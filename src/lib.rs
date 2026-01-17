@@ -280,7 +280,7 @@ fn json_to_python(py: Python, value: &Value) -> PyResult<PyObject> {
             for item in arr {
                 list.append(json_to_python(py, item)?)?;
             }
-            Ok(list.unbind())
+            Ok(list.unbind().into())
         }
 
         Value::Object(obj) => {
@@ -288,7 +288,7 @@ fn json_to_python(py: Python, value: &Value) -> PyResult<PyObject> {
             for (key, value) in obj {
                 dict.set_item(key, json_to_python(py, value)?)?;
             }
-            Ok(dict.unbind())
+            Ok(dict.unbind().into())
         }
     }
 }
