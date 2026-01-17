@@ -403,6 +403,383 @@ impl Evaluator {
                     )),
                 }
             }
+            // Additional string functions
+            "substring" => {
+                if evaluated_args.len() < 2 || evaluated_args.len() > 3 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "substring() requires 2 or 3 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (Value::String(s), Value::Number(start)) => {
+                        let length = if evaluated_args.len() == 3 {
+                            match &evaluated_args[2] {
+                                Value::Number(l) => Some(l.as_f64().unwrap() as i64),
+                                _ => return Err(EvaluatorError::TypeError(
+                                    "substring() length must be a number".to_string(),
+                                )),
+                            }
+                        } else {
+                            None
+                        };
+                        functions::string::substring(s, start.as_f64().unwrap() as i64, length)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "substring() requires string and number arguments".to_string(),
+                    )),
+                }
+            }
+            "substringBefore" => {
+                if evaluated_args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "substringBefore() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (Value::String(s), Value::String(sep)) => {
+                        functions::string::substring_before(s, sep)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "substringBefore() requires string arguments".to_string(),
+                    )),
+                }
+            }
+            "substringAfter" => {
+                if evaluated_args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "substringAfter() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (Value::String(s), Value::String(sep)) => {
+                        functions::string::substring_after(s, sep)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "substringAfter() requires string arguments".to_string(),
+                    )),
+                }
+            }
+            "trim" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "trim() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::String(s) => functions::string::trim(s)
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "trim() requires a string argument".to_string(),
+                    )),
+                }
+            }
+            "contains" => {
+                if evaluated_args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "contains() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (Value::String(s), Value::String(pattern)) => {
+                        functions::string::contains(s, pattern)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "contains() requires string arguments".to_string(),
+                    )),
+                }
+            }
+            "split" => {
+                if evaluated_args.len() < 2 || evaluated_args.len() > 3 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "split() requires 2 or 3 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (Value::String(s), Value::String(sep)) => {
+                        let limit = if evaluated_args.len() == 3 {
+                            match &evaluated_args[2] {
+                                Value::Number(n) => Some(n.as_f64().unwrap() as usize),
+                                _ => return Err(EvaluatorError::TypeError(
+                                    "split() limit must be a number".to_string(),
+                                )),
+                            }
+                        } else {
+                            None
+                        };
+                        functions::string::split(s, sep, limit)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "split() requires string arguments".to_string(),
+                    )),
+                }
+            }
+            "join" => {
+                if evaluated_args.len() < 1 || evaluated_args.len() > 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "join() requires 1 or 2 arguments".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Array(arr) => {
+                        let separator = if evaluated_args.len() == 2 {
+                            match &evaluated_args[1] {
+                                Value::String(s) => Some(s.as_str()),
+                                _ => return Err(EvaluatorError::TypeError(
+                                    "join() separator must be a string".to_string(),
+                                )),
+                            }
+                        } else {
+                            None
+                        };
+                        functions::string::join(arr, separator)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "join() requires an array argument".to_string(),
+                    )),
+                }
+            }
+            "replace" => {
+                if evaluated_args.len() < 3 || evaluated_args.len() > 4 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "replace() requires 3 or 4 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1], &evaluated_args[2]) {
+                    (Value::String(s), Value::String(pattern), Value::String(replacement)) => {
+                        let limit = if evaluated_args.len() == 4 {
+                            match &evaluated_args[3] {
+                                Value::Number(n) => Some(n.as_f64().unwrap() as usize),
+                                _ => return Err(EvaluatorError::TypeError(
+                                    "replace() limit must be a number".to_string(),
+                                )),
+                            }
+                        } else {
+                            None
+                        };
+                        functions::string::replace(s, pattern, replacement, limit)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "replace() requires string arguments".to_string(),
+                    )),
+                }
+            }
+            // Additional numeric functions
+            "max" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "max() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Array(arr) => functions::numeric::max(arr)
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "max() requires an array argument".to_string(),
+                    )),
+                }
+            }
+            "min" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "min() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Array(arr) => functions::numeric::min(arr)
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "min() requires an array argument".to_string(),
+                    )),
+                }
+            }
+            "average" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "average() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Array(arr) => functions::numeric::average(arr)
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "average() requires an array argument".to_string(),
+                    )),
+                }
+            }
+            "abs" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "abs() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Number(n) => functions::numeric::abs(n.as_f64().unwrap())
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "abs() requires a number argument".to_string(),
+                    )),
+                }
+            }
+            "floor" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "floor() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Number(n) => functions::numeric::floor(n.as_f64().unwrap())
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "floor() requires a number argument".to_string(),
+                    )),
+                }
+            }
+            "ceil" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "ceil() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Number(n) => functions::numeric::ceil(n.as_f64().unwrap())
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "ceil() requires a number argument".to_string(),
+                    )),
+                }
+            }
+            "round" => {
+                if evaluated_args.len() < 1 || evaluated_args.len() > 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "round() requires 1 or 2 arguments".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Number(n) => {
+                        let precision = if evaluated_args.len() == 2 {
+                            match &evaluated_args[1] {
+                                Value::Number(p) => Some(p.as_f64().unwrap() as i32),
+                                _ => return Err(EvaluatorError::TypeError(
+                                    "round() precision must be a number".to_string(),
+                                )),
+                            }
+                        } else {
+                            None
+                        };
+                        functions::numeric::round(n.as_f64().unwrap(), precision)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "round() requires a number argument".to_string(),
+                    )),
+                }
+            }
+            "sqrt" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "sqrt() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Number(n) => functions::numeric::sqrt(n.as_f64().unwrap())
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "sqrt() requires a number argument".to_string(),
+                    )),
+                }
+            }
+            "power" => {
+                if evaluated_args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "power() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (Value::Number(base), Value::Number(exp)) => {
+                        functions::numeric::power(base.as_f64().unwrap(), exp.as_f64().unwrap())
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "power() requires number arguments".to_string(),
+                    )),
+                }
+            }
+            // Additional array functions
+            "append" => {
+                if evaluated_args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "append() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Array(arr) => {
+                        functions::array::append(arr, &evaluated_args[1])
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "append() requires an array as first argument".to_string(),
+                    )),
+                }
+            }
+            "reverse" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "reverse() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Array(arr) => functions::array::reverse(arr)
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "reverse() requires an array argument".to_string(),
+                    )),
+                }
+            }
+            "sort" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "sort() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Array(arr) => functions::array::sort(arr)
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "sort() requires an array argument".to_string(),
+                    )),
+                }
+            }
+            "distinct" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "distinct() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Array(arr) => functions::array::distinct(arr)
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "distinct() requires an array argument".to_string(),
+                    )),
+                }
+            }
+            "exists" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "exists() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                functions::array::exists(&evaluated_args[0])
+                    .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+            }
+            // Object functions
             "keys" => {
                 if evaluated_args.len() != 1 {
                     return Err(EvaluatorError::EvaluationError(
@@ -416,6 +793,45 @@ impl Evaluator {
                         "keys() requires an object argument".to_string(),
                     )),
                 }
+            }
+            "lookup" => {
+                if evaluated_args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "lookup() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (Value::Object(obj), Value::String(key)) => {
+                        functions::object::lookup(obj, key)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "lookup() requires an object and string argument".to_string(),
+                    )),
+                }
+            }
+            "spread" => {
+                if evaluated_args.len() != 1 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "spread() requires exactly 1 argument".to_string(),
+                    ));
+                }
+                match &evaluated_args[0] {
+                    Value::Object(obj) => functions::object::spread(obj)
+                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "spread() requires an object argument".to_string(),
+                    )),
+                }
+            }
+            "merge" => {
+                if evaluated_args.is_empty() {
+                    return Err(EvaluatorError::EvaluationError(
+                        "merge() requires at least 1 argument".to_string(),
+                    ));
+                }
+                functions::object::merge(&evaluated_args)
+                    .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
             }
             _ => Err(EvaluatorError::ReferenceError(format!(
                 "Unknown function: {}",
