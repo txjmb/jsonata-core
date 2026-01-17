@@ -47,3 +47,4 @@ target/criterion/
 # Temporary files
 *.tmp
 *.bak
+.venv-wsl/
