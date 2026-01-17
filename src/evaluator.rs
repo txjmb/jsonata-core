@@ -1213,4 +1213,38 @@ mod tests {
         let result = evaluator.evaluate(&ast, &data).unwrap();
         assert_eq!(result, Value::Bool(true));
     }
+
+    #[test]
+    fn test_evaluate_dollar_function_uppercase() {
+        use crate::parser::parse;
+        use serde_json::json;
+
+        let mut evaluator = Evaluator::new();
+        let ast = parse(r#"$uppercase("hello")"#).unwrap();
+        let result = evaluator.evaluate(&ast, &json!({})).unwrap();
+        assert_eq!(result, json!("HELLO"));
+    }
+
+    #[test]
+    fn test_evaluate_dollar_function_sum() {
+        use crate::parser::parse;
+        use serde_json::json;
+
+        let mut evaluator = Evaluator::new();
+        let ast = parse("$sum([1, 2, 3, 4, 5])").unwrap();
+        let result = evaluator.evaluate(&ast, &json!({})).unwrap();
+        assert_eq!(result, json!(15.0));
+    }
+
+    #[test]
+    fn test_evaluate_nested_dollar_functions() {
+        use crate::parser::parse;
+        use serde_json::json;
+
+        let mut evaluator = Evaluator::new();
+        let ast = parse(r#"$length($lowercase("HELLO"))"#).unwrap();
+        let result = evaluator.evaluate(&ast, &json!({})).unwrap();
+        // length() returns an integer, not a float
+        assert_eq!(result, json!(5));
+    }
 }

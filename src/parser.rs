@@ -722,6 +722,7 @@ impl Parser {
 
                     // Extract function name from lhs
                     let name = match &lhs {
+                        // Handle bare function names: uppercase()
                         AstNode::Path { steps } if steps.len() == 1 => {
                             match &steps[0] {
                                 AstNode::String(s) => s.clone(),
@@ -730,6 +731,8 @@ impl Parser {
                                 )),
                             }
                         }
+                        // Handle $-prefixed function names: $uppercase()
+                        AstNode::Variable(name) => name.clone(),
                         _ => return Err(ParserError::InvalidSyntax(
                             "Invalid function call".to_string()
                         )),
@@ -1233,5 +1236,49 @@ mod tests {
         // Test a more complex expression
         let ast = parse("(a + b) * c.d").unwrap();
         assert!(matches!(ast, AstNode::Binary { .. }));
+    }
+
+    #[test]
+    fn test_parse_dollar_function_call() {
+        // Test $uppercase function
+        let ast = parse(r#"$uppercase("hello")"#).unwrap();
+        match ast {
+            AstNode::Function { name, args } => {
+                assert_eq!(name, "uppercase");
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0], AstNode::String("hello".to_string()));
+            }
+            _ => panic!("Expected Function node"),
+        }
+
+        // Test $sum function
+        let ast = parse("$sum([1, 2, 3])").unwrap();
+        match ast {
+            AstNode::Function { name, args } => {
+                assert_eq!(name, "sum");
+                assert_eq!(args.len(), 1);
+            }
+            _ => panic!("Expected Function node"),
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_dollar_functions() {
+        // Test nested $function calls
+        let ast = parse(r#"$length($lowercase("HELLO"))"#).unwrap();
+        match ast {
+            AstNode::Function { name, args } => {
+                assert_eq!(name, "length");
+                assert_eq!(args.len(), 1);
+                // Check nested function
+                match &args[0] {
+                    AstNode::Function { name: inner_name, .. } => {
+                        assert_eq!(inner_name, "lowercase");
+                    }
+                    _ => panic!("Expected nested Function node"),
+                }
+            }
+            _ => panic!("Expected Function node"),
+        }
     }
 }
