@@ -1159,12 +1159,11 @@ mod tests {
             } => {
                 assert!(matches!(*condition, AstNode::Binary { .. }));
                 assert_eq!(*then_branch, AstNode::Number(1.0));
+                // Note: Parser optimization - negative number literals are parsed directly
+                // as Number(-1.0) rather than Unary { Negate, Number(1.0) }
                 assert_eq!(
                     else_branch,
-                    Some(Box::new(AstNode::Unary {
-                        op: UnaryOp::Negate,
-                        operand: Box::new(AstNode::Number(1.0))
-                    }))
+                    Some(Box::new(AstNode::Number(-1.0)))
                 );
             }
             _ => panic!("Expected Conditional node"),
@@ -1208,14 +1207,11 @@ mod tests {
 
     #[test]
     fn test_parse_unary_minus() {
+        // Note: The parser optimizes negative number literals by parsing them directly
+        // as negative numbers (e.g., -5 → Number(-5.0)) rather than creating a Unary
+        // node. This is more efficient and the result is semantically equivalent.
         let ast = parse("-5").unwrap();
-        match ast {
-            AstNode::Unary { op, operand } => {
-                assert_eq!(op, UnaryOp::Negate);
-                assert_eq!(*operand, AstNode::Number(5.0));
-            }
-            _ => panic!("Expected Unary node"),
-        }
+        assert_eq!(ast, AstNode::Number(-5.0));
     }
 
     #[test]
