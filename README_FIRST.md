@@ -21,7 +21,19 @@ All major components are fully implemented:
 
 ## 🚀 What To Do Next
 
-Since you now have cargo available, follow these steps in order:
+### Running in WSL (Recommended for Windows)
+
+If you're on Windows and want to use WSL, see **WSL_SETUP.md** for a complete WSL-specific guide with one-command setup.
+
+Quick WSL start:
+```bash
+cd /mnt/c/Users/mboha/source/repos/jsonatapy
+cargo check && cargo test && maturin develop && pytest tests/python/ -v
+```
+
+### Running Natively
+
+Follow these steps in order:
 
 ### Step 1: Verify Your Environment
 ```bash
