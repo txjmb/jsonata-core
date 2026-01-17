@@ -3,7 +3,7 @@
 // These tests verify that the parser and evaluator work together correctly
 // to process complete JSONata expressions.
 
-use jsonatapy::{parser::parse, evaluator::Evaluator};
+use jsonatapy::{parser::parse, evaluator::{Evaluator, Context}};
 use serde_json::{json, Value};
 
 #[test]
@@ -468,10 +468,11 @@ fn test_with_variables() {
     });
 
     let ast = parse("price * $discount").unwrap();
-    let mut evaluator = Evaluator::new();
 
-    // Bind discount variable
-    evaluator.context.bind("discount".to_string(), json!(0.9));
+    // Create context with discount variable
+    let mut context = Context::new();
+    context.bind("discount".to_string(), json!(0.9));
+    let mut evaluator = Evaluator::with_context(context);
 
     let result = evaluator.evaluate(&ast, &data).unwrap();
     assert_eq!(result, json!(90.0));
