@@ -24,12 +24,14 @@
 //! - `ast` - Abstract Syntax Tree definitions
 
 use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyValueError, PyTypeError, PyRuntimeError};
+use pyo3::types::{PyDict, PyList, PyBool, PyFloat, PyString};
+use serde_json::Value;
 
-mod ast;
-mod parser;
-mod evaluator;
-mod functions;
+pub mod ast;
+pub mod parser;
+pub mod evaluator;
+pub mod functions;
 mod datetime;
 mod signature;
 mod utils;
@@ -56,8 +58,8 @@ mod utils;
 /// ```
 #[pyclass]
 struct JsonataExpression {
-    // TODO: Store compiled AST
-    expression: String,
+    /// The parsed Abstract Syntax Tree
+    ast: ast::AstNode,
 }
 
 #[pymethods]
@@ -76,9 +78,40 @@ impl JsonataExpression {
     /// # Errors
     ///
     /// Returns ValueError if evaluation fails
-    fn evaluate(&self, data: PyObject, bindings: Option<PyObject>) -> PyResult<PyObject> {
-        // TODO: Implement evaluation
-        Err(PyValueError::new_err("Not yet implemented"))
+    fn evaluate(&self, py: Python, data: PyObject, bindings: Option<PyObject>) -> PyResult<PyObject> {
+        // Convert Python data to JSON Value
+        let json_data = python_to_json(py, data)?;
+
+        // Create evaluator with optional bindings
+        let mut evaluator = if let Some(bindings_obj) = bindings {
+            let bindings_json = python_to_json(py, bindings_obj)?;
+
+            // Extract bindings into context
+            let mut context = evaluator::Context::new();
+            if let Value::Object(map) = bindings_json {
+                for (key, value) in map {
+                    context.bind(key, value);
+                }
+            } else {
+                return Err(PyTypeError::new_err(
+                    "bindings must be a dictionary"
+                ));
+            }
+            evaluator::Evaluator::with_context(context)
+        } else {
+            evaluator::Evaluator::new()
+        };
+
+        // Evaluate the AST
+        let result = evaluator.evaluate(&self.ast, &json_data)
+            .map_err(|e| match e {
+                evaluator::EvaluatorError::TypeError(msg) => PyTypeError::new_err(msg),
+                evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
+                evaluator::EvaluatorError::EvaluationError(msg) => PyRuntimeError::new_err(msg),
+            })?;
+
+        // Convert result back to Python
+        json_to_python(py, &result)
     }
 }
 
@@ -107,10 +140,11 @@ impl JsonataExpression {
 /// ```
 #[pyfunction]
 fn compile(expression: &str) -> PyResult<JsonataExpression> {
-    // TODO: Implement parser
-    Ok(JsonataExpression {
-        expression: expression.to_string(),
-    })
+    // Parse the expression into an AST
+    let ast = parser::parse(expression)
+        .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
+
+    Ok(JsonataExpression { ast })
 }
 
 /// Evaluate a JSONata expression against data in one step.
@@ -141,9 +175,118 @@ fn compile(expression: &str) -> PyResult<JsonataExpression> {
 /// print(result)  # "ALICE"
 /// ```
 #[pyfunction]
-fn evaluate(expression: &str, data: PyObject, bindings: Option<PyObject>) -> PyResult<PyObject> {
+fn evaluate(py: Python, expression: &str, data: PyObject, bindings: Option<PyObject>) -> PyResult<PyObject> {
     let expr = compile(expression)?;
-    expr.evaluate(data, bindings)
+    expr.evaluate(py, data, bindings)
+}
+
+/// Convert a Python object to a serde_json::Value
+///
+/// Handles conversion of Python types to JSON-compatible values:
+/// - None -> Null
+/// - bool -> Bool
+/// - int, float -> Number
+/// - str -> String
+/// - list -> Array
+/// - dict -> Object
+fn python_to_json(py: Python, obj: PyObject) -> PyResult<Value> {
+    // Check for None/null
+    if obj.is_none(py) {
+        return Ok(Value::Null);
+    }
+
+    // Check for boolean (must be before number check)
+    if let Ok(b) = obj.extract::<bool>(py) {
+        return Ok(Value::Bool(b));
+    }
+
+    // Check for integer
+    if let Ok(i) = obj.extract::<i64>(py) {
+        return Ok(serde_json::json!(i));
+    }
+
+    // Check for float
+    if let Ok(f) = obj.extract::<f64>(py) {
+        return Ok(serde_json::json!(f));
+    }
+
+    // Check for string
+    if let Ok(s) = obj.extract::<String>(py) {
+        return Ok(Value::String(s));
+    }
+
+    // Check for list/array
+    if let Ok(list) = obj.downcast::<PyList>(py) {
+        let mut result = Vec::new();
+        for item in list.iter() {
+            result.push(python_to_json(py, item.into())?);
+        }
+        return Ok(Value::Array(result));
+    }
+
+    // Check for dict/object
+    if let Ok(dict) = obj.downcast::<PyDict>(py) {
+        let mut result = serde_json::Map::new();
+        for (key, value) in dict.iter() {
+            let key_str = key.extract::<String>()?;
+            let value_json = python_to_json(py, value.into())?;
+            result.insert(key_str, value_json);
+        }
+        return Ok(Value::Object(result));
+    }
+
+    // Unsupported type
+    Err(PyTypeError::new_err(format!(
+        "Cannot convert Python object to JSON: {}",
+        obj.as_ref(py).get_type().name()?
+    )))
+}
+
+/// Convert a serde_json::Value to a Python object
+///
+/// Handles conversion of JSON values to Python types:
+/// - Null -> None
+/// - Bool -> bool
+/// - Number -> float or int
+/// - String -> str
+/// - Array -> list
+/// - Object -> dict
+fn json_to_python(py: Python, value: &Value) -> PyResult<PyObject> {
+    match value {
+        Value::Null => Ok(py.None()),
+
+        Value::Bool(b) => Ok(b.into_py(py)),
+
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(i.into_py(py))
+            } else if let Some(u) = n.as_u64() {
+                Ok(u.into_py(py))
+            } else if let Some(f) = n.as_f64() {
+                Ok(f.into_py(py))
+            } else {
+                Err(PyTypeError::new_err("Invalid number"))
+            }
+        }
+
+        Value::String(s) => Ok(s.into_py(py)),
+
+        Value::Array(arr) => {
+            let list = PyList::empty(py);
+            for item in arr {
+                list.append(json_to_python(py, item)?)?;
+            }
+            Ok(list.into())
+        }
+
+        Value::Object(obj) => {
+            let dict = PyDict::new(py);
+            for (key, value) in obj {
+                dict.set_item(key, json_to_python(py, value)?)?;
+            }
+            Ok(dict.into())
+        }
+    }
 }
 
 /// JSONata Python module
