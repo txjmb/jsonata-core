@@ -43,9 +43,36 @@ print(result)  # 2750
 
 **Note: This project is currently under active development. Installation instructions will be updated once the first release is available.**
 
+### From PyPI (Coming Soon)
 ```bash
 pip install jsonatapy
+# or with UV (recommended - 10-100x faster!)
+uv pip install jsonatapy
 ```
+
+### From Source
+
+**Requirements:**
+- Rust (https://rustup.rs/)
+- Python 3.8+
+- UV (recommended) or pip
+
+**Quick setup with UV:**
+```bash
+# Install UV
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Setup and build
+uv venv
+source .venv/bin/activate
+uv pip install maturin
+maturin develop
+
+# Run tests
+uv run pytest tests/python/ -v
+```
+
+See **UV_SETUP.md** for detailed UV instructions, or **BUILD_INSTRUCTIONS.md** for traditional setup.
 
 ## Quick Start
 

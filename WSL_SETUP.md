@@ -29,23 +29,39 @@ rustc --version
 cargo --version
 ```
 
-### 3. Install Python Dependencies
+### 3. Install UV (Ultra-Fast Python Package Manager)
+
+```bash
+# Install UV (10-100x faster than pip!)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Add to PATH
+export PATH="$HOME/.cargo/bin:$PATH"
+
+# Verify
+uv --version
+```
+
+### 4. Setup Python Environment
 
 ```bash
 # Update package list
 sudo apt update
 
-# Install Python and pip if needed
-sudo apt install python3 python3-pip python3-venv
+# Install Python if needed
+sudo apt install python3
 
-# Install maturin
-pip3 install maturin
+# Create virtual environment with UV
+uv venv
 
-# Install test dependencies
-pip3 install pytest pytest-cov
+# Activate it
+source .venv/bin/activate
+
+# Install dependencies with UV
+uv pip install maturin pytest pytest-cov
 ```
 
-### 4. Build and Test
+### 5. Build and Test
 
 ```bash
 # Check compilation
@@ -57,11 +73,16 @@ cargo test
 # Build Python extension
 maturin develop
 
-# Run Python tests
-pytest tests/python/ -v
+# Run Python tests with UV
+uv run pytest tests/python/ -v
 
-# Try the examples
-python3 examples/basic_usage.py
+# Try the examples with UV
+uv run python examples/basic_usage.py
+```
+
+**One-command build & test:**
+```bash
+cargo check && cargo test && maturin develop && uv run pytest tests/python/ -v
 ```
 
 ## Troubleshooting

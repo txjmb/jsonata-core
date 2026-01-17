@@ -35,25 +35,55 @@ cargo check && cargo test && maturin develop && pytest tests/python/ -v
 
 Follow these steps in order:
 
-### Step 1: Verify Your Environment
+### Step 1: Install UV (Recommended)
+
+UV is an ultra-fast Python package installer (10-100x faster than pip):
+
+```bash
+# Install UV
+curl -LsSf https://astral.sh/uv/install.sh | sh  # Linux/macOS/WSL
+# or
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"  # Windows
+
+# Verify
+uv --version
+```
+
+See **UV_SETUP.md** for complete UV guide.
+
+### Step 2: Setup Environment
+
+```bash
+# Create virtual environment
+uv venv
+
+# Activate it
+source .venv/bin/activate  # Linux/macOS/WSL
+# or
+.venv\Scripts\activate     # Windows
+
+# Install dependencies
+uv pip install maturin pytest pytest-cov
+```
+
+### Step 3: Verify Prerequisites
 ```bash
 python verify_build.py
 ```
 
-This checks that you have all prerequisites installed:
+This checks that you have:
 - Rust (rustc, cargo)
 - Python 3.8+
-- pip
-- maturin (install with: `pip install maturin`)
+- UV and maturin installed
 
-### Step 2: Check Compilation
+### Step 4: Check Compilation
 ```bash
 cargo check
 ```
 
 This verifies the Rust code compiles without errors. If there are any issues, the error messages will tell you what needs to be fixed.
 
-### Step 3: Run Rust Tests
+### Step 5: Run Rust Tests
 ```bash
 cargo test
 ```
@@ -63,7 +93,7 @@ This runs 85+ unit tests across all modules. Expected result:
 test result: ok. 85 passed; 0 failed; 0 ignored
 ```
 
-### Step 4: Build the Python Extension
+### Step 6: Build the Python Extension
 ```bash
 maturin develop
 ```
@@ -74,13 +104,10 @@ This builds the extension and installs it in your current Python environment. Ex
 ✅ Installed jsonatapy-0.1.0
 ```
 
-### Step 5: Run Python Tests
+### Step 7: Run Python Tests
 ```bash
-# First install pytest if you haven't
-pip install pytest pytest-cov
-
-# Run the tests
-pytest tests/python/ -v
+# Run tests with UV (dependencies already installed in Step 2)
+uv run pytest tests/python/ -v
 ```
 
 Expected result:
@@ -88,9 +115,9 @@ Expected result:
 ====== 100+ passed in X.XXs ======
 ```
 
-### Step 6: Try the Examples
+### Step 8: Try the Examples
 ```bash
-python examples/basic_usage.py
+uv run python examples/basic_usage.py
 ```
 
 This runs 12 examples showing JSONataPy in action!
