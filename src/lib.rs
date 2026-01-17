@@ -221,7 +221,8 @@ fn python_to_json(py: Python, obj: &PyObject) -> PyResult<Value> {
     if let Ok(list) = obj.downcast_bound::<PyList>(py) {
         let mut result = Vec::new();
         for item in list.iter() {
-            result.push(python_to_json(py, item.as_any())?);
+            let item_obj = item.unbind();
+            result.push(python_to_json(py, &item_obj)?);
         }
         return Ok(Value::Array(result));
     }
@@ -231,7 +232,8 @@ fn python_to_json(py: Python, obj: &PyObject) -> PyResult<Value> {
         let mut result = serde_json::Map::new();
         for (key, value) in dict.iter() {
             let key_str = key.extract::<String>()?;
-            let value_json = python_to_json(py, value.as_any())?;
+            let value_obj = value.unbind();
+            let value_json = python_to_json(py, &value_obj)?;
             result.insert(key_str, value_json);
         }
         return Ok(Value::Object(result));
@@ -274,19 +276,19 @@ fn json_to_python(py: Python, value: &Value) -> PyResult<PyObject> {
         Value::String(s) => Ok(s.to_object(py)),
 
         Value::Array(arr) => {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for item in arr {
                 list.append(json_to_python(py, item)?)?;
             }
-            Ok(list.to_object(py))
+            Ok(list.unbind())
         }
 
         Value::Object(obj) => {
-            let dict = PyDict::new_bound(py);
+            let dict = PyDict::new(py);
             for (key, value) in obj {
                 dict.set_item(key, json_to_python(py, value)?)?;
             }
-            Ok(dict.to_object(py))
+            Ok(dict.unbind())
         }
     }
 }
