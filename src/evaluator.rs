@@ -74,6 +74,11 @@ impl Evaluator {
 
             // === Variables ===
             AstNode::Variable(name) => {
+                // Special case: $ alone (empty name) refers to root context
+                if name.is_empty() {
+                    return Ok(data.clone());
+                }
+
                 // Look up variable in context
                 self.context
                     .lookup(name)
@@ -267,8 +272,29 @@ impl Evaluator {
             // === Range Operator ===
             BinaryOp::Range => self.range(&left, &right),
 
-            // === In Operator ===
-            BinaryOp::In => self.in_operator(&left, &right),
+            // === In Operator / Array Indexing ===
+            BinaryOp::In => {
+                // Check if this is array indexing (array[index]) vs membership (value in array)
+                // Array indexing: left is array, right is number
+                // Membership: right is array or object
+                if matches!(left, Value::Array(_)) && matches!(right, Value::Number(_)) {
+                    // This is array indexing: array[index]
+                    match (&left, &right) {
+                        (Value::Array(arr), Value::Number(n)) => {
+                            let index = n.as_f64().unwrap() as i64;
+                            if index < 0 || index >= arr.len() as i64 {
+                                Ok(Value::Null)
+                            } else {
+                                Ok(arr[index as usize].clone())
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    // Standard 'in' operator for membership testing
+                    self.in_operator(&left, &right)
+                }
+            }
         }
     }
 
