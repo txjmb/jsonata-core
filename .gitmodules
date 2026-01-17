@@ -1,0 +1,3 @@
+[submodule "tests/jsonata-suite"]
+	path = tests/jsonata-suite
+	url = https://github.com/jsonata-js/jsonata.git

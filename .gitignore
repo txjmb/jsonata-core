@@ -42,7 +42,7 @@ docs/api/
 target/criterion/
 
 # Test artifacts
-tests/jsonata-suite/
+# tests/jsonata-suite/ - Now a git submodule, don't ignore
 
 # Temporary files
 *.tmp
