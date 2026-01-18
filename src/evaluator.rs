@@ -180,10 +180,23 @@ impl Evaluator {
         for step in steps {
             current = match step {
                 AstNode::String(field_name) => {
-                    // Navigate into object field
+                    // Navigate into object field or map over array
                     match &current {
                         Value::Object(obj) => {
                             obj.get(field_name).cloned().unwrap_or(Value::Null)
+                        }
+                        Value::Array(arr) => {
+                            // Array mapping: extract field from each object in array
+                            let mapped: Vec<Value> = arr
+                                .iter()
+                                .map(|item| match item {
+                                    Value::Object(obj) => {
+                                        obj.get(field_name).cloned().unwrap_or(Value::Null)
+                                    }
+                                    _ => Value::Null,
+                                })
+                                .collect();
+                            Value::Array(mapped)
                         }
                         Value::Null => Value::Null,
                         _ => {
@@ -1688,5 +1701,35 @@ mod tests {
         let result = evaluator.evaluate(&ast, &json!({})).unwrap();
         // length() returns an integer, not a float
         assert_eq!(result, json!(5));
+    }
+
+    #[test]
+    fn test_array_mapping() {
+        use crate::parser::parse;
+        use serde_json::json;
+
+        let mut evaluator = Evaluator::new();
+        let data = json!({
+            "products": [
+                {"id": 1, "name": "Laptop", "price": 999.99},
+                {"id": 2, "name": "Mouse", "price": 29.99},
+                {"id": 3, "name": "Keyboard", "price": 79.99}
+            ]
+        });
+
+        // Test mapping over array to extract field
+        let ast = parse("products.name").unwrap();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(result, json!(["Laptop", "Mouse", "Keyboard"]));
+
+        // Test mapping over array to extract prices
+        let ast = parse("products.price").unwrap();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(result, json!([999.99, 29.99, 79.99]));
+
+        // Test with $sum function on mapped array
+        let ast = parse("$sum(products.price)").unwrap();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(result, json!(1109.97));
     }
 }

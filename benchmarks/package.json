@@ -1,0 +1,16 @@
+{
+  "name": "jsonatapy-benchmarks",
+  "version": "1.0.0",
+  "description": "Benchmarks comparing JSONataPy (Rust) vs JSONata (JavaScript)",
+  "private": true,
+  "scripts": {
+    "install-deps": "npm install",
+    "benchmark": "python benchmark.py"
+  },
+  "dependencies": {
+    "jsonata": "^2.0.5"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
