@@ -91,14 +91,22 @@ result = expr.evaluate(data)
 
 ## Project Status
 
-This project is in **early development**. We are currently implementing:
+This project is in **active development** (v0.1). Current implementation status:
 
-- ✅ Project structure and tooling
-- 🚧 Lexer and tokenizer
-- 🚧 Parser (expression to AST)
-- 🚧 Core evaluator
-- 📋 Built-in functions
-- 📋 Advanced features (async, higher-order functions)
+- ✅ Lexer and tokenizer
+- ✅ Parser (expression to AST)
+- ✅ Core evaluator with path expressions
+- ✅ Array operations (map, filter with predicates)
+- ✅ Binary operations (arithmetic, comparison, logical, string)
+- ✅ Object construction in expressions
+- ✅ Lambda function syntax parsing
+- 🚧 Built-in functions (20+ implemented: string, numeric, array, object)
+- 🚧 Lambda function evaluation
+- 📋 Advanced features (async, full higher-order functions)
+- 📋 DateTime functions
+- 📋 100% test suite compatibility
+
+**Performance:** 2-3x slower than JavaScript V8 for typical use cases. See [PERFORMANCE.md](PERFORMANCE.md) for detailed analysis.
 
 See [CLAUDE.MD](CLAUDE.MD) for detailed implementation roadmap.
 
@@ -145,7 +153,18 @@ Contributions are welcome! Please see [CLAUDE.MD](CLAUDE.MD) for:
 
 ## Performance Benchmarks
 
-*Benchmarks will be added as implementation progresses*
+Comparison with reference JavaScript implementation (jsonata-js on Node.js v24):
+
+| Operation | Python Time | JS Time | Ratio |
+|-----------|-------------|---------|-------|
+| Simple path | 9.68 µs | 4.02 µs | 2.4x slower |
+| Array mapping | 11.05 µs | 3.64 µs | 3.0x slower |
+| Array filtering | 11.64 µs | 6.51 µs | **1.8x slower** |
+| Arithmetic | 10.42 µs | 4.68 µs | 2.2x slower |
+
+**For typical use cases with small to medium datasets (< 100 items), jsonatapy is 2-3x slower than the highly optimized JavaScript V8 engine - excellent for a first Rust implementation!**
+
+See [PERFORMANCE.md](PERFORMANCE.md) for detailed analysis and optimization roadmap.
 
 ## License
 

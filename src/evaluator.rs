@@ -36,6 +36,10 @@ impl Context {
         self.bindings.insert(name, value);
     }
 
+    pub fn unbind(&mut self, name: &str) {
+        self.bindings.remove(name);
+    }
+
     pub fn lookup(&self, name: &str) -> Option<&Value> {
         self.bindings.get(name)
     }
@@ -164,20 +168,91 @@ impl Evaluator {
 
             // === Lambda Functions ===
             AstNode::Lambda { params, body } => {
-                // For now, return a placeholder
-                // Full implementation would store the lambda for later execution
-                Err(EvaluatorError::EvaluationError(
-                    "Lambda functions not yet fully implemented".to_string(),
-                ))
+                // Lambda functions are first-class values
+                // They need to be stored as a special value type
+                // For now, we'll use a JSON representation
+                // Full implementation would use a custom Value type
+                let lambda_repr = serde_json::json!({
+                    "__lambda__": true,
+                    "params": params,
+                    "body": format!("{:?}", body)  // Store AST node representation
+                });
+                Ok(lambda_repr)
             }
         }
     }
 
     /// Evaluate a path expression (e.g., foo.bar.baz)
     fn evaluate_path(&mut self, steps: &[AstNode], data: &Value) -> Result<Value, EvaluatorError> {
-        let mut current = data.clone();
+        // Avoid cloning by using references and only cloning when necessary
+        if steps.is_empty() {
+            return Ok(data.clone());
+        }
 
-        for step in steps {
+        // Fast path: single field access on object
+        // This is a very common pattern, so optimize it
+        if steps.len() == 1 {
+            if let AstNode::String(field_name) = &steps[0] {
+                return match data {
+                    Value::Object(obj) => {
+                        Ok(obj.get(field_name).cloned().unwrap_or(Value::Null))
+                    }
+                    Value::Array(arr) => {
+                        // Array mapping: extract field from each object
+                        // Pre-allocate with exact capacity for better performance
+                        let mut mapped = Vec::with_capacity(arr.len());
+                        for item in arr {
+                            match item {
+                                Value::Object(obj) => {
+                                    mapped.push(obj.get(field_name).cloned().unwrap_or(Value::Null));
+                                }
+                                _ => mapped.push(Value::Null),
+                            }
+                        }
+                        Ok(Value::Array(mapped))
+                    }
+                    _ => Ok(Value::Null),
+                };
+            }
+        }
+
+        // For the first step, work with a reference
+        let mut current: Value = match &steps[0] {
+            AstNode::String(field_name) => {
+                match data {
+                    Value::Object(obj) => {
+                        obj.get(field_name).cloned().unwrap_or(Value::Null)
+                    }
+                    Value::Array(arr) => {
+                        // Array mapping: extract field from each object in array
+                        let mut mapped = Vec::with_capacity(arr.len());
+                        for item in arr {
+                            match item {
+                                Value::Object(obj) => {
+                                    mapped.push(obj.get(field_name).cloned().unwrap_or(Value::Null));
+                                }
+                                _ => mapped.push(Value::Null),
+                            }
+                        }
+                        Value::Array(mapped)
+                    }
+                    Value::Null => Value::Null,
+                    _ => {
+                        return Err(EvaluatorError::TypeError(format!(
+                            "Cannot access field '{}' on non-object",
+                            field_name
+                        )))
+                    }
+                }
+            }
+            step => {
+                // Complex first step - evaluate it
+                self.evaluate_path_step(step, data, data)?
+            }
+        };
+
+        // Process remaining steps
+        for step in &steps[1..] {
             current = match step {
                 AstNode::String(field_name) => {
                     // Navigate into object field or map over array
@@ -187,48 +262,81 @@ impl Evaluator {
                         }
                         Value::Array(arr) => {
                             // Array mapping: extract field from each object in array
-                            let mapped: Vec<Value> = arr
-                                .iter()
-                                .map(|item| match item {
+                            // Pre-allocate vector with exact capacity
+                            let mut mapped = Vec::with_capacity(arr.len());
+                            for item in arr {
+                                match item {
                                     Value::Object(obj) => {
-                                        obj.get(field_name).cloned().unwrap_or(Value::Null)
+                                        mapped.push(obj.get(field_name).cloned().unwrap_or(Value::Null));
                                     }
-                                    _ => Value::Null,
-                                })
-                                .collect();
+                                    _ => mapped.push(Value::Null),
+                                }
+                            }
                             Value::Array(mapped)
                         }
                         Value::Null => Value::Null,
                         _ => {
                             return Err(EvaluatorError::TypeError(format!(
-                                "Cannot access field '{}' on non-object: {:?}",
-                                field_name, current
+                                "Cannot access field '{}' on non-object",
+                                field_name
                             )))
                         }
                     }
                 }
-                // Handle complex path steps (e.g., computed properties)
-                _ => {
-                    let step_value = self.evaluate(step, data)?;
-                    match (&current, &step_value) {
-                        (Value::Object(obj), Value::String(key)) => {
-                            obj.get(key).cloned().unwrap_or(Value::Null)
-                        }
-                        (Value::Array(arr), Value::Number(n)) => {
-                            let index = n.as_f64().unwrap() as i64;
-                            if index < 0 || index >= arr.len() as i64 {
-                                Value::Null
-                            } else {
-                                arr[index as usize].clone()
-                            }
-                        }
-                        _ => Value::Null,
-                    }
-                }
+                // Handle complex path steps (e.g., computed properties, object construction)
+                _ => self.evaluate_path_step(step, &current, data)?
             };
         }
 
         Ok(current)
+    }
+
+    /// Helper to evaluate a complex path step
+    fn evaluate_path_step(&mut self, step: &AstNode, current: &Value, original_data: &Value) -> Result<Value, EvaluatorError> {
+        // Special case: array mapping with object construction
+        // e.g., items.{"name": name, "price": price}
+        if matches!(current, Value::Array(_)) && matches!(step, AstNode::Object(_)) {
+            // Map over array, evaluating the object constructor for each item
+            match current {
+                Value::Array(arr) => {
+                    let mapped: Result<Vec<Value>, EvaluatorError> = arr
+                        .iter()
+                        .map(|item| {
+                            // Evaluate the object constructor in the context of this array item
+                            self.evaluate(step, item)
+                        })
+                        .collect();
+                    Ok(Value::Array(mapped?))
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            // For certain operations (Binary, Function calls, Variables), the step evaluates to a new value
+            // rather than being used to index/access the current value
+            // e.g., items[price > 50] where [price > 50] is a filter operation
+            // or $x.price where $x is a variable binding
+            if matches!(step, AstNode::Binary { .. } | AstNode::Function { .. } | AstNode::Variable(_)) {
+                // Evaluate the step in the context of original_data and return the result directly
+                return self.evaluate(step, original_data);
+            }
+
+            // Standard path step evaluation for indexing/accessing current value
+            let step_value = self.evaluate(step, original_data)?;
+            Ok(match (current, &step_value) {
+                (Value::Object(obj), Value::String(key)) => {
+                    obj.get(key).cloned().unwrap_or(Value::Null)
+                }
+                (Value::Array(arr), Value::Number(n)) => {
+                    let index = n.as_f64().unwrap() as i64;
+                    if index < 0 || index >= arr.len() as i64 {
+                        Value::Null
+                    } else {
+                        arr[index as usize].clone()
+                    }
+                }
+                _ => Value::Null,
+            })
+        }
     }
 
     /// Evaluate a binary operation
@@ -241,7 +349,28 @@ impl Evaluator {
     ) -> Result<Value, EvaluatorError> {
         use crate::ast::BinaryOp;
 
-        // Evaluate operands
+        // Special handling for 'In' operator - check for array filtering
+        // Must evaluate lhs first to determine if this is array filtering
+        if op == BinaryOp::In {
+            let left = self.evaluate(lhs, data)?;
+
+            // Check if this is array filtering: array[predicate]
+            if matches!(left, Value::Array(_)) {
+                // Try evaluating rhs in current context to see if it's a simple index
+                let right_result = self.evaluate(rhs, data);
+
+                if let Ok(Value::Number(_)) = right_result {
+                    // Simple numeric index: array[n]
+                    return self.array_index(&left, &right_result.unwrap());
+                } else {
+                    // This is array filtering: array[predicate]
+                    // Evaluate the predicate for each array item
+                    return self.array_filter(lhs, rhs, &left, data);
+                }
+            }
+        }
+
+        // Standard evaluation: evaluate both operands
         let left = self.evaluate(lhs, data)?;
         let right = self.evaluate(rhs, data)?;
 
@@ -285,28 +414,12 @@ impl Evaluator {
             // === Range Operator ===
             BinaryOp::Range => self.range(&left, &right),
 
-            // === In Operator / Array Indexing ===
+            // === In Operator ===
+            // Note: Array indexing and filtering are handled earlier in evaluate_binary_op
             BinaryOp::In => {
-                // Check if this is array indexing (array[index]) vs membership (value in array)
-                // Array indexing: left is array, right is number
-                // Membership: right is array or object
-                if matches!(left, Value::Array(_)) && matches!(right, Value::Number(_)) {
-                    // This is array indexing: array[index]
-                    match (&left, &right) {
-                        (Value::Array(arr), Value::Number(n)) => {
-                            let index = n.as_f64().unwrap() as i64;
-                            if index < 0 || index >= arr.len() as i64 {
-                                Ok(Value::Null)
-                            } else {
-                                Ok(arr[index as usize].clone())
-                            }
-                        }
-                        _ => unreachable!(),
-                    }
-                } else {
-                    // Standard 'in' operator for membership testing
-                    self.in_operator(&left, &right)
-                }
+                // This handles the standard 'in' operator for membership testing
+                // e.g., "foo" in ["foo", "bar"]
+                self.in_operator(&left, &right)
             }
         }
     }
@@ -872,6 +985,184 @@ impl Evaluator {
                 functions::object::merge(&evaluated_args)
                     .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
             }
+
+            // Higher-order functions
+            "map" => {
+                if args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "map() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+
+                // Evaluate the array argument
+                let array = self.evaluate(&args[0], data)?;
+
+                match array {
+                    Value::Array(arr) => {
+                        let mut result = Vec::with_capacity(arr.len());
+                        for item in arr {
+                            // Apply function to each item
+                            let mapped = self.apply_function(&args[1], &[item], data)?;
+                            result.push(mapped);
+                        }
+                        Ok(Value::Array(result))
+                    }
+                    Value::Null => Ok(Value::Null),
+                    _ => Err(EvaluatorError::TypeError(
+                        "map() first argument must be an array".to_string(),
+                    )),
+                }
+            }
+
+            "filter" => {
+                if args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "filter() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+
+                // Evaluate the array argument
+                let array = self.evaluate(&args[0], data)?;
+
+                match array {
+                    Value::Array(arr) => {
+                        let mut result = Vec::with_capacity(arr.len() / 2);
+                        for item in arr {
+                            // Apply predicate function to each item
+                            let predicate_result = self.apply_function(&args[1], &[item.clone()], data)?;
+                            if self.is_truthy(&predicate_result) {
+                                result.push(item);
+                            }
+                        }
+                        Ok(Value::Array(result))
+                    }
+                    Value::Null => Ok(Value::Null),
+                    _ => Err(EvaluatorError::TypeError(
+                        "filter() first argument must be an array".to_string(),
+                    )),
+                }
+            }
+
+            "reduce" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "reduce() requires 2 or 3 arguments".to_string(),
+                    ));
+                }
+
+                // Evaluate the array argument
+                let array = self.evaluate(&args[0], data)?;
+
+                match array {
+                    Value::Array(arr) => {
+                        if arr.is_empty() {
+                            // Return initial value if provided, otherwise null
+                            return if args.len() == 3 {
+                                self.evaluate(&args[2], data)
+                            } else {
+                                Ok(Value::Null)
+                            };
+                        }
+
+                        // Get initial accumulator
+                        let mut accumulator = if args.len() == 3 {
+                            self.evaluate(&args[2], data)?
+                        } else {
+                            arr[0].clone()
+                        };
+
+                        let start_idx = if args.len() == 3 { 0 } else { 1 };
+
+                        // Apply function to each element
+                        for item in &arr[start_idx..] {
+                            // For reduce, the function receives (accumulator, current_value)
+                            // Apply lambda with both parameters
+                            accumulator = self.apply_function(&args[1], &[accumulator.clone(), item.clone()], data)?;
+                        }
+
+                        Ok(accumulator)
+                    }
+                    Value::Null => Ok(Value::Null),
+                    _ => Err(EvaluatorError::TypeError(
+                        "reduce() first argument must be an array".to_string(),
+                    )),
+                }
+            }
+
+            "single" => {
+                if args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "single() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+
+                // Evaluate the array argument
+                let array = self.evaluate(&args[0], data)?;
+
+                match array {
+                    Value::Array(arr) => {
+                        let mut matches = Vec::new();
+                        for item in arr {
+                            // Apply predicate function to each item
+                            let predicate_result = self.apply_function(&args[1], &[item.clone()], data)?;
+                            if self.is_truthy(&predicate_result) {
+                                matches.push(item);
+                            }
+                        }
+
+                        match matches.len() {
+                            0 => Err(EvaluatorError::EvaluationError(
+                                "single() predicate matches no values".to_string(),
+                            )),
+                            1 => Ok(matches.into_iter().next().unwrap()),
+                            count => Err(EvaluatorError::EvaluationError(
+                                format!("single() predicate matches {} values (expected exactly 1)", count),
+                            )),
+                        }
+                    }
+                    Value::Null => Ok(Value::Null),
+                    _ => Err(EvaluatorError::TypeError(
+                        "single() first argument must be an array".to_string(),
+                    )),
+                }
+            }
+
+            "sift" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "sift() requires 1 or 2 arguments".to_string(),
+                    ));
+                }
+
+                // Determine which argument is the object and which is the function
+                let (obj_value, func_arg) = if args.len() == 1 {
+                    // Single argument: use current data as object
+                    (data.clone(), &args[0])
+                } else {
+                    // Two arguments: first is object, second is function
+                    (self.evaluate(&args[0], data)?, &args[1])
+                };
+
+                match obj_value {
+                    Value::Object(obj) => {
+                        let mut result = serde_json::Map::new();
+                        for (key, value) in obj {
+                            // Apply predicate function with the value
+                            // In JSONata, the predicate receives the value, not the key-value pair
+                            let predicate_result = self.apply_function(func_arg, &[value.clone()], data)?;
+                            if self.is_truthy(&predicate_result) {
+                                result.insert(key.clone(), value.clone());
+                            }
+                        }
+                        Ok(Value::Object(result))
+                    }
+                    Value::Null => Ok(Value::Null),
+                    _ => Err(EvaluatorError::TypeError(
+                        "sift() first argument must be an object".to_string(),
+                    )),
+                }
+            }
+
             _ => Err(EvaluatorError::ReferenceError(format!(
                 "Unknown function: {}",
                 name
@@ -880,6 +1171,59 @@ impl Evaluator {
     }
 
     // === Helper methods for operations ===
+
+    /// Apply a function (lambda or expression) to values
+    ///
+    /// This handles both:
+    /// 1. Lambda nodes: function($x) { $x * 2 } - binds parameters and evaluates body
+    /// 2. Simple expressions: price * 2 - evaluates with values as context
+    fn apply_function(&mut self, func_node: &AstNode, values: &[Value], data: &Value) -> Result<Value, EvaluatorError> {
+        match func_node {
+            AstNode::Lambda { params, body } => {
+                // Save current bindings
+                let saved_bindings: std::collections::HashMap<String, Value> = params
+                    .iter()
+                    .filter_map(|param| {
+                        self.context.lookup(param).map(|v| (param.clone(), v.clone()))
+                    })
+                    .collect();
+
+                // Bind lambda parameters to provided values
+                for (i, param) in params.iter().enumerate() {
+                    if let Some(value) = values.get(i) {
+                        self.context.bind(param.clone(), value.clone());
+                    } else {
+                        return Err(EvaluatorError::EvaluationError(
+                            format!("Lambda expects {} parameters, got {}", params.len(), values.len())
+                        ));
+                    }
+                }
+
+                // Evaluate lambda body
+                let result = self.evaluate(body, data)?;
+
+                // Restore previous bindings or unbind if parameter was new
+                for param in params {
+                    if let Some(saved_value) = saved_bindings.get(param) {
+                        self.context.bind(param.clone(), saved_value.clone());
+                    } else {
+                        // Parameter was not previously bound, so remove it
+                        self.context.unbind(param);
+                    }
+                }
+
+                Ok(result)
+            }
+            _ => {
+                // For non-lambda expressions, evaluate with first value as context
+                if values.is_empty() {
+                    self.evaluate(func_node, data)
+                } else {
+                    self.evaluate(func_node, &values[0])
+                }
+            }
+        }
+    }
 
     /// Check if a value is truthy (JSONata semantics)
     fn is_truthy(&self, value: &Value) -> bool {
@@ -997,6 +1341,8 @@ impl Evaluator {
                 Ok(Value::Bool(a.as_f64().unwrap() < b.as_f64().unwrap()))
             }
             (Value::String(a), Value::String(b)) => Ok(Value::Bool(a < b)),
+            // JSONata semantics: comparing with null/undefined returns false
+            (Value::Null, _) | (_, Value::Null) => Ok(Value::Bool(false)),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot compare {:?} and {:?}",
                 left, right
@@ -1011,6 +1357,8 @@ impl Evaluator {
                 Ok(Value::Bool(a.as_f64().unwrap() <= b.as_f64().unwrap()))
             }
             (Value::String(a), Value::String(b)) => Ok(Value::Bool(a <= b)),
+            // JSONata semantics: comparing with null/undefined returns false
+            (Value::Null, _) | (_, Value::Null) => Ok(Value::Bool(false)),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot compare {:?} and {:?}",
                 left, right
@@ -1025,6 +1373,8 @@ impl Evaluator {
                 Ok(Value::Bool(a.as_f64().unwrap() > b.as_f64().unwrap()))
             }
             (Value::String(a), Value::String(b)) => Ok(Value::Bool(a > b)),
+            // JSONata semantics: comparing with null/undefined returns false
+            (Value::Null, _) | (_, Value::Null) => Ok(Value::Bool(false)),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot compare {:?} and {:?}",
                 left, right
@@ -1039,6 +1389,8 @@ impl Evaluator {
                 Ok(Value::Bool(a.as_f64().unwrap() >= b.as_f64().unwrap()))
             }
             (Value::String(a), Value::String(b)) => Ok(Value::Bool(a >= b)),
+            // JSONata semantics: comparing with null/undefined returns false
+            (Value::Null, _) | (_, Value::Null) => Ok(Value::Bool(false)),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot compare {:?} and {:?}",
                 left, right
@@ -1098,6 +1450,56 @@ impl Evaluator {
     }
 
     /// In operator (checks if left is in right array/object)
+    /// Array indexing: array[index]
+    fn array_index(&self, array: &Value, index: &Value) -> Result<Value, EvaluatorError> {
+        match (array, index) {
+            (Value::Array(arr), Value::Number(n)) => {
+                let idx = n.as_f64().unwrap() as i64;
+                if idx < 0 || idx >= arr.len() as i64 {
+                    Ok(Value::Null)
+                } else {
+                    Ok(arr[idx as usize].clone())
+                }
+            }
+            _ => Err(EvaluatorError::TypeError(
+                "Array indexing requires array and number".to_string(),
+            )),
+        }
+    }
+
+    /// Array filtering: array[predicate]
+    /// Evaluates the predicate for each item in the array and returns items where predicate is true
+    fn array_filter(
+        &mut self,
+        _lhs_node: &AstNode,
+        rhs_node: &AstNode,
+        array: &Value,
+        _original_data: &Value,
+    ) -> Result<Value, EvaluatorError> {
+        match array {
+            Value::Array(arr) => {
+                // Pre-allocate with estimated capacity (assume ~50% will match)
+                let mut filtered = Vec::with_capacity(arr.len() / 2);
+
+                for item in arr {
+                    // Evaluate the predicate in the context of this array item
+                    // The item becomes the new "current context" ($)
+                    let predicate_result = self.evaluate(rhs_node, item)?;
+
+                    // Check if the predicate is truthy
+                    if self.is_truthy(&predicate_result) {
+                        filtered.push(item.clone());
+                    }
+                }
+
+                Ok(Value::Array(filtered))
+            }
+            _ => Err(EvaluatorError::TypeError(
+                "Array filtering requires an array".to_string(),
+            )),
+        }
+    }
+
     fn in_operator(&self, left: &Value, right: &Value) -> Result<Value, EvaluatorError> {
         match right {
             Value::Array(arr) => {

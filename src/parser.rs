@@ -48,6 +48,7 @@ pub enum Token {
     // Identifiers and operators
     Identifier(String),
     Variable(String),
+    Function, // function keyword
 
     // Operators
     Plus,
@@ -456,6 +457,7 @@ impl Lexer {
                         "and" => Token::And,
                         "or" => Token::Or,
                         "in" => Token::In,
+                        "function" => Token::Function,
                         _ => Token::Identifier(ident),
                     });
                 }
@@ -630,6 +632,48 @@ impl Parser {
                 Ok(AstNode::Unary {
                     op: UnaryOp::Negate,
                     operand: Box::new(operand),
+                })
+            }
+            Token::Function => {
+                // Parse lambda: function($param1, $param2, ...) { body }
+                self.advance()?; // skip 'function'
+                self.expect(Token::LeftParen)?;
+
+                // Parse parameters
+                let mut params = Vec::new();
+                if self.current_token != Token::RightParen {
+                    loop {
+                        match &self.current_token {
+                            Token::Variable(name) => {
+                                params.push(name.clone());
+                                self.advance()?;
+                            }
+                            _ => {
+                                return Err(ParserError::Expected {
+                                    expected: "parameter name".to_string(),
+                                    found: format!("{:?}", self.current_token),
+                                })
+                            }
+                        }
+
+                        if self.current_token != Token::Comma {
+                            break;
+                        }
+                        self.advance()?; // skip comma
+                    }
+                }
+
+                self.expect(Token::RightParen)?;
+                self.expect(Token::LeftBrace)?;
+
+                // Parse body
+                let body = self.parse_expression(0)?;
+
+                self.expect(Token::RightBrace)?;
+
+                Ok(AstNode::Lambda {
+                    params,
+                    body: Box::new(body),
                 })
             }
             _ => Err(ParserError::UnexpectedToken(format!(

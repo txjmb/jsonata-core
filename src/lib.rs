@@ -114,6 +114,62 @@ impl JsonataExpression {
         // Convert result back to Python
         json_to_python(py, &result)
     }
+
+    /// Evaluate the expression with JSON string input/output (faster for large data).
+    ///
+    /// This method avoids Python↔Rust conversion overhead by accepting and returning
+    /// JSON strings directly. This is significantly faster for large datasets.
+    ///
+    /// # Arguments
+    ///
+    /// * `json_str` - Input data as a JSON string
+    /// * `bindings` - Optional dict of variable bindings (default: None)
+    ///
+    /// # Returns
+    ///
+    /// The result as a JSON string
+    ///
+    /// # Errors
+    ///
+    /// Returns ValueError if JSON parsing or evaluation fails
+    #[pyo3(signature = (json_str, bindings=None))]
+    fn evaluate_json(&self, py: Python, json_str: &str, bindings: Option<PyObject>) -> PyResult<String> {
+        // Parse JSON string directly to serde_json::Value
+        let json_data: Value = serde_json::from_str(json_str)
+            .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
+
+        // Create evaluator with optional bindings
+        let mut evaluator = if let Some(bindings_obj) = bindings {
+            let bindings_json = python_to_json(py, &bindings_obj)?;
+
+            // Extract bindings into context
+            let mut context = evaluator::Context::new();
+            if let Value::Object(map) = bindings_json {
+                for (key, value) in map {
+                    context.bind(key, value);
+                }
+            } else {
+                return Err(PyTypeError::new_err(
+                    "bindings must be a dictionary"
+                ));
+            }
+            evaluator::Evaluator::with_context(context)
+        } else {
+            evaluator::Evaluator::new()
+        };
+
+        // Evaluate the AST
+        let result = evaluator.evaluate(&self.ast, &json_data)
+            .map_err(|e| match e {
+                evaluator::EvaluatorError::TypeError(msg) => PyTypeError::new_err(msg),
+                evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
+                evaluator::EvaluatorError::EvaluationError(msg) => PyRuntimeError::new_err(msg),
+            })?;
+
+        // Convert result to JSON string
+        serde_json::to_string(&result)
+            .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
+    }
 }
 
 /// Compile a JSONata expression into an executable form.
@@ -197,37 +253,87 @@ fn python_to_json(py: Python, obj: &PyObject) -> PyResult<Value> {
         return Ok(Value::Null);
     }
 
-    // Check for boolean (must be before number check)
+    // Use type() to get the actual Python type for faster dispatch
+    let bound = obj.bind(py);
+    let obj_type = bound.get_type();
+
+    // Fast path: check type name first to avoid failed extract attempts
+    if let Ok(type_name) = obj_type.qualname() {
+        let name = type_name.to_str().unwrap_or("");
+        match name {
+            "bool" => {
+                // Boolean (must be before number check since bool is subclass of int in Python)
+                if let Ok(b) = obj.extract::<bool>(py) {
+                    return Ok(Value::Bool(b));
+                }
+            }
+            "int" => {
+                // Integer
+                if let Ok(i) = obj.extract::<i64>(py) {
+                    return Ok(serde_json::json!(i));
+                }
+            }
+            "float" => {
+                // Float - direct path without trying int first
+                if let Ok(f) = obj.extract::<f64>(py) {
+                    return Ok(serde_json::json!(f));
+                }
+            }
+            "str" => {
+                // String
+                if let Ok(s) = obj.extract::<String>(py) {
+                    return Ok(Value::String(s));
+                }
+            }
+            "list" => {
+                // List/array
+                if let Ok(list) = obj.downcast_bound::<PyList>(py) {
+                    let mut result = Vec::with_capacity(list.len());
+                    for item in list.iter() {
+                        let item_obj = item.unbind();
+                        result.push(python_to_json(py, &item_obj)?);
+                    }
+                    return Ok(Value::Array(result));
+                }
+            }
+            "dict" => {
+                // Dict/object
+                if let Ok(dict) = obj.downcast_bound::<PyDict>(py) {
+                    let mut result = serde_json::Map::new();
+                    for (key, value) in dict.iter() {
+                        let key_str = key.extract::<String>()?;
+                        let value_obj = value.unbind();
+                        let value_json = python_to_json(py, &value_obj)?;
+                        result.insert(key_str, value_json);
+                    }
+                    return Ok(Value::Object(result));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Fallback: try all conversions (for subclasses, numpy types, etc.)
     if let Ok(b) = obj.extract::<bool>(py) {
         return Ok(Value::Bool(b));
     }
-
-    // Check for integer
     if let Ok(i) = obj.extract::<i64>(py) {
         return Ok(serde_json::json!(i));
     }
-
-    // Check for float
     if let Ok(f) = obj.extract::<f64>(py) {
         return Ok(serde_json::json!(f));
     }
-
-    // Check for string
     if let Ok(s) = obj.extract::<String>(py) {
         return Ok(Value::String(s));
     }
-
-    // Check for list/array - PyO3 0.23 API
     if let Ok(list) = obj.downcast_bound::<PyList>(py) {
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(list.len());
         for item in list.iter() {
             let item_obj = item.unbind();
             result.push(python_to_json(py, &item_obj)?);
         }
         return Ok(Value::Array(result));
     }
-
-    // Check for dict/object - PyO3 0.23 API
     if let Ok(dict) = obj.downcast_bound::<PyDict>(py) {
         let mut result = serde_json::Map::new();
         for (key, value) in dict.iter() {
