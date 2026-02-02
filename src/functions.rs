@@ -23,7 +23,7 @@ pub mod string {
     use regex::Regex;
 
     /// Helper to detect and extract regex from a Value object
-    fn extract_regex(value: &Value) -> Option<(String, String)> {
+    pub fn extract_regex(value: &Value) -> Option<(String, String)> {
         if let Value::Object(obj) = value {
             if obj.get("__jsonata_regex__") == Some(&Value::Bool(true)) {
                 if let (Some(Value::String(pattern)), Some(Value::String(flags))) =
@@ -36,7 +36,7 @@ pub mod string {
     }
 
     /// Helper to build a Regex from pattern and flags
-    fn build_regex(pattern: &str, flags: &str) -> Result<Regex, FunctionError> {
+    pub fn build_regex(pattern: &str, flags: &str) -> Result<Regex, FunctionError> {
         // Convert JSONata flags to Rust regex flags
         let mut regex_pattern = String::new();
 

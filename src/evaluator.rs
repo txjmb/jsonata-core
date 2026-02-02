@@ -2402,6 +2402,26 @@ impl Evaluator {
                 if matches!(evaluated_args[0], Value::Null) {
                     return Ok(Value::Null);
                 }
+
+                // Check if replacement (3rd arg) is a function/lambda
+                let replacement_is_lambda = if let Value::Object(ref map) = evaluated_args[2] {
+                    map.contains_key("__lambda__") || map.contains_key("__builtin__")
+                } else {
+                    false
+                };
+
+                if replacement_is_lambda {
+                    // Lambda replacement mode
+                    return self.replace_with_lambda(
+                        &evaluated_args[0],
+                        &evaluated_args[1],
+                        &evaluated_args[2],
+                        if evaluated_args.len() == 4 { Some(&evaluated_args[3]) } else { None },
+                        data
+                    );
+                }
+
+                // String replacement mode
                 match (&evaluated_args[0], &evaluated_args[2]) {
                     (Value::String(s), Value::String(replacement)) => {
                         let limit = if evaluated_args.len() == 4 {
@@ -4075,6 +4095,142 @@ impl Evaluator {
         }
 
         Ok(result)
+    }
+    /// Replace with lambda/function callback
+    /// 
+    /// Implements lambda replacement for $replace(str, pattern, function, limit?)
+    /// The function receives a match object with: match, start, end, groups
+    fn replace_with_lambda(
+        &mut self,
+        str_value: &Value,
+        pattern_value: &Value,
+        lambda_value: &Value,
+        limit_value: Option<&Value>,
+        data: &Value,
+    ) -> Result<Value, EvaluatorError> {
+        // Extract string
+        let s = match str_value {
+            Value::String(s) => s.as_str(),
+            _ => return Err(EvaluatorError::TypeError(
+                "replace() requires string arguments".to_string()
+            )),
+        };
+
+        // Extract regex pattern
+        let (pattern, flags) = crate::functions::string::extract_regex(pattern_value)
+            .ok_or_else(|| EvaluatorError::TypeError(
+                "replace() pattern must be a regex when using lambda replacement".to_string()
+            ))?;
+
+        // Build regex
+        let re = crate::functions::string::build_regex(&pattern, &flags)
+            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))?;
+
+        // Parse limit
+        let limit = if let Some(lim_val) = limit_value {
+            match lim_val {
+                Value::Number(n) => {
+                    let lim_f64 = n.as_f64().unwrap();
+                    if lim_f64 < 0.0 {
+                        return Err(EvaluatorError::EvaluationError(
+                            format!("D3011: Limit must be non-negative, got {}", lim_f64)
+                        ));
+                    }
+                    Some(lim_f64 as usize)
+                }
+                _ => return Err(EvaluatorError::TypeError(
+                    "replace() limit must be a number".to_string(),
+                )),
+            }
+        } else {
+            None
+        };
+
+        // Iterate through matches and replace using lambda
+        let mut result = String::new();
+        let mut last_end = 0;
+        let mut count = 0;
+
+        for cap in re.captures_iter(s) {
+            // Check limit
+            if let Some(lim) = limit {
+                if count >= lim {
+                    break;
+                }
+            }
+
+            let m = cap.get(0).unwrap();
+            let match_start = m.start();
+            let match_end = m.end();
+            let match_str = m.as_str();
+
+            // Add text before match
+            result.push_str(&s[last_end..match_start]);
+
+            // Build match object
+            let groups: Vec<Value> = (1..cap.len())
+                .map(|i| {
+                    cap.get(i)
+                        .map(|m| Value::String(m.as_str().to_string()))
+                        .unwrap_or(Value::Null)
+                })
+                .collect();
+
+            let match_obj = serde_json::json!({
+                "match": match_str,
+                "start": match_start,
+                "end": match_end,
+                "groups": groups,
+            });
+
+            // Invoke lambda with match object
+            let replacement_str = if let Value::Object(ref lambda_map) = lambda_value {
+                // Get lambda details
+                if let Some(Value::String(lambda_id)) = lambda_map.get("_lambda_id") {
+                    if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
+                        let result = self.invoke_lambda_with_env(
+                            &stored_lambda.params,
+                            &stored_lambda.body,
+                            stored_lambda.signature.as_ref(),
+                            &[match_obj],
+                            data,
+                            Some(&stored_lambda.captured_env),
+                        )?;
+
+                        // Convert result to string
+                        match result {
+                            Value::String(s) => s,
+                            _ => return Err(EvaluatorError::TypeError(
+                                format!("D3012: Replacement function must return a string, got {:?}", result)
+                            )),
+                        }
+                    } else {
+                        return Err(EvaluatorError::EvaluationError(
+                            "Lambda not found in context".to_string()
+                        ));
+                    }
+                } else {
+                    return Err(EvaluatorError::EvaluationError(
+                        "Invalid lambda value".to_string()
+                    ));
+                }
+            } else {
+                return Err(EvaluatorError::TypeError(
+                    "Replacement must be a lambda function".to_string()
+                ));
+            };
+
+            // Add replacement
+            result.push_str(&replacement_str);
+
+            last_end = match_end;
+            count += 1;
+        }
+
+        // Add remaining text after last match
+        result.push_str(&s[last_end..]);
+
+        Ok(Value::String(result))
     }
 
     /// Capture the current environment bindings for closure support
