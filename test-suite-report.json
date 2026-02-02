@@ -1,0 +1,796 @@
+{
+  "total": 1258,
+  "passed": 1160,
+  "failed": 98,
+  "skipped": 0,
+  "compatibility_pct": 92.20985691573927,
+  "by_group": {
+    "array-constructor": {
+      "passed": 16,
+      "failed": 5,
+      "skipped": 0
+    },
+    "blocks": {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0
+    },
+    "boolean-expresssions": {
+      "passed": 29,
+      "failed": 2,
+      "skipped": 0
+    },
+    "closures": {
+      "passed": 0,
+      "failed": 2,
+      "skipped": 0
+    },
+    "coalescing-operator": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0
+    },
+    "comments": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "comparison-operators": {
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0
+    },
+    "conditionals": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    "context": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "default-operator": {
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0
+    },
+    "descendent-operator": {
+      "passed": 12,
+      "failed": 5,
+      "skipped": 0
+    },
+    "encoding": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "errors": {
+      "passed": 25,
+      "failed": 2,
+      "skipped": 0
+    },
+    "fields": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "flattening": {
+      "passed": 44,
+      "failed": 3,
+      "skipped": 0
+    },
+    "function-abs": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-append": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-applications": {
+      "passed": 15,
+      "failed": 7,
+      "skipped": 0
+    },
+    "function-assert": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-average": {
+      "passed": 12,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-boolean": {
+      "passed": 24,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-ceil": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-contains": {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-count": {
+      "passed": 13,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-decodeUrl": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-decodeUrlComponent": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-each": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-encodeUrl": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-encodeUrlComponent": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-error": {
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-eval": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-exists": {
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-floor": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-formatBase": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-formatNumber": {
+      "passed": 37,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-fromMillis": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-join": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-keys": {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-length": {
+      "passed": 15,
+      "failed": 2,
+      "skipped": 0
+    },
+    "function-lookup": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-lowercase": {
+      "passed": 1,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-max": {
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-merge": {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-number": {
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-pad": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-power": {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-replace": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-reverse": {
+      "passed": 3,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-round": {
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-shuffle": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-sift": {
+      "passed": 4,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-signatures": {
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-sort": {
+      "passed": 10,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-split": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-spread": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-sqrt": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-string": {
+      "passed": 30,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-substring": {
+      "passed": 18,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-substringAfter": {
+      "passed": 4,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-substringBefore": {
+      "passed": 4,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-sum": {
+      "passed": 6,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-tomillis": {
+      "passed": 7,
+      "failed": 6,
+      "skipped": 0
+    },
+    "function-trim": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-typeOf": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0
+    },
+    "function-uppercase": {
+      "passed": 1,
+      "failed": 1,
+      "skipped": 0
+    },
+    "function-zip": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "higher-order-functions": {
+      "passed": 1,
+      "failed": 2,
+      "skipped": 0
+    },
+    "hof-filter": {
+      "passed": 3,
+      "failed": 1,
+      "skipped": 0
+    },
+    "hof-map": {
+      "passed": 11,
+      "failed": 1,
+      "skipped": 0
+    },
+    "hof-reduce": {
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    "hof-single": {
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    "hof-zip-map": {
+      "passed": 2,
+      "failed": 2,
+      "skipped": 0
+    },
+    "inclusion-operator": {
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0
+    },
+    "lambdas": {
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0
+    },
+    "literals": {
+      "passed": 19,
+      "failed": 1,
+      "skipped": 0
+    },
+    "matchers": {
+      "passed": 1,
+      "failed": 1,
+      "skipped": 0
+    },
+    "missing-paths": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "multiple-array-selectors": {
+      "passed": 1,
+      "failed": 2,
+      "skipped": 0
+    },
+    "null": {
+      "passed": 5,
+      "failed": 2,
+      "skipped": 0
+    },
+    "numeric-operators": {
+      "passed": 17,
+      "failed": 2,
+      "skipped": 0
+    },
+    "object-constructor": {
+      "passed": 19,
+      "failed": 8,
+      "skipped": 0
+    },
+    "parentheses": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0
+    },
+    "partial-application": {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    "performance": {
+      "passed": 1,
+      "failed": 1,
+      "skipped": 0
+    },
+    "predicates": {
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "quoted-selectors": {
+      "passed": 7,
+      "failed": 1,
+      "skipped": 0
+    },
+    "range-operator": {
+      "passed": 23,
+      "failed": 2,
+      "skipped": 0
+    },
+    "regex": {
+      "passed": 29,
+      "failed": 10,
+      "skipped": 0
+    },
+    "simple-array-selectors": {
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0
+    },
+    "sorting": {
+      "passed": 14,
+      "failed": 7,
+      "skipped": 0
+    },
+    "string-concat": {
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "tail-recursion": {
+      "passed": 6,
+      "failed": 4,
+      "skipped": 0
+    },
+    "token-conversion": {
+      "passed": 3,
+      "failed": 1,
+      "skipped": 0
+    },
+    "transform": {
+      "passed": 102,
+      "failed": 2,
+      "skipped": 0
+    },
+    "transforms": {
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0
+    },
+    "variables": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0
+    },
+    "wildcards": {
+      "passed": 8,
+      "failed": 2,
+      "skipped": 0
+    }
+  },
+  "failed_tests": [
+    {
+      "test_id": "array-constructor/case007",
+      "group": "array-constructor",
+      "expr": "[\"foo.bar\", foo.bar, [\"foo.baz\", foo.blah.baz]]",
+      "error": "E   AssertionError: Result mismatch for expression: [\"foo.bar\", foo.bar, [\"foo.baz\", foo.blah.baz]]\n      Expected: [\n        \"foo.bar\",\n        42,\n        [\n          \"foo.baz\",\n          {\n            \"fud\": \"hello\"\n          },\n          {\n            \"fud\": \"world\"\n          }\n        ]\n      ]\n      Got:      [\n        \"foo.bar\",\n        42,\n        [\n          \"foo.baz\",\n          [\n            {\n              \"fud\": \"hello\"\n            },\n            {\n              \"fud\": \"world\"\n            }\n          ]\n        ]\n      ]\n    assert ['foo.bar', 4...': 'world'}]]] == ['foo.bar', 4...d': 'world'}]]\n      \n      At index 2 diff: ['foo.baz', [{'fud': 'hello'}, {'fud': 'world'}]] != ['foo.baz', {'fud': 'hello'}, {'fud': 'world'}]\n      \n      Full diff:\n        [\n            'foo.bar',\n            42,...\n      \n      ...Full output truncated (26 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: [\"foo.bar\", foo.bar, [\"foo.baz\", foo.blah.baz]]\n    Exception: AssertionError: Result mismatch for expression: [\"foo.bar\", foo.bar, [\"foo.baz\", foo.blah.baz]]\n      Expected: [\n        \"foo.bar\",\n        42,\n        [\n          \"foo.baz\",\n          {\n            \"fud\": \"hello\"\n          },\n          {\n            \"fud\": \"world\"\n          }\n        ]\n      ]\n      Got:      [\n        \"foo.bar\",\n        42,\n        [\n          \"foo.baz\",\n          [\n            {\n              \"fud\": \"hello\"\n            },\n            {\n              \"fud\": \"world\"\n            }\n          ]\n        ]\n      ]\n    assert ['foo.bar', 4...': 'world'}]]] == ['foo.bar', 4...d': 'world'}]]\n      \n      At index 2 diff: ['foo.baz', [{'fud': 'hello'}, {'fud': 'world'}]] != ['foo.baz', {'fud': 'hello'}, {'fud': 'world'}]\n      \n      Full diff:\n        [\n            'foo.bar',\n            42,...\n      \n      ...Full output truncated (26 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "array-constructor/case012",
+      "group": "array-constructor",
+      "expr": "foo.blah.baz.[[fud, fud]]",
+      "error": "E   AssertionError: Result mismatch for expression: foo.blah.baz.[[fud, fud]]\n      Expected: [\n        [\n          [\n            \"hello\",\n            \"hello\"\n          ]\n        ],\n        [\n          [\n            \"world\",\n            \"world\"\n          ]\n        ]\n      ]\n      Got:      [\n        [\n          \"hello\",\n          \"hello\"\n        ],\n        [\n          \"world\",\n          \"world\"\n        ]\n      ]\n    assert [['hello', 'h...ld', 'world']] == [[['hello', '...d', 'world']]]\n      \n      At index 0 diff: ['hello', 'hello'] != [['hello', 'hello']]\n      \n      Full diff:\n        [\n            [\n      -         [...\n      \n      ...Full output truncated (19 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: foo.blah.baz.[[fud, fud]]\n    Exception: AssertionError: Result mismatch for expression: foo.blah.baz.[[fud, fud]]\n      Expected: [\n        [\n          [\n            \"hello\",\n            \"hello\"\n          ]\n        ],\n        [\n          [\n            \"world\",\n            \"world\"\n          ]\n        ]\n      ]\n      Got:      [\n        [\n          \"hello\",\n          \"hello\"\n        ],\n        [\n          \"world\",\n          \"world\"\n        ]\n      ]\n    assert [['hello', 'h...ld', 'world']] == [[['hello', '...d', 'world']]]\n      \n      At index 0 diff: ['hello', 'hello'] != [['hello', 'hello']]\n      \n      Full diff:\n        [\n            [\n      -         [...\n      \n      ...Full output truncated (19 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "array-constructor/case018",
+      "group": "array-constructor",
+      "expr": "[1, 2, 3].$",
+      "error": "E   AssertionError: Result mismatch for expression: [1, 2, 3].$\n      Expected: [\n        1,\n        2,\n        3\n      ]\n      Got:      null\n    assert None == [1, 2, 3]\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: [1, 2, 3].$\n    Exception: AssertionError: Result mismatch for expression: [1, 2, 3].$\n      Expected: [\n        1,\n        2,\n        3\n      ]\n      Got:      null\n    assert None == [1, 2, 3]"
+    },
+    {
+      "test_id": "array-constructor/case019",
+      "group": "array-constructor",
+      "expr": "[1, 2, 3].$",
+      "error": "E   AssertionError: Result mismatch for expression: [1, 2, 3].$\n      Expected: [\n        1,\n        2,\n        3\n      ]\n      Got:      null\n    assert None == [1, 2, 3]\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: [1, 2, 3].$\n    Exception: AssertionError: Result mismatch for expression: [1, 2, 3].$\n      Expected: [\n        1,\n        2,\n        3\n      ]\n      Got:      null\n    assert None == [1, 2, 3]"
+    },
+    {
+      "test_id": "array-constructor/case020",
+      "group": "array-constructor",
+      "expr": "[1, 2, 3].$",
+      "error": "E   AssertionError: Result mismatch for expression: [1, 2, 3].$\n      Expected: [\n        1,\n        2,\n        3\n      ]\n      Got:      [\n        4,\n        5,\n        6\n      ]\n    assert [4, 5, 6] == [1, 2, 3]\n      \n      At index 0 diff: 4 != 1\n      \n      Full diff:\n        [\n      -     1,\n      ?     ^...\n      \n      ...Full output truncated (11 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: [1, 2, 3].$\n    Exception: AssertionError: Result mismatch for expression: [1, 2, 3].$\n      Expected: [\n        1,\n        2,\n        3\n      ]\n      Got:      [\n        4,\n        5,\n        6\n      ]\n    assert [4, 5, 6] == [1, 2, 3]\n      \n      At index 0 diff: 4 != 1\n      \n      Full diff:\n        [\n      -     1,\n      ?     ^...\n      \n      ...Full output truncated (11 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "boolean-expresssions/case016",
+      "group": "boolean-expresssions",
+      "expr": "$[].content.origin.$lowercase(name)",
+      "error": "E   AssertionError: Result mismatch for expression: $[].content.origin.$lowercase(name)\n      Expected: [\n        \"fakeintegrationname\"\n      ]\n      Got:      \"fakeintegrationname\"\n    assert 'fakeintegrationname' == ['fakeintegrationname']\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: $[].content.origin.$lowercase(name)\n    Exception: AssertionError: Result mismatch for expression: $[].content.origin.$lowercase(name)\n      Expected: [\n        \"fakeintegrationname\"\n      ]\n      Got:      \"fakeintegrationname\"\n    assert 'fakeintegrationname' == ['fakeintegrationname']"
+    },
+    {
+      "test_id": "boolean-expresssions/case027",
+      "group": "boolean-expresssions",
+      "expr": "$not(nothing)",
+      "error": "E   AssertionError: Expected undefined result for expression: $not(nothing)\n      Got: true\n    assert True is None\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: $not(nothing)\n    Exception: AssertionError: Expected undefined result for expression: $not(nothing)\n      Got: true\n    assert True is None"
+    },
+    {
+      "test_id": "closures/case000",
+      "group": "closures",
+      "expr": "Account.(  $AccName := function() { $.\"Account Name\" };  Order[OrderID = \"order104\"].Product{    \"Account\": $AccName(),    \"SKU-\" & $string(ProductID): $.\"Product Name\"  } )",
+      "error": "E   AssertionError: Result mismatch for expression: Account.(  $AccName := function() { $.\"Account Name\" };  Order[OrderID = \"order104\"].Product{    \"Account\": $AccName(),    \"SKU-\" & $string(ProductID): $.\"Product Name\"  } )\n      Expected: {\n        \"Account\": \"Firefly\",\n        \"SKU-858383\": \"Bowler Hat\",\n        \"SKU-345664\": \"Cloak\"\n      }\n      Got:      {\n        \"Account\": [\n          null,\n          null\n        ],\n        \"SKU-858383\": \"Bowler Hat\",\n        \"SKU-345664\": \"Cloak\"\n      }\n    assert {'Account': [... 'Bowler Hat'} == {'Account': '... 'Bowler Hat'}\n      \n      Omitting 2 identical items, use -vv to show\n      Differing items:\n      {'Account': [None, None]} != {'Account': 'Firefly'}\n      \n      Full diff:\n        {...\n      \n      ...Full output truncated (8 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: Account.(  $AccName := function() { $.\"Account Name\" };  Order[OrderID = \"order104\"].Product{    \"Account\": $AccName(),    \"SKU-\" & $string(ProductID): $.\"Product Name\"  } )\n    Exception: AssertionError: Result mismatch for expression: Account.(  $AccName := function() { $.\"Account Name\" };  Order[OrderID = \"order104\"].Product{    \"Account\": $AccName(),    \"SKU-\" & $string(ProductID): $.\"Product Name\"  } )\n      Expected: {\n        \"Account\": \"Firefly\",\n        \"SKU-858383\": \"Bowler Hat\",\n        \"SKU-345664\": \"Cloak\"\n      }\n      Got:      {\n        \"Account\": [\n          null,\n          null\n        ],\n        \"SKU-858383\": \"Bowler Hat\",\n        \"SKU-345664\": \"Cloak\"\n      }\n    assert {'Account': [... 'Bowler Hat'} == {'Account': '... 'Bowler Hat'}\n      \n      Omitting 2 identical items, use -vv to show\n      Differing items:\n      {'Account': [None, None]} != {'Account': 'Firefly'}\n      \n      Full diff:\n        {...\n      \n      ...Full output truncated (8 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "closures/case001",
+      "group": "closures",
+      "expr": "Account.(  $AccName := function() { `Account Name` };  Order[OrderID = \"order104\"].Product{    \"Account\": $AccName(),    \"SKU-\" & $string(ProductID): `Product Name`  } )",
+      "error": "E   AssertionError: Result mismatch for expression: Account.(  $AccName := function() { `Account Name` };  Order[OrderID = \"order104\"].Product{    \"Account\": $AccName(),    \"SKU-\" & $string(ProductID): `Product Name`  } )\n      Expected: {\n        \"Account\": \"Firefly\",\n        \"SKU-858383\": \"Bowler Hat\",\n        \"SKU-345664\": \"Cloak\"\n      }\n      Got:      {\n        \"Account\": [\n          null,\n          null\n        ],\n        \"SKU-858383\": \"Bowler Hat\",\n        \"SKU-345664\": \"Cloak\"\n      }\n    assert {'Account': [... 'Bowler Hat'} == {'Account': '... 'Bowler Hat'}\n      \n      Omitting 2 identical items, use -vv to show\n      Differing items:\n      {'Account': [None, None]} != {'Account': 'Firefly'}\n      \n      Full diff:\n        {...\n      \n      ...Full output truncated (8 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: Account.(  $AccName := function() { `Account Name` };  Order[OrderID = \"order104\"].Product{    \"Account\": $AccName(),    \"SKU-\" & $string(ProductID): `Product Name`  } )\n    Exception: AssertionError: Result mismatch for expression: Account.(  $AccName := function() { `Account Name` };  Order[OrderID = \"order104\"].Product{    \"Account\": $AccName(),    \"SKU-\" & $string(ProductID): `Product Name`  } )\n      Expected: {\n        \"Account\": \"Firefly\",\n        \"SKU-858383\": \"Bowler Hat\",\n        \"SKU-345664\": \"Cloak\"\n      }\n      Got:      {\n        \"Account\": [\n          null,\n          null\n        ],\n        \"SKU-858383\": \"Bowler Hat\",\n        \"SKU-345664\": \"Cloak\"\n      }\n    assert {'Account': [... 'Bowler Hat'} == {'Account': '... 'Bowler Hat'}\n      \n      Omitting 2 identical items, use -vv to show\n      Differing items:\n      {'Account': [None, None]} != {'Account': 'Firefly'}\n      \n      Full diff:\n        {...\n      \n      ...Full output truncated (8 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "descendent-operator/case001",
+      "group": "descendent-operator",
+      "expr": "foo.**.baz",
+      "error": "E   AssertionError: Result mismatch for expression: foo.**.baz\n      Expected: [\n        {\n          \"fud\": \"hello\"\n        },\n        {\n          \"fud\": \"world\"\n        }\n      ]\n      Got:      [\n        {\n          \"fud\": \"hello\"\n        },\n        {\n          \"fud\": \"world\"\n        },\n        {\n          \"fud\": \"hello\"\n        },\n        {\n          \"fud\": \"world\"\n        }\n      ]\n    assert [{'fud': 'hel...ud': 'world'}] == [{'fud': 'hel...ud': 'world'}]\n      \n      Left contains 2 more items, first extra item: {'fud': 'hello'}\n      \n      Full diff:\n        [\n            {\n                'fud': 'hello',...\n      \n      ...Full output truncated (11 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: foo.**.baz\n    Exception: AssertionError: Result mismatch for expression: foo.**.baz\n      Expected: [\n        {\n          \"fud\": \"hello\"\n        },\n        {\n          \"fud\": \"world\"\n        }\n      ]\n      Got:      [\n        {\n          \"fud\": \"hello\"\n        },\n        {\n          \"fud\": \"world\"\n        },\n        {\n          \"fud\": \"hello\"\n        },\n        {\n          \"fud\": \"world\"\n        }\n      ]\n    assert [{'fud': 'hel...ud': 'world'}] == [{'fud': 'hel...ud': 'world'}]\n      \n      Left contains 2 more items, first extra item: {'fud': 'hello'}\n      \n      Full diff:\n        [\n            {\n                'fud': 'hello',...\n      \n      ...Full output truncated (11 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "descendent-operator/case003",
+      "group": "descendent-operator",
+      "expr": "\"foo\".**.fud",
+      "error": "E   AssertionError: Result mismatch for expression: \"foo\".**.fud\n      Expected: [\n        \"hello\",\n        \"world\"\n      ]\n      Got:      null\n    assert None == ['hello', 'world']\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: \"foo\".**.fud\n    Exception: AssertionError: Result mismatch for expression: \"foo\".**.fud\n      Expected: [\n        \"hello\",\n        \"world\"\n      ]\n      Got:      null\n    assert None == ['hello', 'world']"
+    },
+    {
+      "test_id": "descendent-operator/case005",
+      "group": "descendent-operator",
+      "expr": "\"foo\".**.\"fud\"",
+      "error": "E   AssertionError: Result mismatch for expression: \"foo\".**.\"fud\"\n      Expected: [\n        \"hello\",\n        \"world\"\n      ]\n      Got:      null\n    assert None == ['hello', 'world']\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: \"foo\".**.\"fud\"\n    Exception: AssertionError: Result mismatch for expression: \"foo\".**.\"fud\"\n      Expected: [\n        \"hello\",\n        \"world\"\n      ]\n      Got:      null\n    assert None == ['hello', 'world']"
+    },
+    {
+      "test_id": "descendent-operator/case012",
+      "group": "descendent-operator",
+      "expr": "**.Price",
+      "error": "E   AssertionError: Result mismatch for expression: **.Price\n      Expected: [\n        34.45,\n        21.67,\n        34.45,\n        107.99\n      ]\n      Got:      [\n        34.45,\n        21.67,\n        34.45,\n        21.67,\n        34.45,\n        107.99,\n        34.45,\n        107.99\n      ]\n    assert [34.45, 21.67..., 107.99, ...] == [34.45, 21.67, 34.45, 107.99]\n      \n      At index 3 diff: 21.67 != 107.99\n      Left contains 4 more items, first extra item: 34.45\n      \n      Full diff:\n        [\n            34.45,...\n      \n      ...Full output truncated (8 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: **.Price\n    Exception: AssertionError: Result mismatch for expression: **.Price\n      Expected: [\n        34.45,\n        21.67,\n        34.45,\n        107.99\n      ]\n      Got:      [\n        34.45,\n        21.67,\n        34.45,\n        21.67,\n        34.45,\n        107.99,\n        34.45,\n        107.99\n      ]\n    assert [34.45, 21.67..., 107.99, ...] == [34.45, 21.67, 34.45, 107.99]\n      \n      At index 3 diff: 21.67 != 107.99\n      Left contains 4 more items, first extra item: 34.45\n      \n      Full diff:\n        [\n            34.45,...\n      \n      ...Full output truncated (8 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "descendent-operator/case013",
+      "group": "descendent-operator",
+      "expr": "**.Price[0]",
+      "error": "E   AssertionError: Result mismatch for expression: **.Price[0]\n      Expected: [\n        34.45,\n        21.67,\n        34.45,\n        107.99\n      ]\n      Got:      [\n        34.45,\n        21.67,\n        34.45,\n        21.67,\n        34.45,\n        107.99,\n        34.45,\n        107.99\n      ]\n    assert [34.45, 21.67..., 107.99, ...] == [34.45, 21.67, 34.45, 107.99]\n      \n      At index 3 diff: 21.67 != 107.99\n      Left contains 4 more items, first extra item: 34.45\n      \n      Full diff:\n        [\n            34.45,...\n      \n      ...Full output truncated (8 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: **.Price[0]\n    Exception: AssertionError: Result mismatch for expression: **.Price[0]\n      Expected: [\n        34.45,\n        21.67,\n        34.45,\n        107.99\n      ]\n      Got:      [\n        34.45,\n        21.67,\n        34.45,\n        21.67,\n        34.45,\n        107.99,\n        34.45,\n        107.99\n      ]\n    assert [34.45, 21.67..., 107.99, ...] == [34.45, 21.67, 34.45, 107.99]\n      \n      At index 3 diff: 21.67 != 107.99\n      Left contains 4 more items, first extra item: 34.45\n      \n      Full diff:\n        [\n            34.45,...\n      \n      ...Full output truncated (8 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "errors/case022",
+      "group": "errors",
+      "expr": "[1,2,3]{\"num\": $}[true]",
+      "error": "E   Failed: Expected error but got successful result for expression: [1,2,3]{\"num\": $}[true]\n    Result: null"
+    },
+    {
+      "test_id": "errors/case023",
+      "group": "errors",
+      "expr": "[1,2,3]{\"num\": $}{\"num\": $}",
+      "error": "E   Failed: Expected error but got successful result for expression: [1,2,3]{\"num\": $}{\"num\": $}\n    Result: {\n      \"num\": {\n        \"num\": [\n          1,\n          2,\n          3\n        ]\n      }\n    }"
+    },
+    {
+      "test_id": "flattening/case034",
+      "group": "flattening",
+      "expr": "a[0].b",
+      "error": "E   AssertionError: Result mismatch for expression: a[0].b\n      Expected: [\n        1\n      ]\n      Got:      1\n    assert 1 == [1]\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: a[0].b\n    Exception: AssertionError: Result mismatch for expression: a[0].b\n      Expected: [\n        1\n      ]\n      Got:      1\n    assert 1 == [1]"
+    },
+    {
+      "test_id": "flattening/case041",
+      "group": "flattening",
+      "expr": "Phone{type: number[]}",
+      "error": "E   ValueError: Parse error: Expected RightBrace, found LeftBracket\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: Phone{type: number[]}\n    Expected: result\n    Error: Parse error: Expected RightBrace, found LeftBracket"
+    },
+    {
+      "test_id": "flattening/case044",
+      "group": "flattening",
+      "expr": "$filter($, function($e) { $e != 0 })[]",
+      "error": "E   ValueError: filter() first argument must be an array\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $filter($, function($e) { $e != 0 })[]\n    Expected: result\n    Error: filter() first argument must be an array"
+    },
+    {
+      "test_id": "function-applications/case008",
+      "group": "function-applications",
+      "expr": "foo ~> $substringAfter(\"@\") ~> $substringBefore(\".\") ",
+      "error": "E   ValueError: T0410: Argument 1 of function substringAfter does not match function signature\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: foo ~> $substringAfter(\"@\") ~> $substringBefore(\".\") \n    Expected: undefined\n    Error: T0410: Argument 1 of function substringAfter does not match function signature"
+    },
+    {
+      "test_id": "function-applications/case009",
+      "group": "function-applications",
+      "expr": "( $domain := $substringAfter(?,\"@\") ~> $substringBefore(?,\".\"); $domain(\"john@example.com\") )",
+      "error": "E   AssertionError: Result mismatch for expression: ( $domain := $substringAfter(?,\"@\") ~> $substringBefore(?,\".\"); $domain(\"john@example.com\") )\n      Expected: \"example\"\n      Got:      {\n        \"__lambda__\": true,\n        \"params\": [\n          \"__p0\"\n        ],\n        \"body\": \"partial(substringBefore)\",\n        \"_lambda_id\": \"__partial_substringBefore_1_2\",\n        \"_is_partial\": true\n      }\n    assert {'__lambda__': True, '_is_partial': True, '_lambda_id': '__partial_substringBefore_1_2', 'body': 'partial(substringBefore)', ...} == 'example'\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: ( $domain := $substringAfter(?,\"@\") ~> $substringBefore(?,\".\"); $domain(\"john@example.com\") )\n    Exception: AssertionError: Result mismatch for expression: ( $domain := $substringAfter(?,\"@\") ~> $substringBefore(?,\".\"); $domain(\"john@example.com\") )\n      Expected: \"example\"\n      Got:      {\n        \"__lambda__\": true,\n        \"params\": [\n          \"__p0\"\n        ],\n        \"body\": \"partial(substringBefore)\",\n        \"_lambda_id\": \"__partial_substringBefore_1_2\",\n        \"_is_partial\": true\n      }\n    assert {'__lambda__': True, '_is_partial': True, '_lambda_id': '__partial_substringBefore_1_2', 'body': 'partial(substringBefore)', ...} == 'example'"
+    },
+    {
+      "test_id": "function-applications/case012",
+      "group": "function-applications",
+      "expr": "($betweenBackets := $substringAfter(?, \"(\") ~> $substringBefore(?, \")\");$betweenBackets(\"test(foo)bar\")) ",
+      "error": "E   AssertionError: Result mismatch for expression: ($betweenBackets := $substringAfter(?, \"(\") ~> $substringBefore(?, \")\");$betweenBackets(\"test(foo)bar\")) \n      Expected: \"foo\"\n      Got:      {\n        \"__lambda__\": true,\n        \"params\": [\n          \"__p0\"\n        ],\n        \"body\": \"partial(substringBefore)\",\n        \"_lambda_id\": \"__partial_substringBefore_1_2\",\n        \"_is_partial\": true\n      }\n    assert {'__lambda__': True, '_is_partial': True, '_lambda_id': '__partial_substringBefore_1_2', 'body': 'partial(substringBefore)', ...} == 'foo'\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: ($betweenBackets := $substringAfter(?, \"(\") ~> $substringBefore(?, \")\");$betweenBackets(\"test(foo)bar\")) \n    Exception: AssertionError: Result mismatch for expression: ($betweenBackets := $substringAfter(?, \"(\") ~> $substringBefore(?, \")\");$betweenBackets(\"test(foo)bar\")) \n      Expected: \"foo\"\n      Got:      {\n        \"__lambda__\": true,\n        \"params\": [\n          \"__p0\"\n        ],\n        \"body\": \"partial(substringBefore)\",\n        \"_lambda_id\": \"__partial_substringBefore_1_2\",\n        \"_is_partial\": true\n      }\n    assert {'__lambda__': True, '_is_partial': True, '_lambda_id': '__partial_substringBefore_1_2', 'body': 'partial(substringBefore)', ...} == 'foo'"
+    },
+    {
+      "test_id": "function-applications/case013",
+      "group": "function-applications",
+      "expr": "($square := function($x){$x*$x};$chain := \u03bb($f, $g){\u03bb($x){$g($f($x))}};$instructions := [$sum, $square];$sumsq := $instructions ~> $reduce($chain);[1..5] ~> $sumsq()) ",
+      "error": "E   ValueError: Unknown function: instructions\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: ($square := function($x){$x*$x};$chain := \u03bb($f, $g){\u03bb($x){$g($f($x))}};$instructions := [$sum, $square];$sumsq := $instructions ~> $reduce($chain);[1..5] ~> $sumsq()) \n    Expected: result\n    Error: Unknown function: instructions"
+    },
+    {
+      "test_id": "function-applications/case014",
+      "group": "function-applications",
+      "expr": "($square := function($x){$x*$x};$chain := \u03bb($f, $g){\u03bb($x){ $x ~> $f ~> $g }};$instructions := [$sum, $square, $string];$sumsq := $instructions ~> $reduce($chain);[1..5] ~> $sumsq()) ",
+      "error": "E   ValueError: Unknown function: instructions\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: ($square := function($x){$x*$x};$chain := \u03bb($f, $g){\u03bb($x){ $x ~> $f ~> $g }};$instructions := [$sum, $square, $string];$sumsq := $instructions ~> $reduce($chain);[1..5] ~> $sumsq()) \n    Expected: result\n    Error: Unknown function: instructions"
+    },
+    {
+      "test_id": "function-applications/case016",
+      "group": "function-applications",
+      "expr": "($square := function($x){$x*$x};$sum_of_squares := $map(?, $square) ~> $sum;[1..5] ~> $sum_of_squares())  ",
+      "error": "E   ValueError: Type error: sum() requires all array elements to be numbers, got: Object {\"__lambda__\": Bool(true), \"params\": Array [String(\"__p0\")], \"body\": String(\"partial(map)\"), \"_lambda_id\": String(\"__partial_map_1_2\"), \"_is_partial\": Bool(true)}\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: ($square := function($x){$x*$x};$sum_of_squares := $map(?, $square) ~> $sum;[1..5] ~> $sum_of_squares())  \n    Expected: result\n    Error: Type error: sum() requires all array elements to be numbers, got: Object {\"__lambda__\": Bool(true), \"params\": Array [String(\"__p0\")], \"body\": String(\"partial(map)\"), \"_lambda_id\": String(\"__partial_map_1_2\"), \"_is_partial\": Bool(true)}"
+    },
+    {
+      "test_id": "function-applications/case017",
+      "group": "function-applications",
+      "expr": "($times := \u03bb($x, $y) { $x * $y };$product := $reduce(?, $times);$square := function($x){$x*$x};$product_of_squares := $map(?, $square) ~> $product;[1..5] ~> $product_of_squares())",
+      "error": "E   AssertionError: Result mismatch for expression: ($times := \u03bb($x, $y) { $x * $y };$product := $reduce(?, $times);$square := function($x){$x*$x};$product_of_squares := $map(?, $square) ~> $product;[1..5] ~> $product_of_squares())\n      Expected: 14400\n      Got:      {\n        \"__lambda__\": true,\n        \"params\": [\n          \"__p0\"\n        ],\n        \"body\": \"partial(map)\",\n        \"_lambda_id\": \"__partial_map_1_2\",\n        \"_is_partial\": true\n      }\n    assert {'__lambda__': True, '_is_partial': True, '_lambda_id': '__partial_map_1_2', 'body': 'partial(map)', ...} == 14400\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: ($times := \u03bb($x, $y) { $x * $y };$product := $reduce(?, $times);$square := function($x){$x*$x};$product_of_squares := $map(?, $square) ~> $product;[1..5] ~> $product_of_squares())\n    Exception: AssertionError: Result mismatch for expression: ($times := \u03bb($x, $y) { $x * $y };$product := $reduce(?, $times);$square := function($x){$x*$x};$product_of_squares := $map(?, $square) ~> $product;[1..5] ~> $product_of_squares())\n      Expected: 14400\n      Got:      {\n        \"__lambda__\": true,\n        \"params\": [\n          \"__p0\"\n        ],\n        \"body\": \"partial(map)\",\n        \"_lambda_id\": \"__partial_map_1_2\",\n        \"_is_partial\": true\n      }\n    assert {'__lambda__': True, '_is_partial': True, '_lambda_id': '__partial_map_1_2', 'body': 'partial(map)', ...} == 14400"
+    },
+    {
+      "test_id": "function-average/case012",
+      "group": "function-average",
+      "expr": "$average(undefined)",
+      "error": "E   ValueError: average() requires an array or number argument\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $average(undefined)\n    Expected: undefined\n    Error: average() requires an array or number argument"
+    },
+    {
+      "test_id": "function-count/case012",
+      "group": "function-count",
+      "expr": "$count(undefined)",
+      "error": "E   AssertionError: Result mismatch for expression: $count(undefined)\n      Expected: 0\n      Got:      1\n    assert 1 == 0\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: $count(undefined)\n    Exception: AssertionError: Result mismatch for expression: $count(undefined)\n      Expected: 0\n      Got:      1\n    assert 1 == 0"
+    },
+    {
+      "test_id": "function-length/case002",
+      "group": "function-length",
+      "expr": "$length(missing)",
+      "error": "E   ValueError: T0410: Argument 1 of function length does not match function signature\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $length(missing)\n    Expected: undefined\n    Error: T0410: Argument 1 of function length does not match function signature"
+    },
+    {
+      "test_id": "function-length/case004",
+      "group": "function-length",
+      "expr": "$length(\"\\uD834\\uDD1E\")",
+      "error": "E   ValueError: Parse error: Invalid escape sequence: \\uD834\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $length(\"\\uD834\\uDD1E\")\n    Expected: result\n    Error: Parse error: Invalid escape sequence: \\uD834"
+    },
+    {
+      "test_id": "function-lowercase/case001",
+      "group": "function-lowercase",
+      "expr": "$lowercase(blah)",
+      "error": "E   ValueError: T0410: Argument 1 of function lowercase does not match function signature\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $lowercase(blah)\n    Expected: undefined\n    Error: T0410: Argument 1 of function lowercase does not match function signature"
+    },
+    {
+      "test_id": "function-reverse/case001",
+      "group": "function-reverse",
+      "expr": "[[$], [$reverse($)], [$]]",
+      "error": "E   AssertionError: Result mismatch for expression: [[$], [$reverse($)], [$]]\n      Expected: [\n        [\n          1,\n          2,\n          3\n        ],\n        [\n          3,\n          2,\n          1\n        ],\n        [\n          1,\n          2,\n          3\n        ]\n      ]\n      Got:      [\n        [\n          [\n            1,\n            2,\n            3\n          ]\n        ],\n        [\n          [\n            3,\n            2,\n            1\n          ]\n        ],\n        [\n          [\n            1,\n            2,\n            3\n          ]\n        ]\n      ]\n    assert [[[1, 2, 3]],..., [[1, 2, 3]]] == [[1, 2, 3], [...1], [1, 2, 3]]\n      \n      At index 0 diff: [[1, 2, 3]] != [1, 2, 3]\n      \n      Full diff:\n        [\n            [\n      +         [...\n      \n      ...Full output truncated (35 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: [[$], [$reverse($)], [$]]\n    Exception: AssertionError: Result mismatch for expression: [[$], [$reverse($)], [$]]\n      Expected: [\n        [\n          1,\n          2,\n          3\n        ],\n        [\n          3,\n          2,\n          1\n        ],\n        [\n          1,\n          2,\n          3\n        ]\n      ]\n      Got:      [\n        [\n          [\n            1,\n            2,\n            3\n          ]\n        ],\n        [\n          [\n            3,\n            2,\n            1\n          ]\n        ],\n        [\n          [\n            1,\n            2,\n            3\n          ]\n        ]\n      ]\n    assert [[[1, 2, 3]],..., [[1, 2, 3]]] == [[1, 2, 3], [...1], [1, 2, 3]]\n      \n      At index 0 diff: [[1, 2, 3]] != [1, 2, 3]\n      \n      Full diff:\n        [\n            [\n      +         [...\n      \n      ...Full output truncated (35 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "function-sift/case001",
+      "group": "function-sift",
+      "expr": "**[*].$sift(\u03bb($v){$v.Postcode})",
+      "error": "E   AssertionError: Result mismatch for expression: **[*].$sift(\u03bb($v){$v.Postcode})\n      Expected: [\n        {\n          \"Address\": {\n            \"Street\": \"Hursley Park\",\n            \"City\": \"Winchester\",\n            \"Postcode\": \"SO21 2JN\"\n          }\n        },\n        {\n          \"Alternative.Address\": {\n            \"Street\": \"Brick Lane\",\n            \"City\": \"London\",\n            \"Postcode\": \"E1 6RF\"\n          }\n        }\n      ]\n      Got:      [\n        {\n          \"FirstName\": \"Fred\",\n          \"Surname\": \"Smith\",\n          \"Age\": 28,\n          \"Address\": {\n            \"Street\": \"Hursley Park\",\n            \"City\": \"Winchester\",\n            \"Postcode\": \"SO21 2JN\"\n          }\n        },\n        {\n          \"Street\": \"Hursley Park\",\n          \"City\": \"Winchester\",\n          \"Postcode\": \"SO21 2JN\"\n        },\n        [\n          {\n            \"type\": \"home\",\n            \"number\": \"0203 544 1234\"\n          },\n          {\n            \"type\": \"office\",\n            \"number\": \"01962 001234\"\n          },\n          {\n            \"type\": \"office\",\n            \"number\": \"01962 001235\"\n          },\n          {\n            \"type\": \"mobile\",\n            \"number\": \"077 7700 1234\"\n          }\n        ],\n        {\n          \"type\": \"home\",\n          \"number\": \"0203 544 1234\"\n        },\n        {\n          \"type\": \"office\",\n          \"number\": \"01962 001234\"\n        },\n        {\n          \"type\": \"office\",\n          \"number\": \"01962 001235\"\n        },\n        {\n          \"type\": \"mobile\",\n          \"number\": \"077 7700 1234\"\n        },\n        [\n          {\n            \"type\": \"work\"\n          },\n          {\n            \"type\": \"home\"\n          }\n        ],\n        {\n          \"type\": \"work\"\n        },\n        [],\n        {\n          \"type\": \"home\"\n        },\n        [],\n        {\n          \"Over 18 ?\": true,\n          \"Alternative.Address\": {\n            \"Street\": \"Brick Lane\",\n            \"City\": \"London\",\n            \"Postcode\": \"E1 6RF\"\n          }\n        },\n        {\n          \"Street\": \"Brick Lane\",\n          \"City\": \"London\",\n          \"Postcode\": \"E1 6RF\"\n        }\n      ]\n    assert [{'Address': ...office'}, ...] == [{'Address': ...Brick Lane'}}]\n      \n      At index 0 diff: {'FirstName': 'Fred', 'Surname': 'Smith', 'Age': 28, 'Address': {'Street': 'Hursley Park', 'City': 'Winchester', 'Postcode': 'SO21 2JN'}} != {'Address': {'Street': 'Hursley Park', 'City': 'Winchester', 'Postcode': 'SO21 2JN'}}\n      Left contains 12 more items, first extra item: [{'number': '0203 544 1234', 'type': 'home'}, {'number': '01962 001234', 'type': 'office'}, {'number': '01962 001235', 'type': 'office'}, {'number': '077 7700 1234', 'type': 'mobile'}]\n      \n      Full diff:\n        [\n            {...\n      \n      ...Full output truncated (78 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: **[*].$sift(\u03bb($v){$v.Postcode})\n    Exception: AssertionError: Result mismatch for expression: **[*].$sift(\u03bb($v){$v.Postcode})\n      Expected: [\n        {\n          \"Address\": {\n            \"Street\": \"Hursley Park\",\n            \"City\": \"Winchester\",\n            \"Postcode\": \"SO21 2JN\"\n          }\n        },\n        {\n          \"Alternative.Address\": {\n            \"Street\": \"Brick Lane\",\n            \"City\": \"London\",\n            \"Postcode\": \"E1 6RF\"\n          }\n        }\n      ]\n      Got:      [\n        {\n          \"FirstName\": \"Fred\",\n          \"Surname\": \"Smith\",\n          \"Age\": 28,\n          \"Address\": {\n            \"Street\": \"Hursley Park\",\n            \"City\": \"Winchester\",\n            \"Postcode\": \"SO21 2JN\"\n          }\n        },\n        {\n          \"Street\": \"Hursley Park\",\n          \"City\": \"Winchester\",\n          \"Postcode\": \"SO21 2JN\"\n        },\n        [\n          {\n            \"type\": \"home\",\n            \"number\": \"0203 544 1234\"\n          },\n          {\n            \"type\": \"office\",\n            \"number\": \"01962 001234\"\n          },\n          {\n            \"type\": \"office\",\n            \"number\": \"01962 001235\"\n          },\n          {\n            \"type\": \"mobile\",\n            \"number\": \"077 7700 1234\"\n          }\n        ],\n        {\n          \"type\": \"home\",\n          \"number\": \"0203 544 1234\"\n        },\n        {\n          \"type\": \"office\",\n          \"number\": \"01962 001234\"\n        },\n        {\n          \"type\": \"office\",\n          \"number\": \"01962 001235\"\n        },\n        {\n          \"type\": \"mobile\",\n          \"number\": \"077 7700 1234\"\n        },\n        [\n          {\n            \"type\": \"work\"\n          },\n          {\n            \"type\": \"home\"\n          }\n        ],\n        {\n          \"type\": \"work\"\n        },\n        [],\n        {\n          \"type\": \"home\"\n        },\n        [],\n        {\n          \"Over 18 ?\": true,\n          \"Alternative.Address\": {\n            \"Street\": \"Brick Lane\",\n            \"City\": \"London\",\n            \"Postcode\": \"E1 6RF\"\n          }\n        },\n        {\n          \"Street\": \"Brick Lane\",\n          \"City\": \"London\",\n          \"Postcode\": \"E1 6RF\"\n        }\n      ]\n    assert [{'Address': ...office'}, ...] == [{'Address': ...Brick Lane'}}]\n      \n      At index 0 diff: {'FirstName': 'Fred', 'Surname': 'Smith', 'Age': 28, 'Address': {'Street': 'Hursley Park', 'City': 'Winchester', 'Postcode': 'SO21 2JN'}} != {'Address': {'Street': 'Hursley Park', 'City': 'Winchester', 'Postcode': 'SO21 2JN'}}\n      Left contains 12 more items, first extra item: [{'number': '0203 544 1234', 'type': 'home'}, {'number': '01962 001234', 'type': 'office'}, {'number': '01962 001235', 'type': 'office'}, {'number': '077 7700 1234', 'type': 'mobile'}]\n      \n      Full diff:\n        [\n            {...\n      \n      ...Full output truncated (78 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "function-sort/case004",
+      "group": "function-sort",
+      "expr": "[[$], [$sort($)], [$]]",
+      "error": "E   AssertionError: Result mismatch for expression: [[$], [$sort($)], [$]]\n      Expected: [\n        [\n          1,\n          3,\n          2\n        ],\n        [\n          1,\n          2,\n          3\n        ],\n        [\n          1,\n          3,\n          2\n        ]\n      ]\n      Got:      [\n        [\n          [\n            1,\n            3,\n            2\n          ]\n        ],\n        [\n          [\n            1,\n            2,\n            3\n          ]\n        ],\n        [\n          [\n            1,\n            3,\n            2\n          ]\n        ]\n      ]\n    assert [[[1, 3, 2]],..., [[1, 3, 2]]] == [[1, 3, 2], [...3], [1, 3, 2]]\n      \n      At index 0 diff: [[1, 3, 2]] != [1, 3, 2]\n      \n      Full diff:\n        [\n            [\n      +         [...\n      \n      ...Full output truncated (35 lines hidden), use '-vv' to show\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: [[$], [$sort($)], [$]]\n    Exception: AssertionError: Result mismatch for expression: [[$], [$sort($)], [$]]\n      Expected: [\n        [\n          1,\n          3,\n          2\n        ],\n        [\n          1,\n          2,\n          3\n        ],\n        [\n          1,\n          3,\n          2\n        ]\n      ]\n      Got:      [\n        [\n          [\n            1,\n            3,\n            2\n          ]\n        ],\n        [\n          [\n            1,\n            2,\n            3\n          ]\n        ],\n        [\n          [\n            1,\n            3,\n            2\n          ]\n        ]\n      ]\n    assert [[[1, 3, 2]],..., [[1, 3, 2]]] == [[1, 3, 2], [...3], [1, 3, 2]]\n      \n      At index 0 diff: [[1, 3, 2]] != [1, 3, 2]\n      \n      Full diff:\n        [\n            [\n      +         [...\n      \n      ...Full output truncated (35 lines hidden), use '-vv' to show"
+    },
+    {
+      "test_id": "function-string/case012",
+      "group": "function-string",
+      "expr": "$string(blah)",
+      "error": "E   AssertionError: Expected undefined result for expression: $string(blah)\n      Got: \"null\"\n    assert 'null' is None\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected exception type for expression: $string(blah)\n    Exception: AssertionError: Expected undefined result for expression: $string(blah)\n      Got: \"null\"\n    assert 'null' is None"
+    },
+    {
+      "test_id": "function-substring/case003",
+      "group": "function-substring",
+      "expr": "$substring(blah, 6)",
+      "error": "E   ValueError: T0410: Argument 1 of function substring does not match function signature\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $substring(blah, 6)\n    Expected: undefined\n    Error: T0410: Argument 1 of function substring does not match function signature"
+    },
+    {
+      "test_id": "function-substringAfter/case004",
+      "group": "function-substringAfter",
+      "expr": "$substringAfter(blah, \"ld\")",
+      "error": "E   ValueError: T0410: Argument 1 of function substringAfter does not match function signature\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $substringAfter(blah, \"ld\")\n    Expected: undefined\n    Error: T0410: Argument 1 of function substringAfter does not match function signature"
+    },
+    {
+      "test_id": "function-substringBefore/case004",
+      "group": "function-substringBefore",
+      "expr": "$substringBefore(blah, \"He\")",
+      "error": "E   ValueError: T0410: Argument 1 of function substringBefore does not match function signature\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $substringBefore(blah, \"He\")\n    Expected: undefined\n    Error: T0410: Argument 1 of function substringBefore does not match function signature"
+    },
+    {
+      "test_id": "function-sum/case006",
+      "group": "function-sum",
+      "expr": "$sum(undefined)",
+      "error": "E   ValueError: Type error: sum() requires all array elements to be numbers, got: Object {\"__undefined__\": Bool(true)}\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $sum(undefined)\n    Expected: undefined\n    Error: Type error: sum() requires all array elements to be numbers, got: Object {\"__undefined__\": Bool(true)}"
+    },
+    {
+      "test_id": "function-tomillis/case003",
+      "group": "function-tomillis",
+      "expr": "$toMillis(\"2017-10-30\")",
+      "error": "E   ValueError: Parse error: premature end of input\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $toMillis(\"2017-10-30\")\n    Expected: result\n    Error: Parse error: premature end of input"
+    },
+    {
+      "test_id": "function-tomillis/case005",
+      "group": "function-tomillis",
+      "expr": "$toMillis(\"2018\")",
+      "error": "E   ValueError: Parse error: premature end of input\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $toMillis(\"2018\")\n    Expected: result\n    Error: Parse error: premature end of input"
+    },
+    {
+      "test_id": "function-tomillis/case010",
+      "group": "function-tomillis",
+      "expr": "$toMillis(\"201802\", \"[Y0001][M01]\")",
+      "error": "E   ValueError: Parse error: input contains invalid characters\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $toMillis(\"201802\", \"[Y0001][M01]\")\n    Expected: result\n    Error: Parse error: input contains invalid characters"
+    },
+    {
+      "test_id": "function-tomillis/case011",
+      "group": "function-tomillis",
+      "expr": "$toMillis(\"201802\", \"[Y,*-4][M01]\")",
+      "error": "E   ValueError: Parse error: input contains invalid characters\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $toMillis(\"201802\", \"[Y,*-4][M01]\")\n    Expected: result\n    Error: Parse error: input contains invalid characters"
+    },
+    {
+      "test_id": "function-tomillis/case012",
+      "group": "function-tomillis",
+      "expr": "$toMillis(\"20180205\", \"[Y0001][M01][D01]\")",
+      "error": "E   ValueError: Parse error: input contains invalid characters\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $toMillis(\"20180205\", \"[Y0001][M01][D01]\")\n    Expected: result\n    Error: Parse error: input contains invalid characters"
+    },
+    {
+      "test_id": "function-tomillis/case013",
+      "group": "function-tomillis",
+      "expr": "$toMillis('2024-01-01T12:38:49Z') = $toMillis('20240101123849', '[Y0000][M00][D00][H00][m00][s00]')",
+      "error": "E   ValueError: Parse error: input contains invalid characters\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $toMillis('2024-01-01T12:38:49Z') = $toMillis('20240101123849', '[Y0000][M00][D00][H00][m00][s00]')\n    Expected: result\n    Error: Parse error: input contains invalid characters"
+    },
+    {
+      "test_id": "function-uppercase/case001",
+      "group": "function-uppercase",
+      "expr": "$uppercase(blah)",
+      "error": "E   ValueError: T0410: Argument 1 of function uppercase does not match function signature\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $uppercase(blah)\n    Expected: undefined\n    Error: T0410: Argument 1 of function uppercase does not match function signature"
+    },
+    {
+      "test_id": "higher-order-functions/case001",
+      "group": "higher-order-functions",
+      "expr": "\u03bb($f) { \u03bb($x) { $x($x) }( \u03bb($g) { $f( (\u03bb($a) {$g($g)($a)}))})}(\u03bb($f) { \u03bb($n) { $n < 2 ? 1 : $n * $f($n - 1) } })(6)",
+      "error": "E   ValueError: Parse error: Invalid syntax: Invalid function call\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: \u03bb($f) { \u03bb($x) { $x($x) }( \u03bb($g) { $f( (\u03bb($a) {$g($g)($a)}))})}(\u03bb($f) { \u03bb($n) { $n < 2 ? 1 : $n * $f($n - 1) } })(6)\n    Expected: result\n    Error: Parse error: Invalid syntax: Invalid function call"
+    },
+    {
+      "test_id": "higher-order-functions/case002",
+      "group": "higher-order-functions",
+      "expr": "\u03bb($f) { \u03bb($x) { $x($x) }( \u03bb($g) { $f( (\u03bb($a) {$g($g)($a)}))})}(\u03bb($f) { \u03bb($n) { $n <= 1 ? $n : $f($n-1) + $f($n-2) } })(6) ",
+      "error": "E   ValueError: Parse error: Invalid syntax: Invalid function call\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: \u03bb($f) { \u03bb($x) { $x($x) }( \u03bb($g) { $f( (\u03bb($a) {$g($g)($a)}))})}(\u03bb($f) { \u03bb($n) { $n <= 1 ? $n : $f($n-1) + $f($n-2) } })(6) \n    Expected: result\n    Error: Parse error: Invalid syntax: Invalid function call"
+    },
+    {
+      "test_id": "hof-filter/case002",
+      "group": "hof-filter",
+      "expr": "$filter(data, function($d) { true })",
+      "error": "E   ValueError: filter() first argument must be an array\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: $filter(data, function($d) { true })\n    Expected: result\n    Error: filter() first argument must be an array"
+    },
+    {
+      "test_id": "hof-map/case0011",
+      "group": "hof-map",
+      "expr": "( $data := [1]; $square := function($x){$x*$x}; $data ~> $map($square)[] )",
+      "error": "E   ValueError: Right side of ~> must be a function call or function reference\n\nDuring handling of the above exception, another exception occurred:\nE   Failed: Unexpected error for expression: ( $data := [1]; $square := function($x){$x*$x}; $data ~> $map($square)[] )\n    Expected: result\n    Error: Right side of ~> must be a function call or function reference"
+    }
+  ]
+}

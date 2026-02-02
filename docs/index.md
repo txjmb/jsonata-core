@@ -12,6 +12,7 @@ jsonatapy is a Rust-based Python extension that provides native Python support f
 - **[Python API Reference](api.md)** - Complete API documentation
 - **[Usage Guide](usage.md)** - Common patterns and examples
 - **[Performance Guide](performance.md)** - Optimization tips and benchmarks
+- **[Compatibility Report](compatibility.md)** - JSONata 2.1.0 compliance status
 - **[Build Guide](building.md)** - Development and building from source
 - **[JSONata Language Reference](https://docs.jsonata.org/)** - Official JSONata syntax documentation
 
@@ -47,6 +48,7 @@ result = expr.evaluate(data)
 - Object construction and transformation
 - Built-in functions (string, numeric, array, object)
 - Conditional expressions
+- **Validated against 1,273+ reference tests** ([Compatibility Report](compatibility.md))
 
 ### ⚡ High Performance
 - **4.5x faster than JavaScript** on average

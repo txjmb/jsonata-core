@@ -90,6 +90,8 @@ addopts = "-v --strict-markers"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "compatibility: marks tests that verify JS compatibility",
+    "reference: marks tests from the reference JSONata suite",
+    "group: marks tests from a specific test group (use with group name)",
 ]
 
 [tool.coverage.run]

@@ -106,9 +106,9 @@ impl JsonataExpression {
         // Evaluate the AST
         let result = evaluator.evaluate(&self.ast, &json_data)
             .map_err(|e| match e {
-                evaluator::EvaluatorError::TypeError(msg) => PyTypeError::new_err(msg),
+                evaluator::EvaluatorError::TypeError(msg) => PyValueError::new_err(msg),
                 evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
-                evaluator::EvaluatorError::EvaluationError(msg) => PyRuntimeError::new_err(msg),
+                evaluator::EvaluatorError::EvaluationError(msg) => PyValueError::new_err(msg),
             })?;
 
         // Convert result back to Python
@@ -161,9 +161,9 @@ impl JsonataExpression {
         // Evaluate the AST
         let result = evaluator.evaluate(&self.ast, &json_data)
             .map_err(|e| match e {
-                evaluator::EvaluatorError::TypeError(msg) => PyTypeError::new_err(msg),
+                evaluator::EvaluatorError::TypeError(msg) => PyValueError::new_err(msg),
                 evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
-                evaluator::EvaluatorError::EvaluationError(msg) => PyRuntimeError::new_err(msg),
+                evaluator::EvaluatorError::EvaluationError(msg) => PyValueError::new_err(msg),
             })?;
 
         // Convert result to JSON string
@@ -390,6 +390,10 @@ fn json_to_python(py: Python, value: &Value) -> PyResult<PyObject> {
         }
 
         Value::Object(obj) => {
+            // Check if this is the undefined marker - return None
+            if crate::evaluator::is_undefined(value) {
+                return Ok(py.None());
+            }
             let dict = PyDict::new(py);
             for (key, value) in obj {
                 dict.set_item(key, json_to_python(py, value)?)?;

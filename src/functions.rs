@@ -20,36 +20,259 @@ pub enum FunctionError {
 /// Built-in string functions
 pub mod string {
     use super::*;
+    use regex::Regex;
 
-    /// $string() - Cast value to string
-    /// Converts a value to a string representation following JSONata semantics
-    pub fn string(value: &Value) -> Result<Value, FunctionError> {
+    /// Helper to detect and extract regex from a Value object
+    fn extract_regex(value: &Value) -> Option<(String, String)> {
+        if let Value::Object(obj) = value {
+            if obj.get("__jsonata_regex__") == Some(&Value::Bool(true)) {
+                if let (Some(Value::String(pattern)), Some(Value::String(flags))) =
+                    (obj.get("pattern"), obj.get("flags")) {
+                    return Some((pattern.clone(), flags.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    /// Helper to build a Regex from pattern and flags
+    fn build_regex(pattern: &str, flags: &str) -> Result<Regex, FunctionError> {
+        // Convert JSONata flags to Rust regex flags
+        let mut regex_pattern = String::new();
+
+        // Add inline flags
+        if !flags.is_empty() {
+            regex_pattern.push_str("(?");
+            if flags.contains('i') {
+                regex_pattern.push('i');  // case-insensitive
+            }
+            if flags.contains('m') {
+                regex_pattern.push('m');  // multi-line
+            }
+            if flags.contains('s') {
+                regex_pattern.push('s');  // dot matches newline
+            }
+            regex_pattern.push(')');
+        }
+
+        regex_pattern.push_str(pattern);
+
+        Regex::new(&regex_pattern).map_err(|e|
+            FunctionError::ArgumentError(format!("Invalid regex: {}", e))
+        )
+    }
+
+    /// $string(value, prettify) - Convert value to string
+    ///
+    /// - undefined inputs return undefined (but this is handled at call site)
+    /// - strings returned unchanged
+    /// - functions/lambdas return empty string
+    /// - non-finite numbers (Infinity, NaN) throw error D3001
+    /// - other values use JSON.stringify with number precision
+    /// - prettify=true uses 2-space indentation
+    pub fn string(value: &Value, prettify: Option<bool>) -> Result<Value, FunctionError> {
+        // Check if this is a function or undefined first (before checking other types)
+        if let Value::Object(obj) = value {
+            // Check if this is undefined (has __undefined__ marker)
+            if obj.get("__undefined__") == Some(&Value::Bool(true)) {
+                // Undefined converts to empty string
+                return Ok(Value::String(String::new()));
+            }
+            // Check if this is a lambda (has __lambda__ marker)
+            if obj.contains_key("__lambda__") {
+                // Lambdas convert to empty string
+                return Ok(Value::String(String::new()));
+            }
+            // Check if this is a built-in function (has __builtin__ marker)
+            if obj.contains_key("__builtin__") {
+                // Built-in functions convert to empty string
+                return Ok(Value::String(String::new()));
+            }
+        }
+
         let result = match value {
             Value::String(s) => s.clone(),
             Value::Number(n) => {
+                let f = n.as_f64().unwrap_or(0.0);
+                // Check for non-finite numbers (Infinity, NaN)
+                if !f.is_finite() {
+                    return Err(FunctionError::RuntimeError(
+                        format!("D3001: Attempting to invoke string function with non-finite number: {}", f)
+                    ));
+                }
+
+                // Format numbers like JavaScript does
                 if let Some(i) = n.as_i64() {
+                    // Integer - just convert to string
                     i.to_string()
-                } else if let Some(f) = n.as_f64() {
-                    // Remove trailing zeros for cleaner output
-                    let s = f.to_string();
-                    if s.contains('.') {
-                        s.trim_end_matches('0').trim_end_matches('.').to_string()
-                    } else {
-                        s
-                    }
                 } else {
-                    n.to_string()
+                    // Non-integer - use precision formatting
+                    // JavaScript uses toPrecision(15) for non-integers in JSON.stringify
+                    format_number_with_precision(f)
                 }
             }
             Value::Bool(b) => b.to_string(),
-            Value::Null => String::new(),
+            Value::Null => {
+                // Explicit null goes through JSON.stringify to become "null"
+                // Undefined variables are handled at the evaluator level
+                "null".to_string()
+            }
             Value::Array(_) | Value::Object(_) => {
-                return Err(FunctionError::TypeError(
-                    "Cannot convert array or object to string".to_string(),
-                ))
+                // JSON.stringify with optional prettification
+                // Uses custom serialization to handle numbers and functions correctly
+                let indent = if prettify.unwrap_or(false) { Some(2) } else { None };
+                stringify_value_custom(value, indent)?
             }
         };
         Ok(Value::String(result))
+    }
+
+    /// Helper to format a number with precision like JavaScript's toPrecision(15)
+    ///
+    /// JavaScript uses `toPrecision(15)` which formats with 15 significant figures.
+    /// This matches that behavior by:
+    /// 1. Formatting with 15 significant figures
+    /// 2. Removing trailing zeros
+    /// 3. Converting back to number to normalize format
+    fn format_number_with_precision(f: f64) -> String {
+        // Format with 15 significant figures like JavaScript's toPrecision(15)
+        // The format uses scientific notation to ensure precision
+        let formatted = format!("{:.14e}", f);
+
+        // Parse back to f64 and format normally to get the canonical representation
+        // This mimics JavaScript's behavior of normalizing the result
+        if let Ok(parsed) = formatted.parse::<f64>() {
+            // Convert to string without exponential notation unless necessary
+            if parsed.abs() >= 1e-6 && parsed.abs() < 1e21 {
+                // Regular notation
+                let s = format!("{}", parsed);
+                // Ensure we don't have excessive precision
+                if s.contains('.') {
+                    let parts: Vec<&str> = s.split('.').collect();
+                    if parts.len() == 2 {
+                        let int_part = parts[0];
+                        let frac_part = parts[1];
+                        let total_digits = int_part.trim_start_matches('-').len() + frac_part.len();
+
+                        if total_digits > 15 {
+                            // Truncate to 15 significant figures
+                            let sig_figs = 15 - int_part.trim_start_matches('-').len();
+                            if sig_figs > 0 && sig_figs <= frac_part.len() {
+                                let truncated_frac = &frac_part[..sig_figs];
+                                // Remove trailing zeros
+                                let trimmed = truncated_frac.trim_end_matches('0');
+                                if trimmed.is_empty() {
+                                    return int_part.to_string();
+                                } else {
+                                    return format!("{}.{}", int_part, trimmed);
+                                }
+                            }
+                        }
+                    }
+                }
+                s
+            } else {
+                // Use exponential notation for very small or large numbers
+                // Format matches JavaScript: always include sign in exponent
+                let exp_str = format!("{:e}", parsed);
+                // Ensure exponent has + sign: "1e100" -> "1e+100"
+                if exp_str.contains("e") && !exp_str.contains("e-") && !exp_str.contains("e+") {
+                    exp_str.replace("e", "e+")
+                } else {
+                    exp_str
+                }
+            }
+        } else {
+            // Fallback
+            format!("{}", f)
+        }
+    }
+
+    /// Helper to stringify a value as JSON with custom replacer logic
+    ///
+    /// Mimics JavaScript's JSON.stringify with a replacer function that:
+    /// - Converts non-integer numbers to 15 significant figures
+    /// - Keeps integers without decimal point
+    /// - Converts functions to empty string
+    fn stringify_value_custom(value: &Value, indent: Option<usize>) -> Result<String, FunctionError> {
+        // Transform the value recursively before stringifying
+        let transformed = transform_for_stringify(value);
+
+        let result = if let Some(indent_size) = indent {
+            serde_json::to_string_pretty(&transformed)
+                .map_err(|e| FunctionError::RuntimeError(format!("JSON stringify error: {}", e)))?
+        } else {
+            serde_json::to_string(&transformed)
+                .map_err(|e| FunctionError::RuntimeError(format!("JSON stringify error: {}", e)))?
+        };
+        Ok(result)
+    }
+
+    /// Transform a value for JSON.stringify, applying the replacer logic
+    fn transform_for_stringify(value: &Value) -> Value {
+        match value {
+            Value::Number(n) => {
+                // Check if it's an integer first
+                if n.is_i64() || n.is_u64() {
+                    // Keep as integer - serde_json will serialize without .0
+                    value.clone()
+                } else {
+                    // Check if the f64 value is actually an integer
+                    let f = n.as_f64().unwrap_or(0.0);
+                    if f.fract() == 0.0 && f.is_finite() && f.abs() < (1i64 << 53) as f64 {
+                        // It's a whole number that can be represented as i64
+                        if let Some(i) = n.as_i64() {
+                            return Value::Number(i.into());
+                        }
+                    }
+
+                    // Non-integer: apply toPrecision(15) and keep as f64
+                    // We don't parse back to avoid losing precision
+                    let formatted = format_number_with_precision(f);
+                    if let Ok(parsed) = formatted.parse::<f64>() {
+                        // Return as f64 but serde_json will format it nicely
+                        serde_json::json!(parsed)
+                    } else {
+                        value.clone()
+                    }
+                }
+            }
+            Value::Array(arr) => {
+                // Recursively transform array elements
+                let transformed: Vec<Value> = arr.iter().map(|v| {
+                    // Check if element is a function
+                    if let Value::Object(obj) = v {
+                        if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
+                            // Functions become empty string
+                            return Value::String(String::new());
+                        }
+                    }
+                    transform_for_stringify(v)
+                }).collect();
+                Value::Array(transformed)
+            }
+            Value::Object(obj) => {
+                // Check if this is a function
+                if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
+                    // Functions become empty string
+                    return Value::String(String::new());
+                }
+
+                // Recursively transform object values
+                let transformed: serde_json::Map<String, Value> = obj.iter().map(|(k, v)| {
+                    // Check if value is a function
+                    if let Value::Object(obj) = v {
+                        if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
+                            // Functions become empty string
+                            return (k.clone(), Value::String(String::new()));
+                        }
+                    }
+                    (k.clone(), transform_for_stringify(v))
+                }).collect();
+                Value::Object(transformed)
+            }
+            _ => value.clone()
+        }
     }
 
     /// $length() - Get string length with proper Unicode support
@@ -83,9 +306,8 @@ pub mod string {
 
         let end_pos = if let Some(len) = length {
             if len < 0 {
-                return Err(FunctionError::ArgumentError(
-                    "Length cannot be negative".to_string(),
-                ));
+                // Negative length returns empty string
+                return Ok(Value::String(String::new()));
             }
             (start_pos + len as usize).min(chars.len())
         } else {
@@ -116,41 +338,105 @@ pub mod string {
             let result = s[pos + separator.len()..].to_string();
             Ok(Value::String(result))
         } else {
-            Ok(Value::String(String::new()))
+            // If separator not found, return the original string
+            Ok(Value::String(s.to_string()))
         }
     }
 
-    /// $trim(str) - Remove leading and trailing whitespace
+    /// $trim(str) - Normalize and trim whitespace
+    ///
+    /// Normalizes whitespace by replacing runs of whitespace characters (space, tab, newline, etc.)
+    /// with a single space, then strips leading and trailing spaces.
     pub fn trim(s: &str) -> Result<Value, FunctionError> {
-        Ok(Value::String(s.trim().to_string()))
+        use regex::Regex;
+
+        // Normalize whitespace: replace runs of [ \t\n\r]+ with single space
+        let ws_regex = Regex::new(r"[ \t\n\r]+").unwrap();
+        let mut result = ws_regex.replace_all(s, " ").to_string();
+
+        // Strip leading space
+        if result.starts_with(' ') {
+            result = result[1..].to_string();
+        }
+
+        // Strip trailing space
+        if result.ends_with(' ') {
+            result = result[..result.len()-1].to_string();
+        }
+
+        Ok(Value::String(result))
     }
 
-    /// $contains(str, pattern) - Check if string contains substring
-    pub fn contains(s: &str, pattern: &str) -> Result<Value, FunctionError> {
-        Ok(Value::Bool(s.contains(pattern)))
+    /// $contains(str, pattern) - Check if string contains substring or matches regex
+    pub fn contains(s: &str, pattern: &Value) -> Result<Value, FunctionError> {
+        // Check if pattern is a regex
+        if let Some((pat, flags)) = extract_regex(pattern) {
+            let re = build_regex(&pat, &flags)?;
+            return Ok(Value::Bool(re.is_match(s)));
+        }
+
+        // Handle string pattern
+        let pat = match pattern {
+            Value::String(s) => s.as_str(),
+            _ => return Err(FunctionError::TypeError("contains() requires string arguments".to_string())),
+        };
+
+        Ok(Value::Bool(s.contains(pat)))
     }
 
     /// $split(str, separator, limit) - Split string into array
-    pub fn split(s: &str, separator: &str, limit: Option<usize>) -> Result<Value, FunctionError> {
-        if separator.is_empty() {
+    /// separator can be a string or a regex object
+    pub fn split(s: &str, separator: &Value, limit: Option<usize>) -> Result<Value, FunctionError> {
+        // Check if separator is a regex
+        if let Some((pattern, flags)) = extract_regex(separator) {
+            let re = build_regex(&pattern, &flags)?;
+
+            let parts: Vec<Value> = re.split(s)
+                .map(|p| Value::String(p.to_string()))
+                .collect();
+
+            // Truncate to limit if specified (limit is max number of results)
+            let result = if let Some(lim) = limit {
+                parts.into_iter().take(lim).collect()
+            } else {
+                parts
+            };
+
+            return Ok(Value::Array(result));
+        }
+
+        // Handle string separator
+        let sep = match separator {
+            Value::String(s) => s.as_str(),
+            _ => return Err(FunctionError::TypeError("split() requires string arguments".to_string())),
+        };
+
+        if sep.is_empty() {
             // Split into individual characters
             let chars: Vec<Value> = s.chars()
                 .map(|c| Value::String(c.to_string()))
                 .collect();
-            return Ok(Value::Array(chars));
+            // Truncate to limit if specified
+            let result = if let Some(lim) = limit {
+                chars.into_iter().take(lim).collect()
+            } else {
+                chars
+            };
+            return Ok(Value::Array(result));
         }
 
-        let parts: Vec<Value> = if let Some(lim) = limit {
-            s.splitn(lim, separator)
-                .map(|p| Value::String(p.to_string()))
-                .collect()
+        let parts: Vec<Value> = s.split(sep)
+            .map(|p| Value::String(p.to_string()))
+            .collect();
+
+        // Truncate to limit if specified (limit is max number of results)
+        let result = if let Some(lim) = limit {
+            parts.into_iter().take(lim).collect()
         } else {
-            s.split(separator)
-                .map(|p| Value::String(p.to_string()))
-                .collect()
+            parts
         };
 
-        Ok(Value::Array(parts))
+        Ok(Value::Array(result))
     }
 
     /// $join(array, separator) - Join array into string
@@ -173,15 +459,185 @@ pub mod string {
         Ok(Value::String(parts.join(sep)))
     }
 
-    /// $replace(str, pattern, replacement, limit) - Replace substring
+    /// Helper to perform capture group substitution in replacement string
+    /// Handles $0 (full match), $1, $2, etc. (capture groups), and $$ (literal $)
+    fn substitute_capture_groups(
+        replacement: &str,
+        full_match: &str,
+        groups: &[Option<regex::Match>],
+    ) -> String {
+        let mut result = String::new();
+        let mut position = 0;
+        let chars: Vec<char> = replacement.chars().collect();
+
+        while position < chars.len() {
+            if chars[position] == '$' {
+                position += 1;
+
+                if position >= chars.len() {
+                    // $ at end of string, treat as literal
+                    result.push('$');
+                    break;
+                }
+
+                let next_ch = chars[position];
+
+                if next_ch == '$' {
+                    // $$ → literal $
+                    result.push('$');
+                    position += 1;
+                } else if next_ch == '0' {
+                    // $0 → full match
+                    result.push_str(full_match);
+                    position += 1;
+                } else if next_ch.is_ascii_digit() {
+                    // Calculate maxDigits based on number of capture groups
+                    // This matches the JavaScript implementation's logic
+                    let max_digits = if groups.is_empty() {
+                        1
+                    } else {
+                        // floor(log10(groups.len())) + 1
+                        ((groups.len() as f64).log10().floor() as usize) + 1
+                    };
+
+                    // Collect up to max_digits consecutive digits
+                    let mut digits_end = position;
+                    let mut digit_count = 0;
+                    while digits_end < chars.len()
+                        && chars[digits_end].is_ascii_digit()
+                        && digit_count < max_digits {
+                        digits_end += 1;
+                        digit_count += 1;
+                    }
+
+                    if digit_count > 0 {
+                        // Try to parse as group number
+                        let num_str: String = chars[position..digits_end].iter().collect();
+                        let mut group_num = num_str.parse::<usize>().unwrap();
+
+                        // If the group number is out of range and we collected more than 1 digit,
+                        // try parsing with one fewer digit (fallback logic)
+                        let mut used_digits = digit_count;
+                        if max_digits > 1 && group_num > groups.len() && digit_count > 1 {
+                            let fallback_str: String = chars[position..digits_end-1].iter().collect();
+                            if let Ok(fallback_num) = fallback_str.parse::<usize>() {
+                                group_num = fallback_num;
+                                used_digits = digit_count - 1;
+                            }
+                        }
+
+                        // Check if this is a valid group reference
+                        if groups.is_empty() {
+                            // No capture groups at all - treat as literal
+                            result.push('$');
+                            // Don't advance position, let the digit be added as literal next iteration
+                        } else if group_num > 0 && group_num <= groups.len() {
+                            // Valid group reference
+                            if let Some(m) = &groups[group_num - 1] {
+                                result.push_str(m.as_str());
+                            }
+                            // If group didn't match (None), add nothing (empty string)
+                            position += used_digits;
+                        } else {
+                            // Group number out of range, treat as literal
+                            result.push('$');
+                            // Don't advance position, let the digits be added as literals
+                        }
+                    } else {
+                        // No digits found (shouldn't happen since we checked next_ch.is_ascii_digit())
+                        result.push('$');
+                    }
+                } else {
+                    // $ followed by non-digit, treat as literal $
+                    result.push('$');
+                    // Don't consume the next character, let it be processed in next iteration
+                }
+            } else {
+                result.push(chars[position]);
+                position += 1;
+            }
+        }
+
+        result
+    }
+
+    /// $replace(str, pattern, replacement, limit) - Replace substring or regex matches
     pub fn replace(
         s: &str,
-        pattern: &str,
+        pattern: &Value,
         replacement: &str,
         limit: Option<usize>,
     ) -> Result<Value, FunctionError> {
-        if pattern.is_empty() {
-            return Ok(Value::String(s.to_string()));
+        // Check if pattern is a regex
+        if let Some((pat, flags)) = extract_regex(pattern) {
+            let re = build_regex(&pat, &flags)?;
+
+            let result = if let Some(lim) = limit {
+                let mut count = 0;
+                let mut last_match = 0;
+                let mut output = String::new();
+
+                for cap in re.captures_iter(s) {
+                    if count >= lim {
+                        break;
+                    }
+
+                    let m = cap.get(0).unwrap();
+                    output.push_str(&s[last_match..m.start()]);
+
+                    // Collect capture groups
+                    let groups: Vec<Option<regex::Match>> = (1..cap.len())
+                        .map(|i| cap.get(i))
+                        .collect();
+
+                    // Perform capture group substitution
+                    let substituted = substitute_capture_groups(replacement, m.as_str(), &groups);
+                    output.push_str(&substituted);
+
+                    last_match = m.end();
+                    count += 1;
+                }
+
+                output.push_str(&s[last_match..]);
+                output
+            } else {
+                // For unlimited replacements, process each match
+                let mut last_match = 0;
+                let mut output = String::new();
+
+                for cap in re.captures_iter(s) {
+                    let m = cap.get(0).unwrap();
+                    output.push_str(&s[last_match..m.start()]);
+
+                    // Collect capture groups
+                    let groups: Vec<Option<regex::Match>> = (1..cap.len())
+                        .map(|i| cap.get(i))
+                        .collect();
+
+                    // Perform capture group substitution
+                    let substituted = substitute_capture_groups(replacement, m.as_str(), &groups);
+                    output.push_str(&substituted);
+
+                    last_match = m.end();
+                }
+
+                output.push_str(&s[last_match..]);
+                output
+            };
+
+            return Ok(Value::String(result));
+        }
+
+        // Handle string pattern
+        let pat = match pattern {
+            Value::String(s) => s.as_str(),
+            _ => return Err(FunctionError::TypeError("replace() requires string arguments".to_string())),
+        };
+
+        if pat.is_empty() {
+            return Err(FunctionError::RuntimeError(
+                "D3010: Pattern cannot be empty".to_string()
+            ));
         }
 
         let result = if let Some(lim) = limit {
@@ -190,10 +646,10 @@ pub mod string {
             let mut count = 0;
 
             while count < lim {
-                if let Some(pos) = remaining.find(pattern) {
+                if let Some(pos) = remaining.find(pat) {
                     output.push_str(&remaining[..pos]);
                     output.push_str(replacement);
-                    remaining = &remaining[pos + pattern.len()..];
+                    remaining = &remaining[pos + pat.len()..];
                     count += 1;
                 } else {
                     output.push_str(remaining);
@@ -205,10 +661,63 @@ pub mod string {
             }
             output
         } else {
-            s.replace(pattern, replacement)
+            s.replace(pat, replacement)
         };
 
         Ok(Value::String(result))
+    }
+}
+
+/// Built-in boolean functions
+pub mod boolean {
+    use super::*;
+
+    /// $boolean(value) - Convert value to boolean
+    ///
+    /// Conversion rules:
+    /// - boolean: unchanged
+    /// - string: zero-length -> false; otherwise -> true
+    /// - number: 0 -> false; otherwise -> true
+    /// - null -> false
+    /// - array: empty -> false; single element -> recursive; multi-element -> any truthy
+    /// - object: empty -> false; non-empty -> true
+    /// - function -> false
+    pub fn boolean(value: &Value) -> Result<Value, FunctionError> {
+        Ok(Value::Bool(to_boolean(value)))
+    }
+
+    /// Helper function to recursively convert values to boolean
+    fn to_boolean(value: &Value) -> bool {
+        match value {
+            Value::Null => false,
+            Value::Bool(b) => *b,
+            Value::Number(n) => {
+                let f = n.as_f64().unwrap_or(0.0);
+                f != 0.0
+            }
+            Value::String(s) => !s.is_empty(),
+            Value::Array(arr) => {
+                if arr.is_empty() {
+                    false
+                } else if arr.len() == 1 {
+                    // Single element: recursively evaluate
+                    to_boolean(&arr[0])
+                } else {
+                    // Multiple elements: true if any element is truthy
+                    arr.iter().any(to_boolean)
+                }
+            }
+            Value::Object(obj) => {
+                // Check if it's a function (lambda or built-in)
+                // Functions are falsy in JSONata
+                if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
+                    false
+                } else {
+                    // Regular objects: empty -> false, non-empty -> true
+                    !obj.is_empty()
+                }
+            }
+        }
     }
 }
 
@@ -217,25 +726,70 @@ pub mod numeric {
     use super::*;
 
     /// $number() - Cast value to number
+    /// $number(value) - Convert value to number
+    /// Supports decimal, hex (0x), octal (0o), and binary (0b) formats
     pub fn number(value: &Value) -> Result<Value, FunctionError> {
         match value {
-            Value::Number(n) => Ok(Value::Number(n.clone())),
+            Value::Number(n) => {
+                // Already a number - validate it's finite
+                let f = n.as_f64().unwrap_or(0.0);
+                if !f.is_finite() {
+                    return Err(FunctionError::RuntimeError(
+                        "D3030: Cannot convert infinite number".to_string()
+                    ));
+                }
+                Ok(Value::Number(n.clone()))
+            }
             Value::String(s) => {
                 let trimmed = s.trim();
-                trimmed
-                    .parse::<f64>()
-                    .map(|n| serde_json::json!(n))
-                    .map_err(|_| {
-                        FunctionError::TypeError(format!("Cannot convert '{}' to number", s))
-                    })
+
+                // Try hex, octal, or binary format first (0x, 0o, 0b)
+                if let Some(stripped) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+                    // Hexadecimal
+                    return i64::from_str_radix(stripped, 16)
+                        .map(|n| serde_json::json!(n))
+                        .map_err(|_| FunctionError::RuntimeError(
+                            format!("D3030: Cannot convert '{}' to number", s)
+                        ));
+                } else if let Some(stripped) = trimmed.strip_prefix("0o").or_else(|| trimmed.strip_prefix("0O")) {
+                    // Octal
+                    return i64::from_str_radix(stripped, 8)
+                        .map(|n| serde_json::json!(n))
+                        .map_err(|_| FunctionError::RuntimeError(
+                            format!("D3030: Cannot convert '{}' to number", s)
+                        ));
+                } else if let Some(stripped) = trimmed.strip_prefix("0b").or_else(|| trimmed.strip_prefix("0B")) {
+                    // Binary
+                    return i64::from_str_radix(stripped, 2)
+                        .map(|n| serde_json::json!(n))
+                        .map_err(|_| FunctionError::RuntimeError(
+                            format!("D3030: Cannot convert '{}' to number", s)
+                        ));
+                }
+
+                // Try decimal format
+                match trimmed.parse::<f64>() {
+                    Ok(n) => {
+                        // Validate the number is finite
+                        if !n.is_finite() {
+                            return Err(FunctionError::RuntimeError(
+                                format!("D3030: Cannot convert '{}' to number", s)
+                            ));
+                        }
+                        Ok(serde_json::json!(n))
+                    }
+                    Err(_) => Err(FunctionError::RuntimeError(
+                        format!("D3030: Cannot convert '{}' to number", s)
+                    ))
+                }
             }
             Value::Bool(true) => Ok(serde_json::json!(1)),
             Value::Bool(false) => Ok(serde_json::json!(0)),
-            Value::Null => Err(FunctionError::TypeError(
-                "Cannot convert null to number".to_string(),
+            Value::Null => Err(FunctionError::RuntimeError(
+                "D3030: Cannot convert null to number".to_string(),
             )),
-            _ => Err(FunctionError::TypeError(
-                "Cannot convert array or object to number".to_string(),
+            _ => Err(FunctionError::RuntimeError(
+                "D3030: Cannot convert array or object to number".to_string(),
             )),
         }
     }
@@ -350,17 +904,51 @@ pub mod numeric {
     }
 
     /// $round(number, precision) - Round to specified decimal places
+    /// $round(number, precision) - Round to precision using "round half to even" (banker's rounding)
+    ///
+    /// This implements the same rounding behavior as JSONata's JavaScript implementation,
+    /// which rounds .5 values to the nearest even number.
+    ///
+    /// precision can be:
+    /// - positive: round to that many decimal places (e.g., 2 -> 0.01)
+    /// - zero or omitted: round to nearest integer
+    /// - negative: round to powers of 10 (e.g., -2 -> nearest 100)
     pub fn round(n: f64, precision: Option<i32>) -> Result<Value, FunctionError> {
         let prec = precision.unwrap_or(0);
-        if prec < 0 {
-            return Err(FunctionError::ArgumentError(
-                "Precision cannot be negative".to_string(),
-            ));
-        }
 
+        // Shift decimal place for precision (works for both positive and negative)
         let multiplier = 10_f64.powi(prec);
-        let rounded = (n * multiplier).round() / multiplier;
-        Ok(serde_json::json!(rounded))
+        let scaled = n * multiplier;
+
+        // Implement round-half-to-even (banker's rounding)
+        let floor_val = scaled.floor();
+        let frac = scaled - floor_val;
+
+        // Use a small epsilon for floating point comparison
+        let epsilon = 1e-10;
+        let result = if (frac - 0.5).abs() < epsilon {
+            // Exactly at .5 (within tolerance) - round to even
+            let floor_int = floor_val as i64;
+            if floor_int % 2 == 0 {
+                floor_val  // floor is even, stay there
+            } else {
+                floor_val + 1.0  // floor is odd, round up to even
+            }
+        } else if frac > 0.5 {
+            floor_val + 1.0  // round up
+        } else {
+            floor_val  // round down
+        };
+
+        // Shift back
+        let final_result = result / multiplier;
+
+        // Return as integer if it's a whole number
+        if final_result.fract() == 0.0 && final_result.abs() < (i64::MAX as f64) {
+            Ok(serde_json::json!(final_result as i64))
+        } else {
+            Ok(serde_json::json!(final_result))
+        }
     }
 
     /// $sqrt(number) - Square root
@@ -382,6 +970,643 @@ pub mod numeric {
             ));
         }
         Ok(serde_json::json!(result))
+    }
+
+    /// $formatNumber(value, picture, options) - Format number with picture string
+    /// Implements XPath F&O number formatting specification
+    pub fn format_number(value: f64, picture: &str, options: Option<&Value>) -> Result<Value, FunctionError> {
+        // Default format properties (can be overridden by options)
+        let mut decimal_separator = '.';
+        let mut grouping_separator = ',';
+        let mut zero_digit = '0';
+        let mut percent_symbol = "%".to_string();
+        let mut per_mille_symbol = "‰".to_string();
+        let digit_char = '#';
+        let pattern_separator = ';';
+
+        // Parse options if provided
+        if let Some(Value::Object(opts)) = options {
+            if let Some(Value::String(s)) = opts.get("decimal-separator") {
+                decimal_separator = s.chars().next().unwrap_or('.');
+            }
+            if let Some(Value::String(s)) = opts.get("grouping-separator") {
+                grouping_separator = s.chars().next().unwrap_or(',');
+            }
+            if let Some(Value::String(s)) = opts.get("zero-digit") {
+                zero_digit = s.chars().next().unwrap_or('0');
+            }
+            if let Some(Value::String(s)) = opts.get("percent") {
+                percent_symbol = s.clone();
+            }
+            if let Some(Value::String(s)) = opts.get("per-mille") {
+                per_mille_symbol = s.clone();
+            }
+        }
+
+        // Split picture into sub-pictures (positive and negative patterns)
+        let sub_pictures: Vec<&str> = picture.split(pattern_separator).collect();
+        if sub_pictures.len() > 2 {
+            return Err(FunctionError::ArgumentError(
+                "D3080: Too many pattern separators in picture string".to_string()
+            ));
+        }
+
+        // Parse and analyze the picture string
+        let parts = parse_picture(
+            sub_pictures[0],
+            decimal_separator,
+            grouping_separator,
+            zero_digit,
+            digit_char,
+            &percent_symbol,
+            &per_mille_symbol,
+        )?;
+
+        // For negative numbers, use second pattern or add minus sign to first pattern
+        let is_negative = value < 0.0;
+        let mut abs_value = value.abs();
+
+        // Apply percent or per-mille scaling
+        if parts.has_percent {
+            abs_value *= 100.0;
+        } else if parts.has_per_mille {
+            abs_value *= 1000.0;
+        }
+
+        // Apply the pattern
+        let formatted = apply_number_picture(
+            abs_value,
+            &parts,
+            decimal_separator,
+            grouping_separator,
+            zero_digit,
+        )?;
+
+        // Add prefix/suffix and handle negative
+        let result = if is_negative {
+            if sub_pictures.len() == 2 {
+                // Use second pattern for negatives
+                let neg_parts = parse_picture(
+                    sub_pictures[1],
+                    decimal_separator,
+                    grouping_separator,
+                    zero_digit,
+                    digit_char,
+                    &percent_symbol,
+                    &per_mille_symbol,
+                )?;
+                let neg_formatted = apply_number_picture(
+                    abs_value,
+                    &neg_parts,
+                    decimal_separator,
+                    grouping_separator,
+                    zero_digit,
+                )?;
+                format!("{}{}{}", neg_parts.prefix, neg_formatted, neg_parts.suffix)
+            } else {
+                // Add minus sign to prefix
+                format!("-{}{}{}", parts.prefix, formatted, parts.suffix)
+            }
+        } else {
+            format!("{}{}{}", parts.prefix, formatted, parts.suffix)
+        };
+
+        Ok(Value::String(result))
+    }
+
+    /// Helper to check if a character is in the digit family (0-9 or custom zero-digit family)
+    fn is_digit_in_family(c: char, zero_digit: char) -> bool {
+        if c >= '0' && c <= '9' {
+            return true;
+        }
+        // Check if c is in custom digit family (zero_digit to zero_digit+9)
+        let zero_code = zero_digit as u32;
+        let c_code = c as u32;
+        c_code >= zero_code && c_code < zero_code + 10
+    }
+
+    /// Parse a picture string into its components
+    fn parse_picture(
+        picture: &str,
+        decimal_sep: char,
+        grouping_sep: char,
+        zero_digit: char,
+        digit_char: char,
+        percent_symbol: &str,
+        per_mille_symbol: &str,
+    ) -> Result<PictureParts, FunctionError> {
+        // Work with character vectors to avoid UTF-8 byte boundary issues
+        let chars: Vec<char> = picture.chars().collect();
+
+        // Find prefix (chars before any active char)
+        // Active chars for prefix/suffix: decimal sep, grouping sep, digit char, or digit family members
+        // NOTE: 'e'/'E' are NOT included here to avoid treating them as exponent markers in prefix/suffix
+        let prefix_end = chars.iter().position(|&c| {
+            c == decimal_sep || c == grouping_sep || c == digit_char
+            || is_digit_in_family(c, zero_digit)
+        }).unwrap_or(chars.len());
+        let prefix: String = chars[..prefix_end].iter().collect();
+
+        // Find suffix (chars after last active char)
+        let suffix_start = chars.iter().rposition(|&c| {
+            c == decimal_sep || c == grouping_sep || c == digit_char
+            || is_digit_in_family(c, zero_digit)
+        }).map(|pos| pos + 1)
+        .unwrap_or(chars.len());
+        let suffix: String = chars[suffix_start..].iter().collect();
+
+        // Active part (between prefix and suffix)
+        let active: String = chars[prefix_end..suffix_start].iter().collect();
+
+        // Check for exponential notation (e.g., "00.000e0")
+        let exponent_pos = active.find('e').or_else(|| active.find('E'));
+        let (mantissa_part, exponent_part): (String, String) = if let Some(pos) = exponent_pos {
+            (
+                active[..pos].to_string(),
+                active[pos + 1..].to_string()
+            )
+        } else {
+            (active.clone(), String::new())
+        };
+
+        // Split mantissa into integer and fractional parts using character positions
+        let mantissa_chars: Vec<char> = mantissa_part.chars().collect();
+        let decimal_pos = mantissa_chars.iter().position(|&c| c == decimal_sep);
+        let (integer_part, fractional_part): (String, String) = if let Some(pos) = decimal_pos {
+            (
+                mantissa_chars[..pos].iter().collect(),
+                mantissa_chars[pos + 1..].iter().collect()
+            )
+        } else {
+            (mantissa_part.clone(), String::new())
+        };
+
+        // Validate: only one decimal separator
+        if active.matches(decimal_sep).count() > 1 {
+            return Err(FunctionError::ArgumentError(
+                "D3081: Multiple decimal separators in picture".to_string()
+            ));
+        }
+
+        // Validate: no grouping separator adjacent to decimal
+        if let Some(pos) = decimal_pos {
+            if pos > 0 && active.chars().nth(pos - 1) == Some(grouping_sep) {
+                return Err(FunctionError::ArgumentError(
+                    "D3087: Grouping separator adjacent to decimal separator".to_string()
+                ));
+            }
+            if pos + 1 < active.len() && active.chars().nth(pos + 1) == Some(grouping_sep) {
+                return Err(FunctionError::ArgumentError(
+                    "D3087: Grouping separator adjacent to decimal separator".to_string()
+                ));
+            }
+        }
+
+        // Validate: no consecutive grouping separators
+        let grouping_str = format!("{}{}", grouping_sep, grouping_sep);
+        if picture.contains(&grouping_str) {
+            return Err(FunctionError::ArgumentError(
+                "D3089: Consecutive grouping separators in picture".to_string()
+            ));
+        }
+
+        // Detect percent and per-mille symbols
+        let has_percent = picture.contains(percent_symbol);
+        let has_per_mille = picture.contains(per_mille_symbol);
+
+        // Validate: multiple percent signs
+        if picture.matches(percent_symbol).count() > 1 {
+            return Err(FunctionError::ArgumentError(
+                "D3082: Multiple percent signs in picture".to_string()
+            ));
+        }
+
+        // Validate: multiple per-mille signs
+        if picture.matches(per_mille_symbol).count() > 1 {
+            return Err(FunctionError::ArgumentError(
+                "D3083: Multiple per-mille signs in picture".to_string()
+            ));
+        }
+
+        // Validate: cannot have both percent and per-mille
+        if has_percent && has_per_mille {
+            return Err(FunctionError::ArgumentError(
+                "D3084: Cannot have both percent and per-mille in picture".to_string()
+            ));
+        }
+
+        // Validate: integer part cannot end with grouping separator
+        if !integer_part.is_empty() && integer_part.ends_with(grouping_sep) {
+            return Err(FunctionError::ArgumentError(
+                "D3088: Integer part ends with grouping separator".to_string()
+            ));
+        }
+
+        // Validate: at least one digit in mantissa (integer or fractional part)
+        let has_digit_in_integer = integer_part.chars().any(|c| is_digit_in_family(c, zero_digit) || c == digit_char);
+        let has_digit_in_fractional = fractional_part.chars().any(|c| is_digit_in_family(c, zero_digit) || c == digit_char);
+        if !has_digit_in_integer && !has_digit_in_fractional {
+            return Err(FunctionError::ArgumentError(
+                "D3085: Picture must contain at least one digit".to_string()
+            ));
+        }
+
+        // Count minimum integer digits (mandatory digits in digit family)
+        let min_integer_digits = integer_part.chars()
+            .filter(|&c| is_digit_in_family(c, zero_digit))
+            .count();
+
+        // Count minimum and maximum fractional digits
+        let min_fractional_digits = fractional_part.chars()
+            .filter(|&c| is_digit_in_family(c, zero_digit))
+            .count();
+        let mut max_fractional_digits = fractional_part.chars()
+            .filter(|&c| is_digit_in_family(c, zero_digit) || c == digit_char)
+            .count();
+
+        // If there's a decimal point but no fractional digits specified, default to 1
+        // This handles cases like "#.e0" where some fractional precision is expected
+        if decimal_pos.is_some() && max_fractional_digits == 0 {
+            max_fractional_digits = 1;
+        }
+
+        // Find grouping positions in integer part
+        let mut grouping_positions = Vec::new();
+        let int_chars: Vec<char> = integer_part.chars().collect();
+        for (i, &c) in int_chars.iter().enumerate() {
+            if c == grouping_sep {
+                // Count digits to the right of this separator
+                let digits_to_right = int_chars[i + 1..]
+                    .iter()
+                    .filter(|&&ch| is_digit_in_family(ch, zero_digit) || ch == digit_char)
+                    .count();
+                grouping_positions.push(digits_to_right);
+            }
+        }
+
+        // Check if grouping is regular (same interval)
+        let regular_grouping = if grouping_positions.is_empty() {
+            0
+        } else if grouping_positions.len() == 1 {
+            grouping_positions[0]
+        } else {
+            // Check if all intervals are the same
+            let first_interval = grouping_positions[0];
+            if grouping_positions.iter().all(|&p| {
+                grouping_positions.iter().filter(|&&x| x == p).count() == grouping_positions.len() / first_interval
+                || (p % first_interval == 0 && grouping_positions.contains(&first_interval))
+            }) {
+                first_interval
+            } else {
+                0 // Irregular grouping
+            }
+        };
+
+        // Find grouping positions in fractional part
+        let mut fractional_grouping_positions = Vec::new();
+        let frac_chars: Vec<char> = fractional_part.chars().collect();
+        for (i, &c) in frac_chars.iter().enumerate() {
+            if c == grouping_sep {
+                // For fractional part, count digits to the left of this separator
+                let digits_to_left = frac_chars[..i]
+                    .iter()
+                    .filter(|&&ch| is_digit_in_family(ch, zero_digit) || ch == digit_char)
+                    .count();
+                fractional_grouping_positions.push(digits_to_left);
+            }
+        }
+
+        // Process exponent part if present (recognize both ASCII and custom digit families)
+        let min_exponent_digits = if !exponent_part.is_empty() {
+            exponent_part.chars()
+                .filter(|&c| is_digit_in_family(c, zero_digit))
+                .count()
+        } else {
+            0
+        };
+
+        // Validate: exponent part must contain only digit characters (ASCII or custom digit family)
+        if !exponent_part.is_empty() && exponent_part.chars().any(|c| !is_digit_in_family(c, zero_digit)) {
+            return Err(FunctionError::ArgumentError(
+                "D3093: Exponent must contain only digit characters".to_string()
+            ));
+        }
+
+        // Validate: exponent cannot be empty if 'e' is present
+        if exponent_pos.is_some() && min_exponent_digits == 0 {
+            return Err(FunctionError::ArgumentError(
+                "D3093: Exponent cannot be empty".to_string()
+            ));
+        }
+
+        // Validate: percent/per-mille not allowed with exponential notation
+        if min_exponent_digits > 0 && (has_percent || has_per_mille) {
+            return Err(FunctionError::ArgumentError(
+                "D3092: Percent/per-mille not allowed with exponential notation".to_string()
+            ));
+        }
+
+        // Validate: # cannot appear after 0 in integer part
+        // In integer part, # must come before 0 (e.g., "##00" valid, "00##" invalid)
+        let mut seen_zero_in_integer = false;
+        for c in integer_part.chars() {
+            if is_digit_in_family(c, zero_digit) {
+                seen_zero_in_integer = true;
+            } else if c == digit_char && seen_zero_in_integer {
+                return Err(FunctionError::ArgumentError(
+                    "D3090: Optional digit (#) cannot appear after mandatory digit (0) in integer part".to_string()
+                ));
+            }
+        }
+
+        // Validate: # cannot appear before 0 in fractional part
+        // In fractional part, 0 must come before # (e.g., "00##" valid, "##00" invalid)
+        let mut seen_hash_in_fractional = false;
+        for c in fractional_part.chars() {
+            if c == digit_char {
+                seen_hash_in_fractional = true;
+            } else if is_digit_in_family(c, zero_digit) && seen_hash_in_fractional {
+                return Err(FunctionError::ArgumentError(
+                    "D3091: Mandatory digit (0) cannot appear after optional digit (#) in fractional part".to_string()
+                ));
+            }
+        }
+
+        // Validate: invalid characters in picture
+        // All characters in the active part must be valid (digits, decimal, grouping, or 'e'/'E')
+        let valid_chars: Vec<char> = vec![decimal_sep, grouping_sep, zero_digit, digit_char, 'e', 'E'];
+        for c in mantissa_part.chars() {
+            if !is_digit_in_family(c, zero_digit) && !valid_chars.contains(&c) {
+                return Err(FunctionError::ArgumentError(
+                    format!("D3086: Invalid character in picture: '{}'", c)
+                ));
+            }
+        }
+
+        // Scaling factor = minimum integer digits in mantissa
+        let scaling_factor = min_integer_digits;
+
+        Ok(PictureParts {
+            prefix,
+            suffix,
+            min_integer_digits,
+            min_fractional_digits,
+            max_fractional_digits,
+            grouping_positions,
+            fractional_grouping_positions,
+            regular_grouping,
+            has_decimal: decimal_pos.is_some(),
+            has_integer_part: !integer_part.is_empty(),
+            has_percent,
+            has_per_mille,
+            min_exponent_digits,
+            scaling_factor,
+        })
+    }
+
+    /// Apply the picture pattern to format a number
+    fn apply_number_picture(
+        value: f64,
+        parts: &PictureParts,
+        decimal_sep: char,
+        grouping_sep: char,
+        zero_digit: char,
+    ) -> Result<String, FunctionError> {
+        // Handle exponential notation
+        let (mantissa, exponent) = if parts.min_exponent_digits > 0 {
+            // Calculate mantissa and exponent: mantissa * 10^exponent = value
+            let max_mantissa = 10_f64.powi(parts.scaling_factor as i32);
+            let min_mantissa = 10_f64.powi(parts.scaling_factor as i32 - 1);
+
+            let mut m = value;
+            let mut e = 0_i32;
+
+            // Scale mantissa to be within [min_mantissa, max_mantissa)
+            while m < min_mantissa && m != 0.0 {
+                m *= 10.0;
+                e -= 1;
+            }
+            while m >= max_mantissa {
+                m /= 10.0;
+                e += 1;
+            }
+
+            (m, Some(e))
+        } else {
+            (value, None)
+        };
+
+        // Round mantissa to max fractional digits
+        let factor = 10_f64.powi(parts.max_fractional_digits as i32);
+        let rounded = (mantissa * factor).round() / factor;
+
+        // Convert to string with fixed decimal places
+        let mut num_str = format!("{:.prec$}", rounded, prec = parts.max_fractional_digits);
+
+        // Replace '.' with decimal separator
+        if decimal_sep != '.' {
+            num_str = num_str.replace('.', &decimal_sep.to_string());
+        }
+
+        // Split into integer and fractional parts
+        let decimal_pos = num_str.find(decimal_sep).unwrap_or(num_str.len());
+        let mut integer_str = num_str[..decimal_pos].to_string();
+        let mut fractional_str = if decimal_pos < num_str.len() {
+            num_str[decimal_pos + 1..].to_string()
+        } else {
+            String::new()
+        };
+
+        // Strip leading zeros from integer part
+        while integer_str.len() > 1 && integer_str.starts_with(zero_digit) {
+            integer_str.remove(0);
+        }
+        // If we stripped down to a single zero and picture has no integer part, remove it
+        if integer_str == zero_digit.to_string() && !parts.has_integer_part {
+            integer_str.clear();
+        }
+        // If integer part is empty and picture had integer part, add one zero
+        if integer_str.is_empty() && parts.has_integer_part {
+            integer_str.push(zero_digit);
+        }
+
+        // Strip trailing zeros from fractional part
+        while fractional_str.len() > 0 && fractional_str.ends_with(zero_digit) {
+            fractional_str.pop();
+        }
+
+        // Pad integer part to minimum size
+        while integer_str.len() < parts.min_integer_digits {
+            integer_str.insert(0, zero_digit);
+        }
+
+        // Pad fractional part to minimum size
+        while fractional_str.len() < parts.min_fractional_digits {
+            fractional_str.push(zero_digit);
+        }
+
+        // Trim trailing zeros beyond minimum (for optional # digits)
+        while fractional_str.len() > parts.min_fractional_digits {
+            if fractional_str.ends_with(zero_digit) {
+                fractional_str.pop();
+            } else {
+                break;
+            }
+        }
+
+        // Add grouping separators to integer part
+        if parts.regular_grouping > 0 {
+            // Regular grouping (e.g., every 3 digits for "#,###")
+            let mut grouped = String::new();
+            let chars: Vec<char> = integer_str.chars().collect();
+            for (i, &c) in chars.iter().enumerate() {
+                grouped.push(c);
+                let pos_from_right = chars.len() - i - 1;
+                if pos_from_right > 0 && pos_from_right % parts.regular_grouping == 0 {
+                    grouped.push(grouping_sep);
+                }
+            }
+            integer_str = grouped;
+        } else if !parts.grouping_positions.is_empty() {
+            // Irregular grouping (e.g., "9,99,999")
+            let mut grouped = String::new();
+            let chars: Vec<char> = integer_str.chars().collect();
+            for (i, &c) in chars.iter().enumerate() {
+                grouped.push(c);
+                let pos_from_right = chars.len() - i - 1;
+                if parts.grouping_positions.contains(&pos_from_right) {
+                    grouped.push(grouping_sep);
+                }
+            }
+            integer_str = grouped;
+        }
+
+        // Add grouping separators to fractional part
+        if !parts.fractional_grouping_positions.is_empty() {
+            let mut grouped = String::new();
+            let chars: Vec<char> = fractional_str.chars().collect();
+            for (i, &c) in chars.iter().enumerate() {
+                grouped.push(c);
+                // For fractional grouping, positions are counted from the left
+                let pos_from_left = i + 1;
+                if parts.fractional_grouping_positions.contains(&pos_from_left) {
+                    grouped.push(grouping_sep);
+                }
+            }
+            fractional_str = grouped;
+        }
+
+        // Combine integer and fractional parts
+        let mut result = if parts.has_decimal || !fractional_str.is_empty() {
+            format!("{}{}{}", integer_str, decimal_sep, fractional_str)
+        } else {
+            integer_str
+        };
+
+        // Convert digits to custom zero-digit base if needed (mantissa part)
+        if zero_digit != '0' {
+            let zero_code = zero_digit as u32;
+            result = result.chars().map(|c| {
+                if c >= '0' && c <= '9' {
+                    let digit_value = c as u32 - '0' as u32;
+                    char::from_u32(zero_code + digit_value).unwrap_or(c)
+                } else {
+                    c
+                }
+            }).collect();
+        }
+
+        // Append exponent if present
+        if let Some(exp) = exponent {
+            // Format exponent with minimum digits
+            let exp_str = format!("{:0width$}", exp.abs(), width = parts.min_exponent_digits);
+
+            // Convert exponent digits to custom zero-digit base if needed
+            let exp_formatted = if zero_digit != '0' {
+                let zero_code = zero_digit as u32;
+                exp_str.chars().map(|c| {
+                    if c >= '0' && c <= '9' {
+                        let digit_value = c as u32 - '0' as u32;
+                        char::from_u32(zero_code + digit_value).unwrap_or(c)
+                    } else {
+                        c
+                    }
+                }).collect()
+            } else {
+                exp_str
+            };
+
+            // Append 'e' and exponent (with sign if negative)
+            result.push('e');
+            if exp < 0 {
+                result.push('-');
+            }
+            result.push_str(&exp_formatted);
+        }
+
+        Ok(result)
+    }
+
+    /// Holds parsed picture pattern components
+    #[derive(Debug)]
+    struct PictureParts {
+        prefix: String,
+        suffix: String,
+        min_integer_digits: usize,
+        min_fractional_digits: usize,
+        max_fractional_digits: usize,
+        grouping_positions: Vec<usize>,
+        fractional_grouping_positions: Vec<usize>,
+        regular_grouping: usize,
+        has_decimal: bool,
+        has_integer_part: bool,
+        has_percent: bool,
+        has_per_mille: bool,
+        min_exponent_digits: usize,
+        scaling_factor: usize,
+    }
+
+    /// $formatBase(value, radix) - Convert number to string in specified base
+    /// radix defaults to 10, must be between 2 and 36
+    pub fn format_base(value: f64, radix: Option<i64>) -> Result<Value, FunctionError> {
+        // Round to integer
+        let int_value = value.round() as i64;
+
+        // Default radix is 10
+        let radix = radix.unwrap_or(10);
+
+        // Validate radix is between 2 and 36
+        if radix < 2 || radix > 36 {
+            return Err(FunctionError::ArgumentError(
+                format!("D3100: Radix must be between 2 and 36, got {}", radix)
+            ));
+        }
+
+        // Handle negative numbers
+        let is_negative = int_value < 0;
+        let abs_value = int_value.abs() as u64;
+
+        // Convert to string in specified base
+        let digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+        let mut result = String::new();
+        let mut val = abs_value;
+
+        if val == 0 {
+            result.push('0');
+        } else {
+            while val > 0 {
+                let digit = (val % radix as u64) as usize;
+                result.insert(0, digits.chars().nth(digit).unwrap());
+                val /= radix as u64;
+            }
+        }
+
+        // Add negative sign if needed
+        if is_negative {
+            result.insert(0, '-');
+        }
+
+        Ok(Value::String(result))
     }
 }
 
@@ -487,6 +1712,23 @@ pub mod array {
             _ => false,
         }
     }
+
+    /// $shuffle(array) - Randomly shuffle array elements
+    /// Uses Fisher-Yates (inside-out variant) algorithm
+    pub fn shuffle(arr: &[Value]) -> Result<Value, FunctionError> {
+        if arr.len() <= 1 {
+            return Ok(Value::Array(arr.to_vec()));
+        }
+
+        use rand::seq::SliceRandom;
+        use rand::thread_rng;
+
+        let mut result = arr.to_vec();
+        let mut rng = thread_rng();
+        result.shuffle(&mut rng);
+
+        Ok(Value::Array(result))
+    }
 }
 
 /// Built-in object functions
@@ -506,12 +1748,12 @@ pub mod object {
 
     /// $spread(object) - Spread object into array of key-value pairs
     pub fn spread(obj: &serde_json::Map<String, Value>) -> Result<Value, FunctionError> {
+        // Each key-value pair becomes a single-key object: {"key": value}
         let pairs: Vec<Value> = obj
             .iter()
             .map(|(k, v)| {
                 let mut pair = serde_json::Map::new();
-                pair.insert("key".to_string(), Value::String(k.clone()));
-                pair.insert("value".to_string(), v.clone());
+                pair.insert(k.clone(), v.clone());
                 Value::Object(pair)
             })
             .collect();
@@ -541,6 +1783,73 @@ pub mod object {
     }
 }
 
+/// Encoding/decoding functions
+pub mod encoding {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose};
+
+    /// $base64encode(string) - Encode string to base64
+    pub fn base64encode(s: &str) -> Result<Value, FunctionError> {
+        let encoded = general_purpose::STANDARD.encode(s.as_bytes());
+        Ok(Value::String(encoded))
+    }
+
+    /// $base64decode(string) - Decode base64 string
+    pub fn base64decode(s: &str) -> Result<Value, FunctionError> {
+        match general_purpose::STANDARD.decode(s.as_bytes()) {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(decoded) => Ok(Value::String(decoded)),
+                Err(_) => Err(FunctionError::RuntimeError(
+                    "Invalid UTF-8 in decoded base64".to_string()
+                )),
+            },
+            Err(_) => Err(FunctionError::RuntimeError(
+                "Invalid base64 string".to_string()
+            )),
+        }
+    }
+
+    /// $encodeUrlComponent(string) - Encode URL component
+    pub fn encode_url_component(s: &str) -> Result<Value, FunctionError> {
+        let encoded = percent_encoding::utf8_percent_encode(
+            s,
+            percent_encoding::NON_ALPHANUMERIC
+        ).to_string();
+        Ok(Value::String(encoded))
+    }
+
+    /// $decodeUrlComponent(string) - Decode URL component
+    pub fn decode_url_component(s: &str) -> Result<Value, FunctionError> {
+        match percent_encoding::percent_decode_str(s).decode_utf8() {
+            Ok(decoded) => Ok(Value::String(decoded.to_string())),
+            Err(_) => Err(FunctionError::RuntimeError(
+                "Invalid percent-encoded string".to_string()
+            )),
+        }
+    }
+
+    /// $encodeUrl(string) - Encode full URL
+    /// More permissive than encodeUrlComponent - allows URL structure characters
+    pub fn encode_url(s: &str) -> Result<Value, FunctionError> {
+        // Use CONTROLS to preserve URL structure (://?#[]@!$&'()*+,;=)
+        let encoded = percent_encoding::utf8_percent_encode(
+            s,
+            percent_encoding::CONTROLS
+        ).to_string();
+        Ok(Value::String(encoded))
+    }
+
+    /// $decodeUrl(string) - Decode full URL
+    pub fn decode_url(s: &str) -> Result<Value, FunctionError> {
+        match percent_encoding::percent_decode_str(s).decode_utf8() {
+            Ok(decoded) => Ok(Value::String(decoded.to_string())),
+            Err(_) => Err(FunctionError::RuntimeError(
+                "Invalid percent-encoded URL".to_string()
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,36 +1860,36 @@ mod tests {
     fn test_string_conversion() {
         // String to string
         assert_eq!(
-            string::string(&Value::String("hello".to_string())).unwrap(),
+            string::string(&Value::String("hello".to_string()), None).unwrap(),
             Value::String("hello".to_string())
         );
 
         // Number to string
         assert_eq!(
-            string::string(&serde_json::json!(42)).unwrap(),
+            string::string(&serde_json::json!(42), None).unwrap(),
             Value::String("42".to_string())
         );
 
         // Float to string
         assert_eq!(
-            string::string(&serde_json::json!(3.14)).unwrap(),
+            string::string(&serde_json::json!(3.14), None).unwrap(),
             Value::String("3.14".to_string())
         );
 
         // Boolean to string
         assert_eq!(
-            string::string(&Value::Bool(true)).unwrap(),
+            string::string(&Value::Bool(true), None).unwrap(),
             Value::String("true".to_string())
         );
 
         // Null to empty string
         assert_eq!(
-            string::string(&Value::Null).unwrap(),
+            string::string(&Value::Null, None).unwrap(),
             Value::String(String::new())
         );
 
         // Array should error
-        assert!(string::string(&serde_json::json!([1, 2, 3])).is_err());
+        assert!(string::string(&serde_json::json!([1, 2, 3]), None).is_err());
     }
 
     #[test]
@@ -687,28 +1996,28 @@ mod tests {
 
     #[test]
     fn test_contains() {
-        assert_eq!(string::contains("hello world", "world").unwrap(), Value::Bool(true));
-        assert_eq!(string::contains("hello world", "xyz").unwrap(), Value::Bool(false));
-        assert_eq!(string::contains("hello world", "").unwrap(), Value::Bool(true));
+        assert_eq!(string::contains("hello world", &Value::String("world".to_string())).unwrap(), Value::Bool(true));
+        assert_eq!(string::contains("hello world", &Value::String("xyz".to_string())).unwrap(), Value::Bool(false));
+        assert_eq!(string::contains("hello world", &Value::String("".to_string())).unwrap(), Value::Bool(true));
     }
 
     #[test]
     fn test_split() {
         // Split with separator
         assert_eq!(
-            string::split("a,b,c", ",", None).unwrap(),
+            string::split("a,b,c", &Value::String(",".to_string()), None).unwrap(),
             serde_json::json!(["a", "b", "c"])
         );
 
         // Split with limit
         assert_eq!(
-            string::split("a,b,c,d", ",", Some(2)).unwrap(),
+            string::split("a,b,c,d", &Value::String(",".to_string()), Some(2)).unwrap(),
             serde_json::json!(["a", "b,c,d"])
         );
 
         // Split with empty separator (split into chars)
         assert_eq!(
-            string::split("abc", "", None).unwrap(),
+            string::split("abc", &Value::String("".to_string()), None).unwrap(),
             serde_json::json!(["a", "b", "c"])
         );
     }
@@ -744,19 +2053,19 @@ mod tests {
     fn test_replace() {
         // Replace all occurrences
         assert_eq!(
-            string::replace("hello hello", "hello", "hi", None).unwrap(),
+            string::replace("hello hello", &Value::String("hello".to_string()), "hi", None).unwrap(),
             Value::String("hi hi".to_string())
         );
 
         // Replace with limit
         assert_eq!(
-            string::replace("hello hello hello", "hello", "hi", Some(2)).unwrap(),
+            string::replace("hello hello hello", &Value::String("hello".to_string()), "hi", Some(2)).unwrap(),
             Value::String("hi hi hello".to_string())
         );
 
         // Replace empty pattern (no change)
         assert_eq!(
-            string::replace("hello", "", "x", None).unwrap(),
+            string::replace("hello", &Value::String("".to_string()), "x", None).unwrap(),
             Value::String("hello".to_string())
         );
     }
