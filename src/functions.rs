@@ -103,7 +103,6 @@ pub mod string {
 
                 // Format numbers like JavaScript does
                 if let Some(i) = n.as_i64() {
-                    // Integer - just convert to string
                     i.to_string()
                 } else {
                     // Non-integer - use precision formatting
@@ -176,8 +175,8 @@ pub mod string {
                 // Format matches JavaScript: always include sign in exponent
                 let exp_str = format!("{:e}", parsed);
                 // Ensure exponent has + sign: "1e100" -> "1e+100"
-                if exp_str.contains("e") && !exp_str.contains("e-") && !exp_str.contains("e+") {
-                    exp_str.replace("e", "e+")
+                if exp_str.contains('e') && !exp_str.contains("e-") && !exp_str.contains("e+") {
+                    exp_str.replace('e', "e+")
                 } else {
                     exp_str
                 }
@@ -594,9 +593,7 @@ pub mod string {
             }
 
             output.push_str(&s[last_match..]);
-            let result = output;
-
-            return Ok(Value::String(result));
+            return Ok(Value::String(output));
         }
 
         // Handle string pattern
@@ -694,13 +691,11 @@ pub mod boolean {
 pub mod numeric {
     use super::*;
 
-    /// $number() - Cast value to number
     /// $number(value) - Convert value to number
     /// Supports decimal, hex (0x), octal (0o), and binary (0b) formats
     pub fn number(value: &Value) -> Result<Value, FunctionError> {
         match value {
             Value::Number(n) => {
-                // Already a number - validate it's finite
                 let f = n.as_f64().unwrap_or(0.0);
                 if !f.is_finite() {
                     return Err(FunctionError::RuntimeError(
@@ -872,7 +867,6 @@ pub mod numeric {
         Ok(serde_json::json!(n.ceil()))
     }
 
-    /// $round(number, precision) - Round to specified decimal places
     /// $round(number, precision) - Round to precision using "round half to even" (banker's rounding)
     ///
     /// This implements the same rounding behavior as JSONata's JavaScript implementation,
@@ -1045,7 +1039,7 @@ pub mod numeric {
 
     /// Helper to check if a character is in the digit family (0-9 or custom zero-digit family)
     fn is_digit_in_family(c: char, zero_digit: char) -> bool {
-        if c >= '0' && c <= '9' {
+        if c.is_ascii_digit() {
             return true;
         }
         // Check if c is in custom digit family (zero_digit to zero_digit+9)
@@ -1400,7 +1394,7 @@ pub mod numeric {
         }
 
         // Strip trailing zeros from fractional part
-        while fractional_str.len() > 0 && fractional_str.ends_with(zero_digit) {
+        while !fractional_str.is_empty() && fractional_str.ends_with(zero_digit) {
             fractional_str.pop();
         }
 
@@ -1476,7 +1470,7 @@ pub mod numeric {
         if zero_digit != '0' {
             let zero_code = zero_digit as u32;
             result = result.chars().map(|c| {
-                if c >= '0' && c <= '9' {
+                if c.is_ascii_digit() {
                     let digit_value = c as u32 - '0' as u32;
                     char::from_u32(zero_code + digit_value).unwrap_or(c)
                 } else {
@@ -1494,7 +1488,7 @@ pub mod numeric {
             let exp_formatted = if zero_digit != '0' {
                 let zero_code = zero_digit as u32;
                 exp_str.chars().map(|c| {
-                    if c >= '0' && c <= '9' {
+                    if c.is_ascii_digit() {
                         let digit_value = c as u32 - '0' as u32;
                         char::from_u32(zero_code + digit_value).unwrap_or(c)
                     } else {

@@ -68,6 +68,12 @@ impl From<crate::functions::FunctionError> for EvaluatorError {
     }
 }
 
+impl From<crate::datetime::DateTimeError> for EvaluatorError {
+    fn from(e: crate::datetime::DateTimeError) -> Self {
+        EvaluatorError::EvaluationError(e.to_string())
+    }
+}
+
 /// Result of evaluating a lambda body that may be a tail call
 /// Used for trampoline-based tail call optimization
 enum LambdaResult {
@@ -254,12 +260,9 @@ impl Evaluator {
     /// Internal evaluation implementation (separated to allow depth tracking)
     fn evaluate_internal_impl(&mut self, node: &AstNode, data: &Value) -> Result<Value, EvaluatorError> {
         match node {
-            // === Literals ===
             AstNode::String(s) => Ok(Value::String(s.clone())),
 
-            // === Field/Property Name ===
             // Name nodes represent field access on the current data
-            // (Should normally be wrapped in a Path, but handle direct evaluation too)
             AstNode::Name(field_name) => {
                 match data {
                     Value::Object(obj) => Ok(obj.get(field_name).cloned().unwrap_or(Value::Null)),
@@ -314,7 +317,6 @@ impl Evaluator {
                 }))
             }
 
-            // === Variables ===
             AstNode::Variable(name) => {
                 // Special case: $ alone (empty name) refers to current context
                 // First check if $ is bound in the context (for closures that captured $)
@@ -385,7 +387,6 @@ impl Evaluator {
                 Ok(Value::Null)
             }
 
-            // === Parent Variables ===
             AstNode::ParentVariable(name) => {
                 // Special case: $$ alone (empty name) refers to parent/root context
                 if name.is_empty() {
@@ -418,23 +419,18 @@ impl Evaluator {
                 }
             }
 
-            // === Path Expressions ===
             AstNode::Path { steps } => self.evaluate_path(steps, data),
 
-            // === Binary Operations ===
             AstNode::Binary { op, lhs, rhs } => {
                 self.evaluate_binary_op(*op, lhs, rhs, data)
             }
 
-            // === Unary Operations ===
             AstNode::Unary { op, operand } => {
                 self.evaluate_unary_op(*op, operand, data)
             }
 
-            // === Arrays ===
+            // Array constructor - JSONata semantics:
             AstNode::Array(elements) => {
-                // Array constructor: [expr1, expr2, ...]
-                // JSONata semantics:
                 // - If element is itself an array constructor [...], keep it nested
                 // - Otherwise, if element evaluates to an array, flatten it
                 // - Undefined values are excluded
@@ -465,7 +461,6 @@ impl Evaluator {
                 Ok(Value::Array(result))
             }
 
-            // === Objects ===
             AstNode::Object(pairs) => {
                 let mut result = serde_json::Map::new();
                 // Track which pair index produced each key (for D1009 checking)
@@ -511,8 +506,7 @@ impl Evaluator {
                 Ok(Value::Object(result))
             }
 
-            // === Object Transform ===
-            // Follows JavaScript semantics: group items by key first, then evaluate value once per group
+            // Object transform: group items by key, then evaluate value once per group
             AstNode::ObjectTransform { input, pattern } => {
                 // Evaluate the input expression
                 let input_value = self.evaluate_internal(input, data)?;
@@ -623,12 +617,11 @@ impl Evaluator {
                 Ok(Value::Object(result))
             }
 
-            // === Function Calls ===
             AstNode::Function { name, args, is_builtin } => {
                 self.evaluate_function_call(name, args, *is_builtin, data)
             }
 
-            // === Call: invoke an arbitrary expression as a function ===
+            // Call: invoke an arbitrary expression as a function
             // Used for IIFE patterns like (function($x){...})(5) or chained calls
             AstNode::Call { procedure, args } => {
                 // Evaluate the procedure to get the callable value
@@ -636,7 +629,7 @@ impl Evaluator {
 
                 // Check if it's a lambda (object with __lambda__ key)
                 if let Some(stored_lambda) = self.lookup_lambda_from_value(&callable) {
-                    let mut evaluated_args = Vec::new();
+                    let mut evaluated_args = Vec::with_capacity(args.len());
                     for arg in args.iter() {
                         evaluated_args.push(self.evaluate_internal(arg, data)?);
                     }
@@ -650,7 +643,6 @@ impl Evaluator {
                 )))
             }
 
-            // === Conditional Expressions ===
             AstNode::Conditional {
                 condition,
                 then_branch,
@@ -668,7 +660,6 @@ impl Evaluator {
                 }
             }
 
-            // === Block Expressions ===
             AstNode::Block(expressions) => {
                 // Blocks create a new scope - save current bindings
                 let saved_bindings = self.context.bindings.clone();
@@ -698,13 +689,8 @@ impl Evaluator {
                 Ok(result)
             }
 
-            // === Lambda Functions ===
+            // Lambda: capture current environment for closure support
             AstNode::Lambda { params, body, signature, thunk } => {
-                // Lambda functions are first-class values (closures)
-                // They capture the current environment for later invocation
-                //
-                // Store the lambda with captured environment for closure support
-                // Generate a unique name for anonymous lambdas
                 let lambda_id = format!("__lambda_{}_{:p}", params.len(), body.as_ref());
 
                 let stored_lambda = StoredLambda {
@@ -732,9 +718,8 @@ impl Evaluator {
                 Ok(lambda_obj)
             }
 
-            // === Wildcard ===
+            // Wildcard: collect all values from current object
             AstNode::Wildcard => {
-                // Wildcard in path expressions - collect all values from current object
                 match data {
                     Value::Object(obj) => {
                         let mut result = Vec::new();
@@ -755,9 +740,8 @@ impl Evaluator {
                 }
             }
 
-            // === Descendant ===
+            // Descendant: recursively traverse all nested values
             AstNode::Descendant => {
-                // Descendant operator - recursively traverse all nested values
                 let descendants = self.collect_descendants(data);
                 if descendants.is_empty() {
                     Ok(Value::Null) // No descendants means undefined
@@ -766,16 +750,14 @@ impl Evaluator {
                 }
             }
 
-            // === Predicate ===
             AstNode::Predicate(_) => {
                 Err(EvaluatorError::EvaluationError(
                     "Predicate can only be used in path expressions".to_string()
                 ))
             }
 
-            // === Array Grouping ===
+            // Array grouping: same as Array but prevents flattening in path contexts
             AstNode::ArrayGroup(elements) => {
-                // Same as Array but used in path contexts to prevent flattening
                 let mut result = Vec::new();
                 for element in elements {
                     let value = self.evaluate_internal(element, data)?;
@@ -784,25 +766,19 @@ impl Evaluator {
                 Ok(Value::Array(result))
             }
 
-            // === Function Application ===
             AstNode::FunctionApplication(_) => {
                 Err(EvaluatorError::EvaluationError(
                     "Function application can only be used in path expressions".to_string()
                 ))
             }
 
-            // === Sort ===
             AstNode::Sort { input, terms } => {
-                // Sort operator - evaluate input then sort by terms
                 let value = self.evaluate_internal(input, data)?;
                 self.evaluate_sort(&value, terms)
             }
 
-            // === Index Binding ===
+            // Index binding: evaluates input and creates tuple stream with index variable
             AstNode::IndexBind { input, variable } => {
-                // Index binding operator #$var
-                // For now, evaluates input and stores index information for later use
-                // The full tuple stream semantics requires deeper integration with path evaluation
                 let value = self.evaluate_internal(input, data)?;
 
                 // Store the variable name and create indexed results
@@ -832,10 +808,8 @@ impl Evaluator {
                 }
             }
 
-            // === Transform ===
+            // Transform: |location|update[,delete]|
             AstNode::Transform { location, update, delete } => {
-                // Transform operator: |location|update[,delete]|
-                // Creates a function that transforms objects
 
                 // Check if $ is bound (meaning we're being invoked as a lambda)
                 if self.context.lookup("$").is_some() {
@@ -2308,12 +2282,8 @@ impl Evaluator {
                 self.context.bind_lambda(var_name.clone(), stored);
             }
 
-            // Bind the variable in the current scope
-            // Even if the value is undefined (null), we create the binding
-            // This allows inner scopes to shadow outer variables
+            // Bind even if undefined (null) so inner scopes can shadow outer variables
             self.context.bind(var_name, value.clone());
-
-            // Return the value
             return Ok(value);
         }
 
@@ -2368,14 +2338,12 @@ impl Evaluator {
         let right = self.evaluate_internal(rhs, data)?;
 
         match op {
-            // === Arithmetic Operations ===
             BinaryOp::Add => self.add(&left, &right, left_is_explicit_null, right_is_explicit_null),
             BinaryOp::Subtract => self.subtract(&left, &right, left_is_explicit_null, right_is_explicit_null),
             BinaryOp::Multiply => self.multiply(&left, &right, left_is_explicit_null, right_is_explicit_null),
             BinaryOp::Divide => self.divide(&left, &right, left_is_explicit_null, right_is_explicit_null),
             BinaryOp::Modulo => self.modulo(&left, &right, left_is_explicit_null, right_is_explicit_null),
 
-            // === Comparison Operations ===
             BinaryOp::Equal => Ok(Value::Bool(self.equals(&left, &right))),
             BinaryOp::NotEqual => Ok(Value::Bool(!self.equals(&left, &right))),
             BinaryOp::LessThan => self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null),
@@ -2383,48 +2351,16 @@ impl Evaluator {
             BinaryOp::GreaterThan => self.greater_than(&left, &right, left_is_explicit_null, right_is_explicit_null),
             BinaryOp::GreaterThanOrEqual => self.greater_than_or_equal(&left, &right, left_is_explicit_null, right_is_explicit_null),
 
-            // === Logical Operations ===
-            // Note: And/Or are handled above with short-circuit evaluation
-            BinaryOp::And | BinaryOp::Or => {
-                unreachable!("And/Or should be handled earlier with short-circuit evaluation")
-            }
+            // And/Or handled above with short-circuit evaluation
+            BinaryOp::And | BinaryOp::Or => unreachable!(),
 
-            // === String Concatenation ===
             BinaryOp::Concatenate => self.concatenate(&left, &right),
-
-            // === Range Operator ===
             BinaryOp::Range => self.range(&left, &right),
+            BinaryOp::In => self.in_operator(&left, &right),
 
-            // === In Operator ===
-            // Note: Array indexing and filtering are handled earlier in evaluate_binary_op
-            BinaryOp::In => {
-                // This handles the standard 'in' operator for membership testing
-                // e.g., "foo" in ["foo", "bar"]
-                self.in_operator(&left, &right)
-            }
-
-            // === Variable Binding ===
-            // Note: ColonEqual is handled earlier in evaluate_binary_op as a special case
-            BinaryOp::ColonEqual => {
-                unreachable!("ColonEqual should be handled earlier in evaluate_binary_op")
-            }
-
-            // === Coalescing Operator ===
-            // Note: Coalesce is handled earlier in evaluate_binary_op as a special case
-            BinaryOp::Coalesce => {
-                unreachable!("Coalesce should be handled earlier in evaluate_binary_op")
-            }
-
-            // === Default Operator ===
-            // Note: Default is handled earlier in evaluate_binary_op as a special case
-            BinaryOp::Default => {
-                unreachable!("Default should be handled earlier in evaluate_binary_op")
-            }
-
-            // === Chain/Pipe Operator ===
-            // Note: ChainPipe is handled earlier in evaluate_binary_op as a special case
-            BinaryOp::ChainPipe => {
-                unreachable!("ChainPipe should be handled earlier in evaluate_binary_op")
+            // These operators are all handled as special cases earlier in evaluate_binary_op
+            BinaryOp::ColonEqual | BinaryOp::Coalesce | BinaryOp::Default | BinaryOp::ChainPipe => {
+                unreachable!()
             }
         }
     }
@@ -2477,7 +2413,7 @@ impl Evaluator {
         //    (e.g., λ($f){$f(5)}($sum) where $f is bound to $sum reference)
         if let Some(value) = self.context.lookup(name).cloned() {
             if let Some(stored_lambda) = self.lookup_lambda_from_value(&value) {
-                let mut evaluated_args = Vec::new();
+                let mut evaluated_args = Vec::with_capacity(args.len());
                 for arg in args {
                     evaluated_args.push(self.evaluate_internal(arg, data)?);
                 }
@@ -2487,7 +2423,7 @@ impl Evaluator {
                 if map.contains_key("__builtin__") {
                     // This is a built-in function reference (e.g., $f bound to $sum)
                     if let Some(Value::String(builtin_name)) = map.get("_name") {
-                        let mut evaluated_args = Vec::new();
+                        let mut evaluated_args = Vec::with_capacity(args.len());
                         for arg in args {
                             evaluated_args.push(self.evaluate_internal(arg, data)?);
                         }
@@ -2500,7 +2436,7 @@ impl Evaluator {
         // THEN check if this is a stored lambda (user-defined function by name)
         // This only applies if not shadowed by a binding above
         if let Some(stored_lambda) = self.context.lookup_lambda(name).cloned() {
-            let mut evaluated_args = Vec::new();
+            let mut evaluated_args = Vec::with_capacity(args.len());
             for arg in args {
                 evaluated_args.push(self.evaluate_internal(arg, data)?);
             }
@@ -2595,10 +2531,10 @@ impl Evaluator {
                             AstNode::String(s) => Some(s.as_str()),
                             _ => None,
                         };
-                        if let Some(_field_name) = field_name {
+                        if let Some(field) = field_name {
                             match data {
                                 Value::Object(obj) => {
-                                    if !obj.contains_key(_field_name) {
+                                    if !obj.contains_key(field) {
                                         // Field doesn't exist - return undefined
                                         if propagates_undefined(name) {
                                             return Ok(Value::Null);
@@ -2661,8 +2597,7 @@ impl Evaluator {
             }
         }
 
-        // Evaluate all arguments
-        let mut evaluated_args = Vec::new();
+        let mut evaluated_args = Vec::with_capacity(args.len());
         for arg in args {
             evaluated_args.push(self.evaluate_internal(arg, data)?);
         }
@@ -2695,9 +2630,7 @@ impl Evaluator {
             }
         }
 
-        // Call built-in functions
         match name {
-            // String functions
             "string" => {
                 if evaluated_args.len() > 2 {
                     return Err(EvaluatorError::EvaluationError(
@@ -2716,8 +2649,7 @@ impl Evaluator {
                     None
                 };
 
-                functions::string::string(&evaluated_args[0], prettify)
-                    .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                Ok(functions::string::string(&evaluated_args[0], prettify)?)
             }
             "length" => {
                 if evaluated_args.len() != 1 {
@@ -2726,8 +2658,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::string::length(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::string::length(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "T0410: Argument 1 of function length does not match function signature".to_string(),
                     )),
@@ -2740,8 +2671,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::string::uppercase(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::string::uppercase(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "T0410: Argument 1 of function uppercase does not match function signature".to_string(),
                     )),
@@ -2754,14 +2684,12 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::string::lowercase(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::string::lowercase(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "T0410: Argument 1 of function lowercase does not match function signature".to_string(),
                     )),
                 }
             }
-            // Numeric functions
             "number" => {
                 if evaluated_args.is_empty() {
                     return Err(EvaluatorError::EvaluationError(
@@ -2773,8 +2701,7 @@ impl Evaluator {
                         "T0410: Argument 2 of function number does not match function signature".to_string(),
                     ));
                 }
-                functions::numeric::number(&evaluated_args[0])
-                    .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                Ok(functions::numeric::number(&evaluated_args[0])?)
             }
             "sum" => {
                 if evaluated_args.len() != 1 {
@@ -2791,15 +2718,12 @@ impl Evaluator {
                     Value::Array(arr) => {
                         // Flatten nested arrays for sum
                         let flattened = flatten_for_aggregation(arr);
-                        functions::numeric::sum(&flattened)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::numeric::sum(&flattened)?)
                     }
                     // Non-array values are treated as single-element arrays
-                    other => functions::numeric::sum(&[other.clone()])
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    other => Ok(functions::numeric::sum(&[other.clone()])?),
                 }
             }
-            // Array functions
             "count" => {
                 if evaluated_args.len() != 1 {
                     return Err(EvaluatorError::EvaluationError(
@@ -2812,12 +2736,10 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(serde_json::json!(0)), // null counts as 0
-                    Value::Array(arr) => functions::array::count(arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Array(arr) => Ok(functions::array::count(arr)?),
                     _ => Ok(serde_json::json!(1)), // Non-array value counts as 1
                 }
             }
-            // Additional string functions
             "substring" => {
                 if evaluated_args.len() < 2 || evaluated_args.len() > 3 {
                     return Err(EvaluatorError::EvaluationError(
@@ -2836,8 +2758,7 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        functions::string::substring(s, start.as_f64().unwrap() as i64, length)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::string::substring(s, start.as_f64().unwrap() as i64, length)?)
                     }
                     (Value::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substring does not match function signature".to_string(),
@@ -2854,10 +2775,7 @@ impl Evaluator {
                     ));
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
-                    (Value::String(s), Value::String(sep)) => {
-                        functions::string::substring_before(s, sep)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
-                    }
+                    (Value::String(s), Value::String(sep)) => Ok(functions::string::substring_before(s, sep)?),
                     (Value::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substringBefore does not match function signature".to_string(),
                     )),
@@ -2873,10 +2791,7 @@ impl Evaluator {
                     ));
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
-                    (Value::String(s), Value::String(sep)) => {
-                        functions::string::substring_after(s, sep)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
-                    }
+                    (Value::String(s), Value::String(sep)) => Ok(functions::string::substring_after(s, sep)?),
                     (Value::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substringAfter does not match function signature".to_string(),
                     )),
@@ -2926,12 +2841,10 @@ impl Evaluator {
 
                 let padding_needed = abs_width - char_count;
 
-                // Build padding by repeating the pad_string
-                let mut padding = String::new();
-                let pad_string_len = pad_string.chars().count();
+                let pad_chars: Vec<char> = pad_string.chars().collect();
+                let mut padding = String::with_capacity(padding_needed);
                 for i in 0..padding_needed {
-                    let pad_index = i % pad_string_len;
-                    padding.push(pad_string.chars().nth(pad_index).unwrap());
+                    padding.push(pad_chars[i % pad_chars.len()]);
                 }
 
                 let result = if width < 0 {
@@ -2956,8 +2869,7 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::String(s) => functions::string::trim(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::string::trim(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "trim() requires a string argument".to_string(),
                     )),
@@ -2973,10 +2885,7 @@ impl Evaluator {
                     return Ok(Value::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => {
-                        functions::string::contains(s, &evaluated_args[1])
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
-                    }
+                    Value::String(s) => Ok(functions::string::contains(s, &evaluated_args[1])?),
                     _ => Err(EvaluatorError::TypeError(
                         "contains() requires a string as the first argument".to_string(),
                     )),
@@ -3013,8 +2922,7 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        functions::string::split(s, &evaluated_args[1], limit)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::string::split(s, &evaluated_args[1], limit)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "split() requires a string as the first argument".to_string(),
@@ -3087,8 +2995,7 @@ impl Evaluator {
                         } else {
                             None  // No separator provided -> use empty string
                         };
-                        functions::string::join(arr, separator)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::string::join(arr, separator)?)
                     }
                     Value::Null => Ok(Value::Null),
                     _ => unreachable!("Signature validation should ensure array type"),
@@ -3143,8 +3050,7 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        functions::string::replace(s, &evaluated_args[1], replacement, limit)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::string::replace(s, &evaluated_args[1], replacement, limit)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "replace() requires string arguments".to_string(),
@@ -3206,22 +3112,8 @@ impl Evaluator {
                             "match() second argument must be a regex pattern or matcher function".to_string()
                         ))?,
                     None => {
-                        // If no pattern, use regex that matches everything
                         (".*".to_string(), "".to_string())
                     }
-                };
-
-                // Get optional limit
-                let limit = if evaluated_args.len() == 3 {
-                    match &evaluated_args[2] {
-                        Value::Number(n) => Some(n.as_f64().unwrap() as usize),
-                        Value::Null => None,
-                        _ => return Err(EvaluatorError::TypeError(
-                            "match() limit must be a number".to_string(),
-                        )),
-                    }
-                } else {
-                    None
                 };
 
                 // Build regex
@@ -3283,7 +3175,6 @@ impl Evaluator {
                     Ok(Value::Array(results))
                 }
             }
-            // Additional numeric functions
             "max" => {
                 if evaluated_args.len() != 1 {
                     return Err(EvaluatorError::EvaluationError(
@@ -3298,8 +3189,7 @@ impl Evaluator {
                     Value::Null => Ok(Value::Null),
                     Value::Array(arr) => {
                         let flattened = flatten_for_aggregation(arr);
-                        functions::numeric::max(&flattened)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::numeric::max(&flattened)?)
                     }
                     Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
@@ -3321,8 +3211,7 @@ impl Evaluator {
                     Value::Null => Ok(Value::Null),
                     Value::Array(arr) => {
                         let flattened = flatten_for_aggregation(arr);
-                        functions::numeric::min(&flattened)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::numeric::min(&flattened)?)
                     }
                     Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
@@ -3343,10 +3232,8 @@ impl Evaluator {
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
                     Value::Array(arr) => {
-                        // Flatten nested arrays for average
                         let flattened = flatten_for_aggregation(arr);
-                        functions::numeric::average(&flattened)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::numeric::average(&flattened)?)
                     }
                     Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
@@ -3362,8 +3249,7 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::Number(n) => functions::numeric::abs(n.as_f64().unwrap())
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Number(n) => Ok(functions::numeric::abs(n.as_f64().unwrap())?),
                     _ => Err(EvaluatorError::TypeError(
                         "abs() requires a number argument".to_string(),
                     )),
@@ -3377,8 +3263,7 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::Number(n) => functions::numeric::floor(n.as_f64().unwrap())
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Number(n) => Ok(functions::numeric::floor(n.as_f64().unwrap())?),
                     _ => Err(EvaluatorError::TypeError(
                         "floor() requires a number argument".to_string(),
                     )),
@@ -3392,8 +3277,7 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::Number(n) => functions::numeric::ceil(n.as_f64().unwrap())
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Number(n) => Ok(functions::numeric::ceil(n.as_f64().unwrap())?),
                     _ => Err(EvaluatorError::TypeError(
                         "ceil() requires a number argument".to_string(),
                     )),
@@ -3418,8 +3302,7 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        functions::numeric::round(n.as_f64().unwrap(), precision)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::numeric::round(n.as_f64().unwrap(), precision)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "round() requires a number argument".to_string(),
@@ -3434,8 +3317,7 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::Number(n) => functions::numeric::sqrt(n.as_f64().unwrap())
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Number(n) => Ok(functions::numeric::sqrt(n.as_f64().unwrap())?),
                     _ => Err(EvaluatorError::TypeError(
                         "sqrt() requires a number argument".to_string(),
                     )),
@@ -3452,8 +3334,7 @@ impl Evaluator {
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
                     (Value::Number(base), Value::Number(exp)) => {
-                        functions::numeric::power(base.as_f64().unwrap(), exp.as_f64().unwrap())
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::numeric::power(base.as_f64().unwrap(), exp.as_f64().unwrap())?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "power() requires number arguments".to_string(),
@@ -3476,8 +3357,7 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        functions::numeric::format_number(num.as_f64().unwrap(), picture, options)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::numeric::format_number(num.as_f64().unwrap(), picture, options)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "formatNumber() requires a number and a string".to_string(),
@@ -3506,15 +3386,13 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        functions::numeric::format_base(num.as_f64().unwrap(), radix)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::numeric::format_base(num.as_f64().unwrap(), radix)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "formatBase() requires a number".to_string(),
                     )),
                 }
             }
-            // Additional array functions
             "append" => {
                 if evaluated_args.len() != 2 {
                     return Err(EvaluatorError::EvaluationError(
@@ -3541,8 +3419,7 @@ impl Evaluator {
                     other => vec![other.clone()], // Wrap non-array in array
                 };
 
-                functions::array::append(&arr, second)
-                    .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                Ok(functions::array::append(&arr, second)?)
             }
             "reverse" => {
                 if evaluated_args.len() != 1 {
@@ -3552,8 +3429,7 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null), // undefined returns undefined
-                    Value::Array(arr) => functions::array::reverse(arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Array(arr) => Ok(functions::array::reverse(arr)?),
                     _ => Err(EvaluatorError::TypeError(
                         "reverse() requires an array argument".to_string(),
                     )),
@@ -3569,8 +3445,7 @@ impl Evaluator {
                     return Ok(Value::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::Array(arr) => functions::array::shuffle(arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Array(arr) => Ok(functions::array::shuffle(arr)?),
                     _ => Err(EvaluatorError::TypeError(
                         "shuffle() requires an array argument".to_string(),
                     )),
@@ -3654,7 +3529,7 @@ impl Evaluator {
 
                 // Convert arguments to arrays (wrapping non-arrays in single-element arrays)
                 // If any argument is null/undefined, return empty array
-                let mut arrays: Vec<Vec<Value>> = Vec::new();
+                let mut arrays: Vec<Vec<Value>> = Vec::with_capacity(evaluated_args.len());
                 for arg in &evaluated_args {
                     match arg {
                         Value::Array(arr) => {
@@ -3702,7 +3577,6 @@ impl Evaluator {
                     ));
                 }
 
-                // Evaluate the array argument
                 let array_value = self.evaluate_internal(&args[0], data)?;
 
                 // Handle undefined input
@@ -3710,14 +3584,12 @@ impl Evaluator {
                     return Ok(Value::Null);
                 }
 
-                // Convert non-array to single-element array
                 let mut arr = match array_value {
                     Value::Array(arr) => arr,
                     other => vec![other],
                 };
 
                 if args.len() == 2 {
-                    // Custom comparator function provided
                     // Sort using the comparator: function($a, $b) returns true if $a should come before $b
                     let comparator = &args[1];
 
@@ -3743,8 +3615,7 @@ impl Evaluator {
                     Ok(Value::Array(arr))
                 } else {
                     // Default sort (no comparator)
-                    functions::array::sort(&arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    Ok(functions::array::sort(&arr)?)
                 }
             }
             "distinct" => {
@@ -3754,8 +3625,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Array(arr) => functions::array::distinct(arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Array(arr) => Ok(functions::array::distinct(arr)?),
                     _ => Err(EvaluatorError::TypeError(
                         "distinct() requires an array argument".to_string(),
                     )),
@@ -3767,10 +3637,8 @@ impl Evaluator {
                         "exists() requires exactly 1 argument".to_string(),
                     ));
                 }
-                functions::array::exists(&evaluated_args[0])
-                    .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                Ok(functions::array::exists(&evaluated_args[0])?)
             }
-            // Object functions
             "keys" => {
                 if evaluated_args.len() != 1 {
                     return Err(EvaluatorError::EvaluationError(
@@ -3887,12 +3755,10 @@ impl Evaluator {
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
                     Value::Object(obj) => {
-                        // Check if this is a lambda/function - return undefined
                         if obj.get("__lambda__").is_some() {
                             return Ok(undefined_value());
                         }
-                        functions::object::spread(obj)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(functions::object::spread(obj)?)
                     }
                     Value::Array(arr) => {
                         // Spread each object in the array
@@ -3904,8 +3770,7 @@ impl Evaluator {
                                         // Skip lambdas in array
                                         continue;
                                     }
-                                    let spread_result = functions::object::spread(obj)
-                                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))?;
+                                    let spread_result = functions::object::spread(obj)?;
                                     if let Value::Array(spread_items) = spread_result {
                                         result.extend(spread_items);
                                     } else {
@@ -3932,11 +3797,7 @@ impl Evaluator {
                 // vs multiple object arguments: $merge(obj1, obj2)
                 if evaluated_args.len() == 1 {
                     match &evaluated_args[0] {
-                        Value::Array(arr) => {
-                            // Merge array of objects
-                            functions::object::merge(arr)
-                                .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
-                        }
+                        Value::Array(arr) => Ok(functions::object::merge(arr)?),
                         Value::Null => Ok(Value::Null), // $merge(undefined) returns undefined
                         Value::Object(_) => {
                             // Single object - just return it
@@ -3947,13 +3808,10 @@ impl Evaluator {
                         )),
                     }
                 } else {
-                    // Multiple arguments - merge them directly
-                    functions::object::merge(&evaluated_args)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    Ok(functions::object::merge(&evaluated_args)?)
                 }
             }
 
-            // Higher-order functions
             "map" => {
                 if args.len() != 2 {
                     return Err(EvaluatorError::EvaluationError(
@@ -4209,7 +4067,6 @@ impl Evaluator {
                 }
             }
 
-            // Boolean and type functions
             "not" => {
                 if evaluated_args.len() != 1 {
                     return Err(EvaluatorError::EvaluationError(
@@ -4226,10 +4083,7 @@ impl Evaluator {
                         "boolean() requires exactly 1 argument".to_string(),
                     ));
                 }
-                // Undefined variables are handled by the early check on line 1725
-                // Explicit null should convert to false, not undefined
-                functions::boolean::boolean(&evaluated_args[0])
-                    .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                Ok(functions::boolean::boolean(&evaluated_args[0])?)
             }
             "type" => {
                 if evaluated_args.len() != 1 {
@@ -4260,7 +4114,6 @@ impl Evaluator {
                 }
             }
 
-            // Encoding/Decoding functions
             "base64encode" => {
                 if evaluated_args.is_empty() || matches!(evaluated_args[0], Value::Null) {
                     return Ok(Value::Null);
@@ -4271,8 +4124,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::encoding::base64encode(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::encoding::base64encode(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "base64encode() requires a string argument".to_string(),
                     )),
@@ -4288,8 +4140,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::encoding::base64decode(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::encoding::base64decode(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "base64decode() requires a string argument".to_string(),
                     )),
@@ -4305,8 +4156,7 @@ impl Evaluator {
                     return Ok(Value::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::encoding::encode_url_component(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::encoding::encode_url_component(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "encodeUrlComponent() requires a string argument".to_string(),
                     )),
@@ -4322,8 +4172,7 @@ impl Evaluator {
                     return Ok(Value::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::encoding::decode_url_component(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::encoding::decode_url_component(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "decodeUrlComponent() requires a string argument".to_string(),
                     )),
@@ -4339,8 +4188,7 @@ impl Evaluator {
                     return Ok(Value::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::encoding::encode_url(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::encoding::encode_url(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "encodeUrl() requires a string argument".to_string(),
                     )),
@@ -4356,15 +4204,13 @@ impl Evaluator {
                     return Ok(Value::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => functions::encoding::decode_url(s)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::String(s) => Ok(functions::encoding::decode_url(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "decodeUrl() requires a string argument".to_string(),
                     )),
                 }
             }
 
-            // Control flow functions
             "error" => {
                 // $error(message) - throw error with custom message
                 if evaluated_args.is_empty() {
@@ -4476,7 +4322,6 @@ impl Evaluator {
                 }
             }
 
-            // DateTime functions
             "now" => {
                 if !evaluated_args.is_empty() {
                     return Err(EvaluatorError::EvaluationError(
@@ -4509,8 +4354,7 @@ impl Evaluator {
                             match &evaluated_args[1] {
                                 Value::String(picture) => {
                                     // Use custom picture format parsing
-                                    crate::datetime::to_millis_with_picture(s, picture)
-                                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                                    Ok(crate::datetime::to_millis_with_picture(s, picture)?)
                                 }
                                 Value::Null => Ok(Value::Null),
                                 _ => Err(EvaluatorError::TypeError(
@@ -4519,8 +4363,7 @@ impl Evaluator {
                             }
                         } else {
                             // Use ISO 8601 partial date parsing
-                            crate::datetime::to_millis(s)
-                                .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                            Ok(crate::datetime::to_millis(s)?)
                         }
                     }
                     Value::Null => Ok(Value::Null),
@@ -4542,8 +4385,7 @@ impl Evaluator {
                         let millis = n.as_i64().ok_or_else(|| {
                             EvaluatorError::TypeError("fromMillis() requires an integer".to_string())
                         })?;
-                        crate::datetime::from_millis(millis)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        Ok(crate::datetime::from_millis(millis)?)
                     }
                     Value::Null => Ok(Value::Null),
                     _ => Err(EvaluatorError::TypeError(
@@ -4558,8 +4400,6 @@ impl Evaluator {
             ))),
         }
     }
-
-    // === Helper methods for operations ===
 
     /// Apply a function (lambda or expression) to values
     ///
@@ -5161,12 +5001,10 @@ impl Evaluator {
                 // Check if this is a call to a stored lambda (user function)
                 if let Some(stored_lambda) = self.context.lookup_lambda(name).cloned() {
                     if stored_lambda.thunk {
-                        // Evaluate arguments
-                        let mut evaluated_args = Vec::new();
+                        let mut evaluated_args = Vec::with_capacity(args.len());
                         for arg in args {
                             evaluated_args.push(self.evaluate_internal(arg, data)?);
                         }
-                        // Return tail call instead of invoking
                         return Ok(LambdaResult::TailCall {
                             lambda: stored_lambda,
                             args: evaluated_args,
@@ -5190,8 +5028,7 @@ impl Evaluator {
                         if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
                             if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
                                 if stored_lambda.thunk {
-                                    // Evaluate arguments
-                                    let mut evaluated_args = Vec::new();
+                                    let mut evaluated_args = Vec::with_capacity(args.len());
                                     for arg in args {
                                         evaluated_args.push(self.evaluate_internal(arg, data)?);
                                     }
@@ -5339,8 +5176,7 @@ impl Evaluator {
             ))?;
 
         // Build regex
-        let re = crate::functions::string::build_regex(&pattern, &flags)
-            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))?;
+        let re = crate::functions::string::build_regex(&pattern, &flags)?;
 
         // Parse limit
         let limit = if let Some(lim_val) = limit_value {
@@ -5468,7 +5304,6 @@ impl Evaluator {
     fn call_builtin_with_values(&mut self, name: &str, values: &[Value]) -> Result<Value, EvaluatorError> {
         use crate::functions;
 
-        // Most built-in functions expect a single argument
         if values.is_empty() {
             return Err(EvaluatorError::EvaluationError(
                 format!("{}() requires at least 1 argument", name)

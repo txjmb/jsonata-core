@@ -141,7 +141,6 @@ impl JsonataExpression {
 /// ```
 #[pyfunction]
 fn compile(expression: &str) -> PyResult<JsonataExpression> {
-    // Parse the expression into an AST
     let ast = parser::parse(expression)
         .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
 
@@ -192,7 +191,6 @@ fn evaluate(py: Python, expression: &str, data: PyObject, bindings: Option<PyObj
 /// - list -> Array
 /// - dict -> Object
 fn python_to_json(py: Python, obj: &PyObject) -> PyResult<Value> {
-    // Check for None/null
     if obj.is_none(py) {
         return Ok(Value::Null);
     }
