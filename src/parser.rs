@@ -92,6 +92,7 @@ pub enum Token {
     Pipe,  // | transform operator
 
     // Special
+    Hash,  // # index binding operator
     Eof,
 }
 
@@ -112,20 +113,11 @@ impl Lexer {
     }
 
     fn current(&self) -> Option<char> {
-        if self.position < self.input.len() {
-            Some(self.input[self.position])
-        } else {
-            None
-        }
+        self.input.get(self.position).copied()
     }
 
     fn peek(&self, offset: usize) -> Option<char> {
-        let pos = self.position + offset;
-        if pos < self.input.len() {
-            Some(self.input[pos])
-        } else {
-            None
-        }
+        self.input.get(self.position + offset).copied()
     }
 
     fn advance(&mut self) {
@@ -135,12 +127,8 @@ impl Lexer {
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(ch) = self.current() {
-            if ch.is_whitespace() {
-                self.advance();
-            } else {
-                break;
-            }
+        while self.current().is_some_and(|ch| ch.is_whitespace()) {
+            self.advance();
         }
     }
 
@@ -208,7 +196,52 @@ impl Lexer {
                                 }
                             }
                             let code = u32::from_str_radix(&hex, 16).unwrap();
-                            if let Some(ch) = char::from_u32(code) {
+                            if (0xD800..=0xDBFF).contains(&code) {
+                                // High surrogate - expect \uXXXX low surrogate to follow
+                                if self.current() == Some('\\') {
+                                    self.advance();
+                                    if self.current() == Some('u') {
+                                        self.advance();
+                                        let mut low_hex = String::new();
+                                        for _ in 0..4 {
+                                            match self.current() {
+                                                Some(h) if h.is_ascii_hexdigit() => {
+                                                    low_hex.push(h);
+                                                    self.advance();
+                                                }
+                                                _ => {
+                                                    return Err(ParserError::InvalidEscape(
+                                                        format!("\\u{}", low_hex),
+                                                    ))
+                                                }
+                                            }
+                                        }
+                                        let low = u32::from_str_radix(&low_hex, 16).unwrap();
+                                        if (0xDC00..=0xDFFF).contains(&low) {
+                                            let cp = 0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00);
+                                            if let Some(ch) = char::from_u32(cp) {
+                                                result.push(ch);
+                                            } else {
+                                                return Err(ParserError::InvalidEscape(
+                                                    format!("\\u{}\\u{}", hex, low_hex),
+                                                ));
+                                            }
+                                        } else {
+                                            return Err(ParserError::InvalidEscape(
+                                                format!("\\u{}\\u{}", hex, low_hex),
+                                            ));
+                                        }
+                                    } else {
+                                        return Err(ParserError::InvalidEscape(
+                                            format!("\\u{}", hex),
+                                        ));
+                                    }
+                                } else {
+                                    return Err(ParserError::InvalidEscape(
+                                        format!("\\u{}", hex),
+                                    ));
+                                }
+                            } else if let Some(ch) = char::from_u32(code) {
                                 result.push(ch);
                             } else {
                                 return Err(ParserError::InvalidEscape(format!("\\u{}", hex)));
@@ -235,8 +268,8 @@ impl Lexer {
         // Integer part (no minus sign - negation is handled as unary operator)
         if self.current() == Some('0') {
             self.advance();
-        } else if self.current().map_or(false, |c| c.is_ascii_digit()) {
-            while self.current().map_or(false, |c| c.is_ascii_digit()) {
+        } else if self.current().is_some_and(|c| c.is_ascii_digit()) {
+            while self.current().is_some_and(|c| c.is_ascii_digit()) {
                 self.advance();
             }
         } else {
@@ -247,12 +280,12 @@ impl Lexer {
         if self.current() == Some('.') && self.peek(1) != Some('.') {
             // Only consume '.' if next char is not '.', to avoid consuming '..' range operator
             self.advance();
-            if !self.current().map_or(false, |c| c.is_ascii_digit()) {
+            if !self.current().is_some_and(|c| c.is_ascii_digit()) {
                 return Err(ParserError::InvalidNumber(
                     "Expected digit after decimal point".to_string(),
                 ));
             }
-            while self.current().map_or(false, |c| c.is_ascii_digit()) {
+            while self.current().is_some_and(|c| c.is_ascii_digit()) {
                 self.advance();
             }
         }
@@ -263,20 +296,29 @@ impl Lexer {
             if matches!(self.current(), Some('+') | Some('-')) {
                 self.advance();
             }
-            if !self.current().map_or(false, |c| c.is_ascii_digit()) {
+            if !self.current().is_some_and(|c| c.is_ascii_digit()) {
                 return Err(ParserError::InvalidNumber(
                     "Expected digit in exponent".to_string(),
                 ));
             }
-            while self.current().map_or(false, |c| c.is_ascii_digit()) {
+            while self.current().is_some_and(|c| c.is_ascii_digit()) {
                 self.advance();
             }
         }
 
         let num_str: String = self.input[start..self.position].iter().collect();
-        num_str
+        let num: f64 = num_str
             .parse()
-            .map_err(|_| ParserError::InvalidNumber(num_str))
+            .map_err(|_| ParserError::InvalidNumber(num_str.clone()))?;
+
+        // Check for overflow to infinity
+        if num.is_infinite() {
+            return Err(ParserError::InvalidNumber(
+                format!("S0102: Number out of range: {}", num_str)
+            ));
+        }
+
+        Ok(num)
     }
 
     fn read_identifier(&mut self) -> String {
@@ -555,6 +597,10 @@ impl Lexer {
                     self.advance();
                     return Ok(Token::Caret);
                 }
+                Some('#') => {
+                    self.advance();
+                    return Ok(Token::Hash);
+                }
                 Some('=') => {
                     self.advance();
                     return Ok(Token::Equal);
@@ -654,6 +700,7 @@ impl Parser {
             Token::LeftParen => Some((80, 81)),
             Token::LeftBrace => Some((80, 81)), // Object constructor as postfix
             Token::Caret => Some((80, 81)), // Sort operator as postfix
+            Token::Hash => Some((80, 81)),  // Index binding operator as postfix
             Token::Question => Some((20, 21)),
             Token::QuestionQuestion => Some((15, 16)), // Coalescing operator
             Token::QuestionColon => Some((15, 16)), // Default operator
@@ -795,7 +842,7 @@ impl Parser {
                 // Check for empty parentheses () which means undefined
                 if self.current_token == Token::RightParen {
                     self.advance()?;
-                    return Ok(AstNode::Null);
+                    return Ok(AstNode::Undefined);
                 }
 
                 // Parse block expressions (separated by semicolons)
@@ -951,10 +998,14 @@ impl Parser {
 
                 self.expect(Token::RightBrace)?;
 
+                // Apply tail call optimization to the body
+                let (optimized_body, is_thunk) = Self::tail_call_optimize(body);
+
                 Ok(AstNode::Lambda {
                     params,
-                    body: Box::new(body),
+                    body: Box::new(optimized_body),
                     signature,
+                    thunk: is_thunk,
                 })
             }
             _ => Err(ParserError::UnexpectedToken(format!(
@@ -1063,8 +1114,32 @@ impl Parser {
                         // Flatten path expressions
                         let mut steps = match lhs {
                             AstNode::Path { steps } => steps,
+                            // Convert string literals to field names when used as first step in path
+                            // e.g., "foo".bar should behave like foo.bar
+                            AstNode::String(field_name) => vec![PathStep::new(AstNode::Name(field_name))],
                             _ => vec![PathStep::new(lhs)],
                         };
+
+                        // S0213: The literal value cannot be used as a step within a path expression
+                        // Numbers, booleans (true/false), and null cannot be path steps
+                        match &rhs {
+                            AstNode::Number(n) => {
+                                return Err(ParserError::InvalidSyntax(
+                                    format!("S0213: The literal value {} cannot be used as a step within a path expression", n),
+                                ));
+                            }
+                            AstNode::Boolean(b) => {
+                                return Err(ParserError::InvalidSyntax(
+                                    format!("S0213: The literal value {} cannot be used as a step within a path expression", b),
+                                ));
+                            }
+                            AstNode::Null => {
+                                return Err(ParserError::InvalidSyntax(
+                                    "S0213: The literal value null cannot be used as a step within a path expression".to_string(),
+                                ));
+                            }
+                            _ => {}
+                        }
 
                         match rhs {
                             AstNode::Path { steps: mut rhs_steps } => {
@@ -1104,6 +1179,14 @@ impl Parser {
                     }
                 }
                 Token::LeftBracket => {
+                    // S0209: A predicate cannot follow a grouping expression in a step
+                    // Check if lhs is an ObjectTransform (grouping expression)
+                    if matches!(lhs, AstNode::ObjectTransform { .. }) {
+                        return Err(ParserError::InvalidSyntax(
+                            "S0209: A predicate cannot follow a grouping expression in a step".to_string(),
+                        ));
+                    }
+
                     self.advance()?;
 
                     // Predicates in postfix position are always separate steps
@@ -1157,27 +1240,17 @@ impl Parser {
 
                     self.expect(Token::RightParen)?;
 
-                    // Check if lhs is a lambda - if so, this is a lambda invocation
+                    // Check if lhs is a lambda or callable expression
                     match lhs {
-                        AstNode::Lambda { params, body, signature } => {
-                            // Lambda invocation: (function(...){...})(args)
-                            // Create:  ($__lambda := function(...){...}; $__lambda(args))
-                            lhs = AstNode::Block(vec![
-                                AstNode::Binary {
-                                    op: crate::ast::BinaryOp::ColonEqual,
-                                    lhs: Box::new(AstNode::Variable("__lambda__".to_string())),
-                                    rhs: Box::new(AstNode::Lambda {
-                                        params: params.clone(),
-                                        body: body.clone(),
-                                        signature: signature.clone(),
-                                    }),
-                                },
-                                AstNode::Function {
-                                    name: "__lambda__".to_string(),
-                                    args: args.clone(),
-                                    is_builtin: true, // Lambda invocation
-                                },
-                            ]);
+                        // Direct invocations: lambda(args), block(args), chained calls, function result calls
+                        AstNode::Lambda { .. }
+                        | AstNode::Block(_)
+                        | AstNode::Call { .. }
+                        | AstNode::Function { .. } => {
+                            lhs = AstNode::Call {
+                                procedure: Box::new(lhs),
+                                args,
+                            };
                         }
                         ref other_lhs => {
                             // Extract function name from lhs
@@ -1215,7 +1288,7 @@ impl Parser {
                                         lhs = AstNode::Path { steps: context_steps };
                                     }
                                     // Check if last step is a Lambda (inline function in path)
-                                    else if let AstNode::Lambda { params, body, signature } = last_step {
+                                    else if let AstNode::Lambda { params, body, signature, thunk } = last_step {
                                         // Extract all but the last step as the path context
                                         let mut context_steps = steps.clone();
                                         context_steps.pop();
@@ -1241,6 +1314,7 @@ impl Parser {
                                                     params: params.clone(),
                                                     body: body.clone(),
                                                     signature: signature.clone(),
+                                                    thunk: *thunk,
                                                 }),
                                             },
                                             AstNode::Function {
@@ -1290,6 +1364,14 @@ impl Parser {
                     };
                 }
                 Token::LeftBrace => {
+                    // S0210: Each step can only have one grouping expression
+                    // Check if lhs is already an ObjectTransform
+                    if matches!(lhs, AstNode::ObjectTransform { .. }) {
+                        return Err(ParserError::InvalidSyntax(
+                            "S0210: Each step can only have one grouping expression".to_string(),
+                        ));
+                    }
+
                     // Object constructor as postfix: expr{key: value}
                     self.advance()?; // skip '{'
 
@@ -1320,6 +1402,27 @@ impl Parser {
                     lhs = AstNode::ObjectTransform {
                         input: Box::new(lhs),
                         pattern: pairs,
+                    };
+                }
+                Token::Hash => {
+                    // Index binding operator: #$var
+                    // Binds the current array index to the specified variable
+                    self.advance()?; // skip '#'
+
+                    // Expect a variable name
+                    let var_name = match &self.current_token {
+                        Token::Variable(name) => name.clone(),
+                        _ => {
+                            return Err(ParserError::InvalidSyntax(
+                                "Expected variable name after #".to_string(),
+                            ));
+                        }
+                    };
+                    self.advance()?; // skip variable
+
+                    lhs = AstNode::IndexBind {
+                        input: Box::new(lhs),
+                        variable: var_name,
                     };
                 }
                 Token::Caret => {
@@ -1423,6 +1526,54 @@ impl Parser {
         }
 
         Ok(ast)
+    }
+
+    /// Analyze an expression for tail call optimization
+    /// Returns (optimized_expr, is_thunk) where:
+    /// - optimized_expr is the expression (unchanged)
+    /// - is_thunk is true if the expression's tail position is a function call
+    ///
+    /// A tail position is where a function call's result is directly returned:
+    /// - The body itself if it's a function call
+    /// - Both branches of a conditional at tail position
+    /// - The last expression of a block at tail position
+    fn tail_call_optimize(expr: AstNode) -> (AstNode, bool) {
+        let is_thunk = Self::is_tail_call(&expr);
+        (expr, is_thunk)
+    }
+
+    /// Check if an expression is in tail call position
+    /// Returns true if the expression is a function call (or contains function calls in all tail positions)
+    fn is_tail_call(expr: &AstNode) -> bool {
+        match expr {
+            // Direct function calls are tail calls
+            AstNode::Function { .. } => true,
+            AstNode::Call { .. } => true,
+
+            // Conditional: both branches must be tail calls (or at least one if only one branch)
+            AstNode::Conditional { then_branch, else_branch, .. } => {
+                let then_is_tail = Self::is_tail_call(then_branch);
+                let else_is_tail = else_branch.as_ref().map_or(false, |e| Self::is_tail_call(e));
+                // At least one branch should be a tail call for TCO to be useful
+                then_is_tail || else_is_tail
+            }
+
+            // Block: last expression is tail position
+            AstNode::Block(exprs) => {
+                exprs.last().map_or(false, |last| Self::is_tail_call(last))
+            }
+
+            // Variable binding with result: the result expression is tail position
+            AstNode::Binary { op: BinaryOp::ColonEqual, rhs, .. } => {
+                // The rhs (or next expression) could be tail position
+                // But typically := is used for assignment within blocks
+                // Check if rhs is a block (common pattern)
+                Self::is_tail_call(rhs)
+            }
+
+            // Anything else is not a tail call
+            _ => false,
+        }
     }
 }
 

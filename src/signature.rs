@@ -13,9 +13,6 @@ pub enum SignatureError {
     #[error("Argument count mismatch: expected {expected}, got {actual}")]
     ArgumentCountMismatch { expected: usize, actual: usize },
 
-    #[error("Type mismatch: {0}")]
-    TypeMismatch(String),
-
     #[error("T0410: Argument {index} must be {expected}")]
     ArgumentTypeMismatch { index: usize, expected: String },
 
@@ -87,11 +84,13 @@ impl ParamType {
     }
 
     /// Check if this is a function type
+    #[allow(dead_code)]
     pub fn is_function(&self) -> bool {
         matches!(self, ParamType::Function(_))
     }
 
     /// Check if this is an array type
+    #[allow(dead_code)]
     pub fn is_array(&self) -> bool {
         matches!(self, ParamType::Array(_))
     }
@@ -108,11 +107,13 @@ pub struct Parameter {
 #[derive(Debug, Clone)]
 pub struct Signature {
     pub params: Vec<Parameter>,
+    #[allow(dead_code)]
     pub return_type: Option<ParamType>,
 }
 
 impl Signature {
     /// Create a new signature
+    #[allow(dead_code)]
     pub fn new(params: Vec<Parameter>, return_type: Option<ParamType>) -> Self {
         Signature {
             params,
@@ -308,12 +309,8 @@ impl Signature {
     }
 
     /// Validate argument types (non-coercing version for simple type checking)
-    /// Returns specific error types for different failure modes:
-    /// - UndefinedArgument: argument is null/undefined (silent failure)
-    /// - ArgumentTypeMismatch (T0410): explicit value of wrong type
-    /// - ArrayTypeMismatch (T0412): array with wrong element types
+    #[allow(dead_code)]
     pub fn validate_args(&self, args: &[Value]) -> Result<(), SignatureError> {
-        // Use the coercing version and discard the result
         self.validate_and_coerce(args).map(|_| ())
     }
 

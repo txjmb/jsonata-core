@@ -24,7 +24,7 @@
 //! - `ast` - Abstract Syntax Tree definitions
 
 use pyo3::prelude::*;
-use pyo3::exceptions::{PyValueError, PyTypeError, PyRuntimeError};
+use pyo3::exceptions::{PyValueError, PyTypeError};
 use pyo3::types::{PyDict, PyList};
 use serde_json::Value;
 
@@ -80,38 +80,10 @@ impl JsonataExpression {
     /// Returns ValueError if evaluation fails
     #[pyo3(signature = (data, bindings=None))]
     fn evaluate(&self, py: Python, data: PyObject, bindings: Option<PyObject>) -> PyResult<PyObject> {
-        // Convert Python data to JSON Value
         let json_data = python_to_json(py, &data)?;
-
-        // Create evaluator with optional bindings
-        let mut evaluator = if let Some(bindings_obj) = bindings {
-            let bindings_json = python_to_json(py, &bindings_obj)?;
-
-            // Extract bindings into context
-            let mut context = evaluator::Context::new();
-            if let Value::Object(map) = bindings_json {
-                for (key, value) in map {
-                    context.bind(key, value);
-                }
-            } else {
-                return Err(PyTypeError::new_err(
-                    "bindings must be a dictionary"
-                ));
-            }
-            evaluator::Evaluator::with_context(context)
-        } else {
-            evaluator::Evaluator::new()
-        };
-
-        // Evaluate the AST
+        let mut evaluator = create_evaluator(py, bindings)?;
         let result = evaluator.evaluate(&self.ast, &json_data)
-            .map_err(|e| match e {
-                evaluator::EvaluatorError::TypeError(msg) => PyValueError::new_err(msg),
-                evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
-                evaluator::EvaluatorError::EvaluationError(msg) => PyValueError::new_err(msg),
-            })?;
-
-        // Convert result back to Python
+            .map_err(evaluator_error_to_py)?;
         json_to_python(py, &result)
     }
 
@@ -134,39 +106,11 @@ impl JsonataExpression {
     /// Returns ValueError if JSON parsing or evaluation fails
     #[pyo3(signature = (json_str, bindings=None))]
     fn evaluate_json(&self, py: Python, json_str: &str, bindings: Option<PyObject>) -> PyResult<String> {
-        // Parse JSON string directly to serde_json::Value
         let json_data: Value = serde_json::from_str(json_str)
             .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
-
-        // Create evaluator with optional bindings
-        let mut evaluator = if let Some(bindings_obj) = bindings {
-            let bindings_json = python_to_json(py, &bindings_obj)?;
-
-            // Extract bindings into context
-            let mut context = evaluator::Context::new();
-            if let Value::Object(map) = bindings_json {
-                for (key, value) in map {
-                    context.bind(key, value);
-                }
-            } else {
-                return Err(PyTypeError::new_err(
-                    "bindings must be a dictionary"
-                ));
-            }
-            evaluator::Evaluator::with_context(context)
-        } else {
-            evaluator::Evaluator::new()
-        };
-
-        // Evaluate the AST
+        let mut evaluator = create_evaluator(py, bindings)?;
         let result = evaluator.evaluate(&self.ast, &json_data)
-            .map_err(|e| match e {
-                evaluator::EvaluatorError::TypeError(msg) => PyValueError::new_err(msg),
-                evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
-                evaluator::EvaluatorError::EvaluationError(msg) => PyValueError::new_err(msg),
-            })?;
-
-        // Convert result to JSON string
+            .map_err(evaluator_error_to_py)?;
         serde_json::to_string(&result)
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
     }
@@ -400,6 +344,34 @@ fn json_to_python(py: Python, value: &Value) -> PyResult<PyObject> {
             }
             Ok(dict.unbind().into())
         }
+    }
+}
+
+/// Create an evaluator, optionally configured with Python bindings
+fn create_evaluator(py: Python, bindings: Option<PyObject>) -> PyResult<evaluator::Evaluator> {
+    if let Some(bindings_obj) = bindings {
+        let bindings_json = python_to_json(py, &bindings_obj)?;
+
+        let mut context = evaluator::Context::new();
+        if let Value::Object(map) = bindings_json {
+            for (key, value) in map {
+                context.bind(key, value);
+            }
+        } else {
+            return Err(PyTypeError::new_err("bindings must be a dictionary"));
+        }
+        Ok(evaluator::Evaluator::with_context(context))
+    } else {
+        Ok(evaluator::Evaluator::new())
+    }
+}
+
+/// Convert an EvaluatorError to a PyErr
+fn evaluator_error_to_py(e: evaluator::EvaluatorError) -> PyErr {
+    match e {
+        evaluator::EvaluatorError::TypeError(msg) => PyValueError::new_err(msg),
+        evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
+        evaluator::EvaluatorError::EvaluationError(msg) => PyValueError::new_err(msg),
     }
 }
 

@@ -1,37 +1,13 @@
 // Utility functions and helpers
 // Mirrors utils.js from the reference implementation
+//
+// These utilities are currently unused because the evaluator and functions
+// modules use inline type checks. They are retained for API parity with
+// the JavaScript reference implementation and potential future use.
+
+#![allow(dead_code)]
 
 use serde_json::Value;
-
-/// Check if a value is numeric
-pub fn is_numeric(value: &Value) -> bool {
-    matches!(value, Value::Number(_))
-}
-
-/// Check if a value is a string
-pub fn is_string(value: &Value) -> bool {
-    matches!(value, Value::String(_))
-}
-
-/// Check if a value is an array
-pub fn is_array(value: &Value) -> bool {
-    matches!(value, Value::Array(_))
-}
-
-/// Check if a value is an object
-pub fn is_object(value: &Value) -> bool {
-    matches!(value, Value::Object(_))
-}
-
-/// Check if a value is null or undefined (None)
-pub fn is_null(value: &Value) -> bool {
-    matches!(value, Value::Null)
-}
-
-/// Deep clone a JSON value
-pub fn deep_clone(value: &Value) -> Value {
-    value.clone()
-}
 
 /// Convert value to array (wraps non-arrays)
 pub fn to_array(value: &Value) -> Vec<Value> {
@@ -57,15 +33,6 @@ pub fn flatten(arr: &[Value]) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_type_checks() {
-        assert!(is_numeric(&serde_json::json!(42)));
-        assert!(is_string(&Value::String("hello".to_string())));
-        assert!(is_array(&Value::Array(vec![])));
-        assert!(is_object(&serde_json::json!({})));
-        assert!(is_null(&Value::Null));
-    }
 
     #[test]
     fn test_to_array() {

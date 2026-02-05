@@ -84,7 +84,7 @@ pub enum AstNode {
         operand: Box<AstNode>,
     },
 
-    /// Function call
+    /// Function call by name
     Function {
         name: String,
         args: Vec<AstNode>,
@@ -93,12 +93,24 @@ pub enum AstNode {
         is_builtin: bool,
     },
 
+    /// Call an arbitrary expression as a function
+    /// Used for IIFE patterns like `(function($x){...})(5)` or chained calls
+    /// The procedure can be any expression that evaluates to a function
+    Call {
+        procedure: Box<AstNode>,
+        args: Vec<AstNode>,
+    },
+
     /// Lambda function definition
     Lambda {
         params: Vec<String>,
         body: Box<AstNode>,
         /// Optional signature for type checking (e.g., "<n-n:n>")
         signature: Option<String>,
+        /// Whether this lambda's body is a thunk (contains tail call that should be optimized)
+        /// A thunk wraps a tail-position function call for TCO
+        #[serde(default)]
+        thunk: bool,
     },
 
     /// Array constructor
@@ -150,6 +162,16 @@ pub enum AstNode {
         input: Box<AstNode>,
         /// Sort terms - list of (expression, ascending) tuples
         terms: Vec<(AstNode, bool)>,
+    },
+
+    /// Index binding operator #$var
+    /// Binds the current array index to the specified variable during path traversal
+    /// For example: arr#$i.field binds the index to $i for each element
+    IndexBind {
+        /// The input expression being indexed
+        input: Box<AstNode>,
+        /// The variable name to bind the index to (without the $ prefix)
+        variable: String,
     },
 
     /// Transform operator |location|update[,delete]|

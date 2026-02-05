@@ -17,6 +17,15 @@ pub enum FunctionError {
     RuntimeError(String),
 }
 
+/// Check if a Value is a function marker (lambda or builtin)
+pub fn is_function_value(value: &Value) -> bool {
+    if let Value::Object(obj) = value {
+        obj.contains_key("__lambda__") || obj.contains_key("__builtin__")
+    } else {
+        false
+    }
+}
+
 /// Built-in string functions
 pub mod string {
     use super::*;
@@ -73,19 +82,10 @@ pub mod string {
     pub fn string(value: &Value, prettify: Option<bool>) -> Result<Value, FunctionError> {
         // Check if this is a function or undefined first (before checking other types)
         if let Value::Object(obj) = value {
-            // Check if this is undefined (has __undefined__ marker)
             if obj.get("__undefined__") == Some(&Value::Bool(true)) {
-                // Undefined converts to empty string
                 return Ok(Value::String(String::new()));
             }
-            // Check if this is a lambda (has __lambda__ marker)
-            if obj.contains_key("__lambda__") {
-                // Lambdas convert to empty string
-                return Ok(Value::String(String::new()));
-            }
-            // Check if this is a built-in function (has __builtin__ marker)
-            if obj.contains_key("__builtin__") {
-                // Built-in functions convert to empty string
+            if super::is_function_value(value) {
                 return Ok(Value::String(String::new()));
             }
         }
@@ -198,7 +198,7 @@ pub mod string {
         // Transform the value recursively before stringifying
         let transformed = transform_for_stringify(value);
 
-        let result = if let Some(indent_size) = indent {
+        let result = if indent.is_some() {
             serde_json::to_string_pretty(&transformed)
                 .map_err(|e| FunctionError::RuntimeError(format!("JSON stringify error: {}", e)))?
         } else {
@@ -238,34 +238,22 @@ pub mod string {
                 }
             }
             Value::Array(arr) => {
-                // Recursively transform array elements
                 let transformed: Vec<Value> = arr.iter().map(|v| {
-                    // Check if element is a function
-                    if let Value::Object(obj) = v {
-                        if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
-                            // Functions become empty string
-                            return Value::String(String::new());
-                        }
+                    if super::is_function_value(v) {
+                        return Value::String(String::new());
                     }
                     transform_for_stringify(v)
                 }).collect();
                 Value::Array(transformed)
             }
             Value::Object(obj) => {
-                // Check if this is a function
-                if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
-                    // Functions become empty string
+                if super::is_function_value(value) {
                     return Value::String(String::new());
                 }
 
-                // Recursively transform object values
                 let transformed: serde_json::Map<String, Value> = obj.iter().map(|(k, v)| {
-                    // Check if value is a function
-                    if let Value::Object(obj) = v {
-                        if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
-                            // Functions become empty string
-                            return (k.clone(), Value::String(String::new()));
-                        }
+                    if super::is_function_value(v) {
+                        return (k.clone(), Value::String(String::new()));
                     }
                     (k.clone(), transform_for_stringify(v))
                 }).collect();
@@ -528,9 +516,9 @@ pub mod string {
 
                         // Check if this is a valid group reference
                         if groups.is_empty() {
-                            // No capture groups at all - treat as literal
-                            result.push('$');
-                            // Don't advance position, let the digit be added as literal next iteration
+                            // No capture groups at all - $n is replaced with empty string
+                            // and position advances past the digits (per JS implementation)
+                            position += used_digits;
                         } else if group_num > 0 && group_num <= groups.len() {
                             // Valid group reference
                             if let Some(m) = &groups[group_num - 1] {
@@ -539,9 +527,9 @@ pub mod string {
                             // If group didn't match (None), add nothing (empty string)
                             position += used_digits;
                         } else {
-                            // Group number out of range, treat as literal
-                            result.push('$');
-                            // Don't advance position, let the digits be added as literals
+                            // Group number out of range - replace with empty string
+                            // and advance position (per JS implementation)
+                            position += used_digits;
                         }
                     } else {
                         // No digits found (shouldn't happen since we checked next_ch.is_ascii_digit())
@@ -572,58 +560,41 @@ pub mod string {
         if let Some((pat, flags)) = extract_regex(pattern) {
             let re = build_regex(&pat, &flags)?;
 
-            let result = if let Some(lim) = limit {
-                let mut count = 0;
-                let mut last_match = 0;
-                let mut output = String::new();
+            let mut count = 0;
+            let mut last_match = 0;
+            let mut output = String::new();
 
-                for cap in re.captures_iter(s) {
-                    if count >= lim {
-                        break;
-                    }
-
-                    let m = cap.get(0).unwrap();
-                    output.push_str(&s[last_match..m.start()]);
-
-                    // Collect capture groups
-                    let groups: Vec<Option<regex::Match>> = (1..cap.len())
-                        .map(|i| cap.get(i))
-                        .collect();
-
-                    // Perform capture group substitution
-                    let substituted = substitute_capture_groups(replacement, m.as_str(), &groups);
-                    output.push_str(&substituted);
-
-                    last_match = m.end();
-                    count += 1;
+            for cap in re.captures_iter(s) {
+                if limit.is_some_and(|lim| count >= lim) {
+                    break;
                 }
 
-                output.push_str(&s[last_match..]);
-                output
-            } else {
-                // For unlimited replacements, process each match
-                let mut last_match = 0;
-                let mut output = String::new();
+                let m = cap.get(0).unwrap();
 
-                for cap in re.captures_iter(s) {
-                    let m = cap.get(0).unwrap();
-                    output.push_str(&s[last_match..m.start()]);
-
-                    // Collect capture groups
-                    let groups: Vec<Option<regex::Match>> = (1..cap.len())
-                        .map(|i| cap.get(i))
-                        .collect();
-
-                    // Perform capture group substitution
-                    let substituted = substitute_capture_groups(replacement, m.as_str(), &groups);
-                    output.push_str(&substituted);
-
-                    last_match = m.end();
+                // D1004: Regular expression matches zero length string
+                if m.as_str().is_empty() {
+                    return Err(FunctionError::RuntimeError(
+                        "D1004: Regular expression matches zero length string".to_string()
+                    ));
                 }
 
-                output.push_str(&s[last_match..]);
-                output
-            };
+                output.push_str(&s[last_match..m.start()]);
+
+                // Collect capture groups
+                let groups: Vec<Option<regex::Match>> = (1..cap.len())
+                    .map(|i| cap.get(i))
+                    .collect();
+
+                // Perform capture group substitution
+                let substituted = substitute_capture_groups(replacement, m.as_str(), &groups);
+                output.push_str(&substituted);
+
+                last_match = m.end();
+                count += 1;
+            }
+
+            output.push_str(&s[last_match..]);
+            let result = output;
 
             return Ok(Value::String(result));
         }
@@ -708,12 +679,10 @@ pub mod boolean {
                 }
             }
             Value::Object(obj) => {
-                // Check if it's a function (lambda or built-in)
                 // Functions are falsy in JSONata
-                if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
+                if super::is_function_value(value) {
                     false
                 } else {
-                    // Regular objects: empty -> false, non-empty -> true
                     !obj.is_empty()
                 }
             }
@@ -1689,11 +1658,13 @@ pub mod array {
 
     /// $exists(value) - Check if value exists (not null/undefined)
     pub fn exists(value: &Value) -> Result<Value, FunctionError> {
-        Ok(Value::Bool(!matches!(value, Value::Null)))
+        let is_missing = matches!(value, Value::Null)
+            || matches!(value, Value::Object(map) if map.contains_key("__undefined__"));
+        Ok(Value::Bool(!is_missing))
     }
 
-    /// Helper function to compare values for equality
-    fn values_equal(a: &Value, b: &Value) -> bool {
+    /// Compare two JSON values for deep equality (JSONata semantics)
+    pub fn values_equal(a: &Value, b: &Value) -> bool {
         match (a, b) {
             (Value::Null, Value::Null) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,

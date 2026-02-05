@@ -1,6 +1,8 @@
 // Expression evaluator
 // Mirrors jsonata.js from the reference implementation
 
+use std::collections::HashMap;
+
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
 use crate::parser;
 use serde_json::Value;
@@ -15,11 +17,36 @@ pub fn undefined_value() -> Value {
 
 /// Check if a value is the undefined marker
 pub fn is_undefined(value: &Value) -> bool {
-    if let Value::Object(obj) = value {
-        obj.get("__undefined__").map(|v| v == &Value::Bool(true)).unwrap_or(false)
-    } else {
-        false
+    matches!(value, Value::Object(obj) if obj.get("__undefined__") == Some(&Value::Bool(true)))
+}
+
+/// Functions that propagate undefined (return undefined when given an undefined argument).
+/// These functions should return null/undefined when their input path doesn't exist,
+/// rather than throwing a type error.
+const UNDEFINED_PROPAGATING_FUNCTIONS: &[&str] = &[
+    "not", "boolean", "length", "number", "uppercase", "lowercase",
+    "substring", "substringBefore", "substringAfter", "string",
+];
+
+/// Check whether a function propagates undefined values
+fn propagates_undefined(name: &str) -> bool {
+    UNDEFINED_PROPAGATING_FUNCTIONS.contains(&name)
+}
+
+/// Flatten an array for aggregation functions (sum, average, max, min)
+/// JSONata aggregation functions work on flattened arrays
+fn flatten_for_aggregation(arr: &[Value]) -> Vec<Value> {
+    let mut result = Vec::new();
+    for value in arr {
+        match value {
+            Value::Array(inner) => {
+                // Recursively flatten nested arrays
+                result.extend(flatten_for_aggregation(inner));
+            }
+            _ => result.push(value.clone()),
+        }
     }
+    result
 }
 
 /// Evaluator errors
@@ -35,6 +62,28 @@ pub enum EvaluatorError {
     EvaluationError(String),
 }
 
+impl From<crate::functions::FunctionError> for EvaluatorError {
+    fn from(e: crate::functions::FunctionError) -> Self {
+        EvaluatorError::EvaluationError(e.to_string())
+    }
+}
+
+/// Result of evaluating a lambda body that may be a tail call
+/// Used for trampoline-based tail call optimization
+enum LambdaResult {
+    /// Final value - evaluation is complete
+    Value(Value),
+    /// Tail call - need to continue with another lambda invocation
+    TailCall {
+        /// The lambda to call
+        lambda: StoredLambda,
+        /// Arguments for the call
+        args: Vec<Value>,
+        /// Data context for the call
+        data: Value,
+    },
+}
+
 /// Lambda storage
 /// Stores the AST of a lambda function along with its parameters, optional signature,
 /// and captured environment for closures
@@ -44,23 +93,27 @@ pub struct StoredLambda {
     pub body: AstNode,
     pub signature: Option<String>,
     /// Captured environment bindings for closures
-    pub captured_env: std::collections::HashMap<String, Value>,
+    pub captured_env: HashMap<String, Value>,
+    /// Captured data context for lexical scoping of bare field names
+    pub captured_data: Option<Value>,
+    /// Whether this lambda's body contains tail calls that can be optimized
+    pub thunk: bool,
 }
 
 /// Evaluation context
 ///
 /// Holds variable bindings and other state needed during evaluation
 pub struct Context {
-    pub(crate) bindings: std::collections::HashMap<String, Value>,
-    pub(crate) lambdas: std::collections::HashMap<String, StoredLambda>,
+    pub(crate) bindings: HashMap<String, Value>,
+    pub(crate) lambdas: HashMap<String, StoredLambda>,
     parent_data: Option<Value>,
 }
 
 impl Context {
     pub fn new() -> Self {
         Context {
-            bindings: std::collections::HashMap::new(),
-            lambdas: std::collections::HashMap::new(),
+            bindings: HashMap::new(),
+            lambdas: HashMap::new(),
             parent_data: None,
         }
     }
@@ -113,7 +166,9 @@ impl Evaluator {
         Evaluator {
             context: Context::new(),
             recursion_depth: 0,
-            max_recursion_depth: 200, // Increased to handle mutual recursion in tests
+            // Limit recursion depth to prevent stack overflow
+            // True TCO would allow deeper recursion but requires parser-level thunk marking
+            max_recursion_depth: 302,
         }
     }
 
@@ -121,8 +176,49 @@ impl Evaluator {
         Evaluator {
             context,
             recursion_depth: 0,
-            max_recursion_depth: 200,
+            max_recursion_depth: 302,
         }
+    }
+
+    /// Invoke a stored lambda with its captured environment and data.
+    /// This is the standard way to call a StoredLambda, handling the
+    /// captured_env and captured_data extraction boilerplate.
+    fn invoke_stored_lambda(
+        &mut self,
+        stored: &StoredLambda,
+        args: &[Value],
+        data: &Value,
+    ) -> Result<Value, EvaluatorError> {
+        let captured_env = if stored.captured_env.is_empty() {
+            None
+        } else {
+            Some(&stored.captured_env)
+        };
+        let captured_data = stored.captured_data.as_ref();
+        self.invoke_lambda_with_env(
+            &stored.params,
+            &stored.body,
+            stored.signature.as_ref(),
+            args,
+            data,
+            captured_env,
+            captured_data,
+            stored.thunk,
+        )
+    }
+
+    /// Look up a StoredLambda from a Value that may be a lambda marker object.
+    /// Returns the cloned StoredLambda if the value is an object with `__lambda__`
+    /// and a valid `_lambda_id` that references a stored lambda.
+    fn lookup_lambda_from_value(&self, value: &Value) -> Option<StoredLambda> {
+        if let Value::Object(map) = value {
+            if map.contains_key("__lambda__") {
+                if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
+                    return self.context.lookup_lambda(lambda_id).cloned();
+                }
+            }
+        }
+        None
     }
 
     /// Evaluate an AST node against data
@@ -221,11 +317,43 @@ impl Evaluator {
             // === Variables ===
             AstNode::Variable(name) => {
                 // Special case: $ alone (empty name) refers to current context
+                // First check if $ is bound in the context (for closures that captured $)
+                // Otherwise, use the data parameter
                 if name.is_empty() {
+                    if let Some(value) = self.context.lookup("$") {
+                        return Ok(value.clone());
+                    }
+                    // If data is a tuple, return the @ value
+                    if let Value::Object(obj) = data {
+                        if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                            if let Some(inner) = obj.get("@") {
+                                return Ok(inner.clone());
+                            }
+                        }
+                    }
                     return Ok(data.clone());
                 }
 
-                // First check if this is a stored lambda (user-defined functions)
+                // Check variable bindings FIRST
+                // This allows function parameters to shadow outer lambdas with the same name
+                // Critical for Y-combinator pattern: function($g){$g($g)} where $g shadows outer $g
+                if let Some(value) = self.context.lookup(name) {
+                    return Ok(value.clone());
+                }
+
+                // Check tuple bindings in data (for index binding operator #$var)
+                // When iterating over a tuple stream, $var can reference the bound index
+                if let Value::Object(obj) = data {
+                    if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                        // Check for the variable in tuple bindings (stored as "$name")
+                        let binding_key = format!("${}", name);
+                        if let Some(binding_value) = obj.get(&binding_key) {
+                            return Ok(binding_value.clone());
+                        }
+                    }
+                }
+
+                // Then check if this is a stored lambda (user-defined functions)
                 if let Some(stored_lambda) = self.context.lookup_lambda(name) {
                     // Return a lambda representation that can be passed to higher-order functions
                     // Include _lambda_id pointing to the stored lambda so it can be found
@@ -238,13 +366,6 @@ impl Evaluator {
                         "_lambda_id": name  // Same as name for named lambdas
                     });
                     return Ok(lambda_repr);
-                }
-
-                // Check variable bindings BEFORE built-in functions
-                // This allows user-defined variables to shadow built-in functions
-                // (e.g., $length := $count($arr) should work and not resolve to $length built-in)
-                if let Some(value) = self.context.lookup(name) {
-                    return Ok(value.clone());
                 }
 
                 // Check if this is a built-in function reference (only if not shadowed)
@@ -312,33 +433,32 @@ impl Evaluator {
 
             // === Arrays ===
             AstNode::Array(elements) => {
-                // Array constructor with special handling for range operations
-                // Range results are flattened, but other arrays are preserved
-                // Null (undefined) values are excluded from the result per JSONata semantics
+                // Array constructor: [expr1, expr2, ...]
+                // JSONata semantics:
+                // - If element is itself an array constructor [...], keep it nested
+                // - Otherwise, if element evaluates to an array, flatten it
+                // - Undefined values are excluded
                 let mut result = Vec::new();
                 for element in elements {
-                    // Check if this element is a range operation
-                    let is_range = matches!(
-                        element,
-                        AstNode::Binary { op: BinaryOp::Range, .. }
-                    );
+                    // Check if this element is itself an explicit array constructor
+                    let is_array_constructor = matches!(element, AstNode::Array(_));
 
                     let value = self.evaluate_internal(element, data)?;
 
-                    // Skip null (undefined) values in array constructors
-                    // Check both explicit null and the undefined marker
-                    if matches!(value, Value::Null) || is_undefined(&value) {
+                    // Skip undefined values in array constructors
+                    // Note: explicit null is preserved, only undefined (no value) is filtered
+                    if is_undefined(&value) {
                         continue;
                     }
 
-                    if is_range {
-                        // Flatten range results
-                        match value {
-                            Value::Array(arr) => result.extend(arr),
-                            _ => result.push(value),
-                        }
+                    if is_array_constructor {
+                        // Explicit array constructor - keep nested
+                        result.push(value);
+                    } else if let Value::Array(arr) = value {
+                        // Non-array-constructor that evaluated to array - flatten it
+                        result.extend(arr);
                     } else {
-                        // Preserve other values as-is
+                        // Non-array value - add as-is
                         result.push(value);
                     }
                 }
@@ -348,7 +468,11 @@ impl Evaluator {
             // === Objects ===
             AstNode::Object(pairs) => {
                 let mut result = serde_json::Map::new();
-                for (key_node, value_node) in pairs {
+                // Track which pair index produced each key (for D1009 checking)
+                let mut key_sources: HashMap<String, usize> =
+                    HashMap::new();
+
+                for (pair_index, (key_node, value_node)) in pairs.iter().enumerate() {
                     // Evaluate key (must be a string)
                     let key = match self.evaluate_internal(key_node, data)? {
                         Value::String(s) => s,
@@ -361,9 +485,21 @@ impl Evaluator {
                             return Err(EvaluatorError::TypeError(format!(
                                 "Object key must be a string, got: {:?}",
                                 other
-                            )))
+                            )));
                         }
                     };
+
+                    // Check for D1009: multiple key expressions evaluate to same key
+                    if let Some(&existing_idx) = key_sources.get(&key) {
+                        if existing_idx != pair_index {
+                            return Err(EvaluatorError::EvaluationError(format!(
+                                "D1009: Multiple key expressions evaluate to same key: {}",
+                                key
+                            )));
+                        }
+                    }
+                    key_sources.insert(key.clone(), pair_index);
+
                     // Evaluate value - skip undefined values, include null
                     let value = self.evaluate_internal(value_node, data)?;
                     // Skip key-value pairs where the value is undefined
@@ -376,6 +512,7 @@ impl Evaluator {
             }
 
             // === Object Transform ===
+            // Follows JavaScript semantics: group items by key first, then evaluate value once per group
             AstNode::ObjectTransform { input, pattern } => {
                 // Evaluate the input expression
                 let input_value = self.evaluate_internal(input, data)?;
@@ -385,20 +522,36 @@ impl Evaluator {
                     return Ok(undefined_value());
                 }
 
-                // The object transform groups results by keys
-                let mut result = serde_json::Map::new();
-
                 // Handle array input - process each item
-                let items = match input_value {
+                let items: Vec<Value> = match input_value {
                     Value::Array(ref arr) => arr.clone(),
                     Value::Null => return Ok(Value::Null),
                     other => vec![other],
                 };
 
-                for item in items {
-                    for (key_node, value_node) in pattern {
+                // If array is empty, add undefined to enable literal JSON object generation
+                let items = if items.is_empty() {
+                    vec![undefined_value()]
+                } else {
+                    items
+                };
+
+                // Phase 1: Group items by key expression
+                // groups maps key -> (grouped_data, expr_index)
+                // When multiple items have same key, their data is appended together
+                let mut groups: HashMap<String, (Vec<Value>, usize)> =
+                    HashMap::new();
+
+                // Save the current $ binding to restore later
+                let saved_dollar = self.context.lookup("$").cloned();
+
+                for item in &items {
+                    // Bind $ to the current item for key evaluation
+                    self.context.bind("$".to_string(), item.clone());
+
+                    for (pair_index, (key_node, _value_node)) in pattern.iter().enumerate() {
                         // Evaluate key with current item as context
-                        let key = match self.evaluate_internal(key_node, &item)? {
+                        let key = match self.evaluate_internal(key_node, item)? {
                             Value::String(s) => s,
                             Value::Null => continue, // Skip null keys
                             other => {
@@ -407,37 +560,64 @@ impl Evaluator {
                                     continue;
                                 }
                                 return Err(EvaluatorError::TypeError(format!(
-                                    "Object key must be a string, got: {:?}",
+                                    "T1003: Object key must be a string, got: {:?}",
                                     other
-                                )))
+                                )));
                             }
                         };
 
-                        // Evaluate value with current item as context
-                        let value = self.evaluate_internal(value_node, &item)?;
-
-                        // Skip undefined values
-                        if is_undefined(&value) {
-                            continue;
-                        }
-
-                        // If key already exists, merge values into array
-                        if let Some(existing) = result.get_mut(&key) {
-                            match existing {
-                                Value::Array(arr) => {
-                                    if !matches!(value, Value::Null) {
-                                        arr.push(value);
-                                    }
-                                }
-                                _ => {
-                                    let old_value = existing.clone();
-                                    *existing = Value::Array(vec![old_value, value]);
-                                }
+                        // Group items by key
+                        if let Some((existing_data, existing_idx)) = groups.get_mut(&key) {
+                            // Key already exists - check if from same expression index
+                            if *existing_idx != pair_index {
+                                // D1009: multiple key expressions evaluate to same key
+                                return Err(EvaluatorError::EvaluationError(format!(
+                                    "D1009: Multiple key expressions evaluate to same key: {}",
+                                    key
+                                )));
                             }
+                            // Append item to the group
+                            existing_data.push(item.clone());
                         } else {
-                            result.insert(key, value);
+                            // New key - create new group
+                            groups.insert(key, (vec![item.clone()], pair_index));
                         }
                     }
+                }
+
+                // Phase 2: Evaluate value expression for each group
+                let mut result = serde_json::Map::new();
+
+                for (key, (grouped_data, expr_index)) in groups {
+                    // Get the value expression for this group
+                    let (_key_node, value_node) = &pattern[expr_index];
+
+                    // Determine the context for value evaluation:
+                    // - If single item, use that item directly
+                    // - If multiple items, use the array of items
+                    let context = if grouped_data.len() == 1 {
+                        grouped_data.into_iter().next().unwrap()
+                    } else {
+                        Value::Array(grouped_data)
+                    };
+
+                    // Bind $ to the context for value evaluation
+                    self.context.bind("$".to_string(), context.clone());
+
+                    // Evaluate value expression with grouped context
+                    let value = self.evaluate_internal(value_node, &context)?;
+
+                    // Skip undefined values
+                    if !is_undefined(&value) {
+                        result.insert(key, value);
+                    }
+                }
+
+                // Restore the previous $ binding
+                if let Some(saved) = saved_dollar {
+                    self.context.bind("$".to_string(), saved);
+                } else {
+                    self.context.unbind("$");
                 }
 
                 Ok(Value::Object(result))
@@ -446,6 +626,28 @@ impl Evaluator {
             // === Function Calls ===
             AstNode::Function { name, args, is_builtin } => {
                 self.evaluate_function_call(name, args, *is_builtin, data)
+            }
+
+            // === Call: invoke an arbitrary expression as a function ===
+            // Used for IIFE patterns like (function($x){...})(5) or chained calls
+            AstNode::Call { procedure, args } => {
+                // Evaluate the procedure to get the callable value
+                let callable = self.evaluate_internal(procedure, data)?;
+
+                // Check if it's a lambda (object with __lambda__ key)
+                if let Some(stored_lambda) = self.lookup_lambda_from_value(&callable) {
+                    let mut evaluated_args = Vec::new();
+                    for arg in args.iter() {
+                        evaluated_args.push(self.evaluate_internal(arg, data)?);
+                    }
+                    return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
+                }
+
+                // Not a callable value
+                Err(EvaluatorError::TypeError(format!(
+                    "Cannot call non-function value: {:?}",
+                    callable
+                )))
             }
 
             // === Conditional Expressions ===
@@ -477,15 +679,27 @@ impl Evaluator {
                     result = self.evaluate_internal(expr, data)?;
                 }
 
+                // Before restoring, preserve any lambdas referenced by the result
+                // This is essential for closures returned from blocks (IIFE pattern)
+                let lambdas_to_keep = self.extract_lambda_ids(&result);
+                let current_lambdas = self.context.lambdas.clone();
+
                 // Restore original bindings after block completes
                 self.context.bindings = saved_bindings;
                 self.context.lambdas = saved_lambdas;
+
+                // Re-add any lambdas that are referenced by the returned value
+                for lambda_id in lambdas_to_keep {
+                    if let Some(stored_lambda) = current_lambdas.get(&lambda_id) {
+                        self.context.lambdas.insert(lambda_id, stored_lambda.clone());
+                    }
+                }
 
                 Ok(result)
             }
 
             // === Lambda Functions ===
-            AstNode::Lambda { params, body, signature } => {
+            AstNode::Lambda { params, body, signature, thunk } => {
                 // Lambda functions are first-class values (closures)
                 // They capture the current environment for later invocation
                 //
@@ -498,6 +712,8 @@ impl Evaluator {
                     body: (**body).clone(),
                     signature: signature.clone(),
                     captured_env: self.capture_current_environment(),
+                    captured_data: Some(data.clone()),
+                    thunk: *thunk,
                 };
                 self.context.bind_lambda(lambda_id.clone(), stored_lambda);
 
@@ -551,9 +767,7 @@ impl Evaluator {
             }
 
             // === Predicate ===
-            AstNode::Predicate(pred_expr) => {
-                // Predicates should only appear in path expressions
-                // If we get here, something is wrong with the AST
+            AstNode::Predicate(_) => {
                 Err(EvaluatorError::EvaluationError(
                     "Predicate can only be used in path expressions".to_string()
                 ))
@@ -571,9 +785,7 @@ impl Evaluator {
             }
 
             // === Function Application ===
-            AstNode::FunctionApplication(expr) => {
-                // Function application should only appear in path expressions
-                // If we get here, something is wrong with the AST
+            AstNode::FunctionApplication(_) => {
                 Err(EvaluatorError::EvaluationError(
                     "Function application can only be used in path expressions".to_string()
                 ))
@@ -584,6 +796,40 @@ impl Evaluator {
                 // Sort operator - evaluate input then sort by terms
                 let value = self.evaluate_internal(input, data)?;
                 self.evaluate_sort(&value, terms)
+            }
+
+            // === Index Binding ===
+            AstNode::IndexBind { input, variable } => {
+                // Index binding operator #$var
+                // For now, evaluates input and stores index information for later use
+                // The full tuple stream semantics requires deeper integration with path evaluation
+                let value = self.evaluate_internal(input, data)?;
+
+                // Store the variable name and create indexed results
+                // This is a simplified implementation - full tuple stream would require more work
+                match value {
+                    Value::Array(arr) => {
+                        // Store the index binding metadata in a special wrapper
+                        let mut result = Vec::new();
+                        for (idx, item) in arr.iter().enumerate() {
+                            // Create wrapper object with value and index
+                            let mut wrapper = serde_json::Map::new();
+                            wrapper.insert("@".to_string(), item.clone());
+                            wrapper.insert(format!("${}", variable), serde_json::json!(idx));
+                            wrapper.insert("__tuple__".to_string(), Value::Bool(true));
+                            result.push(Value::Object(wrapper));
+                        }
+                        Ok(Value::Array(result))
+                    }
+                    // Single value: just return as-is with index 0
+                    other => {
+                        let mut wrapper = serde_json::Map::new();
+                        wrapper.insert("@".to_string(), other);
+                        wrapper.insert(format!("${}", variable), serde_json::json!(0));
+                        wrapper.insert("__tuple__".to_string(), Value::Bool(true));
+                        Ok(Value::Object(wrapper))
+                    }
+                }
             }
 
             // === Transform ===
@@ -606,7 +852,9 @@ impl Evaluator {
                             delete: delete.clone(),
                         },
                         signature: None,
-                        captured_env: std::collections::HashMap::new(),
+                        captured_env: HashMap::new(),
+                        captured_data: None, // Transform takes $ as parameter
+                        thunk: false,
                     };
 
                     // Store with a generated unique name
@@ -690,8 +938,9 @@ impl Evaluator {
                     return Ok(Value::Array(result));
                 }
 
-                // Try to evaluate the predicate to see if it's a numeric index
+                // Try to evaluate the predicate to see if it's a numeric index or array of indices
                 // If evaluation succeeds and yields a number, use it as an index
+                // If it yields an array of numbers, use them as multiple indices
                 // If evaluation fails (e.g., comparison error), treat as filter
                 match self.evaluate_internal(predicate, current) {
                     Ok(Value::Number(n)) => {
@@ -723,8 +972,50 @@ impl Evaluator {
                         }
                         return Ok(Value::Array(result));
                     }
+                    Ok(Value::Array(indices)) => {
+                        // Array of values - could be indices or filter results
+                        // Check if all values are numeric
+                        let has_non_numeric = indices.iter().any(|v| !matches!(v, Value::Number(_)));
+
+                        if has_non_numeric {
+                            // Non-numeric values - treat as filter, fall through
+                        } else {
+                            // All numeric - use as indices
+                            let arr_len = arr.len() as i64;
+                            let mut resolved_indices: Vec<i64> = indices
+                                .iter()
+                                .filter_map(|v| {
+                                    if let Value::Number(n) = v {
+                                        let idx = n.as_f64().unwrap() as i64;
+                                        // Resolve negative indices
+                                        let actual_idx = if idx < 0 { arr_len + idx } else { idx };
+                                        // Only include valid indices
+                                        if actual_idx >= 0 && actual_idx < arr_len {
+                                            Some(actual_idx)
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+
+                            // Sort and deduplicate indices
+                            resolved_indices.sort();
+                            resolved_indices.dedup();
+
+                            // Select elements at each sorted index
+                            let result: Vec<Value> = resolved_indices
+                                .iter()
+                                .map(|&idx| arr[idx as usize].clone())
+                                .collect();
+
+                            return Ok(Value::Array(result));
+                        }
+                    }
                     Ok(_) => {
-                        // Evaluated successfully but not a number - might be a filter
+                        // Evaluated successfully but not a number or array - might be a filter
                         // Fall through to filter logic
                     }
                     Err(_) => {
@@ -799,7 +1090,16 @@ impl Evaluator {
             if let AstNode::Name(field_name) = &steps[0].node {
                 return match data {
                     Value::Object(obj) => {
-                        Ok(obj.get(field_name).cloned().unwrap_or(Value::Null))
+                        // Check if this is a tuple - extract '@' value
+                        if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                            if let Some(Value::Object(inner)) = obj.get("@") {
+                                Ok(inner.get(field_name).cloned().unwrap_or(Value::Null))
+                            } else {
+                                Ok(Value::Null)
+                            }
+                        } else {
+                            Ok(obj.get(field_name).cloned().unwrap_or(Value::Null))
+                        }
                     }
                     Value::Array(arr) => {
                         // Array mapping: extract field from each element
@@ -807,12 +1107,46 @@ impl Evaluator {
                         for item in arr {
                             match item {
                                 Value::Object(obj) => {
-                                    let val = obj.get(field_name).cloned().unwrap_or(Value::Null);
+                                    // Check if this is a tuple - extract '@' value and preserve bindings
+                                    let (actual_obj, tuple_bindings) = if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                                        if let Some(Value::Object(inner)) = obj.get("@") {
+                                            let bindings: Vec<(String, Value)> = obj.iter()
+                                                .filter(|(k, _)| k.starts_with('$'))
+                                                .map(|(k, v)| (k.clone(), v.clone()))
+                                                .collect();
+                                            (inner.clone(), Some(bindings))
+                                        } else {
+                                            continue;
+                                        }
+                                    } else {
+                                        (obj.clone(), None)
+                                    };
+
+                                    let val = actual_obj.get(field_name).cloned().unwrap_or(Value::Null);
                                     // Flatten array values, push scalars (matching multi-step path behavior)
                                     if !matches!(val, Value::Null) {
+                                        // Helper to wrap in tuple
+                                        let wrap = |v: Value| -> Value {
+                                            if let Some(ref b) = tuple_bindings {
+                                                let mut wrapper = serde_json::Map::new();
+                                                wrapper.insert("@".to_string(), v);
+                                                wrapper.insert("__tuple__".to_string(), Value::Bool(true));
+                                                for (k, val) in b {
+                                                    wrapper.insert(k.clone(), val.clone());
+                                                }
+                                                Value::Object(wrapper)
+                                            } else {
+                                                v
+                                            }
+                                        };
+
                                         match val {
-                                            Value::Array(arr_val) => result.extend(arr_val),
-                                            other => result.push(other),
+                                            Value::Array(arr_val) => {
+                                                for item in arr_val {
+                                                    result.push(wrap(item));
+                                                }
+                                            },
+                                            other => result.push(wrap(other)),
                                         }
                                     }
                                 }
@@ -983,6 +1317,10 @@ impl Evaluator {
                 // Predicate as first step
                 self.evaluate_predicate(data, pred_expr)?
             }
+            AstNode::IndexBind { .. } => {
+                // Index binding as first step - evaluate the IndexBind to create tuple array
+                self.evaluate_internal(&steps[0].node, data)?
+            }
             _ => {
                 // Complex first step - evaluate it
                 self.evaluate_path_step(&steps[0].node, data, data)?
@@ -990,11 +1328,115 @@ impl Evaluator {
         };
 
         // Process remaining steps
-        for (idx, step) in steps[1..].iter().enumerate() {
+        for step in steps[1..].iter() {
+            // Early return if current is null/undefined - no point continuing
+            // This handles cases like `blah.{}` where blah doesn't exist
+            if matches!(current, Value::Null) || is_undefined(&current) {
+                return Ok(Value::Null);
+            }
+
+            // Check if current is a tuple array - if so, we need to bind tuple variables
+            // to context so they're available in nested expressions (like predicates)
+            let is_tuple_array = if let Value::Array(arr) = &current {
+                arr.first().map_or(false, |first| {
+                    if let Value::Object(obj) = first {
+                        obj.get("__tuple__") == Some(&Value::Bool(true))
+                    } else {
+                        false
+                    }
+                })
+            } else {
+                false
+            };
+
+            // For tuple arrays with certain step types, we need special handling to bind
+            // tuple variables to context so they're available in nested expressions.
+            // This is needed for:
+            // - Object constructors: {"label": $$.items[$i]} needs $i in context
+            // - Function applications: .($$.items[$i]) needs $i in context
+            // - Variable lookups: .$i needs to find the tuple binding
+            //
+            // Steps like Name (field access) already have proper tuple handling in their
+            // specific cases, so we don't intercept those here.
+            let needs_tuple_context_binding = is_tuple_array && matches!(
+                &step.node,
+                AstNode::Object(_) | AstNode::FunctionApplication(_) | AstNode::Variable(_)
+            );
+
+            if needs_tuple_context_binding {
+                if let Value::Array(arr) = &current {
+                    let mut results = Vec::new();
+
+                    for tuple in arr {
+                        if let Value::Object(tuple_obj) = tuple {
+                            // Extract tuple bindings (variables starting with $)
+                            let bindings: Vec<(String, Value)> = tuple_obj.iter()
+                                .filter(|(k, _)| k.starts_with('$') && k.len() > 1)  // $i, $j, etc.
+                                .map(|(k, v)| (k[1..].to_string(), v.clone()))  // Remove $ prefix for context binding
+                                .collect();
+
+                            // Save current bindings
+                            let saved_bindings: Vec<(String, Option<Value>)> = bindings.iter()
+                                .map(|(name, _)| (name.clone(), self.context.lookup(name).cloned()))
+                                .collect();
+
+                            // Bind tuple variables to context
+                            for (name, value) in &bindings {
+                                self.context.bind(name.clone(), value.clone());
+                            }
+
+                            // Get the actual value from the tuple (@ field)
+                            let actual_data = tuple_obj.get("@").cloned().unwrap_or(Value::Null);
+
+                            // Evaluate the step
+                            let step_result = match &step.node {
+                                AstNode::Variable(_) => {
+                                    // Variable lookup - check context (which now has bindings)
+                                    self.evaluate_internal(&step.node, tuple)?
+                                }
+                                AstNode::Object(_) | AstNode::FunctionApplication(_) => {
+                                    // Object constructor or function application - evaluate on actual data
+                                    self.evaluate_internal(&step.node, &actual_data)?
+                                }
+                                _ => unreachable!()  // We only match specific types above
+                            };
+
+                            // Restore previous bindings
+                            for (name, saved_value) in &saved_bindings {
+                                if let Some(value) = saved_value {
+                                    self.context.bind(name.clone(), value.clone());
+                                } else {
+                                    self.context.unbind(name);
+                                }
+                            }
+
+                            // Collect result
+                            if !matches!(step_result, Value::Null) && !is_undefined(&step_result) {
+                                // For object constructors, collect results directly
+                                // For other steps, handle arrays
+                                if matches!(&step.node, AstNode::Object(_)) {
+                                    results.push(step_result);
+                                } else if matches!(step_result, Value::Array(_)) {
+                                    if let Value::Array(arr) = step_result {
+                                        results.extend(arr);
+                                    }
+                                } else {
+                                    results.push(step_result);
+                                }
+                            }
+                        }
+                    }
+
+                    current = Value::Array(results);
+                    continue;  // Skip the regular step processing
+                }
+            }
+
             current = match &step.node {
                 AstNode::Wildcard => {
                     // Wildcard in path
-                    match &current {
+                    let stages = &step.stages;
+                    let wildcard_result = match &current {
                         Value::Object(obj) => {
                             let mut result = Vec::new();
                             for value in obj.values() {
@@ -1029,6 +1471,13 @@ impl Evaluator {
                             Value::Array(all_values)
                         }
                         _ => Value::Null,
+                    };
+
+                    // Apply stages (predicates) if present
+                    if !stages.is_empty() {
+                        self.apply_stages(wildcard_result, stages)?
+                    } else {
+                        wildcard_result
                     }
                 }
                 AstNode::Descendant => {
@@ -1055,6 +1504,11 @@ impl Evaluator {
 
                     match &current {
                         Value::Object(obj) => {
+                            // Single object field extraction - NOT array mapping
+                            // This resets did_array_mapping because we're extracting from
+                            // a single value, not mapping over an array. The field's value
+                            // (even if it's an array) should be preserved as-is.
+                            did_array_mapping = false;
                             let val = obj.get(field_name).cloned().unwrap_or(Value::Null);
                             // Apply stages if present
                             if !stages.is_empty() {
@@ -1071,37 +1525,78 @@ impl Evaluator {
                             for item in arr {
                                 match item {
                                     Value::Object(obj) => {
-                                        let val = obj.get(field_name).cloned().unwrap_or(Value::Null);
+                                        // Check if this is a tuple stream element
+                                        let (actual_obj, tuple_bindings) = if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                                            // This is a tuple - extract '@' value and preserve bindings
+                                            if let Some(Value::Object(inner)) = obj.get("@") {
+                                                // Collect index bindings (variables starting with $)
+                                                let bindings: Vec<(String, Value)> = obj.iter()
+                                                    .filter(|(k, _)| k.starts_with('$'))
+                                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                                    .collect();
+                                                (inner.clone(), Some(bindings))
+                                            } else {
+                                                continue; // Invalid tuple
+                                            }
+                                        } else {
+                                            (obj.clone(), None)
+                                        };
+
+                                        let val = actual_obj.get(field_name).cloned().unwrap_or(Value::Null);
 
                                         if !matches!(val, Value::Null) {
+                                            // Helper to wrap value in tuple if we have bindings
+                                            let wrap_in_tuple = |v: Value, bindings: &Option<Vec<(String, Value)>>| -> Value {
+                                                if let Some(b) = bindings {
+                                                    let mut wrapper = serde_json::Map::new();
+                                                    wrapper.insert("@".to_string(), v);
+                                                    wrapper.insert("__tuple__".to_string(), Value::Bool(true));
+                                                    for (k, val) in b {
+                                                        wrapper.insert(k.clone(), val.clone());
+                                                    }
+                                                    Value::Object(wrapper)
+                                                } else {
+                                                    v
+                                                }
+                                            };
+
                                             if !stages.is_empty() {
                                                 // Apply stages to the extracted value
                                                 let processed_val = self.apply_stages(val, stages)?;
                                                 // Stages always return an array (or null); extend results
                                                 match processed_val {
-                                                    Value::Array(arr) => result.extend(arr),
+                                                    Value::Array(arr) => {
+                                                        for item in arr {
+                                                            result.push(wrap_in_tuple(item, &tuple_bindings));
+                                                        }
+                                                    },
                                                     Value::Null => {}, // Skip nulls from stage application
-                                                    other => result.push(other), // Shouldn't happen, but handle it
+                                                    other => result.push(wrap_in_tuple(other, &tuple_bindings)),
                                                 }
                                             } else {
                                                 // No stages: flatten arrays, push scalars
+                                                // But preserve tuple bindings!
                                                 match val {
-                                                    Value::Array(arr) => result.extend(arr),
-                                                    other => result.push(other),
+                                                    Value::Array(arr) => {
+                                                        for item in arr {
+                                                            result.push(wrap_in_tuple(item, &tuple_bindings));
+                                                        }
+                                                    },
+                                                    other => result.push(wrap_in_tuple(other, &tuple_bindings)),
                                                 }
                                             }
                                         }
                                     }
-                                    Value::Array(inner_arr) => {
+                                    Value::Array(_) => {
                                         // Recursively map over nested array
                                         let nested_result = self.evaluate_path(&[step.clone()], item)?;
                                         match nested_result {
                                             Value::Array(nested) => result.extend(nested),
-                                            Value::Null => {}, // Skip nulls from nested arrays
+                                            Value::Null => {},
                                             other => result.push(other),
                                         }
                                     }
-                                    _ => {}, // Skip non-object items
+                                    _ => {},
                                 }
                             }
 
@@ -1145,10 +1640,20 @@ impl Evaluator {
                                 let mut group_values = Vec::new();
                                 for element in elements {
                                     let value = self.evaluate_internal(element, item)?;
-                                    // Flatten the value into group_values
-                                    match value {
-                                        Value::Array(arr) => group_values.extend(arr),
-                                        other => group_values.push(other),
+                                    // If the element is an Array/ArrayGroup, preserve its structure (don't flatten)
+                                    // This ensures [[expr]] produces properly nested arrays
+                                    let should_preserve_array = matches!(element,
+                                        AstNode::Array(_) | AstNode::ArrayGroup(_));
+
+                                    if should_preserve_array {
+                                        // Keep the array as a single element to preserve nesting
+                                        group_values.push(value);
+                                    } else {
+                                        // Flatten the value into group_values
+                                        match value {
+                                            Value::Array(arr) => group_values.extend(arr),
+                                            other => group_values.push(other),
+                                        }
                                     }
                                 }
                                 // Each array element gets its own sub-array with all values
@@ -1196,12 +1701,9 @@ impl Evaluator {
                                     result.push(value);
                                 }
                             }
-                            // Singleton sequence unwrapping
-                            if result.len() == 1 {
-                                result.into_iter().next().unwrap()
-                            } else {
-                                Value::Array(result)
-                            }
+                            // Don't do singleton unwrapping here - let the path result
+                            // handling deal with it, which respects has_explicit_array_keep
+                            Value::Array(result)
                         }
                         _ => {
                             // For non-arrays, bind $ and evaluate
@@ -1220,13 +1722,34 @@ impl Evaluator {
                         }
                     }
                 }
-                AstNode::Sort { input, terms } => {
-                    // Sort as a path step - the input should be evaluated in the context of current
-                    // But since Sort has its own input from being a postfix operator,
-                    // we need to evaluate the input relative to current, then sort
-                    // Actually, when Sort appears in a path, its input is what comes before the ^
-                    // So we should sort 'current' by the terms
+                AstNode::Sort { terms, .. } => {
+                    // Sort as a path step - sort 'current' by the terms
                     self.evaluate_sort(&current, terms)?
+                }
+                AstNode::IndexBind { variable, .. } => {
+                    // Index binding as a path step - creates tuple stream from current
+                    // This wraps each element with an index binding
+                    match &current {
+                        Value::Array(arr) => {
+                            let mut result = Vec::new();
+                            for (idx, item) in arr.iter().enumerate() {
+                                let mut wrapper = serde_json::Map::new();
+                                wrapper.insert("@".to_string(), item.clone());
+                                wrapper.insert(format!("${}", variable), serde_json::json!(idx));
+                                wrapper.insert("__tuple__".to_string(), Value::Bool(true));
+                                result.push(Value::Object(wrapper));
+                            }
+                            Value::Array(result)
+                        }
+                        other => {
+                            // Single value: wrap with index 0
+                            let mut wrapper = serde_json::Map::new();
+                            wrapper.insert("@".to_string(), other.clone());
+                            wrapper.insert(format!("${}", variable), serde_json::json!(0));
+                            wrapper.insert("__tuple__".to_string(), Value::Bool(true));
+                            Value::Object(wrapper)
+                        }
+                    }
                 }
                 // Handle complex path steps (e.g., computed properties, object construction)
                 _ => self.evaluate_path_step(&step.node, &current, data)?
@@ -1249,21 +1772,21 @@ impl Evaluator {
             }
             // Check if any stage is an empty predicate
             step.stages.iter().any(|stage| {
-                if let crate::ast::Stage::Filter(pred) = stage {
-                    matches!(**pred, AstNode::Boolean(true))
-                } else {
-                    false
-                }
+                let crate::ast::Stage::Filter(pred) = stage;
+                matches!(**pred, AstNode::Boolean(true))
             })
         });
 
         // Unwrap when:
-        // 1. Original data was an array (array mapping scenario), OR
-        // 2. Any step has stages (predicates, sorts, etc.) which are array operations, OR
-        // 3. We did array mapping during step evaluation (tracked via did_array_mapping flag)
+        // 1. Any step has stages (predicates, sorts, etc.) which are array operations, OR
+        // 2. We did array mapping during step evaluation (tracked via did_array_mapping flag)
+        //    Note: did_array_mapping is reset to false when extracting from a single object,
+        //    so a[0].b where a[0] returns a single object and .b extracts a field will NOT unwrap.
         // BUT NOT when there's an explicit array-keeping operation
+        //
+        // Important: We DON'T unwrap just because original data was an array - what matters is
+        // whether the final extraction was from an array mapping context or a single object.
         let should_unwrap = !has_explicit_array_keep && (
-            matches!(data, Value::Array(_)) ||
             steps.iter().any(|step| !step.stages.is_empty()) ||
             did_array_mapping
         );
@@ -1302,27 +1825,60 @@ impl Evaluator {
                 _ => unreachable!(),
             }
         } else {
-            // Special case: function calls on arrays should be mapped
-            if matches!(step, AstNode::Function { .. }) && matches!(current, Value::Array(_)) {
-                // Map the function call over each array element
-                if let Value::Array(arr) = current {
-                    let mut result = Vec::new();
-                    for item in arr {
-                        let value = self.evaluate_internal(step, item)?;
-                        result.push(value);
+            // Special case: array.$ should map $ over the array, returning each element
+            // e.g., [1, 2, 3].$ returns [1, 2, 3]
+            if let AstNode::Variable(name) = step {
+                if name.is_empty() {
+                    // Bare $ - map over array if current is an array
+                    if let Value::Array(arr) = current {
+                        // Map $ over each element - $ refers to each element in turn
+                        return Ok(Value::Array(arr.clone()));
+                    } else {
+                        // For non-arrays, $ refers to the current value
+                        return Ok(current.clone());
                     }
-                    return Ok(Value::Array(result));
                 }
             }
 
-            // For certain operations (Binary, Function calls, Variables, Arrays, Objects, Sort, Blocks), the step evaluates to a new value
+            // Special case: Variable access on tuple arrays (from index binding #$var)
+            // When current is a tuple array, we need to evaluate the variable against each tuple
+            // so that tuple bindings ($i, etc.) can be found
+            if matches!(step, AstNode::Variable(_)) {
+                if let Value::Array(arr) = current {
+                    // Check if this is a tuple array
+                    let is_tuple_array = arr.first().map_or(false, |first| {
+                        if let Value::Object(obj) = first {
+                            obj.get("__tuple__") == Some(&Value::Bool(true))
+                        } else {
+                            false
+                        }
+                    });
+
+                    if is_tuple_array {
+                        // Map the variable lookup over each tuple
+                        let mut results = Vec::new();
+                        for tuple in arr {
+                            // Evaluate the variable in the context of this tuple
+                            // This allows tuple bindings ($i, etc.) to be found
+                            let val = self.evaluate_internal(step, tuple)?;
+                            if !matches!(val, Value::Null) && !is_undefined(&val) {
+                                results.push(val);
+                            }
+                        }
+                        return Ok(Value::Array(results));
+                    }
+                }
+            }
+
+            // For certain operations (Binary, Function calls, Variables, ParentVariables, Arrays, Objects, Sort, Blocks), the step evaluates to a new value
             // rather than being used to index/access the current value
             // e.g., items[price > 50] where [price > 50] is a filter operation
             // or $x.price where $x is a variable binding
+            // or $$.field where $$ is the parent context
             // or [0..9] where it's an array constructor
             // or $^(field) where it's a sort operator
             // or (expr).field where (expr) is a block that evaluates to a value
-            if matches!(step, AstNode::Binary { .. } | AstNode::Function { .. } | AstNode::Variable(_) | AstNode::Array(_) | AstNode::Object(_) | AstNode::Sort { .. } | AstNode::Block(_)) {
+            if matches!(step, AstNode::Binary { .. } | AstNode::Function { .. } | AstNode::Variable(_) | AstNode::ParentVariable(_) | AstNode::Array(_) | AstNode::Object(_) | AstNode::Sort { .. } | AstNode::Block(_)) {
                 // Evaluate the step in the context of original_data and return the result directly
                 return self.evaluate_internal(step, original_data);
             }
@@ -1459,20 +2015,67 @@ impl Evaluator {
                 };
             }
 
+            // Early check: if LHS evaluates to undefined, return undefined
+            // This matches JSONata behavior where undefined ~> anyFunc returns undefined
+            let lhs_value_for_check = self.evaluate_internal(lhs, data)?;
+            if is_undefined(&lhs_value_for_check) || matches!(lhs_value_for_check, Value::Null) {
+                return Ok(undefined_value());
+            }
+
             // Handle different RHS types
             match rhs {
                 AstNode::Function { name, args, is_builtin } => {
                     // RHS is a function call
-                    // Build the complete args list with LHS (piped value) as first argument
-                    let mut all_args = vec![lhs.clone()];
-                    all_args.extend_from_slice(args);
-                    return self.evaluate_function_call(name, &all_args, *is_builtin, data);
+                    // Check if the function call has placeholder arguments (partial application)
+                    let has_placeholder = args.iter().any(|arg| matches!(arg, AstNode::Placeholder));
+
+                    if has_placeholder {
+                        // Partial application: replace the first placeholder with LHS value
+                        let lhs_value = self.evaluate_internal(lhs, data)?;
+                        let mut filled_args = Vec::new();
+                        let mut lhs_used = false;
+
+                        for arg in args.iter() {
+                            if matches!(arg, AstNode::Placeholder) && !lhs_used {
+                                // Replace first placeholder with evaluated LHS
+                                // We need to create a temporary binding to pass the value
+                                let temp_name = format!("__pipe_arg_{}", filled_args.len());
+                                self.context.bind(temp_name.clone(), lhs_value.clone());
+                                filled_args.push(AstNode::Variable(temp_name));
+                                lhs_used = true;
+                            } else {
+                                filled_args.push(arg.clone());
+                            }
+                        }
+
+                        // Evaluate the function with filled args
+                        let result = self.evaluate_function_call(name, &filled_args, *is_builtin, data);
+
+                        // Clean up temp bindings
+                        for (i, arg) in args.iter().enumerate() {
+                            if matches!(arg, AstNode::Placeholder) {
+                                self.context.unbind(&format!("__pipe_arg_{}", i));
+                            }
+                        }
+
+                        // Unwrap singleton results from chain operator
+                        return result.map(|v| self.unwrap_singleton(v));
+                    } else {
+                        // No placeholders: build args list with LHS as first argument
+                        let mut all_args = vec![lhs.clone()];
+                        all_args.extend_from_slice(args);
+                        // Unwrap singleton results from chain operator
+                        return self.evaluate_function_call(name, &all_args, *is_builtin, data)
+                            .map(|v| self.unwrap_singleton(v));
+                    }
                 }
                 AstNode::Variable(var_name) => {
                     // RHS is a function reference (no parens)
                     // e.g., $average($tempReadings) ~> $round
                     let all_args = vec![lhs.clone()];
-                    return self.evaluate_function_call(var_name, &all_args, true, data);
+                    // Unwrap singleton results from chain operator
+                    return self.evaluate_function_call(var_name, &all_args, true, data)
+                        .map(|v| self.unwrap_singleton(v));
                 }
                 AstNode::Binary { op: BinaryOp::ChainPipe, .. } => {
                     // RHS is another chain pipe - evaluate LHS first, then pipe through RHS
@@ -1498,12 +2101,97 @@ impl Evaluator {
                         self.context.unbind("$");
                     }
 
-                    return result;
+                    // Unwrap singleton results from chain operator
+                    return result.map(|v| self.unwrap_singleton(v));
                 }
-                AstNode::Lambda { params, body, signature } => {
+                AstNode::Lambda { params, body, signature, thunk } => {
                     // RHS is a lambda - invoke it with LHS as argument
                     let lhs_value = self.evaluate_internal(lhs, data)?;
-                    return self.invoke_lambda(params, body, signature.as_ref(), &[lhs_value], data);
+                    // Unwrap singleton results from chain operator
+                    return self.invoke_lambda(params, body, signature.as_ref(), &[lhs_value], data, *thunk)
+                        .map(|v| self.unwrap_singleton(v));
+                }
+                AstNode::Path { steps } => {
+                    // RHS is a path expression (e.g., function call with predicate: $map($f)[])
+                    // If the first step is a function call, we need to add LHS as first argument
+                    if let Some(first_step) = steps.first() {
+                        match &first_step.node {
+                            AstNode::Function { name, args, is_builtin } => {
+                                // Prepend LHS to the function arguments
+                                let mut all_args = vec![lhs.clone()];
+                                all_args.extend_from_slice(args);
+
+                                // Call the function
+                                let mut result = self.evaluate_function_call(name, &all_args, *is_builtin, data)?;
+
+                                // Apply stages from the first step (e.g., predicates)
+                                for stage in &first_step.stages {
+                                    match stage {
+                                        Stage::Filter(filter_expr) => {
+                                            result = self.evaluate_predicate_as_stage(&result, filter_expr)?;
+                                        }
+                                    }
+                                }
+
+                                // Apply remaining path steps if any
+                                if steps.len() > 1 {
+                                    let remaining_path = AstNode::Path {
+                                        steps: steps[1..].to_vec(),
+                                    };
+                                    result = self.evaluate_internal(&remaining_path, &result)?;
+                                }
+
+                                // Unwrap singleton results from chain operator, unless there are stages
+                                // Stages (like predicates) indicate we want to preserve array structure
+                                if !first_step.stages.is_empty() || steps.len() > 1 {
+                                    return Ok(result);
+                                } else {
+                                    return Ok(self.unwrap_singleton(result));
+                                }
+                            }
+                            AstNode::Variable(var_name) => {
+                                // Variable that should resolve to a function
+                                let all_args = vec![lhs.clone()];
+                                let mut result = self.evaluate_function_call(var_name, &all_args, true, data)?;
+
+                                // Apply stages from the first step
+                                for stage in &first_step.stages {
+                                    match stage {
+                                        Stage::Filter(filter_expr) => {
+                                            result = self.evaluate_predicate_as_stage(&result, filter_expr)?;
+                                        }
+                                    }
+                                }
+
+                                // Apply remaining path steps if any
+                                if steps.len() > 1 {
+                                    let remaining_path = AstNode::Path {
+                                        steps: steps[1..].to_vec(),
+                                    };
+                                    result = self.evaluate_internal(&remaining_path, &result)?;
+                                }
+
+                                // Unwrap singleton results from chain operator, unless there are stages
+                                // Stages (like predicates) indicate we want to preserve array structure
+                                if !first_step.stages.is_empty() || steps.len() > 1 {
+                                    return Ok(result);
+                                } else {
+                                    return Ok(self.unwrap_singleton(result));
+                                }
+                            }
+                            _ => {
+                                // Other path types - just evaluate normally with LHS as context
+                                let lhs_value = self.evaluate_internal(lhs, data)?;
+                                return self.evaluate_internal(rhs, &lhs_value)
+                                    .map(|v| self.unwrap_singleton(v));
+                            }
+                        }
+                    }
+
+                    // Empty path? Shouldn't happen, but handle it
+                    let lhs_value = self.evaluate_internal(lhs, data)?;
+                    return self.evaluate_internal(rhs, &lhs_value)
+                        .map(|v| self.unwrap_singleton(v));
                 }
                 _ => {
                     return Err(EvaluatorError::TypeError(
@@ -1526,7 +2214,7 @@ impl Evaluator {
             };
 
             // Check if RHS is a lambda - store it specially
-            if let AstNode::Lambda { params, body, signature } = rhs {
+            if let AstNode::Lambda { params, body, signature, thunk } = rhs {
                 // Store the lambda AST for later invocation
                 // Capture current environment for closure support
                 let captured_env = self.capture_current_environment();
@@ -1535,70 +2223,89 @@ impl Evaluator {
                     body: (**body).clone(),
                     signature: signature.clone(),
                     captured_env,
+                    captured_data: Some(data.clone()),
+                    thunk: *thunk,
                 };
-                self.context.bind_lambda(var_name, stored_lambda);
+                self.context.bind_lambda(var_name.clone(), stored_lambda);
 
-                // Return a lambda marker value
+                // Return a lambda marker value (include _lambda_id so it can be found later)
                 let lambda_repr = serde_json::json!({
                     "__lambda__": true,
                     "params": params,
+                    "_name": var_name,
+                    "_lambda_id": var_name,
                 });
                 return Ok(lambda_repr);
             }
 
-            // Check if RHS is a function composition (ChainPipe between function references)
+            // Check if RHS is a pure function composition (ChainPipe between function references)
             // e.g., $uppertrim := $trim ~> $uppercase
+            // This creates a lambda that composes the functions.
+            // But NOT for data ~> function, which should be evaluated immediately.
+            // e.g., $result := data ~> $map($fn) should evaluate the pipe
             if let AstNode::Binary { op: BinaryOp::ChainPipe, lhs: chain_lhs, rhs: chain_rhs } = rhs {
-                // Create a lambda: function($) { ($ ~> firstFunc) ~> restOfChain }
-                // The original chain is $trim ~> $uppercase (left-associative)
-                // We want to create: ($ ~> $trim) ~> $uppercase
-                let param_name = "$".to_string();
-
-                // First create $ ~> $trim
-                let first_pipe = AstNode::Binary {
-                    op: BinaryOp::ChainPipe,
-                    lhs: Box::new(AstNode::Variable(param_name.clone())),
-                    rhs: chain_lhs.clone(),
+                // Only wrap in lambda if LHS is a function reference (Variable pointing to a function)
+                // If LHS is data (array, object, function call result, etc.), evaluate the pipe
+                let is_function_composition = match chain_lhs.as_ref() {
+                    // LHS is a function reference like $trim or $sum
+                    AstNode::Variable(name) if self.is_builtin_function(name) || self.context.lookup_lambda(name).is_some() => true,
+                    // LHS is another ChainPipe (nested composition like $f ~> $g ~> $h)
+                    AstNode::Binary { op: BinaryOp::ChainPipe, .. } => true,
+                    // A function call with placeholder creates a partial application
+                    // e.g., $substringAfter(?, "@") ~> $substringBefore(?, ".")
+                    AstNode::Function { args, .. } if args.iter().any(|a| matches!(a, AstNode::Placeholder)) => true,
+                    // Anything else (data, function calls, arrays, etc.) is not pure composition
+                    _ => false,
                 };
 
-                // Then wrap with ~> $uppercase (or the rest of the chain)
-                let composed_body = AstNode::Binary {
-                    op: BinaryOp::ChainPipe,
-                    lhs: Box::new(first_pipe),
-                    rhs: chain_rhs.clone(),
-                };
+                if is_function_composition {
+                    // Create a lambda: function($) { ($ ~> firstFunc) ~> restOfChain }
+                    // The original chain is $trim ~> $uppercase (left-associative)
+                    // We want to create: ($ ~> $trim) ~> $uppercase
+                    let param_name = "$".to_string();
 
-                let stored_lambda = StoredLambda {
-                    params: vec![param_name],
-                    body: composed_body,
-                    signature: None,
-                    captured_env: self.capture_current_environment(),
-                };
-                self.context.bind_lambda(var_name.clone(), stored_lambda);
+                    // First create $ ~> $trim
+                    let first_pipe = AstNode::Binary {
+                        op: BinaryOp::ChainPipe,
+                        lhs: Box::new(AstNode::Variable(param_name.clone())),
+                        rhs: chain_lhs.clone(),
+                    };
 
-                // Return a lambda marker value
-                let lambda_repr = serde_json::json!({
-                    "__lambda__": true,
-                    "params": ["$"],
-                });
-                return Ok(lambda_repr);
+                    // Then wrap with ~> $uppercase (or the rest of the chain)
+                    let composed_body = AstNode::Binary {
+                        op: BinaryOp::ChainPipe,
+                        lhs: Box::new(first_pipe),
+                        rhs: chain_rhs.clone(),
+                    };
+
+                    let stored_lambda = StoredLambda {
+                        params: vec![param_name],
+                        body: composed_body,
+                        signature: None,
+                        captured_env: self.capture_current_environment(),
+                        captured_data: Some(data.clone()),
+                        thunk: false,
+                    };
+                    self.context.bind_lambda(var_name.clone(), stored_lambda);
+
+                    // Return a lambda marker value (include _lambda_id for later lookup)
+                    let lambda_repr = serde_json::json!({
+                        "__lambda__": true,
+                        "params": ["$"],
+                        "_name": var_name,
+                        "_lambda_id": var_name,
+                    });
+                    return Ok(lambda_repr);
+                }
+                // If not function composition, fall through to normal evaluation below
             }
 
             // Evaluate the RHS
             let value = self.evaluate_internal(rhs, data)?;
 
-            // Check if the value is a lambda with captured environment (closure)
-            // If so, we need to copy the stored lambda to the new variable name
-            if let Value::Object(map) = &value {
-                if map.contains_key("__lambda__") {
-                    if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
-                        // This is a lambda with captured environment
-                        // Copy the stored lambda to the new variable name
-                        if let Some(stored) = self.context.lookup_lambda(lambda_id).cloned() {
-                            self.context.bind_lambda(var_name.clone(), stored);
-                        }
-                    }
-                }
+            // If the value is a lambda, copy the stored lambda to the new variable name
+            if let Some(stored) = self.lookup_lambda_from_value(&value) {
+                self.context.bind_lambda(var_name.clone(), stored);
             }
 
             // Bind the variable in the current scope
@@ -1738,9 +2445,9 @@ impl Evaluator {
                 // undefined returns undefined
                 Value::Null => Ok(Value::Null),
                 Value::Number(n) => Ok(serde_json::json!(-n.as_f64().unwrap())),
-                _ => Err(EvaluatorError::TypeError(format!(
-                    "D1002: Cannot negate non-number value"
-                ))),
+                _ => Err(EvaluatorError::TypeError(
+                    "D1002: Cannot negate non-number value".to_string()
+                )),
             },
             UnaryOp::Not => Ok(Value::Bool(!self.is_truthy(&value))),
         }
@@ -1762,63 +2469,42 @@ impl Evaluator {
             return self.create_partial_application(name, args, is_builtin, data);
         }
 
-        // First, check if this "function name" is actually a stored lambda
+        // FIRST check if this variable holds a function value (lambda or builtin reference)
+        // This is critical for:
+        // 1. Allowing function parameters to shadow stored lambdas
+        //    (e.g., Y-combinator pattern: function($g){$g($g)} where parameter $g shadows outer $g)
+        // 2. Calling built-in functions passed as parameters
+        //    (e.g., λ($f){$f(5)}($sum) where $f is bound to $sum reference)
+        if let Some(value) = self.context.lookup(name).cloned() {
+            if let Some(stored_lambda) = self.lookup_lambda_from_value(&value) {
+                let mut evaluated_args = Vec::new();
+                for arg in args {
+                    evaluated_args.push(self.evaluate_internal(arg, data)?);
+                }
+                return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
+            }
+            if let Value::Object(ref map) = value {
+                if map.contains_key("__builtin__") {
+                    // This is a built-in function reference (e.g., $f bound to $sum)
+                    if let Some(Value::String(builtin_name)) = map.get("_name") {
+                        let mut evaluated_args = Vec::new();
+                        for arg in args {
+                            evaluated_args.push(self.evaluate_internal(arg, data)?);
+                        }
+                        return self.call_builtin_with_values(builtin_name, &evaluated_args);
+                    }
+                }
+            }
+        }
+
+        // THEN check if this is a stored lambda (user-defined function by name)
+        // This only applies if not shadowed by a binding above
         if let Some(stored_lambda) = self.context.lookup_lambda(name).cloned() {
-            // This is a lambda stored in a variable - invoke it
-            // Evaluate the arguments
             let mut evaluated_args = Vec::new();
             for arg in args {
                 evaluated_args.push(self.evaluate_internal(arg, data)?);
             }
-
-            // Invoke with captured environment
-            let captured_env = if stored_lambda.captured_env.is_empty() {
-                None
-            } else {
-                Some(&stored_lambda.captured_env)
-            };
-            return self.invoke_lambda_with_env(
-                &stored_lambda.params,
-                &stored_lambda.body,
-                stored_lambda.signature.as_ref(),
-                &evaluated_args,
-                data,
-                captured_env,
-            );
-        }
-
-        // Check if this variable holds a lambda value (JSON object with __lambda__)
-        // This handles closures where a lambda was captured in the environment
-        if let Some(value) = self.context.lookup(name).cloned() {
-            if let Value::Object(ref map) = value {
-                if map.contains_key("__lambda__") {
-                    // This is a lambda value - look up the stored lambda by its ID
-                    if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
-                        if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
-                            // Evaluate the arguments
-                            let mut evaluated_args = Vec::new();
-                            for arg in args {
-                                evaluated_args.push(self.evaluate_internal(arg, data)?);
-                            }
-
-                            // Invoke with captured environment
-                            let captured_env = if stored_lambda.captured_env.is_empty() {
-                                None
-                            } else {
-                                Some(&stored_lambda.captured_env)
-                            };
-                            return self.invoke_lambda_with_env(
-                                &stored_lambda.params,
-                                &stored_lambda.body,
-                                stored_lambda.signature.as_ref(),
-                                &evaluated_args,
-                                data,
-                                captured_env,
-                            );
-                        }
-                    }
-                }
-            }
+            return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
         }
 
         // If the function was called without $ prefix and it's not a stored lambda,
@@ -1842,21 +2528,7 @@ impl Evaluator {
 
             // Check if it's a function reference
             if let AstNode::Variable(var_name) = arg {
-                // Check if it's a built-in function name
-                let builtin_functions = [
-                    "abs", "append", "average", "boolean", "ceil", "contains", "count",
-                    "exists", "filter", "floor", "join", "keys", "length", "lowercase",
-                    "map", "max", "merge", "min", "not", "number", "pad", "power",
-                    "reduce", "replace", "reverse", "round", "shuffle", "sort", "split",
-                    "sqrt", "string", "substring", "substringAfter", "substringBefore",
-                    "sum", "trim", "uppercase", "zip", "each", "sift", "type", "assert",
-                    "error", "single", "lookup", "spread", "formatNumber", "formatBase",
-                    "toMillis", "fromMillis", "now", "millis", "parseInteger",
-                    "encodeUrl", "encodeUrlComponent", "decodeUrl", "decodeUrlComponent",
-                    "base64encode", "base64decode", "eval"
-                ];
-
-                if builtin_functions.contains(&var_name.as_str()) {
+                if self.is_builtin_function(var_name) {
                     return Ok(Value::Bool(true)); // Built-in function exists
                 }
 
@@ -1866,16 +2538,20 @@ impl Evaluator {
                 }
 
                 // Check if the variable is defined
-                if let Some(_) = self.context.lookup(var_name) {
+                if let Some(val) = self.context.lookup(var_name) {
+                    // A variable bound to the undefined marker doesn't "exist"
+                    if is_undefined(&val) {
+                        return Ok(Value::Bool(false));
+                    }
                     return Ok(Value::Bool(true)); // Variable is defined (even if null)
                 } else {
                     return Ok(Value::Bool(false)); // Variable is undefined
                 }
             }
 
-            // For other expressions, evaluate and check if non-null
+            // For other expressions, evaluate and check if non-null/non-undefined
             let value = self.evaluate_internal(arg, data)?;
-            return Ok(Value::Bool(!matches!(value, Value::Null)));
+            return Ok(Value::Bool(!matches!(value, Value::Null) && !is_undefined(&value)));
         }
 
         // Check if any arguments are undefined variables or undefined paths
@@ -1886,9 +2562,16 @@ impl Evaluator {
                 // Skip built-in function names - they're function references, not undefined variables
                 if !var_name.is_empty() && !self.is_builtin_function(var_name) && self.context.lookup(var_name).is_none() {
                     // Undefined variable - for functions that should propagate undefined
-                    if ["not", "boolean", "length", "number", "uppercase", "lowercase", "substring", "substringBefore", "substringAfter", "string"].contains(&name) {
+                    if propagates_undefined(name) {
                         return Ok(Value::Null); // Return undefined
                     }
+                }
+            }
+            // Check for simple field name (e.g., blah) that evaluates to undefined
+            if let AstNode::Name(field_name) = arg {
+                let field_exists = matches!(data, Value::Object(obj) if obj.contains_key(field_name));
+                if !field_exists && propagates_undefined(name) {
+                    return Ok(Value::Null);
                 }
             }
             // Note: AstNode::String represents string literals (e.g., "hello"), not field accesses.
@@ -1906,12 +2589,18 @@ impl Evaluator {
                     // Path evaluated to null - now check if it's truly undefined
                     // For single-step paths, check if the field exists
                     if steps.len() == 1 {
-                        if let AstNode::String(_field_name) = &steps[0].node {
+                        // Get field name - could be Name (identifier) or String (quoted)
+                        let field_name = match &steps[0].node {
+                            AstNode::Name(n) => Some(n.as_str()),
+                            AstNode::String(s) => Some(s.as_str()),
+                            _ => None,
+                        };
+                        if let Some(_field_name) = field_name {
                             match data {
                                 Value::Object(obj) => {
                                     if !obj.contains_key(_field_name) {
                                         // Field doesn't exist - return undefined
-                                        if ["not", "boolean", "length", "number", "uppercase", "lowercase", "substring", "substringBefore", "substringAfter", "string"].contains(&name) {
+                                        if propagates_undefined(name) {
                                             return Ok(Value::Null);
                                         }
                                     }
@@ -1919,7 +2608,7 @@ impl Evaluator {
                                 }
                                 Value::Null => {
                                     // Trying to access field on null data - return undefined
-                                    if ["not", "boolean", "length", "number", "uppercase", "lowercase", "substring", "substringBefore", "substringAfter", "string"].contains(&name) {
+                                    if propagates_undefined(name) {
                                         return Ok(Value::Null);
                                     }
                                 }
@@ -1963,7 +2652,7 @@ impl Evaluator {
                         }
 
                         if failed_due_to_missing_field {
-                            if ["not", "boolean", "length", "number", "uppercase", "lowercase", "substring", "substringBefore", "substringAfter", "string"].contains(&name) {
+                            if propagates_undefined(name) {
                                 return Ok(Value::Null);
                             }
                         }
@@ -2093,10 +2782,18 @@ impl Evaluator {
                         "sum() requires exactly 1 argument".to_string(),
                     ));
                 }
+                // Return undefined if argument is undefined
+                if is_undefined(&evaluated_args[0]) {
+                    return Ok(undefined_value());
+                }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::Array(arr) => functions::numeric::sum(arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Array(arr) => {
+                        // Flatten nested arrays for sum
+                        let flattened = flatten_for_aggregation(arr);
+                        functions::numeric::sum(&flattened)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
                     // Non-array values are treated as single-element arrays
                     other => functions::numeric::sum(&[other.clone()])
                         .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
@@ -2109,8 +2806,12 @@ impl Evaluator {
                         "count() requires exactly 1 argument".to_string(),
                     ));
                 }
+                // Return 0 if argument is undefined
+                if is_undefined(&evaluated_args[0]) {
+                    return Ok(serde_json::json!(0));
+                }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(serde_json::json!(0)), // undefined counts as 0
+                    Value::Null => Ok(serde_json::json!(0)), // null counts as 0
                     Value::Array(arr) => functions::array::count(arr)
                         .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
                     _ => Ok(serde_json::json!(1)), // Non-array value counts as 1
@@ -2450,6 +3151,138 @@ impl Evaluator {
                     )),
                 }
             }
+            "match" => {
+                // $match(str, pattern [, limit])
+                // Returns array of match objects for regex matches or custom matcher function
+                if evaluated_args.is_empty() || evaluated_args.len() > 3 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "match() requires 1 to 3 arguments".to_string(),
+                    ));
+                }
+                if matches!(evaluated_args[0], Value::Null) {
+                    return Ok(Value::Null);
+                }
+
+                let s = match &evaluated_args[0] {
+                    Value::String(s) => s.clone(),
+                    _ => return Err(EvaluatorError::TypeError(
+                        "match() first argument must be a string".to_string(),
+                    )),
+                };
+
+                // Get optional limit
+                let limit = if evaluated_args.len() == 3 {
+                    match &evaluated_args[2] {
+                        Value::Number(n) => Some(n.as_f64().unwrap() as usize),
+                        Value::Null => None,
+                        _ => return Err(EvaluatorError::TypeError(
+                            "match() limit must be a number".to_string(),
+                        )),
+                    }
+                } else {
+                    None
+                };
+
+                // Check if second argument is a custom matcher function (lambda)
+                let pattern_value = evaluated_args.get(1);
+                let is_custom_matcher = pattern_value.map_or(false, |val| {
+                    if let Value::Object(map) = val {
+                        map.contains_key("__lambda__") || map.contains_key("__builtin__")
+                    } else {
+                        false
+                    }
+                });
+
+                if is_custom_matcher {
+                    // Custom matcher function support
+                    // Call the matcher with the string, get match objects with {match, start, end, groups, next}
+                    return self.match_with_custom_matcher(&s, &args[1], limit, data);
+                }
+
+                // Get regex pattern from second argument
+                let (pattern, flags) = match pattern_value {
+                    Some(val) => crate::functions::string::extract_regex(val)
+                        .ok_or_else(|| EvaluatorError::TypeError(
+                            "match() second argument must be a regex pattern or matcher function".to_string()
+                        ))?,
+                    None => {
+                        // If no pattern, use regex that matches everything
+                        (".*".to_string(), "".to_string())
+                    }
+                };
+
+                // Get optional limit
+                let limit = if evaluated_args.len() == 3 {
+                    match &evaluated_args[2] {
+                        Value::Number(n) => Some(n.as_f64().unwrap() as usize),
+                        Value::Null => None,
+                        _ => return Err(EvaluatorError::TypeError(
+                            "match() limit must be a number".to_string(),
+                        )),
+                    }
+                } else {
+                    None
+                };
+
+                // Build regex
+                let is_global = flags.contains('g');
+                let regex_pattern = if flags.contains('i') {
+                    format!("(?i){}", pattern)
+                } else {
+                    pattern.clone()
+                };
+
+                let re = regex::Regex::new(&regex_pattern)
+                    .map_err(|e| EvaluatorError::EvaluationError(
+                        format!("Invalid regex pattern: {}", e)
+                    ))?;
+
+                let mut results = Vec::new();
+                let mut count = 0;
+
+                for caps in re.captures_iter(&s) {
+                    if let Some(lim) = limit {
+                        if count >= lim {
+                            break;
+                        }
+                    }
+
+                    let full_match = caps.get(0).unwrap();
+                    let mut match_obj = serde_json::Map::new();
+                    match_obj.insert("match".to_string(), Value::String(full_match.as_str().to_string()));
+                    match_obj.insert("index".to_string(), Value::Number(serde_json::Number::from(full_match.start())));
+
+                    // Collect capture groups
+                    let mut groups: Vec<Value> = Vec::new();
+                    for i in 1..caps.len() {
+                        if let Some(group) = caps.get(i) {
+                            groups.push(Value::String(group.as_str().to_string()));
+                        } else {
+                            groups.push(Value::Null);
+                        }
+                    }
+                    if !groups.is_empty() {
+                        match_obj.insert("groups".to_string(), Value::Array(groups));
+                    }
+
+                    results.push(Value::Object(match_obj));
+                    count += 1;
+
+                    // If not global, only return first match
+                    if !is_global {
+                        break;
+                    }
+                }
+
+                if results.is_empty() {
+                    Ok(Value::Null)
+                } else if results.len() == 1 && !is_global {
+                    // Single match (non-global) returns the match object directly
+                    Ok(results.into_iter().next().unwrap())
+                } else {
+                    Ok(Value::Array(results))
+                }
+            }
             // Additional numeric functions
             "max" => {
                 if evaluated_args.len() != 1 {
@@ -2463,8 +3296,11 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::Array(arr) => functions::numeric::max(arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Array(arr) => {
+                        let flattened = flatten_for_aggregation(arr);
+                        functions::numeric::max(&flattened)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
                     Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
                         "max() requires an array or number argument".to_string(),
@@ -2483,8 +3319,11 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::Array(arr) => functions::numeric::min(arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Array(arr) => {
+                        let flattened = flatten_for_aggregation(arr);
+                        functions::numeric::min(&flattened)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
                     Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
                         "min() requires an array or number argument".to_string(),
@@ -2497,10 +3336,18 @@ impl Evaluator {
                         "average() requires exactly 1 argument".to_string(),
                     ));
                 }
+                // Return undefined if argument is undefined
+                if is_undefined(&evaluated_args[0]) {
+                    return Ok(undefined_value());
+                }
                 match &evaluated_args[0] {
                     Value::Null => Ok(Value::Null),
-                    Value::Array(arr) => functions::numeric::average(arr)
-                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string())),
+                    Value::Array(arr) => {
+                        // Flatten nested arrays for average
+                        let flattened = flatten_for_aggregation(arr);
+                        functions::numeric::average(&flattened)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                    }
                     Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
                         "average() requires an array or number argument".to_string(),
@@ -2752,7 +3599,12 @@ impl Evaluator {
                             result.insert(key.clone(), value.clone());
                         }
                     }
-                    Ok(Value::Object(result))
+                    // Return undefined for empty results (will be filtered by function application)
+                    if result.is_empty() {
+                        Ok(undefined_value())
+                    } else {
+                        Ok(Value::Object(result))
+                    }
                 };
 
                 // Handle partial application - if only 1 arg, use current context as object
@@ -2768,7 +3620,10 @@ impl Evaluator {
                             for item in arr {
                                 if let Value::Object(o) = item {
                                     let sifted = sift_object(self, o, &args[0], item)?;
-                                    results.push(sifted);
+                                    // sift_object returns undefined for empty results
+                                    if !is_undefined(&sifted) {
+                                        results.push(sifted);
+                                    }
                                 }
                             }
                             return Ok(Value::Array(results));
@@ -3145,28 +4000,49 @@ impl Evaluator {
                 // Evaluate the array argument
                 let array = self.evaluate_internal(&args[0], data)?;
 
-                match array {
-                    Value::Array(arr) => {
-                        let arr_value = Value::Array(arr.clone());
-                        let mut result = Vec::with_capacity(arr.len() / 2);
-                        for (index, item) in arr.into_iter().enumerate() {
-                            // Apply predicate function with (item, index, array)
-                            let predicate_result = self.apply_function(
-                                &args[1],
-                                &[item.clone(), Value::Number(serde_json::Number::from(index)), arr_value.clone()],
-                                data
-                            )?;
-                            if self.is_truthy(&predicate_result) {
-                                result.push(item);
-                            }
-                        }
-                        Ok(Value::Array(result))
-                    }
-                    Value::Null => Ok(Value::Null),
-                    _ => Err(EvaluatorError::TypeError(
-                        "filter() first argument must be an array".to_string(),
-                    )),
+                // Handle undefined input - return undefined
+                if is_undefined(&array) {
+                    return Ok(undefined_value());
                 }
+
+                // Handle null input
+                if matches!(array, Value::Null) {
+                    return Ok(undefined_value());
+                }
+
+                // Coerce non-array values to single-element arrays
+                // Track if input was a single value to unwrap result appropriately
+                let (arr, was_single_value) = match array {
+                    Value::Array(arr) => (arr, false),
+                    single_value => (vec![single_value], true),
+                };
+
+                let arr_value = Value::Array(arr.clone());
+                let mut result = Vec::with_capacity(arr.len() / 2);
+
+                for (index, item) in arr.into_iter().enumerate() {
+                    // Apply predicate function with (item, index, array)
+                    let predicate_result = self.apply_function(
+                        &args[1],
+                        &[item.clone(), Value::Number(serde_json::Number::from(index)), arr_value.clone()],
+                        data
+                    )?;
+                    if self.is_truthy(&predicate_result) {
+                        result.push(item);
+                    }
+                }
+
+                // If input was a single value, return the single matching item
+                // (or undefined if no match)
+                if was_single_value {
+                    if result.len() == 1 {
+                        return Ok(result.remove(0));
+                    } else if result.is_empty() {
+                        return Ok(undefined_value());
+                    }
+                }
+
+                Ok(Value::Array(result))
             }
 
             "reduce" => {
@@ -3291,42 +4167,6 @@ impl Evaluator {
                             format!("single() predicate matches {} values (expected exactly 1)", count),
                         )),
                     }
-                }
-            }
-
-            "sift" => {
-                if args.is_empty() || args.len() > 2 {
-                    return Err(EvaluatorError::EvaluationError(
-                        "sift() requires 1 or 2 arguments".to_string(),
-                    ));
-                }
-
-                // Determine which argument is the object and which is the function
-                let (obj_value, func_arg) = if args.len() == 1 {
-                    // Single argument: use current data as object
-                    (data.clone(), &args[0])
-                } else {
-                    // Two arguments: first is object, second is function
-                    (self.evaluate_internal(&args[0], data)?, &args[1])
-                };
-
-                match obj_value {
-                    Value::Object(obj) => {
-                        let mut result = serde_json::Map::new();
-                        for (key, value) in obj {
-                            // Apply predicate function with the value
-                            // In JSONata, the predicate receives the value, not the key-value pair
-                            let predicate_result = self.apply_function(func_arg, &[value.clone()], data)?;
-                            if self.is_truthy(&predicate_result) {
-                                result.insert(key.clone(), value.clone());
-                            }
-                        }
-                        Ok(Value::Object(result))
-                    }
-                    Value::Null => Ok(Value::Null),
-                    _ => Err(EvaluatorError::TypeError(
-                        "sift() first argument must be an object".to_string(),
-                    )),
                 }
             }
 
@@ -3665,19 +4505,23 @@ impl Evaluator {
                 match &evaluated_args[0] {
                     Value::String(s) => {
                         // Optional second argument is a picture string for custom parsing
-                        let _picture = if evaluated_args.len() == 2 {
+                        if evaluated_args.len() == 2 {
                             match &evaluated_args[1] {
-                                Value::String(p) => Some(p.as_str()),
-                                _ => None,
+                                Value::String(picture) => {
+                                    // Use custom picture format parsing
+                                    crate::datetime::to_millis_with_picture(s, picture)
+                                        .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                                }
+                                Value::Null => Ok(Value::Null),
+                                _ => Err(EvaluatorError::TypeError(
+                                    "toMillis() second argument must be a string".to_string(),
+                                )),
                             }
                         } else {
-                            None
-                        };
-
-                        // For now, only support ISO 8601 format (picture string ignored)
-                        // TODO: Implement custom picture string parsing
-                        crate::datetime::to_millis(s)
-                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                            // Use ISO 8601 partial date parsing
+                            crate::datetime::to_millis(s)
+                                .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        }
                     }
                     Value::Null => Ok(Value::Null),
                     _ => Err(EvaluatorError::TypeError(
@@ -3724,52 +4568,48 @@ impl Evaluator {
     /// 2. Simple expressions: price * 2 - evaluates with values as context
     fn apply_function(&mut self, func_node: &AstNode, values: &[Value], data: &Value) -> Result<Value, EvaluatorError> {
         match func_node {
-            AstNode::Lambda { params, body, signature } => {
+            AstNode::Lambda { params, body, signature, thunk } => {
                 // Direct lambda - invoke it
-                self.invoke_lambda(params, body, signature.as_ref(), values, data)
+                self.invoke_lambda(params, body, signature.as_ref(), values, data, *thunk)
+            }
+            AstNode::Function { name, args, is_builtin } => {
+                // Function call - check if it has placeholders (partial application)
+                let has_placeholder = args.iter().any(|arg| matches!(arg, AstNode::Placeholder));
+
+                if has_placeholder {
+                    // This is a partial application - evaluate it to get the lambda value
+                    let partial_lambda = self.create_partial_application(name, args, *is_builtin, data)?;
+
+                    // Now invoke the partial lambda with the provided values
+                    if let Some(stored) = self.lookup_lambda_from_value(&partial_lambda) {
+                        return self.invoke_stored_lambda(&stored, values, data);
+                    }
+                    return Err(EvaluatorError::EvaluationError(
+                        "Failed to apply partial application".to_string()
+                    ));
+                } else {
+                    // Regular function call without placeholders
+                    // Evaluate it and apply if it returns a function
+                    let result = self.evaluate_internal(func_node, data)?;
+
+                    // Check if result is a lambda value
+                    if let Some(stored) = self.lookup_lambda_from_value(&result) {
+                        return self.invoke_stored_lambda(&stored, values, data);
+                    }
+
+                    // Otherwise just return the result
+                    Ok(result)
+                }
             }
             AstNode::Variable(var_name) => {
                 // Check if this variable holds a stored lambda
                 if let Some(stored_lambda) = self.context.lookup_lambda(var_name).cloned() {
-                    // Invoke the stored lambda with its captured environment
-                    let captured_env = if stored_lambda.captured_env.is_empty() {
-                        None
-                    } else {
-                        Some(&stored_lambda.captured_env)
-                    };
-                    self.invoke_lambda_with_env(
-                        &stored_lambda.params,
-                        &stored_lambda.body,
-                        stored_lambda.signature.as_ref(),
-                        values,
-                        data,
-                        captured_env,
-                    )
+                    self.invoke_stored_lambda(&stored_lambda, values, data)
                 } else if let Some(value) = self.context.lookup(var_name).cloned() {
                     // Check if this variable holds a lambda value (JSON object with __lambda__)
                     // This handles lambdas passed as bound arguments in partial applications
-                    if let Value::Object(ref map) = value {
-                        if map.contains_key("__lambda__") {
-                            // This is a lambda value - look up the stored lambda by its ID
-                            if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
-                                if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
-                                    // Invoke with captured environment
-                                    let captured_env = if stored_lambda.captured_env.is_empty() {
-                                        None
-                                    } else {
-                                        Some(&stored_lambda.captured_env)
-                                    };
-                                    return self.invoke_lambda_with_env(
-                                        &stored_lambda.params,
-                                        &stored_lambda.body,
-                                        stored_lambda.signature.as_ref(),
-                                        values,
-                                        data,
-                                        captured_env,
-                                    );
-                                }
-                            }
-                        }
+                    if let Some(stored) = self.lookup_lambda_from_value(&value) {
+                        return self.invoke_stored_lambda(&stored, values, data);
                     }
                     // Regular variable value - evaluate with first value as context
                     if values.is_empty() {
@@ -3807,7 +4647,7 @@ impl Evaluator {
         location: &AstNode,
         update: &AstNode,
         delete: Option<&AstNode>,
-        original_data: &Value,
+        _original_data: &Value,
     ) -> Result<Value, EvaluatorError> {
         // Get the input value from $ binding
         let input = self.context.lookup("$")
@@ -3918,8 +4758,8 @@ impl Evaluator {
     }
 
     /// Helper to invoke a lambda with given parameters
-    fn invoke_lambda(&mut self, params: &[String], body: &AstNode, signature: Option<&String>, values: &[Value], data: &Value) -> Result<Value, EvaluatorError> {
-        self.invoke_lambda_with_env(params, body, signature, values, data, None)
+    fn invoke_lambda(&mut self, params: &[String], body: &AstNode, signature: Option<&String>, values: &[Value], data: &Value, thunk: bool) -> Result<Value, EvaluatorError> {
+        self.invoke_lambda_with_env(params, body, signature, values, data, None, None, thunk)
     }
 
     /// Invoke a lambda with optional captured environment (for closures)
@@ -3930,8 +4770,23 @@ impl Evaluator {
         signature: Option<&String>,
         values: &[Value],
         data: &Value,
-        captured_env: Option<&std::collections::HashMap<String, Value>>,
+        captured_env: Option<&HashMap<String, Value>>,
+        captured_data: Option<&Value>,
+        thunk: bool,
     ) -> Result<Value, EvaluatorError> {
+        // If this is a thunk (has tail calls), use TCO trampoline
+        if thunk {
+            let stored = StoredLambda {
+                params: params.to_vec(),
+                body: body.clone(),
+                signature: signature.cloned(),
+                captured_env: captured_env.cloned().unwrap_or_default(),
+                captured_data: captured_data.cloned(),
+                thunk,
+            };
+            return self.invoke_lambda_with_tco(&stored, values, data);
+        }
+
         // Validate signature if present, and get coerced arguments
         let coerced_values = if let Some(sig_str) = signature {
             match crate::signature::Signature::parse(sig_str) {
@@ -3984,7 +4839,7 @@ impl Evaluator {
             vars_to_restore.extend(env.keys().cloned());
         }
 
-        let saved_bindings: std::collections::HashMap<String, Option<Value>> = vars_to_restore
+        let saved_bindings: HashMap<String, Option<Value>> = vars_to_restore
             .iter()
             .map(|name| (name.clone(), self.context.lookup(name).cloned()))
             .collect();
@@ -3997,9 +4852,9 @@ impl Evaluator {
         }
 
         // Then bind lambda parameters to provided values (these override captured env)
-        // If there are more params than values, extra params get undefined (null)
+        // If there are more params than values, extra params get undefined
         for (i, param) in params.iter().enumerate() {
-            let value = coerced_values.get(i).cloned().unwrap_or(Value::Null);
+            let value = coerced_values.get(i).cloned().unwrap_or_else(undefined_value);
             self.context.bind(param.clone(), value);
         }
 
@@ -4083,7 +4938,9 @@ impl Evaluator {
         }
 
         // Evaluate lambda body (normal case)
-        let result = self.evaluate_internal(body, data)?;
+        // Use captured_data for lexical scoping if available, otherwise use call-site data
+        let body_data = captured_data.unwrap_or(data);
+        let result = self.evaluate_internal(body, body_data)?;
 
         // Restore previous bindings
         for (name, saved_value) in saved_bindings {
@@ -4096,8 +4953,367 @@ impl Evaluator {
 
         Ok(result)
     }
+
+    /// Invoke a lambda with tail call optimization using a trampoline
+    /// This method uses an iterative loop to handle tail-recursive calls without
+    /// growing the stack, enabling deep recursion for tail-recursive functions.
+    fn invoke_lambda_with_tco(
+        &mut self,
+        stored_lambda: &StoredLambda,
+        initial_args: &[Value],
+        data: &Value,
+    ) -> Result<Value, EvaluatorError> {
+        let mut current_lambda = stored_lambda.clone();
+        let mut current_args = initial_args.to_vec();
+        let mut current_data = data.clone();
+
+        // Maximum number of tail call iterations to prevent infinite loops
+        // This is much higher than non-TCO depth limit since TCO doesn't grow the stack
+        const MAX_TCO_ITERATIONS: usize = 100_000;
+        let mut iterations = 0;
+
+        // Trampoline loop - keeps evaluating until we get a final value
+        loop {
+            iterations += 1;
+            if iterations > MAX_TCO_ITERATIONS {
+                return Err(EvaluatorError::EvaluationError(
+                    "U1001: Stack overflow - maximum recursion depth (500) exceeded".to_string()
+                ));
+            }
+
+            // Evaluate the lambda body
+            let result = self.invoke_lambda_body_for_tco(
+                &current_lambda,
+                &current_args,
+                &current_data,
+            )?;
+
+            match result {
+                LambdaResult::Value(v) => return Ok(v),
+                LambdaResult::TailCall { lambda, args, data } => {
+                    // Continue with the tail call - no stack growth
+                    current_lambda = lambda;
+                    current_args = args;
+                    current_data = data;
+                }
+            }
+        }
+    }
+
+    /// Evaluate a lambda body, detecting tail calls for TCO
+    /// Returns either a final value or a tail call continuation
+    fn invoke_lambda_body_for_tco(
+        &mut self,
+        lambda: &StoredLambda,
+        values: &[Value],
+        data: &Value,
+    ) -> Result<LambdaResult, EvaluatorError> {
+        // Validate signature if present
+        let coerced_values = if let Some(sig_str) = &lambda.signature {
+            match crate::signature::Signature::parse(sig_str) {
+                Ok(sig) => {
+                    match sig.validate_and_coerce(values) {
+                        Ok(coerced) => coerced,
+                        Err(e) => {
+                            match e {
+                                crate::signature::SignatureError::UndefinedArgument => {
+                                    return Ok(LambdaResult::Value(Value::Null));
+                                }
+                                crate::signature::SignatureError::ArgumentTypeMismatch { index, expected } => {
+                                    return Err(EvaluatorError::TypeError(
+                                        format!("T0410: Argument {} of function does not match function signature (expected {})", index, expected)
+                                    ));
+                                }
+                                crate::signature::SignatureError::ArrayTypeMismatch { index, expected } => {
+                                    return Err(EvaluatorError::TypeError(
+                                        format!("T0412: Argument {} of function must be an array of {}", index, expected)
+                                    ));
+                                }
+                                _ => {
+                                    return Err(EvaluatorError::TypeError(format!("Signature validation failed: {}", e)));
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(EvaluatorError::EvaluationError(format!("Invalid signature: {}", e)));
+                }
+            }
+        } else {
+            values.to_vec()
+        };
+
+        // Save and bind parameters
+        let mut vars_to_restore: Vec<String> = lambda.params.clone();
+        if !lambda.captured_env.is_empty() {
+            vars_to_restore.extend(lambda.captured_env.keys().cloned());
+        }
+
+        let saved_bindings: HashMap<String, Option<Value>> = vars_to_restore
+            .iter()
+            .map(|name| (name.clone(), self.context.lookup(name).cloned()))
+            .collect();
+
+        // Apply captured environment
+        for (name, value) in &lambda.captured_env {
+            self.context.bind(name.clone(), value.clone());
+        }
+
+        // Bind parameters
+        for (i, param) in lambda.params.iter().enumerate() {
+            let value = coerced_values.get(i).cloned().unwrap_or(Value::Null);
+            self.context.bind(param.clone(), value);
+        }
+
+        // Evaluate the body with tail call detection
+        let body_data = lambda.captured_data.as_ref().unwrap_or(data);
+        let result = self.evaluate_for_tco(&lambda.body, body_data)?;
+
+        // Restore bindings
+        for (name, saved_value) in saved_bindings {
+            if let Some(value) = saved_value {
+                self.context.bind(name, value);
+            } else {
+                self.context.unbind(&name);
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Evaluate an expression for TCO, detecting tail calls
+    /// Returns LambdaResult::TailCall if the expression is a function call to a user lambda
+    fn evaluate_for_tco(&mut self, node: &AstNode, data: &Value) -> Result<LambdaResult, EvaluatorError> {
+        match node {
+            // Conditional: evaluate condition, then evaluate the chosen branch for TCO
+            AstNode::Conditional { condition, then_branch, else_branch } => {
+                let cond_value = self.evaluate_internal(condition, data)?;
+                let is_truthy = self.is_truthy(&cond_value);
+
+                if is_truthy {
+                    self.evaluate_for_tco(then_branch, data)
+                } else if let Some(else_expr) = else_branch {
+                    self.evaluate_for_tco(else_expr, data)
+                } else {
+                    Ok(LambdaResult::Value(Value::Null))
+                }
+            }
+
+            // Block: evaluate all but last normally, last for TCO
+            AstNode::Block(exprs) => {
+                if exprs.is_empty() {
+                    return Ok(LambdaResult::Value(Value::Null));
+                }
+
+                // Evaluate all expressions except the last
+                let mut result = Value::Null;
+                for (i, expr) in exprs.iter().enumerate() {
+                    if i == exprs.len() - 1 {
+                        // Last expression - evaluate for TCO
+                        return self.evaluate_for_tco(expr, data);
+                    } else {
+                        result = self.evaluate_internal(expr, data)?;
+                    }
+                }
+                Ok(LambdaResult::Value(result))
+            }
+
+            // Variable binding: evaluate value, bind, then evaluate result for TCO if present
+            AstNode::Binary { op: BinaryOp::ColonEqual, lhs, rhs } => {
+                // This is var := value; get the variable name
+                let var_name = match lhs.as_ref() {
+                    AstNode::Variable(name) => name.clone(),
+                    _ => {
+                        // Not a simple variable binding, evaluate normally
+                        let result = self.evaluate_internal(node, data)?;
+                        return Ok(LambdaResult::Value(result));
+                    }
+                };
+
+                // Check if RHS is a lambda - store it specially
+                if let AstNode::Lambda { params, body, signature, thunk } = rhs.as_ref() {
+                    let captured_env = self.capture_current_environment();
+                    let stored_lambda = StoredLambda {
+                        params: params.clone(),
+                        body: (**body).clone(),
+                        signature: signature.clone(),
+                        captured_env,
+                        captured_data: Some(data.clone()),
+                        thunk: *thunk,
+                    };
+                    self.context.bind_lambda(var_name, stored_lambda);
+                    let lambda_repr = serde_json::json!({
+                        "__lambda__": true,
+                        "params": params,
+                    });
+                    return Ok(LambdaResult::Value(lambda_repr));
+                }
+
+                // Evaluate the RHS
+                let value = self.evaluate_internal(rhs, data)?;
+                self.context.bind(var_name, value.clone());
+                Ok(LambdaResult::Value(value))
+            }
+
+            // Function call - this is where TCO happens
+            AstNode::Function { name, args, .. } => {
+                // Check if this is a call to a stored lambda (user function)
+                if let Some(stored_lambda) = self.context.lookup_lambda(name).cloned() {
+                    if stored_lambda.thunk {
+                        // Evaluate arguments
+                        let mut evaluated_args = Vec::new();
+                        for arg in args {
+                            evaluated_args.push(self.evaluate_internal(arg, data)?);
+                        }
+                        // Return tail call instead of invoking
+                        return Ok(LambdaResult::TailCall {
+                            lambda: stored_lambda,
+                            args: evaluated_args,
+                            data: data.clone(),
+                        });
+                    }
+                }
+                // Not a thunk lambda - evaluate normally
+                let result = self.evaluate_internal(node, data)?;
+                Ok(LambdaResult::Value(result))
+            }
+
+            // Call node (calling a lambda value)
+            AstNode::Call { procedure, args } => {
+                // Evaluate the procedure to get the callable
+                let callable = self.evaluate_internal(procedure, data)?;
+
+                // Check if it's a lambda with TCO
+                if let Value::Object(ref map) = callable {
+                    if map.contains_key("__lambda__") {
+                        if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
+                            if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
+                                if stored_lambda.thunk {
+                                    // Evaluate arguments
+                                    let mut evaluated_args = Vec::new();
+                                    for arg in args {
+                                        evaluated_args.push(self.evaluate_internal(arg, data)?);
+                                    }
+                                    return Ok(LambdaResult::TailCall {
+                                        lambda: stored_lambda,
+                                        args: evaluated_args,
+                                        data: data.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                // Not a thunk - evaluate normally
+                let result = self.evaluate_internal(node, data)?;
+                Ok(LambdaResult::Value(result))
+            }
+
+            // Variable reference that might be a function call
+            // This handles cases like $f($x) where $f is referenced by name
+            AstNode::Variable(_) => {
+                let result = self.evaluate_internal(node, data)?;
+                Ok(LambdaResult::Value(result))
+            }
+
+            // Any other expression - evaluate normally
+            _ => {
+                let result = self.evaluate_internal(node, data)?;
+                Ok(LambdaResult::Value(result))
+            }
+        }
+    }
+
+    /// Match with custom matcher function
+    ///
+    /// Implements custom matcher support for $match(str, matcherFunction, limit?)
+    /// The matcher function is called with the string and returns:
+    /// { match: string, start: number, end: number, groups: [], next: function }
+    /// The next function is called repeatedly to get subsequent matches
+    fn match_with_custom_matcher(
+        &mut self,
+        str_value: &str,
+        matcher_node: &AstNode,
+        limit: Option<usize>,
+        data: &Value,
+    ) -> Result<Value, EvaluatorError> {
+        let mut results = Vec::new();
+        let mut count = 0;
+
+        // Call the matcher function with the string
+        let str_val = Value::String(str_value.to_string());
+        let mut current_match = self.apply_function(matcher_node, &[str_val], data)?;
+
+        // Iterate through matches following the 'next' chain
+        while !is_undefined(&current_match) && !matches!(current_match, Value::Null) {
+            // Check limit
+            if let Some(lim) = limit {
+                if count >= lim {
+                    break;
+                }
+            }
+
+            // Extract match information from the result object
+            if let Value::Object(ref match_obj) = current_match {
+                // Validate that this is a proper match object
+                let has_match = match_obj.contains_key("match");
+                let has_start = match_obj.contains_key("start");
+                let has_end = match_obj.contains_key("end");
+                let has_groups = match_obj.contains_key("groups");
+                let has_next = match_obj.contains_key("next");
+
+                if !has_match && !has_start && !has_end && !has_groups && !has_next {
+                    // Invalid matcher result - T1010 error
+                    return Err(EvaluatorError::EvaluationError(
+                        "T1010: The matcher function did not return the correct object structure".to_string()
+                    ));
+                }
+
+                // Build the result match object (match, index, groups)
+                let mut result_obj = serde_json::Map::new();
+
+                if let Some(match_val) = match_obj.get("match") {
+                    result_obj.insert("match".to_string(), match_val.clone());
+                }
+
+                if let Some(start_val) = match_obj.get("start") {
+                    result_obj.insert("index".to_string(), start_val.clone());
+                }
+
+                if let Some(groups_val) = match_obj.get("groups") {
+                    result_obj.insert("groups".to_string(), groups_val.clone());
+                }
+
+                results.push(Value::Object(result_obj));
+                count += 1;
+
+                // Get the next match by calling the 'next' function
+                if let Some(next_func) = match_obj.get("next") {
+                    if let Some(stored) = self.lookup_lambda_from_value(next_func) {
+                        current_match = self.invoke_stored_lambda(&stored, &[], data)?;
+                        continue;
+                    }
+                }
+
+                // No next function or couldn't call it - stop iteration
+                break;
+            } else {
+                // Not a valid match object
+                break;
+            }
+        }
+
+        // Return results
+        if results.is_empty() {
+            Ok(undefined_value())
+        } else {
+            Ok(Value::Array(results))
+        }
+    }
+
     /// Replace with lambda/function callback
-    /// 
+    ///
     /// Implements lambda replacement for $replace(str, pattern, function, limit?)
     /// The function receives a match object with: match, start, end, groups
     fn replace_with_lambda(
@@ -4184,40 +5400,16 @@ impl Evaluator {
             });
 
             // Invoke lambda with match object
-            let replacement_str = if let Value::Object(ref lambda_map) = lambda_value {
-                // Get lambda details
-                if let Some(Value::String(lambda_id)) = lambda_map.get("_lambda_id") {
-                    if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
-                        let result = self.invoke_lambda_with_env(
-                            &stored_lambda.params,
-                            &stored_lambda.body,
-                            stored_lambda.signature.as_ref(),
-                            &[match_obj],
-                            data,
-                            Some(&stored_lambda.captured_env),
-                        )?;
-
-                        // Convert result to string
-                        match result {
-                            Value::String(s) => s,
-                            _ => return Err(EvaluatorError::TypeError(
-                                format!("D3012: Replacement function must return a string, got {:?}", result)
-                            )),
-                        }
-                    } else {
-                        return Err(EvaluatorError::EvaluationError(
-                            "Lambda not found in context".to_string()
-                        ));
-                    }
-                } else {
-                    return Err(EvaluatorError::EvaluationError(
-                        "Invalid lambda value".to_string()
-                    ));
-                }
-            } else {
-                return Err(EvaluatorError::TypeError(
+            let stored_lambda = self.lookup_lambda_from_value(&lambda_value)
+                .ok_or_else(|| EvaluatorError::TypeError(
                     "Replacement must be a lambda function".to_string()
-                ));
+                ))?;
+            let lambda_result = self.invoke_stored_lambda(&stored_lambda, &[match_obj], data)?;
+            let replacement_str = match lambda_result {
+                Value::String(s) => s,
+                _ => return Err(EvaluatorError::TypeError(
+                    format!("D3012: Replacement function must return a string, got {:?}", lambda_result)
+                )),
             };
 
             // Add replacement
@@ -4234,7 +5426,7 @@ impl Evaluator {
     }
 
     /// Capture the current environment bindings for closure support
-    fn capture_current_environment(&self) -> std::collections::HashMap<String, Value> {
+    fn capture_current_environment(&self) -> HashMap<String, Value> {
         self.context.bindings.clone()
     }
 
@@ -4286,59 +5478,37 @@ impl Evaluator {
         let arg = &values[0];
 
         match name {
-            // String functions with single argument
-            "string" => functions::string::string(arg, None)
-                .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string())),
-            "number" => functions::numeric::number(arg)
-                .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string())),
-            "boolean" => functions::boolean::boolean(arg)
-                .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string())),
+            "string" => Ok(functions::string::string(arg, None)?),
+            "number" => Ok(functions::numeric::number(arg)?),
+            "boolean" => Ok(functions::boolean::boolean(arg)?),
             "not" => {
-                let b = functions::boolean::boolean(arg)
-                    .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string()))?;
+                let b = functions::boolean::boolean(arg)?;
                 match b {
                     Value::Bool(val) => Ok(Value::Bool(!val)),
                     _ => Err(EvaluatorError::TypeError("not() requires a boolean".to_string())),
                 }
             }
-            "exists" => {
-                Ok(Value::Bool(!matches!(arg, Value::Null)))
-            }
-            "abs" => {
-                match arg {
-                    Value::Number(n) => functions::numeric::abs(n.as_f64().unwrap_or(0.0))
-                        .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string())),
-                    _ => Err(EvaluatorError::TypeError("abs() requires a number argument".to_string())),
-                }
-            }
-            "floor" => {
-                match arg {
-                    Value::Number(n) => functions::numeric::floor(n.as_f64().unwrap_or(0.0))
-                        .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string())),
-                    _ => Err(EvaluatorError::TypeError("floor() requires a number argument".to_string())),
-                }
-            }
-            "ceil" => {
-                match arg {
-                    Value::Number(n) => functions::numeric::ceil(n.as_f64().unwrap_or(0.0))
-                        .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string())),
-                    _ => Err(EvaluatorError::TypeError("ceil() requires a number argument".to_string())),
-                }
-            }
-            "round" => {
-                match arg {
-                    Value::Number(n) => functions::numeric::round(n.as_f64().unwrap_or(0.0), None)
-                        .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string())),
-                    _ => Err(EvaluatorError::TypeError("round() requires a number argument".to_string())),
-                }
-            }
-            "sqrt" => {
-                match arg {
-                    Value::Number(n) => functions::numeric::sqrt(n.as_f64().unwrap_or(0.0))
-                        .map_err(|e: functions::FunctionError| EvaluatorError::EvaluationError(e.to_string())),
-                    _ => Err(EvaluatorError::TypeError("sqrt() requires a number argument".to_string())),
-                }
-            }
+            "exists" => Ok(Value::Bool(!matches!(arg, Value::Null))),
+            "abs" => match arg {
+                Value::Number(n) => Ok(functions::numeric::abs(n.as_f64().unwrap_or(0.0))?),
+                _ => Err(EvaluatorError::TypeError("abs() requires a number argument".to_string())),
+            },
+            "floor" => match arg {
+                Value::Number(n) => Ok(functions::numeric::floor(n.as_f64().unwrap_or(0.0))?),
+                _ => Err(EvaluatorError::TypeError("floor() requires a number argument".to_string())),
+            },
+            "ceil" => match arg {
+                Value::Number(n) => Ok(functions::numeric::ceil(n.as_f64().unwrap_or(0.0))?),
+                _ => Err(EvaluatorError::TypeError("ceil() requires a number argument".to_string())),
+            },
+            "round" => match arg {
+                Value::Number(n) => Ok(functions::numeric::round(n.as_f64().unwrap_or(0.0), None)?),
+                _ => Err(EvaluatorError::TypeError("round() requires a number argument".to_string())),
+            },
+            "sqrt" => match arg {
+                Value::Number(n) => Ok(functions::numeric::sqrt(n.as_f64().unwrap_or(0.0))?),
+                _ => Err(EvaluatorError::TypeError("sqrt() requires a number argument".to_string())),
+            },
             "uppercase" => {
                 match arg {
                     Value::String(s) => Ok(Value::String(s.to_uppercase())),
@@ -4526,9 +5696,8 @@ impl Evaluator {
                 }
             }
             Value::Array(arr) => {
-                // Include the current array
-                descendants.push(value.clone());
-
+                // DO NOT include the array itself - only recurse into elements
+                // This matches JavaScript behavior: arrays are traversed but not collected
                 for val in arr {
                     // Recursively collect descendants
                     descendants.extend(self.collect_descendants(val));
@@ -4574,6 +5743,49 @@ impl Evaluator {
                         let pred_result = self.evaluate_internal(predicate, current)?;
                         return self.array_index(current, &pred_result);
                     }
+                    Ok(Value::Array(indices)) => {
+                        // Multiple array selectors [[indices]]
+                        // Check if array contains any non-numeric values
+                        let has_non_numeric = indices.iter().any(|v| !matches!(v, Value::Number(_)));
+
+                        if has_non_numeric {
+                            // If array contains non-numeric values, return entire array
+                            return Ok(current.clone());
+                        }
+
+                        // Collect numeric indices, handling negative indices
+                        let arr_len = _arr.len() as i64;
+                        let mut resolved_indices: Vec<i64> = indices
+                            .iter()
+                            .filter_map(|v| {
+                                if let Value::Number(n) = v {
+                                    let idx = n.as_f64().unwrap() as i64;
+                                    // Resolve negative indices
+                                    let actual_idx = if idx < 0 { arr_len + idx } else { idx };
+                                    // Only include valid indices
+                                    if actual_idx >= 0 && actual_idx < arr_len {
+                                        Some(actual_idx)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        // Sort and deduplicate indices
+                        resolved_indices.sort();
+                        resolved_indices.dedup();
+
+                        // Select elements at each sorted index
+                        let result: Vec<Value> = resolved_indices
+                            .iter()
+                            .map(|&idx| _arr[idx as usize].clone())
+                            .collect();
+
+                        return Ok(Value::Array(result));
+                    }
                     Ok(_) => {
                         // Evaluated successfully but not a number - might be a filter
                         // Fall through to filter logic
@@ -4597,24 +5809,57 @@ impl Evaluator {
 
                 Ok(Value::Array(filtered))
             }
-            Value::Object(_) => {
-                // For objects, predicate is like accessing a computed property
+            Value::Object(obj) => {
+                // For objects, predicate can be either:
+                // 1. A string - property access (computed property name)
+                // 2. A boolean expression - filter (return object if truthy)
                 let pred_result = self.evaluate_internal(predicate, current)?;
 
-                // If it's a string, use it as a key
-                if let Value::String(key) = pred_result {
-                    if let Value::Object(obj) = current {
-                        return Ok(obj.get(&key).cloned().unwrap_or(Value::Null));
+                // If it's a string, use it as a key for property access
+                if let Value::String(key) = &pred_result {
+                    return Ok(obj.get(key).cloned().unwrap_or(Value::Null));
+                }
+
+                // Otherwise, treat as a filter expression
+                // If the predicate is truthy, return the object; otherwise return undefined
+                if self.is_truthy(&pred_result) {
+                    Ok(current.clone())
+                } else {
+                    Ok(undefined_value())
+                }
+            }
+            _ => {
+                // For primitive values (string, number, boolean):
+                // In JSONata, scalars are treated as single-element arrays when indexed.
+                // So value[0] returns value, value[1] returns undefined.
+
+                // First check if predicate is a numeric literal
+                if let AstNode::Number(n) = predicate {
+                    // For scalars, index 0 or -1 returns the value, others return undefined
+                    let idx = n.floor() as i64;
+                    if idx == 0 || idx == -1 {
+                        return Ok(current.clone());
+                    } else {
+                        return Ok(undefined_value());
                     }
                 }
 
-                Ok(Value::Null)
-            }
-            _ => {
-                // For primitive values (string, number, boolean), the predicate acts as a filter:
+                // Try to evaluate the predicate to see if it's a numeric index
+                let pred_result = self.evaluate_internal(predicate, current)?;
+
+                if let Value::Number(n) = &pred_result {
+                    // It's a numeric index - treat scalar as single-element array
+                    let idx = n.as_f64().unwrap().floor() as i64;
+                    if idx == 0 || idx == -1 {
+                        return Ok(current.clone());
+                    } else {
+                        return Ok(undefined_value());
+                    }
+                }
+
+                // For non-numeric predicates, treat as a filter:
                 // value[true] returns value, value[false] returns undefined
                 // This enables patterns like: $k[$v>2] which returns $k if $v>2, otherwise undefined
-                let pred_result = self.evaluate_internal(predicate, current)?;
                 if self.is_truthy(&pred_result) {
                     Ok(current.clone())
                 } else {
@@ -4623,6 +5868,53 @@ impl Evaluator {
                 }
             }
         }
+    }
+
+    /// Evaluate a sort term expression, distinguishing missing fields from explicit null
+    /// Returns undefined_value() for missing fields, Value::Null for explicit null
+    fn evaluate_sort_term(&mut self, term_expr: &AstNode, element: &Value) -> Result<Value, EvaluatorError> {
+        // For tuples (from index binding), extract the actual value from @ field
+        let actual_element = if let Value::Object(obj) = element {
+            if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                obj.get("@").cloned().unwrap_or(Value::Null)
+            } else {
+                element.clone()
+            }
+        } else {
+            element.clone()
+        };
+
+        // For simple field access (Path with single Name step), check if field exists
+        if let AstNode::Path { steps } = term_expr {
+            if steps.len() == 1 && steps[0].stages.is_empty() {
+                if let AstNode::Name(field_name) = &steps[0].node {
+                    // Check if the field exists in the element
+                    if let Value::Object(obj) = &actual_element {
+                        return match obj.get(field_name) {
+                            Some(val) => Ok(val.clone()),  // Field exists (may be null)
+                            None => Ok(undefined_value()), // Field is missing
+                        };
+                    } else {
+                        // Not an object - return undefined
+                        return Ok(undefined_value());
+                    }
+                }
+            }
+        }
+
+        // For complex expressions, evaluate normally against the actual element
+        // but with the full tuple as the data context (so index bindings are accessible)
+        let result = self.evaluate_internal(term_expr, element)?;
+
+        // If the result is null from a complex expression, we can't easily tell if it's
+        // "missing field" or "explicit null". For now, treat null results as undefined
+        // to maintain compatibility with existing tests.
+        // TODO: For full JS compatibility, would need deeper analysis of the expression
+        if matches!(result, Value::Null) {
+            return Ok(undefined_value());
+        }
+
+        Ok(result)
     }
 
     /// Evaluate sort operator
@@ -4657,8 +5949,8 @@ impl Evaluator {
                 // Bind $ to current element
                 self.context.bind("$".to_string(), element.clone());
 
-                // Evaluate the sort expression
-                let sort_value = self.evaluate_internal(term_expr, element)?;
+                // Evaluate the sort expression, distinguishing missing fields from explicit null
+                let sort_value = self.evaluate_sort_term(term_expr, element)?;
 
                 // Restore $ binding
                 if let Some(val) = saved_dollar {
@@ -4671,6 +5963,53 @@ impl Evaluator {
             }
 
             indexed_array.push((idx, sort_keys));
+        }
+
+        // Validate that all sort keys are comparable (same type, or undefined)
+        // Undefined values (missing fields) are allowed and sort to the end
+        // Null values (explicit null in data) are NOT allowed (typeof null === 'object' in JS, triggers T2008)
+        for term_idx in 0..terms.len() {
+            let mut first_valid_type: Option<&str> = None;
+
+            for (_idx, sort_keys) in &indexed_array {
+                let sort_value = &sort_keys[term_idx];
+
+                // Skip undefined markers (missing fields) - these are allowed and sort to end
+                if is_undefined(sort_value) {
+                    continue;
+                }
+
+                // Get the type name for this value
+                // Note: explicit null is NOT allowed - typeof null === 'object' in JS
+                let value_type = match sort_value {
+                    Value::Number(_) => "number",
+                    Value::String(_) => "string",
+                    Value::Bool(_) => "boolean",
+                    Value::Array(_) => "array",
+                    Value::Object(_) => "object",  // This catches non-undefined objects
+                    Value::Null => "null",         // Explicit null from data
+                };
+
+                // Check that sort keys are only numbers or strings
+                // Null, boolean, array, and object types are not valid for sorting
+                if value_type != "number" && value_type != "string" {
+                    return Err(EvaluatorError::TypeError(format!(
+                        "T2008: The expressions within an order-by clause must evaluate to numeric or string values"
+                    )));
+                }
+
+                // Check if this matches the first valid type we saw
+                if let Some(first_type) = first_valid_type {
+                    if first_type != value_type {
+                        return Err(EvaluatorError::TypeError(format!(
+                            "T2007: Type mismatch when comparing values in order-by clause: {} and {}",
+                            first_type, value_type
+                        )));
+                    }
+                } else {
+                    first_valid_type = Some(value_type);
+                }
+            }
         }
 
         // Sort the indexed array
@@ -4708,11 +6047,25 @@ impl Evaluator {
     fn compare_values(&self, left: &Value, right: &Value) -> std::cmp::Ordering {
         use std::cmp::Ordering;
 
+        // Handle undefined markers first - they sort to the end
+        let left_undef = is_undefined(left);
+        let right_undef = is_undefined(right);
+
+        if left_undef && right_undef {
+            return Ordering::Equal;
+        }
+        if left_undef {
+            return Ordering::Greater;  // Undefined sorts last
+        }
+        if right_undef {
+            return Ordering::Less;
+        }
+
         match (left, right) {
-            // Nulls sort first
+            // Nulls also sort last (explicit null in data)
             (Value::Null, Value::Null) => Ordering::Equal,
-            (Value::Null, _) => Ordering::Less,
-            (_, Value::Null) => Ordering::Greater,
+            (Value::Null, _) => Ordering::Greater,
+            (_, Value::Null) => Ordering::Less,
 
             // Numbers
             (Value::Number(a), Value::Number(b)) => {
@@ -4766,6 +6119,9 @@ impl Evaluator {
 
     /// Check if a value is truthy (JSONata semantics)
     fn is_truthy(&self, value: &Value) -> bool {
+        if is_undefined(value) {
+            return false;
+        }
         match value {
             Value::Null => false,
             Value::Bool(b) => *b,
@@ -4798,24 +6154,51 @@ impl Evaluator {
         }
     }
 
+    /// Unwrap singleton arrays to scalar values
+    /// This is used when no explicit array-keeping operation (like []) was used
+    fn unwrap_singleton(&self, value: Value) -> Value {
+        match value {
+            Value::Array(ref arr) if arr.len() == 1 => arr[0].clone(),
+            _ => value,
+        }
+    }
+
+    /// Extract lambda IDs from a value (used for closure preservation)
+    /// Finds any _lambda_id references in the value so they can be preserved
+    /// when exiting a block scope
+    fn extract_lambda_ids(&self, value: &Value) -> Vec<String> {
+        let mut ids = Vec::new();
+        self.collect_lambda_ids(value, &mut ids);
+        ids
+    }
+
+    fn collect_lambda_ids(&self, value: &Value, ids: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                // Check if this is a lambda value
+                if map.contains_key("__lambda__") {
+                    if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
+                        ids.push(lambda_id.clone());
+                    }
+                }
+                // Recurse into object values
+                for v in map.values() {
+                    self.collect_lambda_ids(v, ids);
+                }
+            }
+            Value::Array(arr) => {
+                // Recurse into array elements
+                for v in arr {
+                    self.collect_lambda_ids(v, ids);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Equality comparison (JSONata semantics)
     fn equals(&self, left: &Value, right: &Value) -> bool {
-        match (left, right) {
-            (Value::Null, Value::Null) => true,
-            (Value::Bool(a), Value::Bool(b)) => a == b,
-            (Value::Number(a), Value::Number(b)) => {
-                a.as_f64().unwrap() == b.as_f64().unwrap()
-            }
-            (Value::String(a), Value::String(b)) => a == b,
-            (Value::Array(a), Value::Array(b)) => {
-                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| self.equals(x, y))
-            }
-            (Value::Object(a), Value::Object(b)) => {
-                a.len() == b.len()
-                    && a.iter().all(|(k, v)| b.get(k).map_or(false, |v2| self.equals(v, v2)))
-            }
-            _ => false,
-        }
+        crate::functions::array::values_equal(left, right)
     }
 
     /// Addition
@@ -4834,8 +6217,17 @@ impl Evaluator {
             (Value::Null, Value::Null) if left_is_explicit_null || right_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The left side of the + operator must evaluate to a number".to_string()))
             }
-            // Undefined variables with number -> undefined result
-            (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+            // Undefined variable (null) with number -> undefined result
+            (Value::Null, Value::Number(_)) | (Value::Number(_), Value::Null) => Ok(Value::Null),
+            // Boolean with anything (including undefined) -> T2001 error
+            (Value::Bool(_), _) => {
+                Err(EvaluatorError::TypeError("T2001: The left side of the '+' operator must evaluate to a number or a string".to_string()))
+            }
+            (_, Value::Bool(_)) => {
+                Err(EvaluatorError::TypeError("T2001: The right side of the '+' operator must evaluate to a number or a string".to_string()))
+            }
+            // Undefined with undefined -> undefined
+            (Value::Null, Value::Null) => Ok(Value::Null),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot add {:?} and {:?}",
                 left, right
@@ -4869,7 +6261,14 @@ impl Evaluator {
     fn multiply(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
         match (left, right) {
             (Value::Number(a), Value::Number(b)) => {
-                Ok(serde_json::json!(a.as_f64().unwrap() * b.as_f64().unwrap()))
+                let result = a.as_f64().unwrap() * b.as_f64().unwrap();
+                // Check for overflow to Infinity
+                if result.is_infinite() {
+                    return Err(EvaluatorError::EvaluationError(
+                        "D1001: Number out of range".to_string()
+                    ));
+                }
+                Ok(serde_json::json!(result))
             }
             // Explicit null literal -> error
             (Value::Null, _) if left_is_explicit_null => {
@@ -4955,18 +6354,28 @@ impl Evaluator {
         }
     }
 
-    /// Less than comparison
-    fn less_than(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    /// Ordered comparison with null/type checking shared across <, <=, >, >=
+    ///
+    /// `compare_nums` receives (left_f64, right_f64) for numeric operands.
+    /// `compare_strs` receives (left_str, right_str) for string operands.
+    /// `op_symbol` is used in the T2009 error message (e.g. "<", ">=").
+    fn ordered_compare(
+        &self,
+        left: &Value,
+        right: &Value,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+        op_symbol: &str,
+        compare_nums: fn(f64, f64) -> bool,
+        compare_strs: fn(&str, &str) -> bool,
+    ) -> Result<Value, EvaluatorError> {
         match (left, right) {
             (Value::Number(a), Value::Number(b)) => {
-                Ok(Value::Bool(a.as_f64().unwrap() < b.as_f64().unwrap()))
+                Ok(Value::Bool(compare_nums(a.as_f64().unwrap(), b.as_f64().unwrap())))
             }
-            (Value::String(a), Value::String(b)) => Ok(Value::Bool(a < b)),
-            // Null comparisons - distinguish explicit null from undefined
-            (Value::Null, Value::Null) => {
-                // Both null/undefined -> return undefined
-                Ok(Value::Null)
-            }
+            (Value::String(a), Value::String(b)) => Ok(Value::Bool(compare_strs(a, b))),
+            // Both null/undefined -> return undefined
+            (Value::Null, Value::Null) => Ok(Value::Null),
             // Explicit null literal with any type (except null) -> T2010 error
             (Value::Null, _) if left_is_explicit_null => {
                 Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
@@ -4985,7 +6394,10 @@ impl Evaluator {
             }
             // String vs Number -> T2009
             (Value::String(_), Value::Number(_)) | (Value::Number(_), Value::String(_)) => {
-                Err(EvaluatorError::EvaluationError("T2009: The expressions on either side of operator \"<\" must be of the same data type".to_string()))
+                Err(EvaluatorError::EvaluationError(format!(
+                    "T2009: The expressions on either side of operator \"{}\" must be of the same data type",
+                    op_symbol
+                )))
             }
             // Boolean comparisons -> T2010
             (Value::Bool(_), _) | (_, Value::Bool(_)) => {
@@ -5000,180 +6412,49 @@ impl Evaluator {
                 Self::type_name(left), Self::type_name(right)
             ))),
         }
+    }
+
+    /// Less than comparison
+    fn less_than(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+        self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, "<", |a, b| a < b, |a, b| a < b)
     }
 
     /// Less than or equal comparison
     fn less_than_or_equal(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
-        match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                Ok(Value::Bool(a.as_f64().unwrap() <= b.as_f64().unwrap()))
-            }
-            (Value::String(a), Value::String(b)) => Ok(Value::Bool(a <= b)),
-            // Null comparisons - distinguish explicit null from undefined
-            (Value::Null, Value::Null) => Ok(Value::Null),
-            // Explicit null literal with any type (except null) -> T2010 error
-            (Value::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            (_, Value::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Boolean with undefined -> T2010 error
-            (Value::Bool(_), Value::Null) | (Value::Null, Value::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Number or String with undefined (not explicit null) -> undefined result
-            (Value::Number(_), Value::Null) | (Value::Null, Value::Number(_)) |
-            (Value::String(_), Value::Null) | (Value::Null, Value::String(_)) => {
-                Ok(Value::Null)
-            }
-            // String vs Number -> T2009
-            (Value::String(_), Value::Number(_)) | (Value::Number(_), Value::String(_)) => {
-                Err(EvaluatorError::EvaluationError("T2009: The expressions on either side of operator \"<=\" must be of the same data type".to_string()))
-            }
-            // Boolean comparisons -> T2010
-            (Value::Bool(_), _) | (_, Value::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError(format!(
-                    "T2010: Cannot compare {} and {}",
-                    Self::type_name(left), Self::type_name(right)
-                )))
-            }
-            // Other type mismatches
-            _ => Err(EvaluatorError::EvaluationError(format!(
-                "T2010: Cannot compare {} and {}",
-                Self::type_name(left), Self::type_name(right)
-            ))),
-        }
+        self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, "<=", |a, b| a <= b, |a, b| a <= b)
     }
 
     /// Greater than comparison
     fn greater_than(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
-        match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                Ok(Value::Bool(a.as_f64().unwrap() > b.as_f64().unwrap()))
-            }
-            (Value::String(a), Value::String(b)) => Ok(Value::Bool(a > b)),
-            // Null comparisons - distinguish explicit null from undefined
-            (Value::Null, Value::Null) => Ok(Value::Null),
-            // Explicit null literal with any type (except null) -> T2010 error
-            (Value::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            (_, Value::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Boolean with undefined -> T2010 error
-            (Value::Bool(_), Value::Null) | (Value::Null, Value::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Number or String with undefined (not explicit null) -> undefined result
-            (Value::Number(_), Value::Null) | (Value::Null, Value::Number(_)) |
-            (Value::String(_), Value::Null) | (Value::Null, Value::String(_)) => {
-                Ok(Value::Null)
-            }
-            // String vs Number -> T2009
-            (Value::String(_), Value::Number(_)) | (Value::Number(_), Value::String(_)) => {
-                Err(EvaluatorError::EvaluationError("T2009: The expressions on either side of operator \">\" must be of the same data type".to_string()))
-            }
-            // Boolean comparisons -> T2010
-            (Value::Bool(_), _) | (_, Value::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError(format!(
-                    "T2010: Cannot compare {} and {}",
-                    Self::type_name(left), Self::type_name(right)
-                )))
-            }
-            // Other type mismatches
-            _ => Err(EvaluatorError::EvaluationError(format!(
-                "T2010: Cannot compare {} and {}",
-                Self::type_name(left), Self::type_name(right)
-            ))),
-        }
+        self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, ">", |a, b| a > b, |a, b| a > b)
     }
 
     /// Greater than or equal comparison
     fn greater_than_or_equal(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
-        match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                Ok(Value::Bool(a.as_f64().unwrap() >= b.as_f64().unwrap()))
+        self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, ">=", |a, b| a >= b, |a, b| a >= b)
+    }
+
+    /// Convert a value to a string for concatenation
+    fn value_to_concat_string(value: &Value) -> Result<String, EvaluatorError> {
+        match value {
+            Value::String(s) => Ok(s.clone()),
+            Value::Null => Ok(String::new()),
+            Value::Number(_) | Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
+                match crate::functions::string::string(value, None) {
+                    Ok(Value::String(s)) => Ok(s),
+                    Ok(Value::Null) => Ok(String::new()),
+                    _ => Err(EvaluatorError::TypeError(
+                        "Cannot concatenate complex types".to_string(),
+                    )),
+                }
             }
-            (Value::String(a), Value::String(b)) => Ok(Value::Bool(a >= b)),
-            // Null comparisons - distinguish explicit null from undefined
-            (Value::Null, Value::Null) => Ok(Value::Null),
-            // Explicit null literal with any type (except null) -> T2010 error
-            (Value::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            (_, Value::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Boolean with undefined -> T2010 error
-            (Value::Bool(_), Value::Null) | (Value::Null, Value::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Number or String with undefined (not explicit null) -> undefined result
-            (Value::Number(_), Value::Null) | (Value::Null, Value::Number(_)) |
-            (Value::String(_), Value::Null) | (Value::Null, Value::String(_)) => {
-                Ok(Value::Null)
-            }
-            // String vs Number -> T2009
-            (Value::String(_), Value::Number(_)) | (Value::Number(_), Value::String(_)) => {
-                Err(EvaluatorError::EvaluationError("T2009: The expressions on either side of operator \">=\" must be of the same data type".to_string()))
-            }
-            // Boolean comparisons -> T2010
-            (Value::Bool(_), _) | (_, Value::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError(format!(
-                    "T2010: Cannot compare {} and {}",
-                    Self::type_name(left), Self::type_name(right)
-                )))
-            }
-            // Other type mismatches
-            _ => Err(EvaluatorError::EvaluationError(format!(
-                "T2010: Cannot compare {} and {}",
-                Self::type_name(left), Self::type_name(right)
-            ))),
         }
     }
 
     /// String concatenation
     fn concatenate(&self, left: &Value, right: &Value) -> Result<Value, EvaluatorError> {
-        // Convert both values to strings and concatenate
-        // Use $string() function for proper number formatting
-        let left_str = match left {
-            Value::String(s) => s.clone(),
-            Value::Number(_) | Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
-                // Use $string() function for proper formatting
-                match crate::functions::string::string(left, None) {
-                    Ok(Value::String(s)) => s,
-                    Ok(Value::Null) => String::new(),
-                    Ok(_) => return Err(EvaluatorError::TypeError(
-                        "Cannot concatenate complex types".to_string(),
-                    )),
-                    Err(_) => return Err(EvaluatorError::TypeError(
-                        "Cannot concatenate complex types".to_string(),
-                    )),
-                }
-            }
-            Value::Null => String::new(), // null becomes empty string
-        };
-
-        let right_str = match right {
-            Value::String(s) => s.clone(),
-            Value::Number(_) | Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
-                // Use $string() function for proper formatting
-                match crate::functions::string::string(right, None) {
-                    Ok(Value::String(s)) => s,
-                    Ok(Value::Null) => String::new(),
-                    Ok(_) => return Err(EvaluatorError::TypeError(
-                        "Cannot concatenate complex types".to_string(),
-                    )),
-                    Err(_) => return Err(EvaluatorError::TypeError(
-                        "Cannot concatenate complex types".to_string(),
-                    )),
-                }
-            }
-            Value::Null => String::new(), // null becomes empty string
-        };
-
+        let left_str = Self::value_to_concat_string(left)?;
+        let right_str = Self::value_to_concat_string(right)?;
         Ok(Value::String(format!("{}{}", left_str, right_str)))
     }
 
@@ -5227,7 +6508,19 @@ impl Evaluator {
         let start = start_f64.unwrap() as i64;
         let end = end_f64.unwrap() as i64;
 
-        let mut result = Vec::new();
+        // Check range size limit (10 million elements max)
+        let size = if start <= end {
+            (end - start + 1) as usize
+        } else {
+            0
+        };
+        if size > 10_000_000 {
+            return Err(EvaluatorError::EvaluationError(
+                "D2014: Range operator results in too many elements (> 10,000,000)".to_string(),
+            ));
+        }
+
+        let mut result = Vec::with_capacity(size);
         if start <= end {
             for i in start..=end {
                 result.push(serde_json::json!(i));
@@ -5420,6 +6713,8 @@ impl Evaluator {
                 );
                 env
             },
+            captured_data: Some(data.clone()),
+            thunk: false,
         };
 
         self.context.bind_lambda(partial_id.clone(), stored_lambda);
