@@ -1847,14 +1847,17 @@ mod tests {
             Value::String("true".to_string())
         );
 
-        // Null to empty string
+        // Null becomes "null" via JSON.stringify
         assert_eq!(
             string::string(&Value::Null, None).unwrap(),
-            Value::String(String::new())
+            Value::String("null".to_string())
         );
 
-        // Array should error
-        assert!(string::string(&serde_json::json!([1, 2, 3]), None).is_err());
+        // Array gets JSON.stringify'd
+        assert_eq!(
+            string::string(&serde_json::json!([1, 2, 3]), None).unwrap(),
+            Value::String("[1,2,3]".to_string())
+        );
     }
 
     #[test]
@@ -1908,8 +1911,11 @@ mod tests {
             Value::String("世界".to_string())
         );
 
-        // Negative length should error
-        assert!(string::substring("hello", 0, Some(-1)).is_err());
+        // Negative length returns empty string
+        assert_eq!(
+            string::substring("hello", 0, Some(-1)).unwrap(),
+            Value::String(String::new())
+        );
     }
 
     #[test]
@@ -1933,9 +1939,10 @@ mod tests {
             string::substring_after("hello world", " ").unwrap(),
             Value::String("world".to_string())
         );
+        // When separator is not found, return the original string
         assert_eq!(
             string::substring_after("hello world", "x").unwrap(),
-            Value::String(String::new())
+            Value::String("hello world".to_string())
         );
         assert_eq!(
             string::substring_after("hello world", "").unwrap(),
@@ -1974,10 +1981,10 @@ mod tests {
             serde_json::json!(["a", "b", "c"])
         );
 
-        // Split with limit
+        // Split with limit - truncates to limit number of results
         assert_eq!(
             string::split("a,b,c,d", &Value::String(",".to_string()), Some(2)).unwrap(),
-            serde_json::json!(["a", "b,c,d"])
+            serde_json::json!(["a", "b"])
         );
 
         // Split with empty separator (split into chars)
@@ -2028,11 +2035,8 @@ mod tests {
             Value::String("hi hi hello".to_string())
         );
 
-        // Replace empty pattern (no change)
-        assert_eq!(
-            string::replace("hello", &Value::String("".to_string()), "x", None).unwrap(),
-            Value::String("hello".to_string())
-        );
+        // Replace empty pattern returns error D3010
+        assert!(string::replace("hello", &Value::String("".to_string()), "x", None).is_err());
     }
 
     // ===== Numeric Functions Tests =====
@@ -2114,10 +2118,11 @@ mod tests {
         assert_eq!(numeric::ceil(3.2).unwrap(), serde_json::json!(4.0));
         assert_eq!(numeric::ceil(-3.2).unwrap(), serde_json::json!(-3.0));
 
-        // round
+        // round - whole number results are returned as integers
         assert_eq!(numeric::round(3.14159, Some(2)).unwrap(), serde_json::json!(3.14));
-        assert_eq!(numeric::round(3.14159, None).unwrap(), serde_json::json!(3.0));
-        assert!(numeric::round(3.14, Some(-1)).is_err());
+        assert_eq!(numeric::round(3.14159, None).unwrap(), serde_json::json!(3));
+        // Negative precision is supported (rounds to powers of 10)
+        assert_eq!(numeric::round(3.14, Some(-1)).unwrap(), serde_json::json!(0));
 
         // sqrt
         assert_eq!(numeric::sqrt(16.0).unwrap(), serde_json::json!(4.0));
@@ -2247,13 +2252,24 @@ mod tests {
         let result = object::spread(&obj).unwrap();
         if let Value::Array(pairs) = result {
             assert_eq!(pairs.len(), 2);
-            // Check that each pair has "key" and "value" fields
-            for pair in pairs {
+            // Each key-value pair becomes a single-key object: {"key": value}
+            for pair in &pairs {
                 if let Value::Object(p) = pair {
-                    assert!(p.contains_key("key"));
-                    assert!(p.contains_key("value"));
+                    assert_eq!(p.len(), 1, "Each spread element should be a single-key object");
+                } else {
+                    panic!("Expected Object in spread result");
                 }
             }
+            // Verify the actual spread results contain expected keys
+            let all_keys: Vec<String> = pairs.iter().filter_map(|p| {
+                if let Value::Object(m) = p {
+                    m.keys().next().cloned()
+                } else {
+                    None
+                }
+            }).collect();
+            assert!(all_keys.contains(&"a".to_string()));
+            assert!(all_keys.contains(&"b".to_string()));
         } else {
             panic!("Expected array of key-value pairs");
         }

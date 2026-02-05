@@ -20,7 +20,6 @@
 //! - `functions` - Built-in function implementations
 //! - `datetime` - Date/time handling functions
 //! - `signature` - Function signature validation
-//! - `utils` - Utility functions and helpers
 //! - `ast` - Abstract Syntax Tree definitions
 
 use pyo3::prelude::*;
@@ -34,7 +33,6 @@ pub mod evaluator;
 pub mod functions;
 mod datetime;
 mod signature;
-mod utils;
 
 /// A compiled JSONata expression that can be evaluated against data.
 ///
@@ -307,21 +305,21 @@ fn json_to_python(py: Python, value: &Value) -> PyResult<PyObject> {
     match value {
         Value::Null => Ok(py.None()),
 
-        Value::Bool(b) => Ok(b.to_object(py)),
+        Value::Bool(b) => Ok((*b).into_pyobject(py).unwrap().to_owned().into_any().unbind()),
 
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                Ok(i.to_object(py))
+                Ok(i.into_pyobject(py).unwrap().into_any().unbind())
             } else if let Some(u) = n.as_u64() {
-                Ok(u.to_object(py))
+                Ok(u.into_pyobject(py).unwrap().into_any().unbind())
             } else if let Some(f) = n.as_f64() {
-                Ok(f.to_object(py))
+                Ok(f.into_pyobject(py).unwrap().into_any().unbind())
             } else {
                 Err(PyTypeError::new_err("Invalid number"))
             }
         }
 
-        Value::String(s) => Ok(s.to_object(py)),
+        Value::String(s) => Ok(s.into_pyobject(py).unwrap().into_any().unbind()),
 
         Value::Array(arr) => {
             let list = PyList::empty(py);

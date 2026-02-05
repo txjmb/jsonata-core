@@ -1596,7 +1596,9 @@ mod tests {
 
         assert_eq!(lexer.next_token().unwrap(), Token::Number(42.0));
         assert_eq!(lexer.next_token().unwrap(), Token::Number(3.14));
-        assert_eq!(lexer.next_token().unwrap(), Token::Number(-10.0));
+        // Negation is handled as a unary operator, not part of the number literal
+        assert_eq!(lexer.next_token().unwrap(), Token::Minus);
+        assert_eq!(lexer.next_token().unwrap(), Token::Number(10.0));
         assert_eq!(lexer.next_token().unwrap(), Token::Number(2.5e10));
         assert_eq!(lexer.next_token().unwrap(), Token::Number(1e-5));
         assert_eq!(lexer.next_token().unwrap(), Token::Eof);
@@ -1637,9 +1639,10 @@ mod tests {
         assert_eq!(lexer.next_token().unwrap(), Token::True);
         assert_eq!(lexer.next_token().unwrap(), Token::False);
         assert_eq!(lexer.next_token().unwrap(), Token::Null);
-        assert_eq!(lexer.next_token().unwrap(), Token::And);
-        assert_eq!(lexer.next_token().unwrap(), Token::Or);
-        assert_eq!(lexer.next_token().unwrap(), Token::In);
+        // "and", "or", "in" are now contextual keywords - lexer emits them as identifiers
+        assert_eq!(lexer.next_token().unwrap(), Token::Identifier("and".to_string()));
+        assert_eq!(lexer.next_token().unwrap(), Token::Identifier("or".to_string()));
+        assert_eq!(lexer.next_token().unwrap(), Token::Identifier("in".to_string()));
         assert_eq!(lexer.next_token().unwrap(), Token::Eof);
     }
 
@@ -1679,12 +1682,12 @@ mod tests {
 
     #[test]
     fn test_lexer_operators() {
-        let mut lexer = Lexer::new("+ - * / % = != < <= > >= & . .. := ".to_string());
+        // Test non-slash operators first
+        let mut lexer = Lexer::new("+ - * % = != < <= > >= & . .. := ".to_string());
 
         assert_eq!(lexer.next_token().unwrap(), Token::Plus);
         assert_eq!(lexer.next_token().unwrap(), Token::Minus);
         assert_eq!(lexer.next_token().unwrap(), Token::Star);
-        assert_eq!(lexer.next_token().unwrap(), Token::Slash);
         assert_eq!(lexer.next_token().unwrap(), Token::Percent);
         assert_eq!(lexer.next_token().unwrap(), Token::Equal);
         assert_eq!(lexer.next_token().unwrap(), Token::NotEqual);
@@ -1697,6 +1700,14 @@ mod tests {
         assert_eq!(lexer.next_token().unwrap(), Token::DotDot);
         assert_eq!(lexer.next_token().unwrap(), Token::ColonEqual);
         assert_eq!(lexer.next_token().unwrap(), Token::Eof);
+
+        // Slash is context-dependent: after a value token it's division, otherwise regex.
+        // Test slash after a number (value context) to get Token::Slash.
+        let mut lexer2 = Lexer::new("42 / 2".to_string());
+        assert_eq!(lexer2.next_token().unwrap(), Token::Number(42.0));
+        assert_eq!(lexer2.next_token().unwrap(), Token::Slash);
+        assert_eq!(lexer2.next_token().unwrap(), Token::Number(2.0));
+        assert_eq!(lexer2.next_token().unwrap(), Token::Eof);
     }
 
     #[test]
@@ -1852,7 +1863,8 @@ mod tests {
 
     #[test]
     fn test_parse_parentheses() {
-        // (1 + 2) * 3 should parse as (1 + 2) * 3
+        // (1 + 2) * 3 should parse as Block([1 + 2]) * 3
+        // Parenthesized expressions always create a Block in JSONata
         let ast = parse("(1 + 2) * 3").unwrap();
         match ast {
             AstNode::Binary {
@@ -1861,15 +1873,21 @@ mod tests {
                 rhs,
             } => {
                 match *lhs {
-                    AstNode::Binary {
-                        op: BinaryOp::Add,
-                        lhs,
-                        rhs,
-                    } => {
-                        assert_eq!(*lhs, AstNode::Number(1.0));
-                        assert_eq!(*rhs, AstNode::Number(2.0));
+                    AstNode::Block(ref exprs) => {
+                        assert_eq!(exprs.len(), 1);
+                        match &exprs[0] {
+                            AstNode::Binary {
+                                op: BinaryOp::Add,
+                                lhs,
+                                rhs,
+                            } => {
+                                assert_eq!(**lhs, AstNode::Number(1.0));
+                                assert_eq!(**rhs, AstNode::Number(2.0));
+                            }
+                            _ => panic!("Expected Binary node for addition inside block"),
+                        }
                     }
-                    _ => panic!("Expected Binary node for addition"),
+                    _ => panic!("Expected Block node for parenthesized expression, got {:?}", lhs),
                 }
                 assert_eq!(*rhs, AstNode::Number(3.0));
             }
@@ -1946,11 +1964,13 @@ mod tests {
             } => {
                 assert!(matches!(*condition, AstNode::Binary { .. }));
                 assert_eq!(*then_branch, AstNode::Number(1.0));
-                // Note: Parser optimization - negative number literals are parsed directly
-                // as Number(-1.0) rather than Unary { Negate, Number(1.0) }
+                // Negative numbers are parsed as Unary { Negate, Number(1.0) }
                 assert_eq!(
                     else_branch,
-                    Some(Box::new(AstNode::Number(-1.0)))
+                    Some(Box::new(AstNode::Unary {
+                        op: UnaryOp::Negate,
+                        operand: Box::new(AstNode::Number(1.0)),
+                    }))
                 );
             }
             _ => panic!("Expected Conditional node"),
@@ -1994,11 +2014,15 @@ mod tests {
 
     #[test]
     fn test_parse_unary_minus() {
-        // Note: The parser optimizes negative number literals by parsing them directly
-        // as negative numbers (e.g., -5 → Number(-5.0)) rather than creating a Unary
-        // node. This is more efficient and the result is semantically equivalent.
+        // Negative numbers are parsed as Unary { Negate, Number(5.0) }
         let ast = parse("-5").unwrap();
-        assert_eq!(ast, AstNode::Number(-5.0));
+        assert_eq!(
+            ast,
+            AstNode::Unary {
+                op: UnaryOp::Negate,
+                operand: Box::new(AstNode::Number(5.0)),
+            }
+        );
     }
 
     #[test]

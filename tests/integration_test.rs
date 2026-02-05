@@ -44,17 +44,17 @@ fn test_arithmetic_expression() {
         "quantity": 5
     });
 
-    // Test basic multiplication
+    // Test basic multiplication - arithmetic produces f64 results
     let ast = parse("price * quantity").unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
-    assert_eq!(result, json!(500));
+    assert_eq!(result, json!(500.0));
 
     // Test complex arithmetic
     let ast = parse("(price + 10) * quantity").unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
-    assert_eq!(result, json!(550));
+    assert_eq!(result, json!(550.0));
 }
 
 #[test]
@@ -105,7 +105,8 @@ fn test_function_call() {
         "name": "alice"
     });
 
-    let ast = parse("uppercase(name)").unwrap();
+    // Built-in functions require the $ prefix in JSONata
+    let ast = parse("$uppercase(name)").unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
@@ -118,7 +119,8 @@ fn test_nested_function_calls() {
         "text": "HELLO"
     });
 
-    let ast = parse("length(lowercase(text))").unwrap();
+    // Built-in functions require the $ prefix in JSONata
+    let ast = parse("$length($lowercase(text))").unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
@@ -164,7 +166,8 @@ fn test_object_literal() {
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
-    assert_eq!(result, json!({"sum": 30, "product": 200}));
+    // Arithmetic operations produce f64 results
+    assert_eq!(result, json!({"sum": 30.0, "product": 200.0}));
 }
 
 #[test]
@@ -277,7 +280,8 @@ fn test_sum_function() {
         "numbers": [1, 2, 3, 4, 5]
     });
 
-    let ast = parse("sum(numbers)").unwrap();
+    // Built-in functions require the $ prefix in JSONata
+    let ast = parse("$sum(numbers)").unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
@@ -290,7 +294,8 @@ fn test_count_function() {
         "items": [1, 2, 3, 4, 5]
     });
 
-    let ast = parse("count(items)").unwrap();
+    // Built-in functions require the $ prefix in JSONata
+    let ast = parse("$count(items)").unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
@@ -427,11 +432,12 @@ fn test_empty_object() {
 fn test_error_undefined_variable() {
     let data = Value::Null;
 
+    // Undefined variables return null in JSONata (not an error)
     let ast = parse("$undefined").unwrap();
     let mut evaluator = Evaluator::new();
-    let result = evaluator.evaluate(&ast, &data);
+    let result = evaluator.evaluate(&ast, &data).unwrap();
 
-    assert!(result.is_err());
+    assert_eq!(result, Value::Null);
 }
 
 #[test]

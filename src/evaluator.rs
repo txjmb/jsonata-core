@@ -6612,9 +6612,9 @@ mod tests {
         let result = evaluator.evaluate(&AstNode::variable("x"), &data).unwrap();
         assert_eq!(result, serde_json::json!(100));
 
-        // Undefined variable should error
-        let result = evaluator.evaluate(&AstNode::variable("undefined"), &data);
-        assert!(result.is_err());
+        // Undefined variable returns null (undefined in JSONata semantics)
+        let result = evaluator.evaluate(&AstNode::variable("undefined"), &data).unwrap();
+        assert_eq!(result, Value::Null);
     }
 
     #[test]
@@ -6826,7 +6826,7 @@ mod tests {
             serde_json::json!([1, 2, 3, 4, 5])
         );
 
-        // Backward range
+        // Backward range (start > end) returns empty array
         let expr = AstNode::Binary {
             op: BinaryOp::Range,
             lhs: Box::new(AstNode::number(5.0)),
@@ -6835,7 +6835,7 @@ mod tests {
         let result = evaluator.evaluate(&expr, &data).unwrap();
         assert_eq!(
             result,
-            serde_json::json!([5, 4, 3, 2, 1])
+            serde_json::json!([])
         );
     }
 
@@ -6904,9 +6904,8 @@ mod tests {
             AstNode::number(3.0),
         ]);
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        // Note: serde_json represents numbers as f64 internally, so 1.0, 2.0, 3.0
-        // This is semantically correct - JSON doesn't distinguish int vs float
-        assert_eq!(result, serde_json::json!([1.0, 2.0, 3.0]));
+        // Whole number literals are preserved as integers
+        assert_eq!(result, serde_json::json!([1, 2, 3]));
     }
 
     #[test]
@@ -6919,10 +6918,10 @@ mod tests {
             (AstNode::string("age"), AstNode::number(30.0)),
         ]);
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        // Note: serde_json represents numbers as f64 - semantically equivalent to int
+        // Whole number literals are preserved as integers
         assert_eq!(
             result,
-            serde_json::json!({"name": "Alice", "age": 30.0})
+            serde_json::json!({"name": "Alice", "age": 30})
         );
     }
 
@@ -6949,14 +6948,14 @@ mod tests {
         let result = evaluator.evaluate(&expr, &data).unwrap();
         assert_eq!(result, Value::String("no".to_string()));
 
-        // No else branch
+        // No else branch returns undefined (not null)
         let expr = AstNode::Conditional {
             condition: Box::new(AstNode::boolean(false)),
             then_branch: Box::new(AstNode::string("yes")),
             else_branch: None,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::Null);
+        assert_eq!(result, undefined_value());
     }
 
     #[test]
@@ -6970,8 +6969,8 @@ mod tests {
             AstNode::number(3.0),
         ]);
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        // Block returns the last expression
-        assert_eq!(result, serde_json::json!(3.0));
+        // Block returns the last expression; whole numbers are preserved as integers
+        assert_eq!(result, serde_json::json!(3));
     }
 
     #[test]
