@@ -1,23 +1,180 @@
 // Expression evaluator
 // Mirrors jsonata.js from the reference implementation
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
 use crate::parser;
-use serde_json::Value;
+use crate::value::JValue;
+use indexmap::IndexMap;
+use std::rc::Rc;
 use thiserror::Error;
 
-/// Create an undefined marker value
-/// JSONata distinguishes between undefined (no value) and null (explicit null)
-/// We represent undefined with a special marker object
-pub fn undefined_value() -> Value {
-    serde_json::json!({"__undefined__": true})
+/// Specialized predicate patterns for fast filter evaluation.
+/// When a predicate matches one of these patterns, we bypass the full
+/// AST evaluation machinery and use direct field lookups + comparisons.
+enum SpecializedPredicate {
+    /// arr[field] — truthy check on field value
+    TruthyField(String),
+    /// arr[field = literal] — field equality
+    FieldEq(String, JValue),
+    /// arr[field != literal] — field inequality
+    FieldNe(String, JValue),
+    /// arr[field > n] — numeric greater-than
+    FieldGt(String, f64),
+    /// arr[field >= n] — numeric greater-or-equal
+    FieldGte(String, f64),
+    /// arr[field < n] — numeric less-than
+    FieldLt(String, f64),
+    /// arr[field <= n] — numeric less-or-equal
+    FieldLte(String, f64),
+    /// p1 and p2 — compound AND
+    And(Box<SpecializedPredicate>, Box<SpecializedPredicate>),
+    /// p1 or p2 — compound OR
+    Or(Box<SpecializedPredicate>, Box<SpecializedPredicate>),
 }
 
-/// Check if a value is the undefined marker
-pub fn is_undefined(value: &Value) -> bool {
-    matches!(value, Value::Object(obj) if obj.get("__undefined__") == Some(&Value::Bool(true)))
+/// Try to decompose a predicate AST into a specialized fast-path pattern.
+/// Returns None if the predicate is too complex for specialization.
+fn try_specialize_predicate(predicate: &AstNode) -> Option<SpecializedPredicate> {
+    match predicate {
+        // arr[field] — truthy check
+        AstNode::Name(field) => Some(SpecializedPredicate::TruthyField(field.clone())),
+
+        // arr[field op literal] or arr[literal op field]
+        AstNode::Binary { op, lhs, rhs } => {
+            match op {
+                BinaryOp::Equal => try_field_literal_pair(lhs, rhs)
+                    .map(|(f, v)| SpecializedPredicate::FieldEq(f, v)),
+                BinaryOp::NotEqual => try_field_literal_pair(lhs, rhs)
+                    .map(|(f, v)| SpecializedPredicate::FieldNe(f, v)),
+                BinaryOp::GreaterThan => try_field_number_pair(lhs, rhs)
+                    .map(|(f, n, flipped)| if flipped {
+                        SpecializedPredicate::FieldLt(f, n)
+                    } else {
+                        SpecializedPredicate::FieldGt(f, n)
+                    }),
+                BinaryOp::GreaterThanOrEqual => try_field_number_pair(lhs, rhs)
+                    .map(|(f, n, flipped)| if flipped {
+                        SpecializedPredicate::FieldLte(f, n)
+                    } else {
+                        SpecializedPredicate::FieldGte(f, n)
+                    }),
+                BinaryOp::LessThan => try_field_number_pair(lhs, rhs)
+                    .map(|(f, n, flipped)| if flipped {
+                        SpecializedPredicate::FieldGt(f, n)
+                    } else {
+                        SpecializedPredicate::FieldLt(f, n)
+                    }),
+                BinaryOp::LessThanOrEqual => try_field_number_pair(lhs, rhs)
+                    .map(|(f, n, flipped)| if flipped {
+                        SpecializedPredicate::FieldGte(f, n)
+                    } else {
+                        SpecializedPredicate::FieldLte(f, n)
+                    }),
+                BinaryOp::And => {
+                    let left = try_specialize_predicate(lhs)?;
+                    let right = try_specialize_predicate(rhs)?;
+                    Some(SpecializedPredicate::And(Box::new(left), Box::new(right)))
+                }
+                BinaryOp::Or => {
+                    let left = try_specialize_predicate(lhs)?;
+                    let right = try_specialize_predicate(rhs)?;
+                    Some(SpecializedPredicate::Or(Box::new(left), Box::new(right)))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Try to convert an AST literal node to a JValue.
+fn ast_to_literal(node: &AstNode) -> Option<JValue> {
+    match node {
+        AstNode::String(s) => Some(JValue::string(s.clone())),
+        AstNode::Number(n) => Some(JValue::Number(*n)),
+        AstNode::Boolean(b) => Some(JValue::Bool(*b)),
+        AstNode::Null => Some(JValue::Null),
+        _ => None,
+    }
+}
+
+/// Extract (field_name, literal_value) from a Binary node's operands.
+/// Handles both `field = literal` and `literal = field` orderings.
+fn try_field_literal_pair(lhs: &AstNode, rhs: &AstNode) -> Option<(String, JValue)> {
+    if let AstNode::Name(field) = lhs {
+        if let Some(lit) = ast_to_literal(rhs) {
+            return Some((field.clone(), lit));
+        }
+    }
+    if let AstNode::Name(field) = rhs {
+        if let Some(lit) = ast_to_literal(lhs) {
+            return Some((field.clone(), lit));
+        }
+    }
+    None
+}
+
+/// Extract (field_name, number, flipped) for numeric comparisons.
+/// `flipped` is true when the literal is on the LHS (e.g., `10 > price` means `price < 10`).
+fn try_field_number_pair(lhs: &AstNode, rhs: &AstNode) -> Option<(String, f64, bool)> {
+    if let (AstNode::Name(field), AstNode::Number(n)) = (lhs, rhs) {
+        return Some((field.clone(), *n, false));
+    }
+    if let (AstNode::Number(n), AstNode::Name(field)) = (lhs, rhs) {
+        return Some((field.clone(), *n, true));
+    }
+    None
+}
+
+/// Evaluate a specialized predicate against a single item.
+/// Returns true if the item matches the predicate.
+fn evaluate_specialized(item: &JValue, spec: &SpecializedPredicate) -> bool {
+    let obj = match item {
+        JValue::Object(obj) => obj,
+        _ => return false,
+    };
+    match spec {
+        SpecializedPredicate::TruthyField(field) => {
+            match obj.get(field.as_str()) {
+                Some(v) => match v {
+                    JValue::Null | JValue::Undefined => false,
+                    JValue::Bool(b) => *b,
+                    JValue::Number(n) => *n != 0.0,
+                    JValue::String(s) => !s.is_empty(),
+                    JValue::Array(a) => !a.is_empty(),
+                    JValue::Object(o) => !o.is_empty(),
+                    _ => false,
+                },
+                None => false,
+            }
+        }
+        SpecializedPredicate::FieldEq(field, literal) => {
+            obj.get(field.as_str()) == Some(literal)
+        }
+        SpecializedPredicate::FieldNe(field, literal) => {
+            obj.get(field.as_str()) != Some(literal)
+        }
+        SpecializedPredicate::FieldGt(field, n) => {
+            obj.get(field.as_str()).and_then(|v| v.as_f64()).is_some_and(|v| v > *n)
+        }
+        SpecializedPredicate::FieldGte(field, n) => {
+            obj.get(field.as_str()).and_then(|v| v.as_f64()).is_some_and(|v| v >= *n)
+        }
+        SpecializedPredicate::FieldLt(field, n) => {
+            obj.get(field.as_str()).and_then(|v| v.as_f64()).is_some_and(|v| v < *n)
+        }
+        SpecializedPredicate::FieldLte(field, n) => {
+            obj.get(field.as_str()).and_then(|v| v.as_f64()).is_some_and(|v| v <= *n)
+        }
+        SpecializedPredicate::And(left, right) => {
+            evaluate_specialized(item, left) && evaluate_specialized(item, right)
+        }
+        SpecializedPredicate::Or(left, right) => {
+            evaluate_specialized(item, left) || evaluate_specialized(item, right)
+        }
+    }
 }
 
 /// Functions that propagate undefined (return undefined when given an undefined argument).
@@ -33,20 +190,81 @@ fn propagates_undefined(name: &str) -> bool {
     UNDEFINED_PROPAGATING_FUNCTIONS.contains(&name)
 }
 
-/// Flatten an array for aggregation functions (sum, average, max, min)
-/// JSONata aggregation functions work on flattened arrays
-fn flatten_for_aggregation(arr: &[Value]) -> Vec<Value> {
-    let mut result = Vec::new();
-    for value in arr {
-        match value {
-            Value::Array(inner) => {
-                // Recursively flatten nested arrays
-                result.extend(flatten_for_aggregation(inner));
+/// Iterator-based numeric aggregation helpers.
+/// These avoid cloning values by iterating over references and extracting f64 values directly.
+mod aggregation {
+    use super::*;
+
+    /// Iterate over all numeric values in a potentially nested array, yielding f64 values.
+    /// Returns Err if any non-numeric value is encountered.
+    fn for_each_numeric(arr: &[JValue], func_name: &str, mut f: impl FnMut(f64)) -> Result<(), EvaluatorError> {
+        fn recurse(arr: &[JValue], func_name: &str, f: &mut dyn FnMut(f64)) -> Result<(), EvaluatorError> {
+            for value in arr.iter() {
+                match value {
+                    JValue::Array(inner) => recurse(inner, func_name, f)?,
+                    JValue::Number(n) => {
+                        f(*n);
+                    }
+                    _ => {
+                        return Err(EvaluatorError::TypeError(format!(
+                            "{}() requires all array elements to be numbers",
+                            func_name
+                        )));
+                    }
+                }
             }
-            _ => result.push(value.clone()),
+            Ok(())
         }
+        recurse(arr, func_name, &mut f)
     }
-    result
+
+    /// Count elements in a potentially nested array without cloning.
+    fn count_numeric(arr: &[JValue], func_name: &str) -> Result<usize, EvaluatorError> {
+        let mut count = 0usize;
+        for_each_numeric(arr, func_name, |_| count += 1)?;
+        Ok(count)
+    }
+
+    pub fn sum(arr: &[JValue]) -> Result<JValue, EvaluatorError> {
+        if arr.is_empty() {
+            return Ok(JValue::from(0i64));
+        }
+        let mut total = 0.0f64;
+        for_each_numeric(arr, "sum", |n| total += n)?;
+        Ok(JValue::Number(total))
+    }
+
+    pub fn max(arr: &[JValue]) -> Result<JValue, EvaluatorError> {
+        if arr.is_empty() {
+            return Ok(JValue::Null);
+        }
+        let mut max_val = f64::NEG_INFINITY;
+        for_each_numeric(arr, "max", |n| {
+            if n > max_val { max_val = n; }
+        })?;
+        Ok(JValue::Number(max_val))
+    }
+
+    pub fn min(arr: &[JValue]) -> Result<JValue, EvaluatorError> {
+        if arr.is_empty() {
+            return Ok(JValue::Null);
+        }
+        let mut min_val = f64::INFINITY;
+        for_each_numeric(arr, "min", |n| {
+            if n < min_val { min_val = n; }
+        })?;
+        Ok(JValue::Number(min_val))
+    }
+
+    pub fn average(arr: &[JValue]) -> Result<JValue, EvaluatorError> {
+        if arr.is_empty() {
+            return Ok(JValue::Null);
+        }
+        let mut total = 0.0f64;
+        let count = count_numeric(arr, "average")?;
+        for_each_numeric(arr, "average", |n| total += n)?;
+        Ok(JValue::Number(total / count as f64))
+    }
 }
 
 /// Evaluator errors
@@ -78,15 +296,15 @@ impl From<crate::datetime::DateTimeError> for EvaluatorError {
 /// Used for trampoline-based tail call optimization
 enum LambdaResult {
     /// Final value - evaluation is complete
-    Value(Value),
+    JValue(JValue),
     /// Tail call - need to continue with another lambda invocation
     TailCall {
         /// The lambda to call
         lambda: StoredLambda,
         /// Arguments for the call
-        args: Vec<Value>,
+        args: Vec<JValue>,
         /// Data context for the call
-        data: Value,
+        data: JValue,
     },
 }
 
@@ -99,58 +317,125 @@ pub struct StoredLambda {
     pub body: AstNode,
     pub signature: Option<String>,
     /// Captured environment bindings for closures
-    pub captured_env: HashMap<String, Value>,
+    pub captured_env: HashMap<String, JValue>,
     /// Captured data context for lexical scoping of bare field names
-    pub captured_data: Option<Value>,
+    pub captured_data: Option<JValue>,
     /// Whether this lambda's body contains tail calls that can be optimized
     pub thunk: bool,
 }
 
+/// A single scope in the scope stack
+struct Scope {
+    bindings: HashMap<String, JValue>,
+    lambdas: HashMap<String, StoredLambda>,
+}
+
+impl Scope {
+    fn new() -> Self {
+        Scope {
+            bindings: HashMap::new(),
+            lambdas: HashMap::new(),
+        }
+    }
+}
+
 /// Evaluation context
 ///
-/// Holds variable bindings and other state needed during evaluation
+/// Holds variable bindings and other state needed during evaluation.
+/// Uses a scope stack for efficient push/pop instead of clone/restore.
 pub struct Context {
-    pub(crate) bindings: HashMap<String, Value>,
-    pub(crate) lambdas: HashMap<String, StoredLambda>,
-    parent_data: Option<Value>,
+    scope_stack: Vec<Scope>,
+    parent_data: Option<JValue>,
 }
 
 impl Context {
     pub fn new() -> Self {
         Context {
-            bindings: HashMap::new(),
-            lambdas: HashMap::new(),
+            scope_stack: vec![Scope::new()],
             parent_data: None,
         }
     }
 
-    pub fn bind(&mut self, name: String, value: Value) {
-        self.bindings.insert(name, value);
+    /// Push a new scope onto the stack
+    fn push_scope(&mut self) {
+        self.scope_stack.push(Scope::new());
+    }
+
+    /// Pop the top scope from the stack
+    fn pop_scope(&mut self) {
+        if self.scope_stack.len() > 1 {
+            self.scope_stack.pop();
+        }
+    }
+
+    /// Pop scope but preserve specified lambdas by moving them to the current top scope
+    fn pop_scope_preserving_lambdas(&mut self, lambda_ids: &[String]) {
+        if self.scope_stack.len() > 1 {
+            let popped = self.scope_stack.pop().unwrap();
+            if !lambda_ids.is_empty() {
+                let top = self.scope_stack.last_mut().unwrap();
+                for id in lambda_ids {
+                    if let Some(stored) = popped.lambdas.get(id) {
+                        top.lambdas.insert(id.clone(), stored.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn bind(&mut self, name: String, value: JValue) {
+        self.scope_stack.last_mut().unwrap().bindings.insert(name, value);
     }
 
     pub fn bind_lambda(&mut self, name: String, lambda: StoredLambda) {
-        self.lambdas.insert(name, lambda);
+        self.scope_stack.last_mut().unwrap().lambdas.insert(name, lambda);
     }
 
     pub fn unbind(&mut self, name: &str) {
-        self.bindings.remove(name);
-        self.lambdas.remove(name);
+        // Remove from top scope only
+        let top = self.scope_stack.last_mut().unwrap();
+        top.bindings.remove(name);
+        top.lambdas.remove(name);
     }
 
-    pub fn lookup(&self, name: &str) -> Option<&Value> {
-        self.bindings.get(name)
+    pub fn lookup(&self, name: &str) -> Option<&JValue> {
+        // Walk scope stack from top to bottom
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(value) = scope.bindings.get(name) {
+                return Some(value);
+            }
+        }
+        None
     }
 
     pub fn lookup_lambda(&self, name: &str) -> Option<&StoredLambda> {
-        self.lambdas.get(name)
+        // Walk scope stack from top to bottom
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(lambda) = scope.lambdas.get(name) {
+                return Some(lambda);
+            }
+        }
+        None
     }
 
-    pub fn set_parent(&mut self, data: Value) {
+    pub fn set_parent(&mut self, data: JValue) {
         self.parent_data = Some(data);
     }
 
-    pub fn get_parent(&self) -> Option<&Value> {
+    pub fn get_parent(&self) -> Option<&JValue> {
         self.parent_data.as_ref()
+    }
+
+    /// Collect all bindings across all scopes (for environment capture).
+    /// Higher scopes shadow lower scopes.
+    fn all_bindings(&self) -> HashMap<String, JValue> {
+        let mut result = HashMap::new();
+        for scope in &self.scope_stack {
+            for (k, v) in &scope.bindings {
+                result.insert(k.clone(), v.clone());
+            }
+        }
+        result
     }
 }
 
@@ -192,9 +477,9 @@ impl Evaluator {
     fn invoke_stored_lambda(
         &mut self,
         stored: &StoredLambda,
-        args: &[Value],
-        data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        args: &[JValue],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         let captured_env = if stored.captured_env.is_empty() {
             None
         } else {
@@ -213,25 +498,109 @@ impl Evaluator {
         )
     }
 
-    /// Look up a StoredLambda from a Value that may be a lambda marker object.
-    /// Returns the cloned StoredLambda if the value is an object with `__lambda__`
-    /// and a valid `_lambda_id` that references a stored lambda.
-    fn lookup_lambda_from_value(&self, value: &Value) -> Option<StoredLambda> {
-        if let Value::Object(map) = value {
-            if map.contains_key("__lambda__") {
-                if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
-                    return self.context.lookup_lambda(lambda_id).cloned();
-                }
-            }
+    /// Look up a StoredLambda from a JValue that may be a lambda marker.
+    /// Returns the cloned StoredLambda if the value is a JValue::Lambda variant
+    /// with a valid lambda_id that references a stored lambda.
+    fn lookup_lambda_from_value(&self, value: &JValue) -> Option<StoredLambda> {
+        if let JValue::Lambda { lambda_id, .. } = value {
+            return self.context.lookup_lambda(&**lambda_id).cloned();
         }
         None
+    }
+
+    /// Get the number of parameters a callback function expects by inspecting its AST.
+    /// This is used to avoid passing unnecessary arguments to callbacks in HOF functions.
+    /// Returns the parameter count, or usize::MAX if unable to determine (meaning pass all args).
+    fn get_callback_param_count(&self, func_node: &AstNode) -> usize {
+        match func_node {
+            AstNode::Lambda { params, .. } => params.len(),
+            AstNode::Variable(var_name) => {
+                // Check if this variable holds a stored lambda
+                if let Some(stored_lambda) = self.context.lookup_lambda(var_name) {
+                    return stored_lambda.params.len();
+                }
+                // Also check if it's a lambda value in bindings (e.g., from partial application)
+                if let Some(value) = self.context.lookup(var_name) {
+                    if let Some(stored_lambda) = self.lookup_lambda_from_value(value) {
+                        return stored_lambda.params.len();
+                    }
+                }
+                // Unknown, return max to be safe
+                usize::MAX
+            }
+            AstNode::Function { .. } => {
+                // For function references, we can't easily determine param count
+                // Return max to be safe
+                usize::MAX
+            }
+            _ => usize::MAX,
+        }
+    }
+
+    /// Merge sort implementation using a comparator function.
+    /// This replaces the O(n²) bubble sort for better performance on large arrays.
+    /// The comparator returns true if the first element should come AFTER the second.
+    fn merge_sort_with_comparator(
+        &mut self,
+        arr: &mut [JValue],
+        comparator: &AstNode,
+        data: &JValue,
+    ) -> Result<(), EvaluatorError> {
+        if arr.len() <= 1 {
+            return Ok(());
+        }
+
+        let mid = arr.len() / 2;
+
+        // Sort left half
+        self.merge_sort_with_comparator(&mut arr[..mid], comparator, data)?;
+
+        // Sort right half
+        self.merge_sort_with_comparator(&mut arr[mid..], comparator, data)?;
+
+        // Merge the sorted halves
+        let mut temp = Vec::with_capacity(arr.len());
+        let (left, right) = arr.split_at(mid);
+
+        let mut i = 0;
+        let mut j = 0;
+
+        while i < left.len() && j < right.len() {
+            // Apply comparator: returns true if left[i] should come AFTER right[j]
+            let cmp_result = self.apply_function(
+                comparator,
+                &[left[i].clone(), right[j].clone()],
+                data,
+            )?;
+
+            if self.is_truthy(&cmp_result) {
+                // left[i] should come after right[j], so take right[j]
+                temp.push(right[j].clone());
+                j += 1;
+            } else {
+                // left[i] should come before or equal to right[j], so take left[i]
+                temp.push(left[i].clone());
+                i += 1;
+            }
+        }
+
+        // Copy remaining elements
+        temp.extend_from_slice(&left[i..]);
+        temp.extend_from_slice(&right[j..]);
+
+        // Copy back to original array (can't use copy_from_slice since JValue is not Copy)
+        for (i, val) in temp.into_iter().enumerate() {
+            arr[i] = val;
+        }
+
+        Ok(())
     }
 
     /// Evaluate an AST node against data
     ///
     /// This is the main entry point for evaluation. It sets up the parent context
     /// to be the root data if not already set.
-    pub fn evaluate(&mut self, node: &AstNode, data: &Value) -> Result<Value, EvaluatorError> {
+    pub fn evaluate(&mut self, node: &AstNode, data: &JValue) -> Result<JValue, EvaluatorError> {
         // Set parent context to root data if not already set
         if self.context.get_parent().is_none() {
             self.context.set_parent(data.clone());
@@ -241,7 +610,7 @@ impl Evaluator {
     }
 
     /// Internal evaluation method
-    fn evaluate_internal(&mut self, node: &AstNode, data: &Value) -> Result<Value, EvaluatorError> {
+    fn evaluate_internal(&mut self, node: &AstNode, data: &JValue) -> Result<JValue, EvaluatorError> {
         // Check recursion depth to prevent stack overflow
         self.recursion_depth += 1;
         if self.recursion_depth > self.max_recursion_depth {
@@ -258,48 +627,48 @@ impl Evaluator {
     }
 
     /// Internal evaluation implementation (separated to allow depth tracking)
-    fn evaluate_internal_impl(&mut self, node: &AstNode, data: &Value) -> Result<Value, EvaluatorError> {
+    fn evaluate_internal_impl(&mut self, node: &AstNode, data: &JValue) -> Result<JValue, EvaluatorError> {
         match node {
-            AstNode::String(s) => Ok(Value::String(s.clone())),
+            AstNode::String(s) => Ok(JValue::string(s.clone())),
 
             // Name nodes represent field access on the current data
             AstNode::Name(field_name) => {
                 match data {
-                    Value::Object(obj) => Ok(obj.get(field_name).cloned().unwrap_or(Value::Null)),
-                    Value::Array(arr) => {
+                    JValue::Object(obj) => Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null)),
+                    JValue::Array(arr) => {
                         // Map over array
                         let mut result = Vec::new();
-                        for item in arr {
-                            if let Value::Object(obj) = item {
+                        for item in arr.iter() {
+                            if let JValue::Object(obj) = item {
                                 if let Some(val) = obj.get(field_name) {
                                     result.push(val.clone());
                                 }
                             }
                         }
                         if result.is_empty() {
-                            Ok(Value::Null)
+                            Ok(JValue::Null)
                         } else if result.len() == 1 {
                             Ok(result.into_iter().next().unwrap())
                         } else {
-                            Ok(Value::Array(result))
+                            Ok(JValue::array(result))
                         }
                     }
-                    _ => Ok(Value::Null),
+                    _ => Ok(JValue::Null),
                 }
             }
 
             AstNode::Number(n) => {
-                // Preserve integer-ness: if the number is a whole number, create an integer Value
+                // Preserve integer-ness: if the number is a whole number, create an integer JValue
                 if n.fract() == 0.0 && n.is_finite() && n.abs() < (1i64 << 53) as f64 {
                     // It's a whole number that can be represented as i64
-                    Ok(serde_json::json!(*n as i64))
+                    Ok(JValue::from(*n as i64))
                 } else {
-                    Ok(serde_json::json!(*n))
+                    Ok(JValue::Number(*n))
                 }
             }
-            AstNode::Boolean(b) => Ok(Value::Bool(*b)),
-            AstNode::Null => Ok(Value::Null),
-            AstNode::Undefined => Ok(undefined_value()),
+            AstNode::Boolean(b) => Ok(JValue::Bool(*b)),
+            AstNode::Null => Ok(JValue::Null),
+            AstNode::Undefined => Ok(JValue::Undefined),
             AstNode::Placeholder => {
                 // Placeholders should only appear as function arguments
                 // If we reach here, it's an error
@@ -310,11 +679,7 @@ impl Evaluator {
             AstNode::Regex { pattern, flags } => {
                 // Return a regex object as a special JSON value
                 // This will be recognized by functions like $split, $match, $replace
-                Ok(serde_json::json!({
-                    "__jsonata_regex__": true,
-                    "pattern": pattern,
-                    "flags": flags
-                }))
+                Ok(JValue::regex(pattern.as_str(), flags.as_str()))
             }
 
             AstNode::Variable(name) => {
@@ -326,8 +691,8 @@ impl Evaluator {
                         return Ok(value.clone());
                     }
                     // If data is a tuple, return the @ value
-                    if let Value::Object(obj) = data {
-                        if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                    if let JValue::Object(obj) = data {
+                        if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
                             if let Some(inner) = obj.get("@") {
                                 return Ok(inner.clone());
                             }
@@ -345,8 +710,8 @@ impl Evaluator {
 
                 // Check tuple bindings in data (for index binding operator #$var)
                 // When iterating over a tuple stream, $var can reference the bound index
-                if let Value::Object(obj) = data {
-                    if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                if let JValue::Object(obj) = data {
+                    if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
                         // Check for the variable in tuple bindings (stored as "$name")
                         let binding_key = format!("${}", name);
                         if let Some(binding_value) = obj.get(&binding_key) {
@@ -360,13 +725,12 @@ impl Evaluator {
                     // Return a lambda representation that can be passed to higher-order functions
                     // Include _lambda_id pointing to the stored lambda so it can be found
                     // when captured in closures
-                    let lambda_repr = serde_json::json!({
-                        "__lambda__": true,
-                        "params": stored_lambda.params,
-                        "body": format!("{:?}", stored_lambda.body),
-                        "_name": name,  // Store the name for later invocation
-                        "_lambda_id": name  // Same as name for named lambdas
-                    });
+                    let lambda_repr = JValue::lambda(
+                        name.as_str(),
+                        stored_lambda.params.clone(),
+                        Some(name.to_string()),
+                        stored_lambda.signature.clone(),
+                    );
                     return Ok(lambda_repr);
                 }
 
@@ -374,17 +738,14 @@ impl Evaluator {
                 if self.is_builtin_function(name) {
                     // Return a marker for built-in functions
                     // This allows built-in functions to be passed to higher-order functions
-                    let builtin_repr = serde_json::json!({
-                        "__builtin__": true,
-                        "_name": name
-                    });
+                    let builtin_repr = JValue::builtin(name.as_str());
                     return Ok(builtin_repr);
                 }
 
                 // Undefined variable - return null (undefined in JSONata semantics)
                 // This allows expressions like `$not(undefined_var)` to return undefined
                 // and comparisons like `3 > $undefined` to return undefined
-                Ok(Value::Null)
+                Ok(JValue::Null)
             }
 
             AstNode::ParentVariable(name) => {
@@ -412,10 +773,10 @@ impl Evaluator {
 
                 // Access field on parent context
                 match parent_data {
-                    Value::Object(obj) => {
-                        Ok(obj.get(name).cloned().unwrap_or(Value::Null))
+                    JValue::Object(obj) => {
+                        Ok(obj.get(name).cloned().unwrap_or(JValue::Null))
                     }
-                    _ => Ok(Value::Null)
+                    _ => Ok(JValue::Null)
                 }
             }
 
@@ -443,26 +804,26 @@ impl Evaluator {
 
                     // Skip undefined values in array constructors
                     // Note: explicit null is preserved, only undefined (no value) is filtered
-                    if is_undefined(&value) {
+                    if value.is_undefined() {
                         continue;
                     }
 
                     if is_array_constructor {
                         // Explicit array constructor - keep nested
                         result.push(value);
-                    } else if let Value::Array(arr) = value {
+                    } else if let JValue::Array(arr) = value {
                         // Non-array-constructor that evaluated to array - flatten it
-                        result.extend(arr);
+                        result.extend(arr.iter().cloned());
                     } else {
                         // Non-array value - add as-is
                         result.push(value);
                     }
                 }
-                Ok(Value::Array(result))
+                Ok(JValue::array(result))
             }
 
             AstNode::Object(pairs) => {
-                let mut result = serde_json::Map::new();
+                let mut result = IndexMap::new();
                 // Track which pair index produced each key (for D1009 checking)
                 let mut key_sources: HashMap<String, usize> =
                     HashMap::new();
@@ -470,11 +831,11 @@ impl Evaluator {
                 for (pair_index, (key_node, value_node)) in pairs.iter().enumerate() {
                     // Evaluate key (must be a string)
                     let key = match self.evaluate_internal(key_node, data)? {
-                        Value::String(s) => s,
-                        Value::Null => continue, // Skip null keys
+                        JValue::String(s) => s,
+                        JValue::Null => continue, // Skip null keys
                         other => {
                             // Skip undefined keys
-                            if is_undefined(&other) {
+                            if other.is_undefined() {
                                 continue;
                             }
                             return Err(EvaluatorError::TypeError(format!(
@@ -485,7 +846,7 @@ impl Evaluator {
                     };
 
                     // Check for D1009: multiple key expressions evaluate to same key
-                    if let Some(&existing_idx) = key_sources.get(&key) {
+                    if let Some(&existing_idx) = key_sources.get(&*key) {
                         if existing_idx != pair_index {
                             return Err(EvaluatorError::EvaluationError(format!(
                                 "D1009: Multiple key expressions evaluate to same key: {}",
@@ -493,17 +854,17 @@ impl Evaluator {
                             )));
                         }
                     }
-                    key_sources.insert(key.clone(), pair_index);
+                    key_sources.insert(key.to_string(), pair_index);
 
                     // Evaluate value - skip undefined values, include null
                     let value = self.evaluate_internal(value_node, data)?;
                     // Skip key-value pairs where the value is undefined
-                    if is_undefined(&value) {
+                    if value.is_undefined() {
                         continue;
                     }
-                    result.insert(key, value);
+                    result.insert(key.to_string(), value);
                 }
-                Ok(Value::Object(result))
+                Ok(JValue::object(result))
             }
 
             // Object transform: group items by key, then evaluate value once per group
@@ -512,20 +873,20 @@ impl Evaluator {
                 let input_value = self.evaluate_internal(input, data)?;
 
                 // If input is undefined, return undefined (not empty object)
-                if is_undefined(&input_value) {
-                    return Ok(undefined_value());
+                if input_value.is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
 
                 // Handle array input - process each item
-                let items: Vec<Value> = match input_value {
-                    Value::Array(ref arr) => arr.clone(),
-                    Value::Null => return Ok(Value::Null),
+                let items: Vec<JValue> = match input_value {
+                    JValue::Array(ref arr) => (**arr).clone(),
+                    JValue::Null => return Ok(JValue::Null),
                     other => vec![other],
                 };
 
                 // If array is empty, add undefined to enable literal JSON object generation
                 let items = if items.is_empty() {
-                    vec![undefined_value()]
+                    vec![JValue::Undefined]
                 } else {
                     items
                 };
@@ -533,7 +894,7 @@ impl Evaluator {
                 // Phase 1: Group items by key expression
                 // groups maps key -> (grouped_data, expr_index)
                 // When multiple items have same key, their data is appended together
-                let mut groups: HashMap<String, (Vec<Value>, usize)> =
+                let mut groups: HashMap<String, (Vec<JValue>, usize)> =
                     HashMap::new();
 
                 // Save the current $ binding to restore later
@@ -546,11 +907,11 @@ impl Evaluator {
                     for (pair_index, (key_node, _value_node)) in pattern.iter().enumerate() {
                         // Evaluate key with current item as context
                         let key = match self.evaluate_internal(key_node, item)? {
-                            Value::String(s) => s,
-                            Value::Null => continue, // Skip null keys
+                            JValue::String(s) => s,
+                            JValue::Null => continue, // Skip null keys
                             other => {
                                 // Skip undefined keys
-                                if is_undefined(&other) {
+                                if other.is_undefined() {
                                     continue;
                                 }
                                 return Err(EvaluatorError::TypeError(format!(
@@ -561,7 +922,7 @@ impl Evaluator {
                         };
 
                         // Group items by key
-                        if let Some((existing_data, existing_idx)) = groups.get_mut(&key) {
+                        if let Some((existing_data, existing_idx)) = groups.get_mut(&*key) {
                             // Key already exists - check if from same expression index
                             if *existing_idx != pair_index {
                                 // D1009: multiple key expressions evaluate to same key
@@ -574,13 +935,13 @@ impl Evaluator {
                             existing_data.push(item.clone());
                         } else {
                             // New key - create new group
-                            groups.insert(key, (vec![item.clone()], pair_index));
+                            groups.insert(key.to_string(), (vec![item.clone()], pair_index));
                         }
                     }
                 }
 
                 // Phase 2: Evaluate value expression for each group
-                let mut result = serde_json::Map::new();
+                let mut result = IndexMap::new();
 
                 for (key, (grouped_data, expr_index)) in groups {
                     // Get the value expression for this group
@@ -592,7 +953,7 @@ impl Evaluator {
                     let context = if grouped_data.len() == 1 {
                         grouped_data.into_iter().next().unwrap()
                     } else {
-                        Value::Array(grouped_data)
+                        JValue::array(grouped_data)
                     };
 
                     // Bind $ to the context for value evaluation
@@ -602,7 +963,7 @@ impl Evaluator {
                     let value = self.evaluate_internal(value_node, &context)?;
 
                     // Skip undefined values
-                    if !is_undefined(&value) {
+                    if !value.is_undefined() {
                         result.insert(key, value);
                     }
                 }
@@ -614,7 +975,7 @@ impl Evaluator {
                     self.context.unbind("$");
                 }
 
-                Ok(Value::Object(result))
+                Ok(JValue::object(result))
             }
 
             AstNode::Function { name, args, is_builtin } => {
@@ -627,7 +988,7 @@ impl Evaluator {
                 // Evaluate the procedure to get the callable value
                 let callable = self.evaluate_internal(procedure, data)?;
 
-                // Check if it's a lambda (object with __lambda__ key)
+                // Check if it's a lambda value
                 if let Some(stored_lambda) = self.lookup_lambda_from_value(&callable) {
                     let mut evaluated_args = Vec::with_capacity(args.len());
                     for arg in args.iter() {
@@ -656,35 +1017,23 @@ impl Evaluator {
                 } else {
                     // No else branch - return undefined (not null)
                     // This allows $map to filter out results from conditionals without else
-                    Ok(undefined_value())
+                    Ok(JValue::Undefined)
                 }
             }
 
             AstNode::Block(expressions) => {
-                // Blocks create a new scope - save current bindings
-                let saved_bindings = self.context.bindings.clone();
-                let saved_lambdas = self.context.lambdas.clone();
+                // Blocks create a new scope - push scope instead of clone/restore
+                self.context.push_scope();
 
-                let mut result = Value::Null;
+                let mut result = JValue::Null;
                 for expr in expressions {
                     result = self.evaluate_internal(expr, data)?;
                 }
 
-                // Before restoring, preserve any lambdas referenced by the result
+                // Before popping, preserve any lambdas referenced by the result
                 // This is essential for closures returned from blocks (IIFE pattern)
                 let lambdas_to_keep = self.extract_lambda_ids(&result);
-                let current_lambdas = self.context.lambdas.clone();
-
-                // Restore original bindings after block completes
-                self.context.bindings = saved_bindings;
-                self.context.lambdas = saved_lambdas;
-
-                // Re-add any lambdas that are referenced by the returned value
-                for lambda_id in lambdas_to_keep {
-                    if let Some(stored_lambda) = current_lambdas.get(&lambda_id) {
-                        self.context.lambdas.insert(lambda_id, stored_lambda.clone());
-                    }
-                }
+                self.context.pop_scope_preserving_lambdas(&lambdas_to_keep);
 
                 Ok(result)
             }
@@ -697,23 +1046,18 @@ impl Evaluator {
                     params: params.clone(),
                     body: (**body).clone(),
                     signature: signature.clone(),
-                    captured_env: self.capture_current_environment(),
+                    captured_env: self.capture_environment_for(body, params),
                     captured_data: Some(data.clone()),
                     thunk: *thunk,
                 };
                 self.context.bind_lambda(lambda_id.clone(), stored_lambda);
 
-                let mut lambda_obj = serde_json::json!({
-                    "__lambda__": true,
-                    "params": params,
-                    "body": format!("{:?}", body),
-                    "_lambda_id": lambda_id  // Reference to stored lambda with captured env
-                });
-
-                // Add signature if present
-                if let Some(sig) = signature {
-                    lambda_obj["signature"] = serde_json::json!(sig);
-                }
+                let lambda_obj = JValue::lambda(
+                    lambda_id.as_str(),
+                    params.clone(),
+                    None::<String>,
+                    signature.clone(),
+                );
 
                 Ok(lambda_obj)
             }
@@ -721,22 +1065,22 @@ impl Evaluator {
             // Wildcard: collect all values from current object
             AstNode::Wildcard => {
                 match data {
-                    Value::Object(obj) => {
+                    JValue::Object(obj) => {
                         let mut result = Vec::new();
                         for value in obj.values() {
                             // Flatten arrays into the result
                             match value {
-                                Value::Array(arr) => result.extend(arr.clone()),
+                                JValue::Array(arr) => result.extend(arr.iter().cloned()),
                                 _ => result.push(value.clone()),
                             }
                         }
-                        Ok(Value::Array(result))
+                        Ok(JValue::array(result))
                     }
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         // For arrays, wildcard returns all elements
-                        Ok(Value::Array(arr.clone()))
+                        Ok(JValue::Array(arr.clone()))
                     }
-                    _ => Ok(Value::Null),
+                    _ => Ok(JValue::Null),
                 }
             }
 
@@ -744,9 +1088,9 @@ impl Evaluator {
             AstNode::Descendant => {
                 let descendants = self.collect_descendants(data);
                 if descendants.is_empty() {
-                    Ok(Value::Null) // No descendants means undefined
+                    Ok(JValue::Null) // No descendants means undefined
                 } else {
-                    Ok(Value::Array(descendants))
+                    Ok(JValue::array(descendants))
                 }
             }
 
@@ -763,7 +1107,7 @@ impl Evaluator {
                     let value = self.evaluate_internal(element, data)?;
                     result.push(value);
                 }
-                Ok(Value::Array(result))
+                Ok(JValue::array(result))
             }
 
             AstNode::FunctionApplication(_) => {
@@ -784,26 +1128,26 @@ impl Evaluator {
                 // Store the variable name and create indexed results
                 // This is a simplified implementation - full tuple stream would require more work
                 match value {
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         // Store the index binding metadata in a special wrapper
                         let mut result = Vec::new();
                         for (idx, item) in arr.iter().enumerate() {
                             // Create wrapper object with value and index
-                            let mut wrapper = serde_json::Map::new();
+                            let mut wrapper = IndexMap::new();
                             wrapper.insert("@".to_string(), item.clone());
-                            wrapper.insert(format!("${}", variable), serde_json::json!(idx));
-                            wrapper.insert("__tuple__".to_string(), Value::Bool(true));
-                            result.push(Value::Object(wrapper));
+                            wrapper.insert(format!("${}", variable), JValue::Number(idx as f64));
+                            wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
+                            result.push(JValue::object(wrapper));
                         }
-                        Ok(Value::Array(result))
+                        Ok(JValue::array(result))
                     }
                     // Single value: just return as-is with index 0
                     other => {
-                        let mut wrapper = serde_json::Map::new();
+                        let mut wrapper = IndexMap::new();
                         wrapper.insert("@".to_string(), other);
-                        wrapper.insert(format!("${}", variable), serde_json::json!(0));
-                        wrapper.insert("__tuple__".to_string(), Value::Bool(true));
-                        Ok(Value::Object(wrapper))
+                        wrapper.insert(format!("${}", variable), JValue::from(0i64));
+                        wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
+                        Ok(JValue::object(wrapper))
                     }
                 }
             }
@@ -836,7 +1180,7 @@ impl Evaluator {
                     self.context.bind_lambda(lambda_name, transform_lambda);
 
                     // Return lambda marker
-                    Ok(Value::String("<lambda>".to_string()))
+                    Ok(JValue::string("<lambda>".to_string()))
                 }
             }
         }
@@ -845,12 +1189,12 @@ impl Evaluator {
     /// Apply stages (filters/predicates) to a value during field extraction
     /// Non-array values are wrapped in an array before filtering (JSONata semantics)
     /// This matches the JavaScript reference where stages apply to sequences
-    fn apply_stages(&mut self, value: Value, stages: &[Stage]) -> Result<Value, EvaluatorError> {
+    fn apply_stages(&mut self, value: JValue, stages: &[Stage]) -> Result<JValue, EvaluatorError> {
         // Wrap non-arrays in an array for filtering (JSONata semantics)
         let mut result = match value {
-            Value::Array(arr) => Value::Array(arr),
-            Value::Null => return Ok(Value::Null), // Null passes through unchanged
-            other => Value::Array(vec![other]),
+            JValue::Array(arr) => JValue::Array(arr),
+            JValue::Null => return Ok(JValue::Null), // Null passes through unchanged
+            other => JValue::array(vec![other]),
         };
 
         for stage in stages {
@@ -864,41 +1208,56 @@ impl Evaluator {
         Ok(result)
     }
 
+    /// Check if an AST node is definitely a filter expression (comparison/logical)
+    /// rather than a potential numeric index. When true, we skip speculative numeric evaluation.
+    fn is_filter_predicate(predicate: &AstNode) -> bool {
+        match predicate {
+            AstNode::Binary { op, .. } => matches!(op,
+                BinaryOp::GreaterThan | BinaryOp::GreaterThanOrEqual |
+                BinaryOp::LessThan | BinaryOp::LessThanOrEqual |
+                BinaryOp::Equal | BinaryOp::NotEqual |
+                BinaryOp::And | BinaryOp::Or | BinaryOp::In
+            ),
+            AstNode::Unary { op: crate::ast::UnaryOp::Not, .. } => true,
+            _ => false,
+        }
+    }
+
     /// Evaluate a predicate as a stage during field extraction
     /// This has different semantics than standalone predicates:
     /// - Maps index operations over arrays of extracted values
-    fn evaluate_predicate_as_stage(&mut self, current: &Value, predicate: &AstNode) -> Result<Value, EvaluatorError> {
+    fn evaluate_predicate_as_stage(&mut self, current: &JValue, predicate: &AstNode) -> Result<JValue, EvaluatorError> {
         // Special case: empty brackets [] (represented as Boolean(true))
         if matches!(predicate, AstNode::Boolean(true)) {
             return match current {
-                Value::Array(arr) => Ok(Value::Array(arr.clone())),
-                Value::Null => Ok(Value::Null),
-                other => Ok(Value::Array(vec![other.clone()])),
+                JValue::Array(arr) => Ok(JValue::Array(arr.clone())),
+                JValue::Null => Ok(JValue::Null),
+                other => Ok(JValue::array(vec![other.clone()])),
             };
         }
 
         match current {
-            Value::Array(arr) => {
+            JValue::Array(arr) => {
                 // For stages: if we have an array of values (from field extraction),
                 // apply the predicate to each value if appropriate
 
                 // Check if predicate is a numeric index
                 if let AstNode::Number(n) = predicate {
                     // Check if this is an array of arrays (extracted array fields)
-                    let is_array_of_arrays = arr.iter().any(|item| matches!(item, Value::Array(_)));
+                    let is_array_of_arrays = arr.iter().any(|item| matches!(item, JValue::Array(_)));
 
                     if !is_array_of_arrays {
                         // Simple values: just index normally
-                        return self.array_index(current, &serde_json::json!(n));
+                        return self.array_index(current, &JValue::Number(*n));
                     }
 
                     // Array of arrays: map index access over each extracted array
                     let mut result = Vec::new();
-                    for item in arr {
+                    for item in arr.iter() {
                         match item {
-                            Value::Array(_) => {
-                                let indexed = self.array_index(item, &serde_json::json!(n))?;
-                                if !matches!(indexed, Value::Null) {
+                            JValue::Array(_) => {
+                                let indexed = self.array_index(item, &JValue::Number(*n))?;
+                                if !matches!(indexed, JValue::Null) {
                                     result.push(indexed);
                                 }
                             }
@@ -909,7 +1268,29 @@ impl Evaluator {
                             }
                         }
                     }
-                    return Ok(Value::Array(result));
+                    return Ok(JValue::array(result));
+                }
+
+                // Short-circuit: if predicate is definitely a comparison/logical expression,
+                // skip speculative numeric evaluation and go directly to filter logic
+                if Self::is_filter_predicate(predicate) {
+                    // Try specialized fast path for simple field comparisons
+                    if let Some(spec) = try_specialize_predicate(predicate) {
+                        let filtered: Vec<JValue> = arr.iter()
+                            .filter(|item| evaluate_specialized(item, &spec))
+                            .cloned()
+                            .collect();
+                        return Ok(JValue::array(filtered));
+                    }
+                    // Fallback: full AST evaluation
+                    let mut filtered = Vec::new();
+                    for item in arr.iter() {
+                        let item_result = self.evaluate_internal(predicate, item)?;
+                        if self.is_truthy(&item_result) {
+                            filtered.push(item.clone());
+                        }
+                    }
+                    return Ok(JValue::array(filtered));
                 }
 
                 // Try to evaluate the predicate to see if it's a numeric index or array of indices
@@ -917,23 +1298,23 @@ impl Evaluator {
                 // If it yields an array of numbers, use them as multiple indices
                 // If evaluation fails (e.g., comparison error), treat as filter
                 match self.evaluate_internal(predicate, current) {
-                    Ok(Value::Number(n)) => {
-                        let n_val = n.as_f64().unwrap();
-                        let is_array_of_arrays = arr.iter().any(|item| matches!(item, Value::Array(_)));
+                    Ok(JValue::Number(n)) => {
+                        let n_val = n;
+                        let is_array_of_arrays = arr.iter().any(|item| matches!(item, JValue::Array(_)));
 
                         if !is_array_of_arrays {
-                            let pred_result = serde_json::json!(n_val);
+                            let pred_result = JValue::Number(n_val as f64);
                             return self.array_index(current, &pred_result);
                         }
 
                         // Array of arrays: map index access
                         let mut result = Vec::new();
-                        let pred_result = serde_json::json!(n_val);
-                        for item in arr {
+                        let pred_result = JValue::Number(n_val as f64);
+                        for item in arr.iter() {
                             match item {
-                                Value::Array(_) => {
+                                JValue::Array(_) => {
                                     let indexed = self.array_index(item, &pred_result)?;
-                                    if !matches!(indexed, Value::Null) {
+                                    if !matches!(indexed, JValue::Null) {
                                         result.push(indexed);
                                     }
                                 }
@@ -944,12 +1325,12 @@ impl Evaluator {
                                 }
                             }
                         }
-                        return Ok(Value::Array(result));
+                        return Ok(JValue::array(result));
                     }
-                    Ok(Value::Array(indices)) => {
+                    Ok(JValue::Array(indices)) => {
                         // Array of values - could be indices or filter results
                         // Check if all values are numeric
-                        let has_non_numeric = indices.iter().any(|v| !matches!(v, Value::Number(_)));
+                        let has_non_numeric = indices.iter().any(|v| !matches!(v, JValue::Number(_)));
 
                         if has_non_numeric {
                             // Non-numeric values - treat as filter, fall through
@@ -959,8 +1340,8 @@ impl Evaluator {
                             let mut resolved_indices: Vec<i64> = indices
                                 .iter()
                                 .filter_map(|v| {
-                                    if let Value::Number(n) = v {
-                                        let idx = n.as_f64().unwrap() as i64;
+                                    if let JValue::Number(n) = v {
+                                        let idx = *n as i64;
                                         // Resolve negative indices
                                         let actual_idx = if idx < 0 { arr_len + idx } else { idx };
                                         // Only include valid indices
@@ -980,12 +1361,12 @@ impl Evaluator {
                             resolved_indices.dedup();
 
                             // Select elements at each sorted index
-                            let result: Vec<Value> = resolved_indices
+                            let result: Vec<JValue> = resolved_indices
                                 .iter()
                                 .map(|&idx| arr[idx as usize].clone())
                                 .collect();
 
-                            return Ok(Value::Array(result));
+                            return Ok(JValue::array(result));
                         }
                     }
                     Ok(_) => {
@@ -1000,17 +1381,17 @@ impl Evaluator {
 
                 // It's a filter expression
                 let mut filtered = Vec::new();
-                for item in arr {
+                for item in arr.iter() {
                     let item_result = self.evaluate_internal(predicate, item)?;
                     if self.is_truthy(&item_result) {
                         filtered.push(item.clone());
                     }
                 }
-                Ok(Value::Array(filtered))
+                Ok(JValue::array(filtered))
             }
-            Value::Null => {
+            JValue::Null => {
                 // Null: return null
-                Ok(Value::Null)
+                Ok(JValue::Null)
             }
             other => {
                 // Non-array values: treat as single-element conceptual array
@@ -1023,18 +1404,18 @@ impl Evaluator {
                     if *n == 0.0 {
                         return Ok(other.clone());
                     } else {
-                        return Ok(Value::Null);
+                        return Ok(JValue::Null);
                     }
                 }
 
                 // Try to evaluate the predicate to see if it's a numeric index
                 match self.evaluate_internal(predicate, other) {
-                    Ok(Value::Number(n)) => {
+                    Ok(JValue::Number(n)) => {
                         // Index 0 returns the value, other indices return null
-                        if n.as_f64().unwrap_or(0.0) == 0.0 {
+                        if n == 0.0 {
                             Ok(other.clone())
                         } else {
-                            Ok(Value::Null)
+                            Ok(JValue::Null)
                         }
                     }
                     Ok(pred_result) => {
@@ -1042,7 +1423,7 @@ impl Evaluator {
                         if self.is_truthy(&pred_result) {
                             Ok(other.clone())
                         } else {
-                            Ok(Value::Null)
+                            Ok(JValue::Null)
                         }
                     }
                     Err(e) => Err(e),
@@ -1052,7 +1433,7 @@ impl Evaluator {
     }
 
     /// Evaluate a path expression (e.g., foo.bar.baz)
-    fn evaluate_path(&mut self, steps: &[PathStep], data: &Value) -> Result<Value, EvaluatorError> {
+    fn evaluate_path(&mut self, steps: &[PathStep], data: &JValue) -> Result<JValue, EvaluatorError> {
         // Avoid cloning by using references and only cloning when necessary
         if steps.is_empty() {
             return Ok(data.clone());
@@ -1063,77 +1444,85 @@ impl Evaluator {
         if steps.len() == 1 {
             if let AstNode::Name(field_name) = &steps[0].node {
                 return match data {
-                    Value::Object(obj) => {
+                    JValue::Object(obj) => {
                         // Check if this is a tuple - extract '@' value
-                        if obj.get("__tuple__") == Some(&Value::Bool(true)) {
-                            if let Some(Value::Object(inner)) = obj.get("@") {
-                                Ok(inner.get(field_name).cloned().unwrap_or(Value::Null))
+                        if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                            if let Some(JValue::Object(inner)) = obj.get("@") {
+                                Ok(inner.get(field_name).cloned().unwrap_or(JValue::Null))
                             } else {
-                                Ok(Value::Null)
+                                Ok(JValue::Null)
                             }
                         } else {
-                            Ok(obj.get(field_name).cloned().unwrap_or(Value::Null))
+                            Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null))
                         }
                     }
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         // Array mapping: extract field from each element
+                        // Optimized: use references to access fields without cloning entire objects
                         let mut result = Vec::new();
-                        for item in arr {
+                        for item in arr.iter() {
                             match item {
-                                Value::Object(obj) => {
+                                JValue::Object(obj) => {
                                     // Check if this is a tuple - extract '@' value and preserve bindings
-                                    let (actual_obj, tuple_bindings) = if obj.get("__tuple__") == Some(&Value::Bool(true)) {
-                                        if let Some(Value::Object(inner)) = obj.get("@") {
-                                            let bindings: Vec<(String, Value)> = obj.iter()
-                                                .filter(|(k, _)| k.starts_with('$'))
-                                                .map(|(k, v)| (k.clone(), v.clone()))
-                                                .collect();
-                                            (inner.clone(), Some(bindings))
-                                        } else {
-                                            continue;
-                                        }
-                                    } else {
-                                        (obj.clone(), None)
-                                    };
+                                    let is_tuple = obj.get("__tuple__") == Some(&JValue::Bool(true));
 
-                                    let val = actual_obj.get(field_name).cloned().unwrap_or(Value::Null);
-                                    // Flatten array values, push scalars (matching multi-step path behavior)
-                                    if !matches!(val, Value::Null) {
-                                        // Helper to wrap in tuple
-                                        let wrap = |v: Value| -> Value {
-                                            if let Some(ref b) = tuple_bindings {
-                                                let mut wrapper = serde_json::Map::new();
-                                                wrapper.insert("@".to_string(), v);
-                                                wrapper.insert("__tuple__".to_string(), Value::Bool(true));
-                                                for (k, val) in b {
-                                                    wrapper.insert(k.clone(), val.clone());
-                                                }
-                                                Value::Object(wrapper)
-                                            } else {
-                                                v
-                                            }
+                                    if is_tuple {
+                                        let inner = match obj.get("@") {
+                                            Some(JValue::Object(inner)) => inner,
+                                            _ => continue,
                                         };
 
-                                        match val {
-                                            Value::Array(arr_val) => {
-                                                for item in arr_val {
-                                                    result.push(wrap(item));
+                                        if let Some(val) = inner.get(field_name) {
+                                            if !matches!(val, JValue::Null) {
+                                                // Build tuple wrapper - only clone bindings when needed
+                                                let wrap = |v: JValue| -> JValue {
+                                                    let mut wrapper = IndexMap::new();
+                                                    wrapper.insert("@".to_string(), v);
+                                                    wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
+                                                    for (k, v) in obj.iter() {
+                                                        if k.starts_with('$') {
+                                                            wrapper.insert(k.clone(), v.clone());
+                                                        }
+                                                    }
+                                                    JValue::object(wrapper)
+                                                };
+
+                                                match val {
+                                                    JValue::Array(arr_val) => {
+                                                        for item in arr_val.iter() {
+                                                            result.push(wrap(item.clone()));
+                                                        }
+                                                    },
+                                                    other => result.push(wrap(other.clone())),
                                                 }
-                                            },
-                                            other => result.push(wrap(other)),
+                                            }
+                                        }
+                                    } else {
+                                        // Non-tuple: access field directly by reference, only clone the field value
+                                        if let Some(val) = obj.get(field_name) {
+                                            if !matches!(val, JValue::Null) {
+                                                match val {
+                                                    JValue::Array(arr_val) => {
+                                                        for item in arr_val.iter() {
+                                                            result.push(item.clone());
+                                                        }
+                                                    },
+                                                    other => result.push(other.clone()),
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                                Value::Array(inner_arr) => {
+                                JValue::Array(inner_arr) => {
                                     // Recursively map over nested array
-                                    let nested_result = self.evaluate_path(&[PathStep::new(AstNode::Name(field_name.clone()))], &Value::Array(inner_arr.clone()))?;
+                                    let nested_result = self.evaluate_path(&[PathStep::new(AstNode::Name(field_name.clone()))], &JValue::Array(inner_arr.clone()))?;
                                     // Add nested result to our results
                                     match nested_result {
-                                        Value::Array(nested) => {
+                                        JValue::Array(nested) => {
                                             // Flatten nested arrays from recursive mapping
-                                            result.extend(nested);
+                                            result.extend(nested.iter().cloned());
                                         }
-                                        Value::Null => {}, // Skip nulls from nested arrays
+                                        JValue::Null => {}, // Skip nulls from nested arrays
                                         other => result.push(other),
                                     }
                                 }
@@ -1145,14 +1534,14 @@ impl Evaluator {
                         // JSONata singleton unwrapping: if we have exactly one result,
                         // unwrap it (even if it's an array)
                         if result.is_empty() {
-                            Ok(Value::Null)
+                            Ok(JValue::Null)
                         } else if result.len() == 1 {
                             Ok(result.into_iter().next().unwrap())
                         } else {
-                            Ok(Value::Array(result))
+                            Ok(JValue::array(result))
                         }
                     }
-                    _ => Ok(Value::Null),
+                    _ => Ok(JValue::Null),
                 };
             }
         }
@@ -1161,29 +1550,29 @@ impl Evaluator {
         let mut did_array_mapping = false;
 
         // For the first step, work with a reference
-        let mut current: Value = match &steps[0].node {
+        let mut current: JValue = match &steps[0].node {
             AstNode::Wildcard => {
                 // Wildcard as first step
                 match data {
-                    Value::Object(obj) => {
+                    JValue::Object(obj) => {
                         let mut result = Vec::new();
                         for value in obj.values() {
                             // Flatten arrays into the result
                             match value {
-                                Value::Array(arr) => result.extend(arr.clone()),
+                                JValue::Array(arr) => result.extend(arr.iter().cloned()),
                                 _ => result.push(value.clone()),
                             }
                         }
-                        Value::Array(result)
+                        JValue::array(result)
                     }
-                    Value::Array(arr) => Value::Array(arr.clone()),
-                    _ => Value::Null,
+                    JValue::Array(arr) => JValue::Array(arr.clone()),
+                    _ => JValue::Null,
                 }
             }
             AstNode::Descendant => {
                 // Descendant as first step
                 let descendants = self.collect_descendants(data);
-                Value::Array(descendants)
+                JValue::array(descendants)
             }
             AstNode::ParentVariable(name) => {
                 // Parent variable as first step
@@ -1201,10 +1590,10 @@ impl Evaluator {
                 } else {
                     // $$field accesses field on parent
                     match parent_data {
-                        Value::Object(obj) => {
-                            obj.get(name).cloned().unwrap_or(Value::Null)
+                        JValue::Object(obj) => {
+                            obj.get(name).cloned().unwrap_or(JValue::Null)
                         }
-                        _ => Value::Null
+                        _ => JValue::Null
                     }
                 }
             }
@@ -1213,8 +1602,8 @@ impl Evaluator {
                 let stages = &steps[0].stages;
 
                 match data {
-                    Value::Object(obj) => {
-                        let val = obj.get(field_name).cloned().unwrap_or(Value::Null);
+                    JValue::Object(obj) => {
+                        let val = obj.get(field_name).cloned().unwrap_or(JValue::Null);
                         // Apply any stages to the extracted value
                         if !stages.is_empty() {
                             self.apply_stages(val, stages)?
@@ -1222,56 +1611,56 @@ impl Evaluator {
                             val
                         }
                     }
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         // Array mapping: extract field from each element and apply stages
                         let mut result = Vec::new();
-                        for item in arr {
+                        for item in arr.iter() {
                             match item {
-                                Value::Object(obj) => {
-                                    let val = obj.get(field_name).cloned().unwrap_or(Value::Null);
-                                    if !matches!(val, Value::Null) {
+                                JValue::Object(obj) => {
+                                    let val = obj.get(field_name).cloned().unwrap_or(JValue::Null);
+                                    if !matches!(val, JValue::Null) {
                                         if !stages.is_empty() {
                                             // Apply stages to the extracted value
                                             let processed_val = self.apply_stages(val, stages)?;
                                             // Stages always return an array (or null); extend results
                                             match processed_val {
-                                                Value::Array(arr) => result.extend(arr),
-                                                Value::Null => {}, // Skip nulls from stage application
+                                                JValue::Array(arr) => result.extend(arr.iter().cloned()),
+                                                JValue::Null => {}, // Skip nulls from stage application
                                                 other => result.push(other), // Shouldn't happen, but handle it
                                             }
                                         } else {
                                             // No stages: flatten arrays, push scalars
                                             match val {
-                                                Value::Array(arr) => result.extend(arr),
+                                                JValue::Array(arr) => result.extend(arr.iter().cloned()),
                                                 other => result.push(other),
                                             }
                                         }
                                     }
                                 }
-                                Value::Array(inner_arr) => {
+                                JValue::Array(inner_arr) => {
                                     // Recursively map over nested array
-                                    let nested_result = self.evaluate_path(&[steps[0].clone()], &Value::Array(inner_arr.clone()))?;
+                                    let nested_result = self.evaluate_path(&[steps[0].clone()], &JValue::Array(inner_arr.clone()))?;
                                     match nested_result {
-                                        Value::Array(nested) => result.extend(nested),
-                                        Value::Null => {}, // Skip nulls from nested arrays
+                                        JValue::Array(nested) => result.extend(nested.iter().cloned()),
+                                        JValue::Null => {}, // Skip nulls from nested arrays
                                         other => result.push(other),
                                     }
                                 }
                                 _ => {}, // Skip non-object items
                             }
                         }
-                        Value::Array(result)
+                        JValue::array(result)
                     }
-                    Value::Null => Value::Null,
+                    JValue::Null => JValue::Null,
                     // Accessing field on non-object returns undefined (not an error)
-                    _ => undefined_value(),
+                    _ => JValue::Undefined,
                 }
             }
             AstNode::String(string_literal) => {
                 // String literal in path context - evaluate as literal and apply stages
                 // This handles cases like "Red"[true] where "Red" is a literal, not a field access
                 let stages = &steps[0].stages;
-                let val = Value::String(string_literal.clone());
+                let val = JValue::string(string_literal.clone());
 
                 if !stages.is_empty() {
                     // Apply stages (predicates) to the string literal
@@ -1279,8 +1668,8 @@ impl Evaluator {
                     // Unwrap single-element arrays back to scalar
                     // (string literals with predicates should return scalar or null, not arrays)
                     match result {
-                        Value::Array(arr) if arr.len() == 1 => arr.into_iter().next().unwrap(),
-                        Value::Array(arr) if arr.is_empty() => Value::Null,
+                        JValue::Array(arr) if arr.len() == 1 => arr[0].clone(),
+                        JValue::Array(arr) if arr.is_empty() => JValue::Null,
                         other => other,
                     }
                 } else {
@@ -1305,16 +1694,16 @@ impl Evaluator {
         for step in steps[1..].iter() {
             // Early return if current is null/undefined - no point continuing
             // This handles cases like `blah.{}` where blah doesn't exist
-            if matches!(current, Value::Null) || is_undefined(&current) {
-                return Ok(Value::Null);
+            if matches!(current, JValue::Null) || current.is_undefined() {
+                return Ok(JValue::Null);
             }
 
             // Check if current is a tuple array - if so, we need to bind tuple variables
             // to context so they're available in nested expressions (like predicates)
-            let is_tuple_array = if let Value::Array(arr) = &current {
+            let is_tuple_array = if let JValue::Array(arr) = &current {
                 arr.first().map_or(false, |first| {
-                    if let Value::Object(obj) = first {
-                        obj.get("__tuple__") == Some(&Value::Bool(true))
+                    if let JValue::Object(obj) = first {
+                        obj.get("__tuple__") == Some(&JValue::Bool(true))
                     } else {
                         false
                     }
@@ -1338,19 +1727,19 @@ impl Evaluator {
             );
 
             if needs_tuple_context_binding {
-                if let Value::Array(arr) = &current {
+                if let JValue::Array(arr) = &current {
                     let mut results = Vec::new();
 
-                    for tuple in arr {
-                        if let Value::Object(tuple_obj) = tuple {
+                    for tuple in arr.iter() {
+                        if let JValue::Object(tuple_obj) = tuple {
                             // Extract tuple bindings (variables starting with $)
-                            let bindings: Vec<(String, Value)> = tuple_obj.iter()
+                            let bindings: Vec<(String, JValue)> = tuple_obj.iter()
                                 .filter(|(k, _)| k.starts_with('$') && k.len() > 1)  // $i, $j, etc.
                                 .map(|(k, v)| (k[1..].to_string(), v.clone()))  // Remove $ prefix for context binding
                                 .collect();
 
                             // Save current bindings
-                            let saved_bindings: Vec<(String, Option<Value>)> = bindings.iter()
+                            let saved_bindings: Vec<(String, Option<JValue>)> = bindings.iter()
                                 .map(|(name, _)| (name.clone(), self.context.lookup(name).cloned()))
                                 .collect();
 
@@ -1360,7 +1749,7 @@ impl Evaluator {
                             }
 
                             // Get the actual value from the tuple (@ field)
-                            let actual_data = tuple_obj.get("@").cloned().unwrap_or(Value::Null);
+                            let actual_data = tuple_obj.get("@").cloned().unwrap_or(JValue::Null);
 
                             // Evaluate the step
                             let step_result = match &step.node {
@@ -1385,14 +1774,14 @@ impl Evaluator {
                             }
 
                             // Collect result
-                            if !matches!(step_result, Value::Null) && !is_undefined(&step_result) {
+                            if !matches!(step_result, JValue::Null) && !step_result.is_undefined() {
                                 // For object constructors, collect results directly
                                 // For other steps, handle arrays
                                 if matches!(&step.node, AstNode::Object(_)) {
                                     results.push(step_result);
-                                } else if matches!(step_result, Value::Array(_)) {
-                                    if let Value::Array(arr) = step_result {
-                                        results.extend(arr);
+                                } else if matches!(step_result, JValue::Array(_)) {
+                                    if let JValue::Array(arr) = step_result {
+                                        results.extend(arr.iter().cloned());
                                     }
                                 } else {
                                     results.push(step_result);
@@ -1401,7 +1790,7 @@ impl Evaluator {
                         }
                     }
 
-                    current = Value::Array(results);
+                    current = JValue::array(results);
                     continue;  // Skip the regular step processing
                 }
             }
@@ -1411,40 +1800,40 @@ impl Evaluator {
                     // Wildcard in path
                     let stages = &step.stages;
                     let wildcard_result = match &current {
-                        Value::Object(obj) => {
+                        JValue::Object(obj) => {
                             let mut result = Vec::new();
                             for value in obj.values() {
                                 // Flatten arrays into the result
                                 match value {
-                                    Value::Array(arr) => result.extend(arr.clone()),
+                                    JValue::Array(arr) => result.extend(arr.iter().cloned()),
                                     _ => result.push(value.clone()),
                                 }
                             }
-                            Value::Array(result)
+                            JValue::array(result)
                         }
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             // Map wildcard over array
                             let mut all_values = Vec::new();
-                            for item in arr {
+                            for item in arr.iter() {
                                 match item {
-                                    Value::Object(obj) => {
+                                    JValue::Object(obj) => {
                                         for value in obj.values() {
                                             // Flatten arrays
                                             match value {
-                                                Value::Array(arr) => all_values.extend(arr.clone()),
+                                                JValue::Array(arr) => all_values.extend(arr.iter().cloned()),
                                                 _ => all_values.push(value.clone()),
                                             }
                                         }
                                     }
-                                    Value::Array(inner) => {
-                                        all_values.extend(inner.clone());
+                                    JValue::Array(inner) => {
+                                        all_values.extend(inner.iter().cloned());
                                     }
                                     _ => {}
                                 }
                             }
-                            Value::Array(all_values)
+                            JValue::array(all_values)
                         }
-                        _ => Value::Null,
+                        _ => JValue::Null,
                     };
 
                     // Apply stages (predicates) if present
@@ -1457,18 +1846,18 @@ impl Evaluator {
                 AstNode::Descendant => {
                     // Descendant in path
                     match &current {
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             // Collect descendants from all array elements
                             let mut all_descendants = Vec::new();
-                            for item in arr {
+                            for item in arr.iter() {
                                 all_descendants.extend(self.collect_descendants(item));
                             }
-                            Value::Array(all_descendants)
+                            JValue::array(all_descendants)
                         }
                         _ => {
                             // Collect descendants from current value
                             let descendants = self.collect_descendants(&current);
-                            Value::Array(descendants)
+                            JValue::array(descendants)
                         }
                     }
                 }
@@ -1477,13 +1866,13 @@ impl Evaluator {
                     let stages = &step.stages;
 
                     match &current {
-                        Value::Object(obj) => {
+                        JValue::Object(obj) => {
                             // Single object field extraction - NOT array mapping
                             // This resets did_array_mapping because we're extracting from
                             // a single value, not mapping over an array. The field's value
                             // (even if it's an array) should be preserved as-is.
                             did_array_mapping = false;
-                            let val = obj.get(field_name).cloned().unwrap_or(Value::Null);
+                            let val = obj.get(field_name).cloned().unwrap_or(JValue::Null);
                             // Apply stages if present
                             if !stages.is_empty() {
                                 self.apply_stages(val, stages)?
@@ -1491,20 +1880,20 @@ impl Evaluator {
                                 val
                             }
                         }
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             // Array mapping: extract field from each element and apply stages
                             did_array_mapping = true; // Track that we did array mapping
                             let mut result = Vec::new();
 
-                            for item in arr {
+                            for item in arr.iter() {
                                 match item {
-                                    Value::Object(obj) => {
+                                    JValue::Object(obj) => {
                                         // Check if this is a tuple stream element
-                                        let (actual_obj, tuple_bindings) = if obj.get("__tuple__") == Some(&Value::Bool(true)) {
+                                        let (actual_obj, tuple_bindings) = if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
                                             // This is a tuple - extract '@' value and preserve bindings
-                                            if let Some(Value::Object(inner)) = obj.get("@") {
+                                            if let Some(JValue::Object(inner)) = obj.get("@") {
                                                 // Collect index bindings (variables starting with $)
-                                                let bindings: Vec<(String, Value)> = obj.iter()
+                                                let bindings: Vec<(String, JValue)> = obj.iter()
                                                     .filter(|(k, _)| k.starts_with('$'))
                                                     .map(|(k, v)| (k.clone(), v.clone()))
                                                     .collect();
@@ -1516,19 +1905,19 @@ impl Evaluator {
                                             (obj.clone(), None)
                                         };
 
-                                        let val = actual_obj.get(field_name).cloned().unwrap_or(Value::Null);
+                                        let val = actual_obj.get(field_name).cloned().unwrap_or(JValue::Null);
 
-                                        if !matches!(val, Value::Null) {
+                                        if !matches!(val, JValue::Null) {
                                             // Helper to wrap value in tuple if we have bindings
-                                            let wrap_in_tuple = |v: Value, bindings: &Option<Vec<(String, Value)>>| -> Value {
+                                            let wrap_in_tuple = |v: JValue, bindings: &Option<Vec<(String, JValue)>>| -> JValue {
                                                 if let Some(b) = bindings {
-                                                    let mut wrapper = serde_json::Map::new();
+                                                    let mut wrapper = IndexMap::new();
                                                     wrapper.insert("@".to_string(), v);
-                                                    wrapper.insert("__tuple__".to_string(), Value::Bool(true));
+                                                    wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
                                                     for (k, val) in b {
                                                         wrapper.insert(k.clone(), val.clone());
                                                     }
-                                                    Value::Object(wrapper)
+                                                    JValue::object(wrapper)
                                                 } else {
                                                     v
                                                 }
@@ -1539,21 +1928,21 @@ impl Evaluator {
                                                 let processed_val = self.apply_stages(val, stages)?;
                                                 // Stages always return an array (or null); extend results
                                                 match processed_val {
-                                                    Value::Array(arr) => {
-                                                        for item in arr {
-                                                            result.push(wrap_in_tuple(item, &tuple_bindings));
+                                                    JValue::Array(arr) => {
+                                                        for item in arr.iter() {
+                                                            result.push(wrap_in_tuple(item.clone(), &tuple_bindings));
                                                         }
                                                     },
-                                                    Value::Null => {}, // Skip nulls from stage application
+                                                    JValue::Null => {}, // Skip nulls from stage application
                                                     other => result.push(wrap_in_tuple(other, &tuple_bindings)),
                                                 }
                                             } else {
                                                 // No stages: flatten arrays, push scalars
                                                 // But preserve tuple bindings!
                                                 match val {
-                                                    Value::Array(arr) => {
-                                                        for item in arr {
-                                                            result.push(wrap_in_tuple(item, &tuple_bindings));
+                                                    JValue::Array(arr) => {
+                                                        for item in arr.iter() {
+                                                            result.push(wrap_in_tuple(item.clone(), &tuple_bindings));
                                                         }
                                                     },
                                                     other => result.push(wrap_in_tuple(other, &tuple_bindings)),
@@ -1561,12 +1950,12 @@ impl Evaluator {
                                             }
                                         }
                                     }
-                                    Value::Array(_) => {
+                                    JValue::Array(_) => {
                                         // Recursively map over nested array
                                         let nested_result = self.evaluate_path(&[step.clone()], item)?;
                                         match nested_result {
-                                            Value::Array(nested) => result.extend(nested),
-                                            Value::Null => {},
+                                            JValue::Array(nested) => result.extend(nested.iter().cloned()),
+                                            JValue::Null => {},
                                             other => result.push(other),
                                         }
                                     }
@@ -1574,25 +1963,25 @@ impl Evaluator {
                                 }
                             }
 
-                            Value::Array(result)
+                            JValue::array(result)
                         }
-                        Value::Null => Value::Null,
+                        JValue::Null => JValue::Null,
                         // Accessing field on non-object returns undefined (not an error)
-                        _ => undefined_value(),
+                        _ => JValue::Undefined,
                     }
                 }
                 AstNode::String(string_literal) => {
                     // String literal as a path step - evaluate as literal and apply stages
                     let stages = &step.stages;
-                    let val = Value::String(string_literal.clone());
+                    let val = JValue::string(string_literal.clone());
 
                     if !stages.is_empty() {
                         // Apply stages (predicates) to the string literal
                         let result = self.apply_stages(val, stages)?;
                         // Unwrap single-element arrays back to scalar
                         match result {
-                            Value::Array(arr) if arr.len() == 1 => arr.into_iter().next().unwrap(),
-                            Value::Array(arr) if arr.is_empty() => Value::Null,
+                            JValue::Array(arr) if arr.len() == 1 => arr[0].clone(),
+                            JValue::Array(arr) if arr.is_empty() => JValue::Null,
                             other => other,
                         }
                     } else {
@@ -1607,9 +1996,9 @@ impl Evaluator {
                     // Array grouping: map expression over array but keep results grouped
                     // .[expr] means evaluate expr for each array element
                     match &current {
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             let mut result = Vec::new();
-                            for item in arr {
+                            for item in arr.iter() {
                                 // For each array item, evaluate all elements and collect results
                                 let mut group_values = Vec::new();
                                 for element in elements {
@@ -1625,15 +2014,15 @@ impl Evaluator {
                                     } else {
                                         // Flatten the value into group_values
                                         match value {
-                                            Value::Array(arr) => group_values.extend(arr),
+                                            JValue::Array(arr) => group_values.extend(arr.iter().cloned()),
                                             other => group_values.push(other),
                                         }
                                     }
                                 }
                                 // Each array element gets its own sub-array with all values
-                                result.push(Value::Array(group_values));
+                                result.push(JValue::array(group_values));
                             }
-                            Value::Array(result)
+                            JValue::array(result)
                         }
                         _ => {
                             // For non-arrays, just evaluate the array constructor normally
@@ -1642,7 +2031,7 @@ impl Evaluator {
                                 let value = self.evaluate_internal(element, &current)?;
                                 result.push(value);
                             }
-                            Value::Array(result)
+                            JValue::array(result)
                         }
                     }
                 }
@@ -1651,9 +2040,9 @@ impl Evaluator {
                     // .(expr) means evaluate expr for each element, with $ bound to that element
                     // Null/undefined results are filtered out
                     match &current {
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             let mut result = Vec::new();
-                            for item in arr {
+                            for item in arr.iter() {
                                 // Save the current $ binding
                                 let saved_dollar = self.context.lookup("$").cloned();
 
@@ -1671,13 +2060,13 @@ impl Evaluator {
                                 }
 
                                 // Only include non-null/undefined values
-                                if !matches!(value, Value::Null) && !is_undefined(&value) {
+                                if !matches!(value, JValue::Null) && !value.is_undefined() {
                                     result.push(value);
                                 }
                             }
                             // Don't do singleton unwrapping here - let the path result
                             // handling deal with it, which respects has_explicit_array_keep
-                            Value::Array(result)
+                            JValue::array(result)
                         }
                         _ => {
                             // For non-arrays, bind $ and evaluate
@@ -1704,24 +2093,24 @@ impl Evaluator {
                     // Index binding as a path step - creates tuple stream from current
                     // This wraps each element with an index binding
                     match &current {
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             let mut result = Vec::new();
                             for (idx, item) in arr.iter().enumerate() {
-                                let mut wrapper = serde_json::Map::new();
+                                let mut wrapper = IndexMap::new();
                                 wrapper.insert("@".to_string(), item.clone());
-                                wrapper.insert(format!("${}", variable), serde_json::json!(idx));
-                                wrapper.insert("__tuple__".to_string(), Value::Bool(true));
-                                result.push(Value::Object(wrapper));
+                                wrapper.insert(format!("${}", variable), JValue::Number(idx as f64));
+                                wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
+                                result.push(JValue::object(wrapper));
                             }
-                            Value::Array(result)
+                            JValue::array(result)
                         }
                         other => {
                             // Single value: wrap with index 0
-                            let mut wrapper = serde_json::Map::new();
+                            let mut wrapper = IndexMap::new();
                             wrapper.insert("@".to_string(), other.clone());
-                            wrapper.insert(format!("${}", variable), serde_json::json!(0));
-                            wrapper.insert("__tuple__".to_string(), Value::Bool(true));
-                            Value::Object(wrapper)
+                            wrapper.insert(format!("${}", variable), JValue::from(0i64));
+                            wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
+                            JValue::object(wrapper)
                         }
                     }
                 }
@@ -1767,9 +2156,9 @@ impl Evaluator {
 
         let result = match &current {
             // Empty arrays become null/undefined
-            Value::Array(arr) if arr.is_empty() => Value::Null,
+            JValue::Array(arr) if arr.is_empty() => JValue::Null,
             // Unwrap singleton arrays when appropriate
-            Value::Array(arr) if arr.len() == 1 && should_unwrap => {
+            JValue::Array(arr) if arr.len() == 1 && should_unwrap => {
                 arr[0].clone()
             }
             // Keep arrays otherwise
@@ -1780,21 +2169,21 @@ impl Evaluator {
     }
 
     /// Helper to evaluate a complex path step
-    fn evaluate_path_step(&mut self, step: &AstNode, current: &Value, original_data: &Value) -> Result<Value, EvaluatorError> {
+    fn evaluate_path_step(&mut self, step: &AstNode, current: &JValue, original_data: &JValue) -> Result<JValue, EvaluatorError> {
         // Special case: array mapping with object construction
         // e.g., items.{"name": name, "price": price}
-        if matches!(current, Value::Array(_)) && matches!(step, AstNode::Object(_)) {
+        if matches!(current, JValue::Array(_)) && matches!(step, AstNode::Object(_)) {
             // Map over array, evaluating the object constructor for each item
             match current {
-                Value::Array(arr) => {
-                    let mapped: Result<Vec<Value>, EvaluatorError> = arr
+                JValue::Array(arr) => {
+                    let mapped: Result<Vec<JValue>, EvaluatorError> = arr
                         .iter()
                         .map(|item| {
                             // Evaluate the object constructor in the context of this array item
                             self.evaluate_internal(step, item)
                         })
                         .collect();
-                    Ok(Value::Array(mapped?))
+                    Ok(JValue::array(mapped?))
                 }
                 _ => unreachable!(),
             }
@@ -1804,9 +2193,9 @@ impl Evaluator {
             if let AstNode::Variable(name) = step {
                 if name.is_empty() {
                     // Bare $ - map over array if current is an array
-                    if let Value::Array(arr) = current {
+                    if let JValue::Array(arr) = current {
                         // Map $ over each element - $ refers to each element in turn
-                        return Ok(Value::Array(arr.clone()));
+                        return Ok(JValue::Array(arr.clone()));
                     } else {
                         // For non-arrays, $ refers to the current value
                         return Ok(current.clone());
@@ -1818,11 +2207,11 @@ impl Evaluator {
             // When current is a tuple array, we need to evaluate the variable against each tuple
             // so that tuple bindings ($i, etc.) can be found
             if matches!(step, AstNode::Variable(_)) {
-                if let Value::Array(arr) = current {
+                if let JValue::Array(arr) = current {
                     // Check if this is a tuple array
                     let is_tuple_array = arr.first().map_or(false, |first| {
-                        if let Value::Object(obj) = first {
-                            obj.get("__tuple__") == Some(&Value::Bool(true))
+                        if let JValue::Object(obj) = first {
+                            obj.get("__tuple__") == Some(&JValue::Bool(true))
                         } else {
                             false
                         }
@@ -1831,15 +2220,15 @@ impl Evaluator {
                     if is_tuple_array {
                         // Map the variable lookup over each tuple
                         let mut results = Vec::new();
-                        for tuple in arr {
+                        for tuple in arr.iter() {
                             // Evaluate the variable in the context of this tuple
                             // This allows tuple bindings ($i, etc.) to be found
                             let val = self.evaluate_internal(step, tuple)?;
-                            if !matches!(val, Value::Null) && !is_undefined(&val) {
+                            if !matches!(val, JValue::Null) && !val.is_undefined() {
                                 results.push(val);
                             }
                         }
-                        return Ok(Value::Array(results));
+                        return Ok(JValue::array(results));
                     }
                 }
             }
@@ -1860,11 +2249,11 @@ impl Evaluator {
             // Standard path step evaluation for indexing/accessing current value
             let step_value = self.evaluate_internal(step, original_data)?;
             Ok(match (current, &step_value) {
-                (Value::Object(obj), Value::String(key)) => {
-                    obj.get(key).cloned().unwrap_or(Value::Null)
+                (JValue::Object(obj), JValue::String(key)) => {
+                    obj.get(&**key).cloned().unwrap_or(JValue::Null)
                 }
-                (Value::Array(arr), Value::Number(n)) => {
-                    let index = n.as_f64().unwrap() as i64;
+                (JValue::Array(arr), JValue::Number(n)) => {
+                    let index = *n as i64;
                     let len = arr.len() as i64;
 
                     // Handle negative indexing (offset from end)
@@ -1875,12 +2264,12 @@ impl Evaluator {
                     };
 
                     if actual_idx < 0 || actual_idx >= len {
-                        Value::Null
+                        JValue::Null
                     } else {
                         arr[actual_idx as usize].clone()
                     }
                 }
-                _ => Value::Null,
+                _ => JValue::Null,
             })
         }
     }
@@ -1891,8 +2280,8 @@ impl Evaluator {
         op: crate::ast::BinaryOp,
         lhs: &AstNode,
         rhs: &AstNode,
-        data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         use crate::ast::BinaryOp;
 
         // Special handling for coalescing operator (??)
@@ -1908,7 +2297,7 @@ impl Evaluator {
                         Ok(value)
                     }
                     // For paths and variables, null means undefined - use RHS
-                    else if matches!(value, Value::Null) &&
+                    else if matches!(value, JValue::Null) &&
                        (matches!(lhs, AstNode::Path { .. }) ||
                         matches!(lhs, AstNode::String(_)) ||
                         matches!(lhs, AstNode::Variable(_))) {
@@ -1944,7 +2333,7 @@ impl Evaluator {
                 let lhs_value = self.evaluate_internal(lhs, data)?;
                 // Do regex match inline
                 return match lhs_value {
-                    Value::String(s) => {
+                    JValue::String(s) => {
                         // Build the regex
                         let case_insensitive = flags.contains('i');
                         let regex_pattern = if case_insensitive {
@@ -1956,33 +2345,33 @@ impl Evaluator {
                             Ok(re) => {
                                 if let Some(m) = re.find(&s) {
                                     // Return match object
-                                    let mut result = serde_json::Map::new();
-                                    result.insert("match".to_string(), Value::String(m.as_str().to_string()));
-                                    result.insert("start".to_string(), serde_json::json!(m.start()));
-                                    result.insert("end".to_string(), serde_json::json!(m.end()));
+                                    let mut result = IndexMap::new();
+                                    result.insert("match".to_string(), JValue::string(m.as_str().to_string()));
+                                    result.insert("start".to_string(), JValue::Number(m.start() as f64));
+                                    result.insert("end".to_string(), JValue::Number(m.end() as f64));
 
                                     // Capture groups
                                     let mut groups = Vec::new();
                                     for cap in re.captures_iter(&s).take(1) {
                                         for i in 1..cap.len() {
                                             if let Some(c) = cap.get(i) {
-                                                groups.push(Value::String(c.as_str().to_string()));
+                                                groups.push(JValue::string(c.as_str().to_string()));
                                             }
                                         }
                                     }
                                     if !groups.is_empty() {
-                                        result.insert("groups".to_string(), Value::Array(groups));
+                                        result.insert("groups".to_string(), JValue::array(groups));
                                     }
 
-                                    Ok(Value::Object(result))
+                                    Ok(JValue::object(result))
                                 } else {
-                                    Ok(Value::Null)
+                                    Ok(JValue::Null)
                                 }
                             }
                             Err(e) => Err(EvaluatorError::EvaluationError(format!("Invalid regex: {}", e))),
                         }
                     }
-                    Value::Null => Ok(Value::Null),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError(
                         "Left side of ~> /regex/ must be a string".to_string(),
                     )),
@@ -1992,8 +2381,8 @@ impl Evaluator {
             // Early check: if LHS evaluates to undefined, return undefined
             // This matches JSONata behavior where undefined ~> anyFunc returns undefined
             let lhs_value_for_check = self.evaluate_internal(lhs, data)?;
-            if is_undefined(&lhs_value_for_check) || matches!(lhs_value_for_check, Value::Null) {
-                return Ok(undefined_value());
+            if lhs_value_for_check.is_undefined() || matches!(lhs_value_for_check, JValue::Null) {
+                return Ok(JValue::Undefined);
             }
 
             // Handle different RHS types
@@ -2190,8 +2579,8 @@ impl Evaluator {
             // Check if RHS is a lambda - store it specially
             if let AstNode::Lambda { params, body, signature, thunk } = rhs {
                 // Store the lambda AST for later invocation
-                // Capture current environment for closure support
-                let captured_env = self.capture_current_environment();
+                // Capture only the free variables referenced by the lambda body
+                let captured_env = self.capture_environment_for(body, params);
                 let stored_lambda = StoredLambda {
                     params: params.clone(),
                     body: (**body).clone(),
@@ -2200,15 +2589,17 @@ impl Evaluator {
                     captured_data: Some(data.clone()),
                     thunk: *thunk,
                 };
+                let lambda_params = stored_lambda.params.clone();
+                let lambda_sig = stored_lambda.signature.clone();
                 self.context.bind_lambda(var_name.clone(), stored_lambda);
 
                 // Return a lambda marker value (include _lambda_id so it can be found later)
-                let lambda_repr = serde_json::json!({
-                    "__lambda__": true,
-                    "params": params,
-                    "_name": var_name,
-                    "_lambda_id": var_name,
-                });
+                let lambda_repr = JValue::lambda(
+                        var_name.as_str(),
+                        lambda_params,
+                        Some(var_name.clone()),
+                        lambda_sig,
+                    );
                 return Ok(lambda_repr);
             }
 
@@ -2263,12 +2654,12 @@ impl Evaluator {
                     self.context.bind_lambda(var_name.clone(), stored_lambda);
 
                     // Return a lambda marker value (include _lambda_id for later lookup)
-                    let lambda_repr = serde_json::json!({
-                        "__lambda__": true,
-                        "params": ["$"],
-                        "_name": var_name,
-                        "_lambda_id": var_name,
-                    });
+                    let lambda_repr = JValue::lambda(
+                            var_name.as_str(),
+                            vec!["$".to_string()],
+                            Some(var_name.clone()),
+                            None::<String>,
+                        );
                     return Ok(lambda_repr);
                 }
                 // If not function composition, fall through to normal evaluation below
@@ -2293,11 +2684,11 @@ impl Evaluator {
             let left = self.evaluate_internal(lhs, data)?;
 
             // Check if this is array filtering: array[predicate]
-            if matches!(left, Value::Array(_)) {
+            if matches!(left, JValue::Array(_)) {
                 // Try evaluating rhs in current context to see if it's a simple index
                 let right_result = self.evaluate_internal(rhs, data);
 
-                if let Ok(Value::Number(_)) = right_result {
+                if let Ok(JValue::Number(_)) = right_result {
                     // Simple numeric index: array[n]
                     return self.array_index(&left, &right_result.unwrap());
                 } else {
@@ -2313,20 +2704,20 @@ impl Evaluator {
             let left = self.evaluate_internal(lhs, data)?;
             if !self.is_truthy(&left) {
                 // Short-circuit: if left is falsy, return false without evaluating right
-                return Ok(Value::Bool(false));
+                return Ok(JValue::Bool(false));
             }
             let right = self.evaluate_internal(rhs, data)?;
-            return Ok(Value::Bool(self.is_truthy(&right)));
+            return Ok(JValue::Bool(self.is_truthy(&right)));
         }
 
         if op == BinaryOp::Or {
             let left = self.evaluate_internal(lhs, data)?;
             if self.is_truthy(&left) {
                 // Short-circuit: if left is truthy, return true without evaluating right
-                return Ok(Value::Bool(true));
+                return Ok(JValue::Bool(true));
             }
             let right = self.evaluate_internal(rhs, data)?;
-            return Ok(Value::Bool(self.is_truthy(&right)));
+            return Ok(JValue::Bool(self.is_truthy(&right)));
         }
 
         // Check if operands are explicit null literals (vs undefined from variables)
@@ -2344,8 +2735,8 @@ impl Evaluator {
             BinaryOp::Divide => self.divide(&left, &right, left_is_explicit_null, right_is_explicit_null),
             BinaryOp::Modulo => self.modulo(&left, &right, left_is_explicit_null, right_is_explicit_null),
 
-            BinaryOp::Equal => Ok(Value::Bool(self.equals(&left, &right))),
-            BinaryOp::NotEqual => Ok(Value::Bool(!self.equals(&left, &right))),
+            BinaryOp::Equal => Ok(JValue::Bool(self.equals(&left, &right))),
+            BinaryOp::NotEqual => Ok(JValue::Bool(!self.equals(&left, &right))),
             BinaryOp::LessThan => self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null),
             BinaryOp::LessThanOrEqual => self.less_than_or_equal(&left, &right, left_is_explicit_null, right_is_explicit_null),
             BinaryOp::GreaterThan => self.greater_than(&left, &right, left_is_explicit_null, right_is_explicit_null),
@@ -2370,8 +2761,8 @@ impl Evaluator {
         &mut self,
         op: crate::ast::UnaryOp,
         operand: &AstNode,
-        data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         use crate::ast::UnaryOp;
 
         let value = self.evaluate_internal(operand, data)?;
@@ -2379,13 +2770,13 @@ impl Evaluator {
         match op {
             UnaryOp::Negate => match value {
                 // undefined returns undefined
-                Value::Null => Ok(Value::Null),
-                Value::Number(n) => Ok(serde_json::json!(-n.as_f64().unwrap())),
+                JValue::Null => Ok(JValue::Null),
+                JValue::Number(n) => Ok(JValue::Number(-n)),
                 _ => Err(EvaluatorError::TypeError(
                     "D1002: Cannot negate non-number value".to_string()
                 )),
             },
-            UnaryOp::Not => Ok(Value::Bool(!self.is_truthy(&value))),
+            UnaryOp::Not => Ok(JValue::Bool(!self.is_truthy(&value))),
         }
     }
 
@@ -2395,8 +2786,8 @@ impl Evaluator {
         name: &str,
         args: &[AstNode],
         is_builtin: bool,
-        data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         use crate::functions;
 
         // Check for partial application (any argument is a Placeholder)
@@ -2419,17 +2810,13 @@ impl Evaluator {
                 }
                 return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
             }
-            if let Value::Object(ref map) = value {
-                if map.contains_key("__builtin__") {
-                    // This is a built-in function reference (e.g., $f bound to $sum)
-                    if let Some(Value::String(builtin_name)) = map.get("_name") {
-                        let mut evaluated_args = Vec::with_capacity(args.len());
-                        for arg in args {
-                            evaluated_args.push(self.evaluate_internal(arg, data)?);
-                        }
-                        return self.call_builtin_with_values(builtin_name, &evaluated_args);
-                    }
+            if let JValue::Builtin { name: builtin_name } = &value {
+                // This is a built-in function reference (e.g., $f bound to $sum)
+                let mut evaluated_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    evaluated_args.push(self.evaluate_internal(arg, data)?);
                 }
+                return self.call_builtin_with_values(builtin_name, &evaluated_args);
             }
         }
 
@@ -2459,35 +2846,35 @@ impl Evaluator {
 
             // Check if it's an explicit null literal
             if matches!(arg, AstNode::Null) {
-                return Ok(Value::Bool(true)); // Explicit null exists
+                return Ok(JValue::Bool(true)); // Explicit null exists
             }
 
             // Check if it's a function reference
             if let AstNode::Variable(var_name) = arg {
                 if self.is_builtin_function(var_name) {
-                    return Ok(Value::Bool(true)); // Built-in function exists
+                    return Ok(JValue::Bool(true)); // Built-in function exists
                 }
 
                 // Check if it's a stored lambda
                 if self.context.lookup_lambda(var_name).is_some() {
-                    return Ok(Value::Bool(true)); // Lambda exists
+                    return Ok(JValue::Bool(true)); // Lambda exists
                 }
 
                 // Check if the variable is defined
                 if let Some(val) = self.context.lookup(var_name) {
                     // A variable bound to the undefined marker doesn't "exist"
-                    if is_undefined(&val) {
-                        return Ok(Value::Bool(false));
+                    if val.is_undefined() {
+                        return Ok(JValue::Bool(false));
                     }
-                    return Ok(Value::Bool(true)); // Variable is defined (even if null)
+                    return Ok(JValue::Bool(true)); // Variable is defined (even if null)
                 } else {
-                    return Ok(Value::Bool(false)); // Variable is undefined
+                    return Ok(JValue::Bool(false)); // Variable is undefined
                 }
             }
 
             // For other expressions, evaluate and check if non-null/non-undefined
             let value = self.evaluate_internal(arg, data)?;
-            return Ok(Value::Bool(!matches!(value, Value::Null) && !is_undefined(&value)));
+            return Ok(JValue::Bool(!matches!(value, JValue::Null) && !value.is_undefined()));
         }
 
         // Check if any arguments are undefined variables or undefined paths
@@ -2499,15 +2886,15 @@ impl Evaluator {
                 if !var_name.is_empty() && !self.is_builtin_function(var_name) && self.context.lookup(var_name).is_none() {
                     // Undefined variable - for functions that should propagate undefined
                     if propagates_undefined(name) {
-                        return Ok(Value::Null); // Return undefined
+                        return Ok(JValue::Null); // Return undefined
                     }
                 }
             }
             // Check for simple field name (e.g., blah) that evaluates to undefined
             if let AstNode::Name(field_name) = arg {
-                let field_exists = matches!(data, Value::Object(obj) if obj.contains_key(field_name));
+                let field_exists = matches!(data, JValue::Object(obj) if obj.contains_key(field_name));
                 if !field_exists && propagates_undefined(name) {
-                    return Ok(Value::Null);
+                    return Ok(JValue::Null);
                 }
             }
             // Note: AstNode::String represents string literals (e.g., "hello"), not field accesses.
@@ -2521,7 +2908,7 @@ impl Evaluator {
                 //
                 // We can distinguish these by checking if the path is accessing a field
                 // that doesn't exist on an object vs one that has an explicit null value.
-                if let Ok(Value::Null) = self.evaluate_internal(arg, data) {
+                if let Ok(JValue::Null) = self.evaluate_internal(arg, data) {
                     // Path evaluated to null - now check if it's truly undefined
                     // For single-step paths, check if the field exists
                     if steps.len() == 1 {
@@ -2533,19 +2920,19 @@ impl Evaluator {
                         };
                         if let Some(field) = field_name {
                             match data {
-                                Value::Object(obj) => {
+                                JValue::Object(obj) => {
                                     if !obj.contains_key(field) {
                                         // Field doesn't exist - return undefined
                                         if propagates_undefined(name) {
-                                            return Ok(Value::Null);
+                                            return Ok(JValue::Null);
                                         }
                                     }
                                     // Field exists with value null - continue to throw T0410
                                 }
-                                Value::Null => {
+                                JValue::Null => {
                                     // Trying to access field on null data - return undefined
                                     if propagates_undefined(name) {
-                                        return Ok(Value::Null);
+                                        return Ok(JValue::Null);
                                     }
                                 }
                                 _ => {}
@@ -2561,7 +2948,7 @@ impl Evaluator {
                         for (i, step) in steps.iter().enumerate() {
                             if let AstNode::Name(field_name) = &step.node {
                                 match current {
-                                    Value::Object(obj) => {
+                                    JValue::Object(obj) => {
                                         if let Some(val) = obj.get(field_name) {
                                             current = val;
                                         } else {
@@ -2570,11 +2957,11 @@ impl Evaluator {
                                             break;
                                         }
                                     }
-                                    Value::Array(_) => {
+                                    JValue::Array(_) => {
                                         // Array access - evaluate normally
                                         break;
                                     }
-                                    Value::Null => {
+                                    JValue::Null => {
                                         // Hit null in the middle of the path
                                         if i > 0 {
                                             // Previous field had null value - not undefined
@@ -2589,7 +2976,7 @@ impl Evaluator {
 
                         if failed_due_to_missing_field {
                             if propagates_undefined(name) {
-                                return Ok(Value::Null);
+                                return Ok(JValue::Null);
                             }
                         }
                     }
@@ -2616,7 +3003,7 @@ impl Evaluator {
             // These functions expect 2+ arguments, but received 1
             // Only insert context if it's a compatible type (string for string functions)
             // Otherwise, let the function throw T0411 for wrong argument count
-            if matches!(data, Value::String(_)) {
+            if matches!(data, JValue::String(_)) {
                 evaluated_args.insert(0, data.clone());
             }
         }
@@ -2624,9 +3011,9 @@ impl Evaluator {
         // Special handling for $string() with no explicit arguments
         // After context insertion, check if the argument is null (undefined context)
         if name == "string" && args.is_empty() && !evaluated_args.is_empty() {
-            if matches!(evaluated_args[0], Value::Null) {
+            if matches!(evaluated_args[0], JValue::Null) {
                 // Context was null/undefined, so return undefined
-                return Ok(Value::Null);
+                return Ok(JValue::Null);
             }
         }
 
@@ -2640,7 +3027,7 @@ impl Evaluator {
 
                 let prettify = if evaluated_args.len() == 2 {
                     match &evaluated_args[1] {
-                        Value::Bool(b) => Some(*b),
+                        JValue::Bool(b) => Some(*b),
                         _ => return Err(EvaluatorError::TypeError(
                             "string() prettify parameter must be a boolean".to_string(),
                         )),
@@ -2658,7 +3045,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::string::length(s)?),
+                    JValue::String(s) => Ok(functions::string::length(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "T0410: Argument 1 of function length does not match function signature".to_string(),
                     )),
@@ -2671,7 +3058,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::string::uppercase(s)?),
+                    JValue::String(s) => Ok(functions::string::uppercase(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "T0410: Argument 1 of function uppercase does not match function signature".to_string(),
                     )),
@@ -2684,7 +3071,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::string::lowercase(s)?),
+                    JValue::String(s) => Ok(functions::string::lowercase(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "T0410: Argument 1 of function lowercase does not match function signature".to_string(),
                     )),
@@ -2710,17 +3097,19 @@ impl Evaluator {
                     ));
                 }
                 // Return undefined if argument is undefined
-                if is_undefined(&evaluated_args[0]) {
-                    return Ok(undefined_value());
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Array(arr) => {
-                        // Flatten nested arrays for sum
-                        let flattened = flatten_for_aggregation(arr);
-                        Ok(functions::numeric::sum(&flattened)?)
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Array(arr) => {
+                        // Use zero-clone iterator-based sum
+                        Ok(aggregation::sum(arr)?)
                     }
-                    // Non-array values are treated as single-element arrays
+                    // Non-array values: extract number directly
+                    JValue::Number(n) => {
+                        Ok(JValue::Number(*n))
+                    }
                     other => Ok(functions::numeric::sum(&[other.clone()])?),
                 }
             }
@@ -2731,13 +3120,13 @@ impl Evaluator {
                     ));
                 }
                 // Return 0 if argument is undefined
-                if is_undefined(&evaluated_args[0]) {
-                    return Ok(serde_json::json!(0));
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::from(0i64));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(serde_json::json!(0)), // null counts as 0
-                    Value::Array(arr) => Ok(functions::array::count(arr)?),
-                    _ => Ok(serde_json::json!(1)), // Non-array value counts as 1
+                    JValue::Null => Ok(JValue::from(0i64)), // null counts as 0
+                    JValue::Array(arr) => Ok(functions::array::count(arr)?),
+                    _ => Ok(JValue::from(1i64)), // Non-array value counts as 1
                 }
             }
             "substring" => {
@@ -2747,10 +3136,10 @@ impl Evaluator {
                     ));
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
-                    (Value::String(s), Value::Number(start)) => {
+                    (JValue::String(s), JValue::Number(start)) => {
                         let length = if evaluated_args.len() == 3 {
                             match &evaluated_args[2] {
-                                Value::Number(l) => Some(l.as_f64().unwrap() as i64),
+                                JValue::Number(l) => Some(*l as i64),
                                 _ => return Err(EvaluatorError::TypeError(
                                     "T0410: Argument 3 of function substring does not match function signature".to_string(),
                                 )),
@@ -2758,9 +3147,9 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        Ok(functions::string::substring(s, start.as_f64().unwrap() as i64, length)?)
+                        Ok(functions::string::substring(s, *start as i64, length)?)
                     }
-                    (Value::String(_), _) => Err(EvaluatorError::TypeError(
+                    (JValue::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substring does not match function signature".to_string(),
                     )),
                     _ => Err(EvaluatorError::TypeError(
@@ -2775,8 +3164,8 @@ impl Evaluator {
                     ));
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
-                    (Value::String(s), Value::String(sep)) => Ok(functions::string::substring_before(s, sep)?),
-                    (Value::String(_), _) => Err(EvaluatorError::TypeError(
+                    (JValue::String(s), JValue::String(sep)) => Ok(functions::string::substring_before(s, sep)?),
+                    (JValue::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substringBefore does not match function signature".to_string(),
                     )),
                     _ => Err(EvaluatorError::TypeError(
@@ -2791,8 +3180,8 @@ impl Evaluator {
                     ));
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
-                    (Value::String(s), Value::String(sep)) => Ok(functions::string::substring_after(s, sep)?),
-                    (Value::String(_), _) => Err(EvaluatorError::TypeError(
+                    (JValue::String(s), JValue::String(sep)) => Ok(functions::string::substring_after(s, sep)?),
+                    (JValue::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substringAfter does not match function signature".to_string(),
                     )),
                     _ => Err(EvaluatorError::TypeError(
@@ -2809,8 +3198,8 @@ impl Evaluator {
 
                 // First argument: string to pad
                 let string = match &evaluated_args[0] {
-                    Value::String(s) => s.clone(),
-                    Value::Null => return Ok(Value::Null),
+                    JValue::String(s) => s.clone(),
+                    JValue::Null => return Ok(JValue::Null),
                     _ => return Err(EvaluatorError::TypeError(
                         "pad() first argument must be a string".to_string(),
                     )),
@@ -2818,7 +3207,7 @@ impl Evaluator {
 
                 // Second argument: width (negative = left pad, positive = right pad)
                 let width = match &evaluated_args.get(1) {
-                    Some(Value::Number(n)) => n.as_f64().unwrap() as i32,
+                    Some(JValue::Number(n)) => *n as i32,
                     _ => return Err(EvaluatorError::TypeError(
                         "pad() second argument must be a number".to_string(),
                     )),
@@ -2826,8 +3215,8 @@ impl Evaluator {
 
                 // Third argument: padding string (optional, defaults to space)
                 let pad_string = match evaluated_args.get(2) {
-                    Some(Value::String(s)) if !s.is_empty() => s.clone(),
-                    _ => " ".to_string(),
+                    Some(JValue::String(s)) if !s.is_empty() => s.clone(),
+                    _ => Rc::from(" "),
                 };
 
                 let abs_width = width.abs() as usize;
@@ -2836,7 +3225,7 @@ impl Evaluator {
 
                 if char_count >= abs_width {
                     // String is already long enough
-                    return Ok(Value::String(string));
+                    return Ok(JValue::string(string));
                 }
 
                 let padding_needed = abs_width - char_count;
@@ -2855,12 +3244,12 @@ impl Evaluator {
                     format!("{}{}", string, padding)
                 };
 
-                Ok(Value::String(result))
+                Ok(JValue::string(result))
             }
 
             "trim" => {
                 if evaluated_args.is_empty() {
-                    return Ok(Value::Null); // undefined
+                    return Ok(JValue::Null); // undefined
                 }
                 if evaluated_args.len() != 1 {
                     return Err(EvaluatorError::EvaluationError(
@@ -2868,8 +3257,8 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::String(s) => Ok(functions::string::trim(s)?),
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::String(s) => Ok(functions::string::trim(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "trim() requires a string argument".to_string(),
                     )),
@@ -2881,11 +3270,11 @@ impl Evaluator {
                         "contains() requires exactly 2 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::string::contains(s, &evaluated_args[1])?),
+                    JValue::String(s) => Ok(functions::string::contains(s, &evaluated_args[1])?),
                     _ => Err(EvaluatorError::TypeError(
                         "contains() requires a string as the first argument".to_string(),
                     )),
@@ -2897,15 +3286,15 @@ impl Evaluator {
                         "split() requires 2 or 3 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => {
+                    JValue::String(s) => {
                         let limit = if evaluated_args.len() == 3 {
                             match &evaluated_args[2] {
-                                Value::Number(n) => {
-                                    let f = n.as_f64().unwrap();
+                                JValue::Number(n) => {
+                                    let f = *n;
                                     // Negative limit is an error
                                     if f < 0.0 {
                                         return Err(EvaluatorError::EvaluationError(
@@ -2937,8 +3326,8 @@ impl Evaluator {
                         "T0410: Argument 1 of function $join does not match function signature".to_string()
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
 
                 // Signature: <a<s>s?:s> - array of strings, optional separator, returns string
@@ -2985,11 +3374,11 @@ impl Evaluator {
 
                 // After coercion, first arg is guaranteed to be an array of strings
                 match &coerced_args[0] {
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         let separator = if coerced_args.len() == 2 {
                             match &coerced_args[1] {
-                                Value::String(s) => Some(s.as_str()),
-                                Value::Null => None,  // Undefined separator -> use empty string
+                                JValue::String(s) => Some(&**s),
+                                JValue::Null => None,  // Undefined separator -> use empty string
                                 _ => None,  // Signature should have validated this
                             }
                         } else {
@@ -2997,7 +3386,7 @@ impl Evaluator {
                         };
                         Ok(functions::string::join(arr, separator)?)
                     }
-                    Value::Null => Ok(Value::Null),
+                    JValue::Null => Ok(JValue::Null),
                     _ => unreachable!("Signature validation should ensure array type"),
                 }
             }
@@ -3007,16 +3396,12 @@ impl Evaluator {
                         "replace() requires 3 or 4 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
 
                 // Check if replacement (3rd arg) is a function/lambda
-                let replacement_is_lambda = if let Value::Object(ref map) = evaluated_args[2] {
-                    map.contains_key("__lambda__") || map.contains_key("__builtin__")
-                } else {
-                    false
-                };
+                let replacement_is_lambda = matches!(evaluated_args[2], JValue::Lambda { .. } | JValue::Builtin { .. });
 
                 if replacement_is_lambda {
                     // Lambda replacement mode
@@ -3031,11 +3416,11 @@ impl Evaluator {
 
                 // String replacement mode
                 match (&evaluated_args[0], &evaluated_args[2]) {
-                    (Value::String(s), Value::String(replacement)) => {
+                    (JValue::String(s), JValue::String(replacement)) => {
                         let limit = if evaluated_args.len() == 4 {
                             match &evaluated_args[3] {
-                                Value::Number(n) => {
-                                    let lim_f64 = n.as_f64().unwrap();
+                                JValue::Number(n) => {
+                                    let lim_f64 = *n;
                                     if lim_f64 < 0.0 {
                                         return Err(EvaluatorError::EvaluationError(
                                             format!("D3011: Limit must be non-negative, got {}", lim_f64)
@@ -3065,12 +3450,12 @@ impl Evaluator {
                         "match() requires 1 to 3 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
 
                 let s = match &evaluated_args[0] {
-                    Value::String(s) => s.clone(),
+                    JValue::String(s) => s.clone(),
                     _ => return Err(EvaluatorError::TypeError(
                         "match() first argument must be a string".to_string(),
                     )),
@@ -3079,8 +3464,8 @@ impl Evaluator {
                 // Get optional limit
                 let limit = if evaluated_args.len() == 3 {
                     match &evaluated_args[2] {
-                        Value::Number(n) => Some(n.as_f64().unwrap() as usize),
-                        Value::Null => None,
+                        JValue::Number(n) => Some(*n as usize),
+                        JValue::Null => None,
                         _ => return Err(EvaluatorError::TypeError(
                             "match() limit must be a number".to_string(),
                         )),
@@ -3092,11 +3477,7 @@ impl Evaluator {
                 // Check if second argument is a custom matcher function (lambda)
                 let pattern_value = evaluated_args.get(1);
                 let is_custom_matcher = pattern_value.map_or(false, |val| {
-                    if let Value::Object(map) = val {
-                        map.contains_key("__lambda__") || map.contains_key("__builtin__")
-                    } else {
-                        false
-                    }
+                    matches!(val, JValue::Lambda { .. } | JValue::Builtin { .. })
                 });
 
                 if is_custom_matcher {
@@ -3140,24 +3521,24 @@ impl Evaluator {
                     }
 
                     let full_match = caps.get(0).unwrap();
-                    let mut match_obj = serde_json::Map::new();
-                    match_obj.insert("match".to_string(), Value::String(full_match.as_str().to_string()));
-                    match_obj.insert("index".to_string(), Value::Number(serde_json::Number::from(full_match.start())));
+                    let mut match_obj = IndexMap::new();
+                    match_obj.insert("match".to_string(), JValue::string(full_match.as_str().to_string()));
+                    match_obj.insert("index".to_string(), JValue::Number(full_match.start() as f64));
 
                     // Collect capture groups
-                    let mut groups: Vec<Value> = Vec::new();
+                    let mut groups: Vec<JValue> = Vec::new();
                     for i in 1..caps.len() {
                         if let Some(group) = caps.get(i) {
-                            groups.push(Value::String(group.as_str().to_string()));
+                            groups.push(JValue::string(group.as_str().to_string()));
                         } else {
-                            groups.push(Value::Null);
+                            groups.push(JValue::Null);
                         }
                     }
                     if !groups.is_empty() {
-                        match_obj.insert("groups".to_string(), Value::Array(groups));
+                        match_obj.insert("groups".to_string(), JValue::array(groups));
                     }
 
-                    results.push(Value::Object(match_obj));
+                    results.push(JValue::object(match_obj));
                     count += 1;
 
                     // If not global, only return first match
@@ -3167,12 +3548,12 @@ impl Evaluator {
                 }
 
                 if results.is_empty() {
-                    Ok(Value::Null)
+                    Ok(JValue::Null)
                 } else if results.len() == 1 && !is_global {
                     // Single match (non-global) returns the match object directly
                     Ok(results.into_iter().next().unwrap())
                 } else {
-                    Ok(Value::Array(results))
+                    Ok(JValue::array(results))
                 }
             }
             "max" => {
@@ -3182,16 +3563,16 @@ impl Evaluator {
                     ));
                 }
                 // Check for undefined
-                if is_undefined(&evaluated_args[0]) {
-                    return Ok(undefined_value());
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Array(arr) => {
-                        let flattened = flatten_for_aggregation(arr);
-                        Ok(functions::numeric::max(&flattened)?)
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Array(arr) => {
+                        // Use zero-clone iterator-based max
+                        Ok(aggregation::max(arr)?)
                     }
-                    Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
+                    JValue::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
                         "max() requires an array or number argument".to_string(),
                     )),
@@ -3204,16 +3585,16 @@ impl Evaluator {
                     ));
                 }
                 // Check for undefined
-                if is_undefined(&evaluated_args[0]) {
-                    return Ok(undefined_value());
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Array(arr) => {
-                        let flattened = flatten_for_aggregation(arr);
-                        Ok(functions::numeric::min(&flattened)?)
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Array(arr) => {
+                        // Use zero-clone iterator-based min
+                        Ok(aggregation::min(arr)?)
                     }
-                    Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
+                    JValue::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
                         "min() requires an array or number argument".to_string(),
                     )),
@@ -3226,16 +3607,16 @@ impl Evaluator {
                     ));
                 }
                 // Return undefined if argument is undefined
-                if is_undefined(&evaluated_args[0]) {
-                    return Ok(undefined_value());
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Array(arr) => {
-                        let flattened = flatten_for_aggregation(arr);
-                        Ok(functions::numeric::average(&flattened)?)
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Array(arr) => {
+                        // Use zero-clone iterator-based average
+                        Ok(aggregation::average(arr)?)
                     }
-                    Value::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
+                    JValue::Number(_) => Ok(evaluated_args[0].clone()), // Single number returns itself
                     _ => Err(EvaluatorError::TypeError(
                         "average() requires an array or number argument".to_string(),
                     )),
@@ -3248,8 +3629,8 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Number(n) => Ok(functions::numeric::abs(n.as_f64().unwrap())?),
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Number(n) => Ok(functions::numeric::abs(*n)?),
                     _ => Err(EvaluatorError::TypeError(
                         "abs() requires a number argument".to_string(),
                     )),
@@ -3262,8 +3643,8 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Number(n) => Ok(functions::numeric::floor(n.as_f64().unwrap())?),
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Number(n) => Ok(functions::numeric::floor(*n)?),
                     _ => Err(EvaluatorError::TypeError(
                         "floor() requires a number argument".to_string(),
                     )),
@@ -3276,8 +3657,8 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Number(n) => Ok(functions::numeric::ceil(n.as_f64().unwrap())?),
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Number(n) => Ok(functions::numeric::ceil(*n)?),
                     _ => Err(EvaluatorError::TypeError(
                         "ceil() requires a number argument".to_string(),
                     )),
@@ -3290,11 +3671,11 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Number(n) => {
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Number(n) => {
                         let precision = if evaluated_args.len() == 2 {
                             match &evaluated_args[1] {
-                                Value::Number(p) => Some(p.as_f64().unwrap() as i32),
+                                JValue::Number(p) => Some(*p as i32),
                                 _ => return Err(EvaluatorError::TypeError(
                                     "round() precision must be a number".to_string(),
                                 )),
@@ -3302,7 +3683,7 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        Ok(functions::numeric::round(n.as_f64().unwrap(), precision)?)
+                        Ok(functions::numeric::round(*n, precision)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "round() requires a number argument".to_string(),
@@ -3316,8 +3697,8 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Number(n) => Ok(functions::numeric::sqrt(n.as_f64().unwrap())?),
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Number(n) => Ok(functions::numeric::sqrt(*n)?),
                     _ => Err(EvaluatorError::TypeError(
                         "sqrt() requires a number argument".to_string(),
                     )),
@@ -3329,12 +3710,12 @@ impl Evaluator {
                         "power() requires exactly 2 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
-                    (Value::Number(base), Value::Number(exp)) => {
-                        Ok(functions::numeric::power(base.as_f64().unwrap(), exp.as_f64().unwrap())?)
+                    (JValue::Number(base), JValue::Number(exp)) => {
+                        Ok(functions::numeric::power(*base, *exp)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "power() requires number arguments".to_string(),
@@ -3347,17 +3728,17 @@ impl Evaluator {
                         "formatNumber() requires 2 or 3 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
-                    (Value::Number(num), Value::String(picture)) => {
+                    (JValue::Number(num), JValue::String(picture)) => {
                         let options = if evaluated_args.len() == 3 {
                             Some(&evaluated_args[2])
                         } else {
                             None
                         };
-                        Ok(functions::numeric::format_number(num.as_f64().unwrap(), picture, options)?)
+                        Ok(functions::numeric::format_number(*num, picture, options)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "formatNumber() requires a number and a string".to_string(),
@@ -3371,14 +3752,14 @@ impl Evaluator {
                     ));
                 }
                 // Handle undefined input
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::Number(num) => {
+                    JValue::Number(num) => {
                         let radix = if evaluated_args.len() == 2 {
                             match &evaluated_args[1] {
-                                Value::Number(r) => Some(r.as_f64().unwrap().trunc() as i64),
+                                JValue::Number(r) => Some(r.trunc() as i64),
                                 _ => return Err(EvaluatorError::TypeError(
                                     "formatBase() radix must be a number".to_string(),
                                 )),
@@ -3386,7 +3767,7 @@ impl Evaluator {
                         } else {
                             None
                         };
-                        Ok(functions::numeric::format_base(num.as_f64().unwrap(), radix)?)
+                        Ok(functions::numeric::format_base(*num, radix)?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "formatBase() requires a number".to_string(),
@@ -3404,18 +3785,18 @@ impl Evaluator {
                 let second = &evaluated_args[1];
 
                 // If second arg is null, return first as-is (no change)
-                if matches!(second, Value::Null) {
+                if matches!(second, JValue::Null) {
                     return Ok(first.clone());
                 }
 
                 // If first arg is null, return second as-is (appending to nothing gives second)
-                if matches!(first, Value::Null) {
+                if matches!(first, JValue::Null) {
                     return Ok(second.clone());
                 }
 
                 // Convert both to arrays if needed, then append
                 let arr = match first {
-                    Value::Array(a) => a.clone(),
+                    JValue::Array(a) => a.to_vec(),
                     other => vec![other.clone()], // Wrap non-array in array
                 };
 
@@ -3428,8 +3809,8 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null), // undefined returns undefined
-                    Value::Array(arr) => Ok(functions::array::reverse(arr)?),
+                    JValue::Null => Ok(JValue::Null), // undefined returns undefined
+                    JValue::Array(arr) => Ok(functions::array::reverse(arr)?),
                     _ => Err(EvaluatorError::TypeError(
                         "reverse() requires an array argument".to_string(),
                     )),
@@ -3441,11 +3822,11 @@ impl Evaluator {
                         "shuffle() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::Array(arr) => Ok(functions::array::shuffle(arr)?),
+                    JValue::Array(arr) => Ok(functions::array::shuffle(arr)?),
                     _ => Err(EvaluatorError::TypeError(
                         "shuffle() requires an array argument".to_string(),
                     )),
@@ -3460,25 +3841,44 @@ impl Evaluator {
                     ));
                 }
 
+                // Determine which argument is the function
+                let func_arg = if evaluated_args.len() == 1 {
+                    &args[0]
+                } else {
+                    &args[1]
+                };
+
+                // Detect how many parameters the callback expects
+                let param_count = self.get_callback_param_count(func_arg);
+
                 // Helper function to sift a single object
-                let sift_object = |evaluator: &mut Self, obj: &serde_json::Map<String, Value>, func_node: &AstNode, context_data: &Value| -> Result<Value, EvaluatorError> {
-                    let obj_value = Value::Object(obj.clone());
-                    let mut result = serde_json::Map::new();
+                let sift_object = |evaluator: &mut Self, obj: &IndexMap<String, JValue>, func_node: &AstNode, context_data: &JValue, param_count: usize| -> Result<JValue, EvaluatorError> {
+                    // Only create the object value if callback uses 3 parameters
+                    let obj_value = if param_count >= 3 {
+                        Some(JValue::object(obj.clone()))
+                    } else {
+                        None
+                    };
+
+                    let mut result = IndexMap::new();
                     for (key, value) in obj.iter() {
-                        let pred_result = evaluator.apply_function(
-                            func_node,
-                            &[value.clone(), Value::String(key.clone()), obj_value.clone()],
-                            context_data
-                        )?;
+                        // Build argument list based on what callback expects
+                        let call_args = match param_count {
+                            1 => vec![value.clone()],
+                            2 => vec![value.clone(), JValue::string(key.clone())],
+                            _ => vec![value.clone(), JValue::string(key.clone()), obj_value.as_ref().unwrap().clone()],
+                        };
+
+                        let pred_result = evaluator.apply_function(func_node, &call_args, context_data)?;
                         if evaluator.is_truthy(&pred_result) {
                             result.insert(key.clone(), value.clone());
                         }
                     }
                     // Return undefined for empty results (will be filtered by function application)
                     if result.is_empty() {
-                        Ok(undefined_value())
+                        Ok(JValue::Undefined)
                     } else {
-                        Ok(Value::Object(result))
+                        Ok(JValue::object(result))
                     }
                 };
 
@@ -3486,33 +3886,33 @@ impl Evaluator {
                 if evaluated_args.len() == 1 {
                     // $sift(function) - use current context data as object
                     match data {
-                        Value::Object(o) => {
-                            return sift_object(self, o, &args[0], data);
+                        JValue::Object(o) => {
+                            return sift_object(self, o, &args[0], data, param_count);
                         }
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             // Map sift over each object in the array
                             let mut results = Vec::new();
-                            for item in arr {
-                                if let Value::Object(o) = item {
-                                    let sifted = sift_object(self, o, &args[0], item)?;
+                            for item in arr.iter() {
+                                if let JValue::Object(o) = item {
+                                    let sifted = sift_object(self, o, &args[0], item, param_count)?;
                                     // sift_object returns undefined for empty results
-                                    if !is_undefined(&sifted) {
+                                    if !sifted.is_undefined() {
                                         results.push(sifted);
                                     }
                                 }
                             }
-                            return Ok(Value::Array(results));
+                            return Ok(JValue::array(results));
                         }
-                        Value::Null => return Ok(Value::Null),
-                        _ => return Ok(undefined_value()),
+                        JValue::Null => return Ok(JValue::Null),
+                        _ => return Ok(JValue::Undefined),
                     }
                 } else {
                     // $sift(object, function)
                     match &evaluated_args[0] {
-                        Value::Object(o) => {
-                            return sift_object(self, o, &args[1], data);
+                        JValue::Object(o) => {
+                            return sift_object(self, o, &args[1], data, param_count);
                         }
-                        Value::Null => return Ok(Value::Null),
+                        JValue::Null => return Ok(JValue::Null),
                         _ => return Err(EvaluatorError::TypeError(
                             "sift() first argument must be an object".to_string(),
                         )),
@@ -3529,19 +3929,19 @@ impl Evaluator {
 
                 // Convert arguments to arrays (wrapping non-arrays in single-element arrays)
                 // If any argument is null/undefined, return empty array
-                let mut arrays: Vec<Vec<Value>> = Vec::with_capacity(evaluated_args.len());
+                let mut arrays: Vec<Vec<JValue>> = Vec::with_capacity(evaluated_args.len());
                 for arg in &evaluated_args {
                     match arg {
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             if arr.is_empty() {
                                 // Empty array means result is empty
-                                return Ok(Value::Array(vec![]));
+                                return Ok(JValue::array(vec![]));
                             }
-                            arrays.push(arr.clone());
+                            arrays.push(arr.to_vec());
                         }
-                        Value::Null => {
+                        JValue::Null => {
                             // Null/undefined means result is empty
-                            return Ok(Value::Array(vec![]));
+                            return Ok(JValue::array(vec![]));
                         }
                         other => {
                             // Wrap non-array values in single-element array
@@ -3551,7 +3951,7 @@ impl Evaluator {
                 }
 
                 if arrays.is_empty() {
-                    return Ok(Value::Array(vec![]));
+                    return Ok(JValue::array(vec![]));
                 }
 
                 // Find the length of the shortest array
@@ -3564,10 +3964,10 @@ impl Evaluator {
                     for array in &arrays {
                         tuple.push(array[i].clone());
                     }
-                    result.push(Value::Array(tuple));
+                    result.push(JValue::array(tuple));
                 }
 
-                Ok(Value::Array(result))
+                Ok(JValue::array(result))
             }
 
             "sort" => {
@@ -3580,39 +3980,20 @@ impl Evaluator {
                 let array_value = self.evaluate_internal(&args[0], data)?;
 
                 // Handle undefined input
-                if matches!(array_value, Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(array_value, JValue::Null) {
+                    return Ok(JValue::Null);
                 }
 
                 let mut arr = match array_value {
-                    Value::Array(arr) => arr,
+                    JValue::Array(arr) => arr.to_vec(),
                     other => vec![other],
                 };
 
                 if args.len() == 2 {
-                    // Sort using the comparator: function($a, $b) returns true if $a should come before $b
-                    let comparator = &args[1];
-
-                    // Use a simple bubble sort to allow using the comparator function
-                    // JSONata comparator: returns true if $a should come AFTER $b
-                    let n = arr.len();
-                    for i in 0..n {
-                        for j in 0..(n - i - 1) {
-                            // Apply comparator function with (a, b)
-                            let cmp_result = self.apply_function(
-                                comparator,
-                                &[arr[j].clone(), arr[j + 1].clone()],
-                                data
-                            )?;
-
-                            // If comparator returns true (a should come AFTER b), swap
-                            if self.is_truthy(&cmp_result) {
-                                arr.swap(j, j + 1);
-                            }
-                        }
-                    }
-
-                    Ok(Value::Array(arr))
+                    // Sort using the comparator: function($a, $b) returns true if $a should come AFTER $b
+                    // Use merge sort for O(n log n) performance instead of O(n²) bubble sort
+                    self.merge_sort_with_comparator(&mut arr, &args[1], data)?;
+                    Ok(JValue::array(arr))
                 } else {
                     // Default sort (no comparator)
                     Ok(functions::array::sort(&arr)?)
@@ -3625,7 +4006,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Array(arr) => Ok(functions::array::distinct(arr)?),
+                    JValue::Array(arr) => Ok(functions::array::distinct(arr)?),
                     _ => Err(EvaluatorError::TypeError(
                         "distinct() requires an array argument".to_string(),
                     )),
@@ -3647,55 +4028,52 @@ impl Evaluator {
                 }
 
                 // Helper to unwrap single-element arrays
-                let unwrap_single = |keys: Vec<Value>| -> Value {
+                let unwrap_single = |keys: Vec<JValue>| -> JValue {
                     if keys.len() == 1 {
                         keys.into_iter().next().unwrap()
                     } else {
-                        Value::Array(keys)
+                        JValue::array(keys)
                     }
                 };
 
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Object(obj) => {
-                        // Check if this is a lambda (internal representation)
-                        if obj.contains_key("__lambda__") {
-                            return Ok(Value::Null);
-                        }
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Lambda { .. } | JValue::Builtin { .. } => Ok(JValue::Null),
+                    JValue::Object(obj) => {
                         // Return undefined for empty objects
                         if obj.is_empty() {
-                            Ok(Value::Null)
+                            Ok(JValue::Null)
                         } else {
-                            let keys: Vec<Value> = obj.keys()
-                                .map(|k| Value::String(k.clone()))
+                            let keys: Vec<JValue> = obj.keys()
+                                .map(|k| JValue::string(k.clone()))
                                 .collect();
                             Ok(unwrap_single(keys))
                         }
                     }
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         // For arrays, collect keys from all objects
                         let mut all_keys = Vec::new();
-                        for item in arr {
-                            if let Value::Object(obj) = item {
-                                // Skip lambda objects
-                                if obj.contains_key("__lambda__") {
-                                    continue;
-                                }
+                        for item in arr.iter() {
+                            // Skip lambda/builtin values
+                            if matches!(item, JValue::Lambda { .. } | JValue::Builtin { .. }) {
+                                continue;
+                            }
+                            if let JValue::Object(obj) = item {
                                 for key in obj.keys() {
-                                    if !all_keys.contains(&Value::String(key.clone())) {
-                                        all_keys.push(Value::String(key.clone()));
+                                    if !all_keys.contains(&JValue::string(key.clone())) {
+                                        all_keys.push(JValue::string(key.clone()));
                                     }
                                 }
                             }
                         }
                         if all_keys.is_empty() {
-                            Ok(Value::Null)
+                            Ok(JValue::Null)
                         } else {
                             Ok(unwrap_single(all_keys))
                         }
                     }
                     // Non-object types return undefined
-                    _ => Ok(Value::Null),
+                    _ => Ok(JValue::Null),
                 }
             }
             "lookup" => {
@@ -3704,29 +4082,29 @@ impl Evaluator {
                         "lookup() requires exactly 2 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
 
                 let key = match &evaluated_args[1] {
-                    Value::String(k) => k.as_str(),
+                    JValue::String(k) => &**k,
                     _ => return Err(EvaluatorError::TypeError(
                         "lookup() requires a string key".to_string(),
                     )),
                 };
 
                 // Helper function to recursively lookup in values
-                fn lookup_recursive(val: &Value, key: &str) -> Vec<Value> {
+                fn lookup_recursive(val: &JValue, key: &str) -> Vec<JValue> {
                     match val {
-                        Value::Array(arr) => {
+                        JValue::Array(arr) => {
                             let mut results = Vec::new();
-                            for item in arr {
+                            for item in arr.iter() {
                                 let nested = lookup_recursive(item, key);
-                                results.extend(nested);
+                                results.extend(nested.iter().cloned());
                             }
                             results
                         }
-                        Value::Object(obj) => {
+                        JValue::Object(obj) => {
                             if let Some(v) = obj.get(key) {
                                 vec![v.clone()]
                             } else {
@@ -3739,11 +4117,11 @@ impl Evaluator {
 
                 let results = lookup_recursive(&evaluated_args[0], key);
                 if results.is_empty() {
-                    Ok(Value::Null)
+                    Ok(JValue::Null)
                 } else if results.len() == 1 {
                     Ok(results[0].clone())
                 } else {
-                    Ok(Value::Array(results))
+                    Ok(JValue::array(results))
                 }
             }
             "spread" => {
@@ -3753,26 +4131,24 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::Null),
-                    Value::Object(obj) => {
-                        if obj.get("__lambda__").is_some() {
-                            return Ok(undefined_value());
-                        }
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Lambda { .. } | JValue::Builtin { .. } => Ok(JValue::Undefined),
+                    JValue::Object(obj) => {
                         Ok(functions::object::spread(obj)?)
                     }
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         // Spread each object in the array
                         let mut result = Vec::new();
-                        for item in arr {
+                        for item in arr.iter() {
                             match item {
-                                Value::Object(obj) => {
-                                    if obj.get("__lambda__").is_some() {
-                                        // Skip lambdas in array
-                                        continue;
-                                    }
+                                JValue::Lambda { .. } | JValue::Builtin { .. } => {
+                                    // Skip lambdas in array
+                                    continue;
+                                }
+                                JValue::Object(obj) => {
                                     let spread_result = functions::object::spread(obj)?;
-                                    if let Value::Array(spread_items) = spread_result {
-                                        result.extend(spread_items);
+                                    if let JValue::Array(spread_items) = spread_result {
+                                        result.extend(spread_items.iter().cloned());
                                     } else {
                                         result.push(spread_result);
                                     }
@@ -3781,7 +4157,7 @@ impl Evaluator {
                                 other => result.push(other.clone()),
                             }
                         }
-                        Ok(Value::Array(result))
+                        Ok(JValue::array(result))
                     }
                     // Non-objects are returned unchanged
                     other => Ok(other.clone()),
@@ -3797,9 +4173,9 @@ impl Evaluator {
                 // vs multiple object arguments: $merge(obj1, obj2)
                 if evaluated_args.len() == 1 {
                     match &evaluated_args[0] {
-                        Value::Array(arr) => Ok(functions::object::merge(arr)?),
-                        Value::Null => Ok(Value::Null), // $merge(undefined) returns undefined
-                        Value::Object(_) => {
+                        JValue::Array(arr) => Ok(functions::object::merge(arr)?),
+                        JValue::Null => Ok(JValue::Null), // $merge(undefined) returns undefined
+                        JValue::Object(_) => {
                             // Single object - just return it
                             Ok(evaluated_args[0].clone())
                         }
@@ -3823,25 +4199,36 @@ impl Evaluator {
                 let array = self.evaluate_internal(&args[0], data)?;
 
                 match array {
-                    Value::Array(arr) => {
-                        let arr_value = Value::Array(arr.clone());
+                    JValue::Array(arr) => {
+                        // Detect how many parameters the callback expects
+                        let param_count = self.get_callback_param_count(&args[1]);
+
+                        // Only create the array value if callback uses 3 parameters
+                        let arr_value = if param_count >= 3 {
+                            Some(JValue::Array(arr.clone()))
+                        } else {
+                            None
+                        };
+
                         let mut result = Vec::with_capacity(arr.len());
-                        for (index, item) in arr.into_iter().enumerate() {
-                            // Apply function with (item, index, array) - callbacks may use any subset
-                            let mapped = self.apply_function(
-                                &args[1],
-                                &[item, Value::Number(serde_json::Number::from(index)), arr_value.clone()],
-                                data
-                            )?;
+                        for (index, item) in arr.iter().enumerate() {
+                            // Build argument list based on what callback expects
+                            let call_args = match param_count {
+                                1 => vec![item.clone()],
+                                2 => vec![item.clone(), JValue::Number(index as f64)],
+                                _ => vec![item.clone(), JValue::Number(index as f64), arr_value.as_ref().unwrap().clone()],
+                            };
+
+                            let mapped = self.apply_function(&args[1], &call_args, data)?;
                             // Filter out undefined results but keep explicit null (JSONata map semantics)
                             // undefined comes from missing else clause, null is explicit
-                            if !is_undefined(&mapped) {
+                            if !mapped.is_undefined() {
                                 result.push(mapped);
                             }
                         }
-                        Ok(Value::Array(result))
+                        Ok(JValue::array(result))
                     }
-                    Value::Null => Ok(Value::Null),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError(
                         "map() first argument must be an array".to_string(),
                     )),
@@ -3859,32 +4246,43 @@ impl Evaluator {
                 let array = self.evaluate_internal(&args[0], data)?;
 
                 // Handle undefined input - return undefined
-                if is_undefined(&array) {
-                    return Ok(undefined_value());
+                if array.is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
 
                 // Handle null input
-                if matches!(array, Value::Null) {
-                    return Ok(undefined_value());
+                if matches!(array, JValue::Null) {
+                    return Ok(JValue::Undefined);
                 }
 
                 // Coerce non-array values to single-element arrays
                 // Track if input was a single value to unwrap result appropriately
                 let (arr, was_single_value) = match array {
-                    Value::Array(arr) => (arr, false),
+                    JValue::Array(arr) => (arr.to_vec(), false),
                     single_value => (vec![single_value], true),
                 };
 
-                let arr_value = Value::Array(arr.clone());
+                // Detect how many parameters the callback expects
+                let param_count = self.get_callback_param_count(&args[1]);
+
+                // Only create the array value if callback uses 3 parameters
+                let arr_value = if param_count >= 3 {
+                    Some(JValue::array(arr.clone()))
+                } else {
+                    None
+                };
+
                 let mut result = Vec::with_capacity(arr.len() / 2);
 
                 for (index, item) in arr.into_iter().enumerate() {
-                    // Apply predicate function with (item, index, array)
-                    let predicate_result = self.apply_function(
-                        &args[1],
-                        &[item.clone(), Value::Number(serde_json::Number::from(index)), arr_value.clone()],
-                        data
-                    )?;
+                    // Build argument list based on what callback expects
+                    let call_args = match param_count {
+                        1 => vec![item.clone()],
+                        2 => vec![item.clone(), JValue::Number(index as f64)],
+                        _ => vec![item.clone(), JValue::Number(index as f64), arr_value.as_ref().unwrap().clone()],
+                    };
+
+                    let predicate_result = self.apply_function(&args[1], &call_args, data)?;
                     if self.is_truthy(&predicate_result) {
                         result.push(item);
                     }
@@ -3896,11 +4294,11 @@ impl Evaluator {
                     if result.len() == 1 {
                         return Ok(result.remove(0));
                     } else if result.is_empty() {
-                        return Ok(undefined_value());
+                        return Ok(JValue::Undefined);
                     }
                 }
 
-                Ok(Value::Array(result))
+                Ok(JValue::array(result))
             }
 
             "reduce" => {
@@ -3928,8 +4326,8 @@ impl Evaluator {
 
                 // Convert single value to array (JSONata reduce accepts single values)
                 let arr = match array {
-                    Value::Array(arr) => arr,
-                    Value::Null => return Ok(Value::Null),
+                    JValue::Array(arr) => arr.to_vec(),
+                    JValue::Null => return Ok(JValue::Null),
                     single => vec![single],
                 };
 
@@ -3938,7 +4336,7 @@ impl Evaluator {
                     return if args.len() == 3 {
                         self.evaluate_internal(&args[2], data)
                     } else {
-                        Ok(Value::Null)
+                        Ok(JValue::Null)
                     };
                 }
 
@@ -3950,24 +4348,32 @@ impl Evaluator {
                 };
 
                 let start_idx = if args.len() == 3 { 0 } else { 1 };
-                let arr_value = Value::Array(arr.clone());
 
-                        // Apply function to each element
-                        for (idx, item) in arr[start_idx..].iter().enumerate() {
-                            // For reduce, the function receives (accumulator, value, index, array)
-                            // Callbacks may use any subset of these parameters
-                            let actual_idx = start_idx + idx;
-                            accumulator = self.apply_function(
-                                &args[1],
-                                &[
-                                    accumulator.clone(),
-                                    item.clone(),
-                                    Value::Number(serde_json::Number::from(actual_idx)),
-                                    arr_value.clone()
-                                ],
-                                data
-                            )?;
-                        }
+                // Detect how many parameters the callback expects
+                let param_count = self.get_callback_param_count(&args[1]);
+
+                // Only create the array value if callback uses 4 parameters
+                let arr_value = if param_count >= 4 {
+                    Some(JValue::array(arr.clone()))
+                } else {
+                    None
+                };
+
+                // Apply function to each element
+                for (idx, item) in arr[start_idx..].iter().enumerate() {
+                    // For reduce, the function receives (accumulator, value, index, array)
+                    // Callbacks may use any subset of these parameters
+                    let actual_idx = start_idx + idx;
+
+                    // Build argument list based on what callback expects
+                    let call_args = match param_count {
+                        2 => vec![accumulator.clone(), item.clone()],
+                        3 => vec![accumulator.clone(), item.clone(), JValue::Number(actual_idx as f64)],
+                        _ => vec![accumulator.clone(), item.clone(), JValue::Number(actual_idx as f64), arr_value.as_ref().unwrap().clone()],
+                    };
+
+                    accumulator = self.apply_function(&args[1], &call_args, data)?;
+                }
 
                 Ok(accumulator)
             }
@@ -3984,8 +4390,8 @@ impl Evaluator {
 
                 // Convert to array (wrap single values)
                 let arr = match array {
-                    Value::Array(arr) => arr,
-                    Value::Null => return Ok(Value::Null),
+                    JValue::Array(arr) => arr.to_vec(),
+                    JValue::Null => return Ok(JValue::Null),
                     other => vec![other],
                 };
 
@@ -4002,13 +4408,13 @@ impl Evaluator {
                     }
                 } else {
                     // With predicate - find exactly 1 matching element
-                    let arr_value = Value::Array(arr.clone());
+                    let arr_value = JValue::array(arr.clone());
                     let mut matches = Vec::new();
                     for (index, item) in arr.into_iter().enumerate() {
                         // Apply predicate function with (item, index, array)
                         let predicate_result = self.apply_function(
                             &args[1],
-                            &[item.clone(), Value::Number(serde_json::Number::from(index)), arr_value.clone()],
+                            &[item.clone(), JValue::Number(index as f64), arr_value.clone()],
                             data
                         )?;
                         if self.is_truthy(&predicate_result) {
@@ -4046,21 +4452,29 @@ impl Evaluator {
                     (self.evaluate_internal(&args[0], data)?, &args[1])
                 };
 
+                // Detect how many parameters the callback expects
+                let param_count = self.get_callback_param_count(func_arg);
+
                 match obj_value {
-                    Value::Object(obj) => {
+                    JValue::Object(obj) => {
                         let mut result = Vec::new();
-                        for (key, value) in obj {
-                            // Apply function with (value, key) arguments
+                        for (key, value) in obj.iter() {
+                            // Build argument list based on what callback expects
                             // The callback receives the value as the first argument and key as second
-                            let fn_result = self.apply_function(func_arg, &[value.clone(), Value::String(key.clone())], data)?;
+                            let call_args = match param_count {
+                                1 => vec![value.clone()],
+                                _ => vec![value.clone(), JValue::string(key.clone())],
+                            };
+
+                            let fn_result = self.apply_function(func_arg, &call_args, data)?;
                             // Skip undefined results (similar to map behavior)
-                            if !matches!(fn_result, Value::Null) && !is_undefined(&fn_result) {
+                            if !matches!(fn_result, JValue::Null) && !fn_result.is_undefined() {
                                 result.push(fn_result);
                             }
                         }
-                        Ok(Value::Array(result))
+                        Ok(JValue::array(result))
                     }
-                    Value::Null => Ok(Value::Null),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError(
                         "each() first argument must be an object".to_string(),
                     )),
@@ -4075,7 +4489,7 @@ impl Evaluator {
                 }
                 // $not(x) returns the logical negation of x
                 // null is falsy, so $not(null) = true
-                Ok(Value::Bool(!self.is_truthy(&evaluated_args[0])))
+                Ok(JValue::Bool(!self.is_truthy(&evaluated_args[0])))
             }
             "boolean" => {
                 if evaluated_args.len() != 1 {
@@ -4095,28 +4509,21 @@ impl Evaluator {
                 // In JavaScript: $type(undefined) returns undefined, $type(null) returns "null"
                 // We use a special marker object to distinguish undefined from null
                 match &evaluated_args[0] {
-                    Value::Null => Ok(Value::String("null".to_string())), // explicit null
-                    Value::Bool(_) => Ok(Value::String("boolean".to_string())),
-                    Value::Number(_) => Ok(Value::String("number".to_string())),
-                    Value::String(_) => Ok(Value::String("string".to_string())),
-                    Value::Array(_) => Ok(Value::String("array".to_string())),
-                    Value::Object(obj) => {
-                        // Check if this is the undefined marker
-                        if is_undefined(&evaluated_args[0]) {
-                            Ok(undefined_value()) // undefined returns undefined
-                        // Check if this is a function (lambda or built-in)
-                        } else if obj.contains_key("__lambda__") || obj.contains_key("__builtin__") {
-                            Ok(Value::String("function".to_string()))
-                        } else {
-                            Ok(Value::String("object".to_string()))
-                        }
-                    }
+                    JValue::Null => Ok(JValue::string("null".to_string())), // explicit null
+                    JValue::Bool(_) => Ok(JValue::string("boolean".to_string())),
+                    JValue::Number(_) => Ok(JValue::string("number".to_string())),
+                    JValue::String(_) => Ok(JValue::string("string")),
+                    JValue::Array(_) => Ok(JValue::string("array".to_string())),
+                    JValue::Object(_) => Ok(JValue::string("object".to_string())),
+                    JValue::Undefined => Ok(JValue::Undefined),
+                    JValue::Lambda { .. } | JValue::Builtin { .. } => Ok(JValue::string("function".to_string())),
+                    JValue::Regex { .. } => Ok(JValue::string("regex".to_string())),
                 }
             }
 
             "base64encode" => {
-                if evaluated_args.is_empty() || matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if evaluated_args.is_empty() || matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 if evaluated_args.len() != 1 {
                     return Err(EvaluatorError::EvaluationError(
@@ -4124,15 +4531,15 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::encoding::base64encode(s)?),
+                    JValue::String(s) => Ok(functions::encoding::base64encode(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "base64encode() requires a string argument".to_string(),
                     )),
                 }
             }
             "base64decode" => {
-                if evaluated_args.is_empty() || matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if evaluated_args.is_empty() || matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 if evaluated_args.len() != 1 {
                     return Err(EvaluatorError::EvaluationError(
@@ -4140,7 +4547,7 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::encoding::base64decode(s)?),
+                    JValue::String(s) => Ok(functions::encoding::base64decode(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "base64decode() requires a string argument".to_string(),
                     )),
@@ -4152,11 +4559,11 @@ impl Evaluator {
                         "encodeUrlComponent() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::encoding::encode_url_component(s)?),
+                    JValue::String(s) => Ok(functions::encoding::encode_url_component(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "encodeUrlComponent() requires a string argument".to_string(),
                     )),
@@ -4168,11 +4575,11 @@ impl Evaluator {
                         "decodeUrlComponent() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::encoding::decode_url_component(s)?),
+                    JValue::String(s) => Ok(functions::encoding::decode_url_component(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "decodeUrlComponent() requires a string argument".to_string(),
                     )),
@@ -4184,11 +4591,11 @@ impl Evaluator {
                         "encodeUrl() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::encoding::encode_url(s)?),
+                    JValue::String(s) => Ok(functions::encoding::encode_url(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "encodeUrl() requires a string argument".to_string(),
                     )),
@@ -4200,11 +4607,11 @@ impl Evaluator {
                         "decodeUrl() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
-                    Value::String(s) => Ok(functions::encoding::decode_url(s)?),
+                    JValue::String(s) => Ok(functions::encoding::decode_url(s)?),
                     _ => Err(EvaluatorError::TypeError(
                         "decodeUrl() requires a string argument".to_string(),
                     )),
@@ -4219,7 +4626,7 @@ impl Evaluator {
                 }
 
                 match &evaluated_args[0] {
-                    Value::String(s) => {
+                    JValue::String(s) => {
                         return Err(EvaluatorError::EvaluationError(format!("D3137: {}", s)));
                     }
                     _ => {
@@ -4239,7 +4646,7 @@ impl Evaluator {
 
                 // First argument must be a boolean
                 let condition = match &evaluated_args[0] {
-                    Value::Bool(b) => *b,
+                    JValue::Bool(b) => *b,
                     _ => {
                         return Err(EvaluatorError::TypeError(
                             "T0410: Argument 1 of function $assert does not match function signature".to_string(),
@@ -4250,16 +4657,16 @@ impl Evaluator {
                 if !condition {
                     let message = if evaluated_args.len() == 2 {
                         match &evaluated_args[1] {
-                            Value::String(s) => s.clone(),
-                            _ => "$assert() statement failed".to_string(),
+                            JValue::String(s) => s.clone(),
+                            _ => Rc::from("$assert() statement failed"),
                         }
                     } else {
-                        "$assert() statement failed".to_string()
+                        Rc::from("$assert() statement failed")
                     };
                     return Err(EvaluatorError::EvaluationError(format!("D3141: {}", message)));
                 }
 
-                Ok(Value::Null)
+                Ok(JValue::Null)
             }
 
             "eval" => {
@@ -4271,13 +4678,13 @@ impl Evaluator {
                 }
 
                 // If the first argument is null/undefined, return undefined
-                if matches!(evaluated_args[0], Value::Null) {
-                    return Ok(Value::Null);
+                if matches!(evaluated_args[0], JValue::Null) {
+                    return Ok(JValue::Null);
                 }
 
                 // First argument must be a string expression
                 let expr_str = match &evaluated_args[0] {
-                    Value::String(s) => s.as_str(),
+                    JValue::String(s) => &**s,
                     _ => {
                         return Err(EvaluatorError::EvaluationError(
                             "T0410: Argument 1 of function $eval must be a string".to_string(),
@@ -4348,15 +4755,15 @@ impl Evaluator {
                 }
 
                 match &evaluated_args[0] {
-                    Value::String(s) => {
+                    JValue::String(s) => {
                         // Optional second argument is a picture string for custom parsing
                         if evaluated_args.len() == 2 {
                             match &evaluated_args[1] {
-                                Value::String(picture) => {
+                                JValue::String(picture) => {
                                     // Use custom picture format parsing
                                     Ok(crate::datetime::to_millis_with_picture(s, picture)?)
                                 }
-                                Value::Null => Ok(Value::Null),
+                                JValue::Null => Ok(JValue::Null),
                                 _ => Err(EvaluatorError::TypeError(
                                     "toMillis() second argument must be a string".to_string(),
                                 )),
@@ -4366,7 +4773,7 @@ impl Evaluator {
                             Ok(crate::datetime::to_millis(s)?)
                         }
                     }
-                    Value::Null => Ok(Value::Null),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError(
                         "toMillis() requires a string argument".to_string(),
                     )),
@@ -4381,13 +4788,13 @@ impl Evaluator {
                 }
 
                 match &evaluated_args[0] {
-                    Value::Number(n) => {
-                        let millis = n.as_i64().ok_or_else(|| {
+                    JValue::Number(n) => {
+                        let millis = (if n.fract() == 0.0 { Ok(*n as i64) } else { Err(()) }).map_err(|_| {
                             EvaluatorError::TypeError("fromMillis() requires an integer".to_string())
                         })?;
                         Ok(crate::datetime::from_millis(millis)?)
                     }
-                    Value::Null => Ok(Value::Null),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError(
                         "fromMillis() requires a number argument".to_string(),
                     )),
@@ -4406,7 +4813,7 @@ impl Evaluator {
     /// This handles both:
     /// 1. Lambda nodes: function($x) { $x * 2 } - binds parameters and evaluates body
     /// 2. Simple expressions: price * 2 - evaluates with values as context
-    fn apply_function(&mut self, func_node: &AstNode, values: &[Value], data: &Value) -> Result<Value, EvaluatorError> {
+    fn apply_function(&mut self, func_node: &AstNode, values: &[JValue], data: &JValue) -> Result<JValue, EvaluatorError> {
         match func_node {
             AstNode::Lambda { params, body, signature, thunk } => {
                 // Direct lambda - invoke it
@@ -4446,7 +4853,7 @@ impl Evaluator {
                 if let Some(stored_lambda) = self.context.lookup_lambda(var_name).cloned() {
                     self.invoke_stored_lambda(&stored_lambda, values, data)
                 } else if let Some(value) = self.context.lookup(var_name).cloned() {
-                    // Check if this variable holds a lambda value (JSON object with __lambda__)
+                    // Check if this variable holds a lambda value
                     // This handles lambdas passed as bound arguments in partial applications
                     if let Some(stored) = self.lookup_lambda_from_value(&value) {
                         return self.invoke_stored_lambda(&stored, values, data);
@@ -4487,8 +4894,8 @@ impl Evaluator {
         location: &AstNode,
         update: &AstNode,
         delete: Option<&AstNode>,
-        _original_data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        _original_data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         // Get the input value from $ binding
         let input = self.context.lookup("$")
             .ok_or_else(|| EvaluatorError::EvaluationError("Transform requires $ binding".to_string()))?
@@ -4498,10 +4905,10 @@ impl Evaluator {
         let located_objects = self.evaluate_internal(location, &input)?;
 
         // Collect target objects into a vector for comparison
-        let targets: Vec<Value> = match located_objects {
-            Value::Array(arr) => arr,
-            Value::Object(_) => vec![located_objects],
-            Value::Null => Vec::new(),
+        let targets: Vec<JValue> = match located_objects {
+            JValue::Array(arr) => arr.to_vec(),
+            JValue::Object(_) => vec![located_objects],
+            JValue::Null => Vec::new(),
             other => vec![other],
         };
 
@@ -4513,14 +4920,14 @@ impl Evaluator {
         let delete_fields: Vec<String> = if let Some(delete_node) = delete {
             let delete_val = self.evaluate_internal(delete_node, &input)?;
             match delete_val {
-                Value::Array(arr) => arr.iter()
+                JValue::Array(arr) => arr.iter()
                     .filter_map(|v| match v {
-                        Value::String(s) => Some(s.clone()),
+                        JValue::String(s) => Some(s.to_string()),
                         _ => None,
                     })
                     .collect(),
-                Value::String(s) => vec![s],
-                Value::Null => Vec::new(), // Undefined variable is treated as no deletion
+                JValue::String(s) => vec![s.to_string()],
+                JValue::Null => Vec::new(), // Undefined variable is treated as no deletion
                 _ => {
                     // Delete parameter must be an array of strings or a string
                     return Err(EvaluatorError::EvaluationError(
@@ -4535,25 +4942,26 @@ impl Evaluator {
         // Recursive helper to apply transformation throughout the structure
         fn apply_transform_deep(
             evaluator: &mut Evaluator,
-            value: &Value,
-            targets: &[Value],
+            value: &JValue,
+            targets: &[JValue],
             update: &AstNode,
             delete_fields: &[String],
-        ) -> Result<Value, EvaluatorError> {
+        ) -> Result<JValue, EvaluatorError> {
             // Check if this value is one of the targets to transform
-            // Use Value's PartialEq for semantic equality comparison
+            // Use JValue's PartialEq for semantic equality comparison
             if targets.iter().any(|t| t == value) {
                 // Transform this object
-                if let Value::Object(mut map) = value.clone() {
+                if let JValue::Object(map_rc) = value.clone() {
+                    let mut map = (*map_rc).clone();
                     let update_val = evaluator.evaluate_internal(update, value)?;
                     // Validate that update evaluates to an object or null (undefined)
                     match update_val {
-                        Value::Object(update_map) => {
-                            for (key, val) in update_map {
-                                map.insert(key, val);
+                        JValue::Object(update_map) => {
+                            for (key, val) in update_map.iter() {
+                                map.insert(key.clone(), val.clone());
                             }
                         }
-                        Value::Null => {
+                        JValue::Null => {
                             // Null/undefined means no updates, just continue to deletions
                         }
                         _ => {
@@ -4563,31 +4971,31 @@ impl Evaluator {
                         }
                     }
                     for field in delete_fields {
-                        map.remove(field);
+                        map.shift_remove(field);
                     }
-                    return Ok(Value::Object(map));
+                    return Ok(JValue::object(map));
                 }
                 return Ok(value.clone());
             }
 
             // Otherwise, recursively process children to find and transform targets
             match value {
-                Value::Object(map) => {
-                    let mut new_map = serde_json::Map::new();
-                    for (k, v) in map {
+                JValue::Object(map) => {
+                    let mut new_map = IndexMap::new();
+                    for (k, v) in map.iter() {
                         new_map.insert(
                             k.clone(),
                             apply_transform_deep(evaluator, v, targets, update, delete_fields)?
                         );
                     }
-                    Ok(Value::Object(new_map))
+                    Ok(JValue::object(new_map))
                 }
-                Value::Array(arr) => {
+                JValue::Array(arr) => {
                     let mut new_arr = Vec::new();
-                    for item in arr {
+                    for item in arr.iter() {
                         new_arr.push(apply_transform_deep(evaluator, item, targets, update, delete_fields)?);
                     }
-                    Ok(Value::Array(new_arr))
+                    Ok(JValue::array(new_arr))
                 }
                 _ => Ok(value.clone()),
             }
@@ -4598,7 +5006,7 @@ impl Evaluator {
     }
 
     /// Helper to invoke a lambda with given parameters
-    fn invoke_lambda(&mut self, params: &[String], body: &AstNode, signature: Option<&String>, values: &[Value], data: &Value, thunk: bool) -> Result<Value, EvaluatorError> {
+    fn invoke_lambda(&mut self, params: &[String], body: &AstNode, signature: Option<&String>, values: &[JValue], data: &JValue, thunk: bool) -> Result<JValue, EvaluatorError> {
         self.invoke_lambda_with_env(params, body, signature, values, data, None, None, thunk)
     }
 
@@ -4608,12 +5016,12 @@ impl Evaluator {
         params: &[String],
         body: &AstNode,
         signature: Option<&String>,
-        values: &[Value],
-        data: &Value,
-        captured_env: Option<&HashMap<String, Value>>,
-        captured_data: Option<&Value>,
+        values: &[JValue],
+        data: &JValue,
+        captured_env: Option<&HashMap<String, JValue>>,
+        captured_data: Option<&JValue>,
         thunk: bool,
-    ) -> Result<Value, EvaluatorError> {
+    ) -> Result<JValue, EvaluatorError> {
         // If this is a thunk (has tail calls), use TCO trampoline
         if thunk {
             let stored = StoredLambda {
@@ -4638,7 +5046,7 @@ impl Evaluator {
                             match e {
                                 // Undefined argument - return undefined (silent failure)
                                 crate::signature::SignatureError::UndefinedArgument => {
-                                    return Ok(Value::Null);
+                                    return Ok(JValue::Null);
                                 }
                                 // Explicit type mismatch - throw error
                                 crate::signature::SignatureError::ArgumentTypeMismatch { index, expected } => {
@@ -4672,17 +5080,8 @@ impl Evaluator {
             values.to_vec()
         };
 
-        // Save current bindings for all variables we might modify
-        // This includes both parameters and any captured environment variables
-        let mut vars_to_restore: Vec<String> = params.to_vec();
-        if let Some(env) = captured_env {
-            vars_to_restore.extend(env.keys().cloned());
-        }
-
-        let saved_bindings: HashMap<String, Option<Value>> = vars_to_restore
-            .iter()
-            .map(|name| (name.clone(), self.context.lookup(name).cloned()))
-            .collect();
+        // Push a new scope for this lambda invocation
+        self.context.push_scope();
 
         // First apply captured environment (for closures)
         if let Some(env) = captured_env {
@@ -4694,7 +5093,7 @@ impl Evaluator {
         // Then bind lambda parameters to provided values (these override captured env)
         // If there are more params than values, extra params get undefined
         for (i, param) in params.iter().enumerate() {
-            let value = coerced_values.get(i).cloned().unwrap_or_else(undefined_value);
+            let value = coerced_values.get(i).cloned().unwrap_or(JValue::Undefined);
             self.context.bind(param.clone(), value);
         }
 
@@ -4710,9 +5109,9 @@ impl Evaluator {
 
                     // Get placeholder positions from captured env
                     let placeholder_positions: Vec<usize> = if let Some(env) = captured_env {
-                        if let Some(Value::Array(positions)) = env.get("__placeholder_positions") {
+                        if let Some(JValue::Array(positions)) = env.get("__placeholder_positions") {
                             positions.iter()
-                                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                                .filter_map(|v| v.as_f64().map(|n| n as usize))
                                 .collect()
                         } else {
                             vec![]
@@ -4722,7 +5121,7 @@ impl Evaluator {
                     };
 
                     // Reconstruct the full argument list
-                    let mut full_args: Vec<Value> = vec![Value::Null; total_args];
+                    let mut full_args: Vec<JValue> = vec![JValue::Null; total_args];
 
                     // Fill in bound arguments from captured environment
                     if let Some(env) = captured_env {
@@ -4740,23 +5139,16 @@ impl Evaluator {
                     // Fill in placeholder positions with provided values
                     for (i, &pos) in placeholder_positions.iter().enumerate() {
                         if pos < total_args {
-                            let value = coerced_values.get(i).cloned().unwrap_or(Value::Null);
+                            let value = coerced_values.get(i).cloned().unwrap_or(JValue::Null);
                             full_args[pos] = value;
                         }
                     }
 
-                    // Restore bindings before calling the function
-                    for (name, saved_value) in &saved_bindings {
-                        if let Some(value) = saved_value {
-                            self.context.bind(name.clone(), value.clone());
-                        } else {
-                            self.context.unbind(name);
-                        }
-                    }
+                    // Pop lambda scope, then push a new scope for temp args
+                    self.context.pop_scope();
+                    self.context.push_scope();
 
                     // Build AST nodes for the function call arguments
-                    // We need to convert the Values to a form that evaluate_function_call can use
-                    // Since we already have evaluated Values, we'll bind them temporarily and reference them
                     let mut temp_args: Vec<AstNode> = Vec::new();
                     for (i, value) in full_args.iter().enumerate() {
                         let temp_name = format!("__temp_arg_{}", i);
@@ -4767,10 +5159,8 @@ impl Evaluator {
                     // Call the original function
                     let result = self.evaluate_function_call(func_name, &temp_args, is_builtin, data);
 
-                    // Clean up temp bindings
-                    for i in 0..full_args.len() {
-                        self.context.unbind(&format!("__temp_arg_{}", i));
-                    }
+                    // Pop temp scope
+                    self.context.pop_scope();
 
                     return result;
                 }
@@ -4782,14 +5172,9 @@ impl Evaluator {
         let body_data = captured_data.unwrap_or(data);
         let result = self.evaluate_internal(body, body_data)?;
 
-        // Restore previous bindings
-        for (name, saved_value) in saved_bindings {
-            if let Some(value) = saved_value {
-                self.context.bind(name, value);
-            } else {
-                self.context.unbind(&name);
-            }
-        }
+        // Pop lambda scope, preserving any lambdas referenced by the return value
+        let lambdas_to_keep = self.extract_lambda_ids(&result);
+        self.context.pop_scope_preserving_lambdas(&lambdas_to_keep);
 
         Ok(result)
     }
@@ -4800,9 +5185,9 @@ impl Evaluator {
     fn invoke_lambda_with_tco(
         &mut self,
         stored_lambda: &StoredLambda,
-        initial_args: &[Value],
-        data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        initial_args: &[JValue],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         let mut current_lambda = stored_lambda.clone();
         let mut current_args = initial_args.to_vec();
         let mut current_data = data.clone();
@@ -4812,16 +5197,22 @@ impl Evaluator {
         const MAX_TCO_ITERATIONS: usize = 100_000;
         let mut iterations = 0;
 
+        // Push a persistent scope for the TCO trampoline loop.
+        // This scope persists across all iterations so that lambdas defined
+        // in one iteration (like recursive $iter) remain available in subsequent ones.
+        self.context.push_scope();
+
         // Trampoline loop - keeps evaluating until we get a final value
-        loop {
+        let result = loop {
             iterations += 1;
             if iterations > MAX_TCO_ITERATIONS {
+                self.context.pop_scope();
                 return Err(EvaluatorError::EvaluationError(
                     "U1001: Stack overflow - maximum recursion depth (500) exceeded".to_string()
                 ));
             }
 
-            // Evaluate the lambda body
+            // Evaluate the lambda body within the persistent scope
             let result = self.invoke_lambda_body_for_tco(
                 &current_lambda,
                 &current_args,
@@ -4829,7 +5220,7 @@ impl Evaluator {
             )?;
 
             match result {
-                LambdaResult::Value(v) => return Ok(v),
+                LambdaResult::JValue(v) => break v,
                 LambdaResult::TailCall { lambda, args, data } => {
                     // Continue with the tail call - no stack growth
                     current_lambda = lambda;
@@ -4837,16 +5228,24 @@ impl Evaluator {
                     current_data = data;
                 }
             }
-        }
+        };
+
+        // Pop the persistent TCO scope, preserving lambdas referenced by the result
+        let lambdas_to_keep = self.extract_lambda_ids(&result);
+        self.context.pop_scope_preserving_lambdas(&lambdas_to_keep);
+
+        Ok(result)
     }
 
     /// Evaluate a lambda body, detecting tail calls for TCO
-    /// Returns either a final value or a tail call continuation
+    /// Returns either a final value or a tail call continuation.
+    /// NOTE: Does not push/pop its own scope - the caller (invoke_lambda_with_tco)
+    /// manages the persistent scope for the trampoline loop.
     fn invoke_lambda_body_for_tco(
         &mut self,
         lambda: &StoredLambda,
-        values: &[Value],
-        data: &Value,
+        values: &[JValue],
+        data: &JValue,
     ) -> Result<LambdaResult, EvaluatorError> {
         // Validate signature if present
         let coerced_values = if let Some(sig_str) = &lambda.signature {
@@ -4857,7 +5256,7 @@ impl Evaluator {
                         Err(e) => {
                             match e {
                                 crate::signature::SignatureError::UndefinedArgument => {
-                                    return Ok(LambdaResult::Value(Value::Null));
+                                    return Ok(LambdaResult::JValue(JValue::Null));
                                 }
                                 crate::signature::SignatureError::ArgumentTypeMismatch { index, expected } => {
                                     return Err(EvaluatorError::TypeError(
@@ -4884,17 +5283,7 @@ impl Evaluator {
             values.to_vec()
         };
 
-        // Save and bind parameters
-        let mut vars_to_restore: Vec<String> = lambda.params.clone();
-        if !lambda.captured_env.is_empty() {
-            vars_to_restore.extend(lambda.captured_env.keys().cloned());
-        }
-
-        let saved_bindings: HashMap<String, Option<Value>> = vars_to_restore
-            .iter()
-            .map(|name| (name.clone(), self.context.lookup(name).cloned()))
-            .collect();
-
+        // Bind directly into the persistent scope (managed by invoke_lambda_with_tco)
         // Apply captured environment
         for (name, value) in &lambda.captured_env {
             self.context.bind(name.clone(), value.clone());
@@ -4902,29 +5291,18 @@ impl Evaluator {
 
         // Bind parameters
         for (i, param) in lambda.params.iter().enumerate() {
-            let value = coerced_values.get(i).cloned().unwrap_or(Value::Null);
+            let value = coerced_values.get(i).cloned().unwrap_or(JValue::Null);
             self.context.bind(param.clone(), value);
         }
 
         // Evaluate the body with tail call detection
         let body_data = lambda.captured_data.as_ref().unwrap_or(data);
-        let result = self.evaluate_for_tco(&lambda.body, body_data)?;
-
-        // Restore bindings
-        for (name, saved_value) in saved_bindings {
-            if let Some(value) = saved_value {
-                self.context.bind(name, value);
-            } else {
-                self.context.unbind(&name);
-            }
-        }
-
-        Ok(result)
+        self.evaluate_for_tco(&lambda.body, body_data)
     }
 
     /// Evaluate an expression for TCO, detecting tail calls
     /// Returns LambdaResult::TailCall if the expression is a function call to a user lambda
-    fn evaluate_for_tco(&mut self, node: &AstNode, data: &Value) -> Result<LambdaResult, EvaluatorError> {
+    fn evaluate_for_tco(&mut self, node: &AstNode, data: &JValue) -> Result<LambdaResult, EvaluatorError> {
         match node {
             // Conditional: evaluate condition, then evaluate the chosen branch for TCO
             AstNode::Conditional { condition, then_branch, else_branch } => {
@@ -4936,18 +5314,18 @@ impl Evaluator {
                 } else if let Some(else_expr) = else_branch {
                     self.evaluate_for_tco(else_expr, data)
                 } else {
-                    Ok(LambdaResult::Value(Value::Null))
+                    Ok(LambdaResult::JValue(JValue::Null))
                 }
             }
 
             // Block: evaluate all but last normally, last for TCO
             AstNode::Block(exprs) => {
                 if exprs.is_empty() {
-                    return Ok(LambdaResult::Value(Value::Null));
+                    return Ok(LambdaResult::JValue(JValue::Null));
                 }
 
                 // Evaluate all expressions except the last
-                let mut result = Value::Null;
+                let mut result = JValue::Null;
                 for (i, expr) in exprs.iter().enumerate() {
                     if i == exprs.len() - 1 {
                         // Last expression - evaluate for TCO
@@ -4956,7 +5334,7 @@ impl Evaluator {
                         result = self.evaluate_internal(expr, data)?;
                     }
                 }
-                Ok(LambdaResult::Value(result))
+                Ok(LambdaResult::JValue(result))
             }
 
             // Variable binding: evaluate value, bind, then evaluate result for TCO if present
@@ -4967,13 +5345,13 @@ impl Evaluator {
                     _ => {
                         // Not a simple variable binding, evaluate normally
                         let result = self.evaluate_internal(node, data)?;
-                        return Ok(LambdaResult::Value(result));
+                        return Ok(LambdaResult::JValue(result));
                     }
                 };
 
                 // Check if RHS is a lambda - store it specially
                 if let AstNode::Lambda { params, body, signature, thunk } = rhs.as_ref() {
-                    let captured_env = self.capture_current_environment();
+                    let captured_env = self.capture_environment_for(body, params);
                     let stored_lambda = StoredLambda {
                         params: params.clone(),
                         body: (**body).clone(),
@@ -4983,17 +5361,14 @@ impl Evaluator {
                         thunk: *thunk,
                     };
                     self.context.bind_lambda(var_name, stored_lambda);
-                    let lambda_repr = serde_json::json!({
-                        "__lambda__": true,
-                        "params": params,
-                    });
-                    return Ok(LambdaResult::Value(lambda_repr));
+                    let lambda_repr = JValue::lambda("anon", params.clone(), None::<String>, None::<String>);
+                    return Ok(LambdaResult::JValue(lambda_repr));
                 }
 
                 // Evaluate the RHS
                 let value = self.evaluate_internal(rhs, data)?;
                 self.context.bind(var_name, value.clone());
-                Ok(LambdaResult::Value(value))
+                Ok(LambdaResult::JValue(value))
             }
 
             // Function call - this is where TCO happens
@@ -5014,7 +5389,7 @@ impl Evaluator {
                 }
                 // Not a thunk lambda - evaluate normally
                 let result = self.evaluate_internal(node, data)?;
-                Ok(LambdaResult::Value(result))
+                Ok(LambdaResult::JValue(result))
             }
 
             // Call node (calling a lambda value)
@@ -5023,41 +5398,37 @@ impl Evaluator {
                 let callable = self.evaluate_internal(procedure, data)?;
 
                 // Check if it's a lambda with TCO
-                if let Value::Object(ref map) = callable {
-                    if map.contains_key("__lambda__") {
-                        if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
-                            if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
-                                if stored_lambda.thunk {
-                                    let mut evaluated_args = Vec::with_capacity(args.len());
-                                    for arg in args {
-                                        evaluated_args.push(self.evaluate_internal(arg, data)?);
-                                    }
-                                    return Ok(LambdaResult::TailCall {
-                                        lambda: stored_lambda,
-                                        args: evaluated_args,
-                                        data: data.clone(),
-                                    });
-                                }
+                if let JValue::Lambda { lambda_id, .. } = &callable {
+                    if let Some(stored_lambda) = self.context.lookup_lambda(&**lambda_id).cloned() {
+                        if stored_lambda.thunk {
+                            let mut evaluated_args = Vec::with_capacity(args.len());
+                            for arg in args {
+                                evaluated_args.push(self.evaluate_internal(arg, data)?);
                             }
+                            return Ok(LambdaResult::TailCall {
+                                lambda: stored_lambda,
+                                args: evaluated_args,
+                                data: data.clone(),
+                            });
                         }
                     }
                 }
                 // Not a thunk - evaluate normally
                 let result = self.evaluate_internal(node, data)?;
-                Ok(LambdaResult::Value(result))
+                Ok(LambdaResult::JValue(result))
             }
 
             // Variable reference that might be a function call
             // This handles cases like $f($x) where $f is referenced by name
             AstNode::Variable(_) => {
                 let result = self.evaluate_internal(node, data)?;
-                Ok(LambdaResult::Value(result))
+                Ok(LambdaResult::JValue(result))
             }
 
             // Any other expression - evaluate normally
             _ => {
                 let result = self.evaluate_internal(node, data)?;
-                Ok(LambdaResult::Value(result))
+                Ok(LambdaResult::JValue(result))
             }
         }
     }
@@ -5073,17 +5444,17 @@ impl Evaluator {
         str_value: &str,
         matcher_node: &AstNode,
         limit: Option<usize>,
-        data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         let mut results = Vec::new();
         let mut count = 0;
 
         // Call the matcher function with the string
-        let str_val = Value::String(str_value.to_string());
+        let str_val = JValue::string(str_value.to_string());
         let mut current_match = self.apply_function(matcher_node, &[str_val], data)?;
 
         // Iterate through matches following the 'next' chain
-        while !is_undefined(&current_match) && !matches!(current_match, Value::Null) {
+        while !current_match.is_undefined() && !matches!(current_match, JValue::Null) {
             // Check limit
             if let Some(lim) = limit {
                 if count >= lim {
@@ -5092,7 +5463,7 @@ impl Evaluator {
             }
 
             // Extract match information from the result object
-            if let Value::Object(ref match_obj) = current_match {
+            if let JValue::Object(ref match_obj) = current_match {
                 // Validate that this is a proper match object
                 let has_match = match_obj.contains_key("match");
                 let has_start = match_obj.contains_key("start");
@@ -5108,7 +5479,7 @@ impl Evaluator {
                 }
 
                 // Build the result match object (match, index, groups)
-                let mut result_obj = serde_json::Map::new();
+                let mut result_obj = IndexMap::new();
 
                 if let Some(match_val) = match_obj.get("match") {
                     result_obj.insert("match".to_string(), match_val.clone());
@@ -5122,7 +5493,7 @@ impl Evaluator {
                     result_obj.insert("groups".to_string(), groups_val.clone());
                 }
 
-                results.push(Value::Object(result_obj));
+                results.push(JValue::object(result_obj));
                 count += 1;
 
                 // Get the next match by calling the 'next' function
@@ -5143,9 +5514,9 @@ impl Evaluator {
 
         // Return results
         if results.is_empty() {
-            Ok(undefined_value())
+            Ok(JValue::Undefined)
         } else {
-            Ok(Value::Array(results))
+            Ok(JValue::array(results))
         }
     }
 
@@ -5155,15 +5526,15 @@ impl Evaluator {
     /// The function receives a match object with: match, start, end, groups
     fn replace_with_lambda(
         &mut self,
-        str_value: &Value,
-        pattern_value: &Value,
-        lambda_value: &Value,
-        limit_value: Option<&Value>,
-        data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        str_value: &JValue,
+        pattern_value: &JValue,
+        lambda_value: &JValue,
+        limit_value: Option<&JValue>,
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         // Extract string
         let s = match str_value {
-            Value::String(s) => s.as_str(),
+            JValue::String(s) => &**s,
             _ => return Err(EvaluatorError::TypeError(
                 "replace() requires string arguments".to_string()
             )),
@@ -5181,8 +5552,8 @@ impl Evaluator {
         // Parse limit
         let limit = if let Some(lim_val) = limit_value {
             match lim_val {
-                Value::Number(n) => {
-                    let lim_f64 = n.as_f64().unwrap();
+                JValue::Number(n) => {
+                    let lim_f64 = *n;
                     if lim_f64 < 0.0 {
                         return Err(EvaluatorError::EvaluationError(
                             format!("D3011: Limit must be non-negative, got {}", lim_f64)
@@ -5220,20 +5591,20 @@ impl Evaluator {
             result.push_str(&s[last_end..match_start]);
 
             // Build match object
-            let groups: Vec<Value> = (1..cap.len())
+            let groups: Vec<JValue> = (1..cap.len())
                 .map(|i| {
                     cap.get(i)
-                        .map(|m| Value::String(m.as_str().to_string()))
-                        .unwrap_or(Value::Null)
+                        .map(|m| JValue::string(m.as_str().to_string()))
+                        .unwrap_or(JValue::Null)
                 })
                 .collect();
 
-            let match_obj = serde_json::json!({
-                "match": match_str,
-                "start": match_start,
-                "end": match_end,
-                "groups": groups,
-            });
+            let mut match_map = IndexMap::new();
+            match_map.insert("match".to_string(), JValue::string(match_str));
+            match_map.insert("start".to_string(), JValue::Number(match_start as f64));
+            match_map.insert("end".to_string(), JValue::Number(match_end as f64));
+            match_map.insert("groups".to_string(), JValue::array(groups));
+            let match_obj = JValue::object(match_map);
 
             // Invoke lambda with match object
             let stored_lambda = self.lookup_lambda_from_value(&lambda_value)
@@ -5242,7 +5613,7 @@ impl Evaluator {
                 ))?;
             let lambda_result = self.invoke_stored_lambda(&stored_lambda, &[match_obj], data)?;
             let replacement_str = match lambda_result {
-                Value::String(s) => s,
+                JValue::String(s) => s,
                 _ => return Err(EvaluatorError::TypeError(
                     format!("D3012: Replacement function must return a string, got {:?}", lambda_result)
                 )),
@@ -5258,12 +5629,151 @@ impl Evaluator {
         // Add remaining text after last match
         result.push_str(&s[last_end..]);
 
-        Ok(Value::String(result))
+        Ok(JValue::string(result))
     }
 
     /// Capture the current environment bindings for closure support
-    fn capture_current_environment(&self) -> HashMap<String, Value> {
-        self.context.bindings.clone()
+    fn capture_current_environment(&self) -> HashMap<String, JValue> {
+        self.context.all_bindings()
+    }
+
+    /// Capture only the variables referenced by a lambda body (selective capture).
+    /// This avoids cloning the entire environment when only a few variables are needed.
+    fn capture_environment_for(&self, body: &AstNode, params: &[String]) -> HashMap<String, JValue> {
+        let free_vars = Self::collect_free_variables(body, params);
+        if free_vars.is_empty() {
+            return HashMap::new();
+        }
+        let mut result = HashMap::new();
+        for var_name in &free_vars {
+            if let Some(value) = self.context.lookup(var_name) {
+                result.insert(var_name.clone(), value.clone());
+            }
+        }
+        result
+    }
+
+    /// Collect all free variables in an AST node that are not bound by the given params.
+    /// A "free variable" is one that is referenced but not defined within the expression.
+    fn collect_free_variables(body: &AstNode, params: &[String]) -> HashSet<String> {
+        let mut free_vars = HashSet::new();
+        let bound: HashSet<&str> = params.iter().map(|s| s.as_str()).collect();
+        Self::collect_free_vars_walk(body, &bound, &mut free_vars);
+        free_vars
+    }
+
+    fn collect_free_vars_walk(node: &AstNode, bound: &HashSet<&str>, free: &mut HashSet<String>) {
+        match node {
+            AstNode::Variable(name) => {
+                if !bound.contains(name.as_str()) {
+                    free.insert(name.clone());
+                }
+            }
+            AstNode::Function { name, args, .. } => {
+                // Function name references a variable (e.g., $f(...))
+                if !bound.contains(name.as_str()) {
+                    free.insert(name.clone());
+                }
+                for arg in args {
+                    Self::collect_free_vars_walk(arg, bound, free);
+                }
+            }
+            AstNode::Lambda { params, body, .. } => {
+                // Inner lambda introduces new bindings
+                let mut inner_bound = bound.clone();
+                for p in params {
+                    inner_bound.insert(p.as_str());
+                }
+                Self::collect_free_vars_walk(body, &inner_bound, free);
+            }
+            AstNode::Binary { op, lhs, rhs } => {
+                Self::collect_free_vars_walk(lhs, bound, free);
+                Self::collect_free_vars_walk(rhs, bound, free);
+                // For ColonEqual, note: the binding is visible after this expr in blocks,
+                // but block handling takes care of that separately
+                let _ = op;
+            }
+            AstNode::Unary { operand, .. } => {
+                Self::collect_free_vars_walk(operand, bound, free);
+            }
+            AstNode::Path { steps } => {
+                for step in steps {
+                    Self::collect_free_vars_walk(&step.node, bound, free);
+                    for stage in &step.stages {
+                        match stage {
+                            Stage::Filter(expr) => Self::collect_free_vars_walk(expr, bound, free),
+                        }
+                    }
+                }
+            }
+            AstNode::Call { procedure, args } => {
+                Self::collect_free_vars_walk(procedure, bound, free);
+                for arg in args {
+                    Self::collect_free_vars_walk(arg, bound, free);
+                }
+            }
+            AstNode::Conditional { condition, then_branch, else_branch } => {
+                Self::collect_free_vars_walk(condition, bound, free);
+                Self::collect_free_vars_walk(then_branch, bound, free);
+                if let Some(else_expr) = else_branch {
+                    Self::collect_free_vars_walk(else_expr, bound, free);
+                }
+            }
+            AstNode::Block(exprs) => {
+                let mut block_bound = bound.clone();
+                for expr in exprs {
+                    Self::collect_free_vars_walk(expr, &block_bound, free);
+                    // Bindings introduced via := become bound for subsequent expressions
+                    if let AstNode::Binary { op: BinaryOp::ColonEqual, lhs, .. } = expr {
+                        if let AstNode::Variable(var_name) = lhs.as_ref() {
+                            block_bound.insert(var_name.as_str());
+                        }
+                    }
+                }
+            }
+            AstNode::Array(exprs) | AstNode::ArrayGroup(exprs) => {
+                for expr in exprs {
+                    Self::collect_free_vars_walk(expr, bound, free);
+                }
+            }
+            AstNode::Object(pairs) => {
+                for (key, value) in pairs {
+                    Self::collect_free_vars_walk(key, bound, free);
+                    Self::collect_free_vars_walk(value, bound, free);
+                }
+            }
+            AstNode::ObjectTransform { input, pattern } => {
+                Self::collect_free_vars_walk(input, bound, free);
+                for (key, value) in pattern {
+                    Self::collect_free_vars_walk(key, bound, free);
+                    Self::collect_free_vars_walk(value, bound, free);
+                }
+            }
+            AstNode::Predicate(expr) | AstNode::FunctionApplication(expr) => {
+                Self::collect_free_vars_walk(expr, bound, free);
+            }
+            AstNode::Sort { input, terms } => {
+                Self::collect_free_vars_walk(input, bound, free);
+                for (expr, _) in terms {
+                    Self::collect_free_vars_walk(expr, bound, free);
+                }
+            }
+            AstNode::IndexBind { input, .. } => {
+                Self::collect_free_vars_walk(input, bound, free);
+            }
+            AstNode::Transform { location, update, delete } => {
+                Self::collect_free_vars_walk(location, bound, free);
+                Self::collect_free_vars_walk(update, bound, free);
+                if let Some(del) = delete {
+                    Self::collect_free_vars_walk(del, bound, free);
+                }
+            }
+            // Leaf nodes with no variable references
+            AstNode::String(_) | AstNode::Name(_) | AstNode::Number(_) |
+            AstNode::Boolean(_) | AstNode::Null | AstNode::Undefined |
+            AstNode::Placeholder | AstNode::Regex { .. } |
+            AstNode::Wildcard | AstNode::Descendant | AstNode::ParentVariable(_) => {}
+        }
     }
 
     /// Check if a name refers to a built-in function
@@ -5301,7 +5811,7 @@ impl Evaluator {
 
     /// Call a built-in function directly with pre-evaluated Values
     /// This is used when passing built-in functions to higher-order functions like $map
-    fn call_builtin_with_values(&mut self, name: &str, values: &[Value]) -> Result<Value, EvaluatorError> {
+    fn call_builtin_with_values(&mut self, name: &str, values: &[JValue]) -> Result<JValue, EvaluatorError> {
         use crate::functions;
 
         if values.is_empty() {
@@ -5319,68 +5829,68 @@ impl Evaluator {
             "not" => {
                 let b = functions::boolean::boolean(arg)?;
                 match b {
-                    Value::Bool(val) => Ok(Value::Bool(!val)),
+                    JValue::Bool(val) => Ok(JValue::Bool(!val)),
                     _ => Err(EvaluatorError::TypeError("not() requires a boolean".to_string())),
                 }
             }
-            "exists" => Ok(Value::Bool(!matches!(arg, Value::Null))),
+            "exists" => Ok(JValue::Bool(!matches!(arg, JValue::Null))),
             "abs" => match arg {
-                Value::Number(n) => Ok(functions::numeric::abs(n.as_f64().unwrap_or(0.0))?),
+                JValue::Number(n) => Ok(functions::numeric::abs(*n)?),
                 _ => Err(EvaluatorError::TypeError("abs() requires a number argument".to_string())),
             },
             "floor" => match arg {
-                Value::Number(n) => Ok(functions::numeric::floor(n.as_f64().unwrap_or(0.0))?),
+                JValue::Number(n) => Ok(functions::numeric::floor(*n)?),
                 _ => Err(EvaluatorError::TypeError("floor() requires a number argument".to_string())),
             },
             "ceil" => match arg {
-                Value::Number(n) => Ok(functions::numeric::ceil(n.as_f64().unwrap_or(0.0))?),
+                JValue::Number(n) => Ok(functions::numeric::ceil(*n)?),
                 _ => Err(EvaluatorError::TypeError("ceil() requires a number argument".to_string())),
             },
             "round" => match arg {
-                Value::Number(n) => Ok(functions::numeric::round(n.as_f64().unwrap_or(0.0), None)?),
+                JValue::Number(n) => Ok(functions::numeric::round(*n, None)?),
                 _ => Err(EvaluatorError::TypeError("round() requires a number argument".to_string())),
             },
             "sqrt" => match arg {
-                Value::Number(n) => Ok(functions::numeric::sqrt(n.as_f64().unwrap_or(0.0))?),
+                JValue::Number(n) => Ok(functions::numeric::sqrt(*n)?),
                 _ => Err(EvaluatorError::TypeError("sqrt() requires a number argument".to_string())),
             },
             "uppercase" => {
                 match arg {
-                    Value::String(s) => Ok(Value::String(s.to_uppercase())),
-                    Value::Null => Ok(Value::Null),
+                    JValue::String(s) => Ok(JValue::string(s.to_uppercase())),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("uppercase() requires a string argument".to_string())),
                 }
             }
             "lowercase" => {
                 match arg {
-                    Value::String(s) => Ok(Value::String(s.to_lowercase())),
-                    Value::Null => Ok(Value::Null),
+                    JValue::String(s) => Ok(JValue::string(s.to_lowercase())),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("lowercase() requires a string argument".to_string())),
                 }
             }
             "trim" => {
                 match arg {
-                    Value::String(s) => Ok(Value::String(s.trim().to_string())),
-                    Value::Null => Ok(Value::Null),
+                    JValue::String(s) => Ok(JValue::string(s.trim().to_string())),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("trim() requires a string argument".to_string())),
                 }
             }
             "length" => {
                 match arg {
-                    Value::String(s) => Ok(Value::Number(serde_json::Number::from(s.chars().count()))),
-                    Value::Array(arr) => Ok(Value::Number(serde_json::Number::from(arr.len()))),
-                    Value::Null => Ok(Value::Null),
+                    JValue::String(s) => Ok(JValue::Number(s.chars().count() as f64)),
+                    JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("length() requires a string or array argument".to_string())),
                 }
             }
             "sum" => {
                 match arg {
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         let mut total = 0.0;
-                        for item in arr {
+                        for item in arr.iter() {
                             match item {
-                                Value::Number(n) => {
-                                    total += n.as_f64().unwrap_or(0.0);
+                                JValue::Number(n) => {
+                                    total += *n;
                                 }
                                 _ => {
                                     return Err(EvaluatorError::TypeError(
@@ -5389,69 +5899,69 @@ impl Evaluator {
                                 }
                             }
                         }
-                        Ok(serde_json::json!(total))
+                        Ok(JValue::Number(total))
                     }
-                    Value::Number(n) => Ok(Value::Number(n.clone())),
-                    Value::Null => Ok(Value::Null),
+                    JValue::Number(n) => Ok(JValue::Number(*n)),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("sum() requires an array of numbers".to_string())),
                 }
             }
             "count" => {
                 match arg {
-                    Value::Array(arr) => Ok(Value::Number(serde_json::Number::from(arr.len()))),
-                    Value::Null => Ok(Value::Number(serde_json::Number::from(0))),
-                    _ => Ok(Value::Number(serde_json::Number::from(1))), // Single value counts as 1
+                    JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
+                    JValue::Null => Ok(JValue::Number(0 as f64)),
+                    _ => Ok(JValue::Number(1 as f64)), // Single value counts as 1
                 }
             }
             "max" => {
                 match arg {
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         let mut max_val: Option<f64> = None;
-                        for item in arr {
-                            if let Value::Number(n) = item {
-                                let f = n.as_f64().unwrap_or(f64::NEG_INFINITY);
+                        for item in arr.iter() {
+                            if let JValue::Number(n) = item {
+                                let f = Some(*n).unwrap_or(f64::NEG_INFINITY);
                                 max_val = Some(max_val.map_or(f, |m| m.max(f)));
                             }
                         }
-                        max_val.map_or(Ok(Value::Null), |m| Ok(serde_json::json!(m)))
+                        max_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m as f64)))
                     }
-                    Value::Number(n) => Ok(Value::Number(n.clone())),
-                    Value::Null => Ok(Value::Null),
+                    JValue::Number(n) => Ok(JValue::Number(*n)),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("max() requires an array of numbers".to_string())),
                 }
             }
             "min" => {
                 match arg {
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         let mut min_val: Option<f64> = None;
-                        for item in arr {
-                            if let Value::Number(n) = item {
-                                let f = n.as_f64().unwrap_or(f64::INFINITY);
+                        for item in arr.iter() {
+                            if let JValue::Number(n) = item {
+                                let f = Some(*n).unwrap_or(f64::INFINITY);
                                 min_val = Some(min_val.map_or(f, |m| m.min(f)));
                             }
                         }
-                        min_val.map_or(Ok(Value::Null), |m| Ok(serde_json::json!(m)))
+                        min_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m as f64)))
                     }
-                    Value::Number(n) => Ok(Value::Number(n.clone())),
-                    Value::Null => Ok(Value::Null),
+                    JValue::Number(n) => Ok(JValue::Number(*n)),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("min() requires an array of numbers".to_string())),
                 }
             }
             "average" => {
                 match arg {
-                    Value::Array(arr) => {
+                    JValue::Array(arr) => {
                         let nums: Vec<f64> = arr.iter()
                             .filter_map(|v| v.as_f64())
                             .collect();
                         if nums.is_empty() {
-                            Ok(Value::Null)
+                            Ok(JValue::Null)
                         } else {
                             let avg = nums.iter().sum::<f64>() / nums.len() as f64;
-                            Ok(serde_json::json!(avg))
+                            Ok(JValue::Number(avg))
                         }
                     }
-                    Value::Number(n) => Ok(Value::Number(n.clone())),
-                    Value::Null => Ok(Value::Null),
+                    JValue::Number(n) => Ok(JValue::Number(*n)),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("average() requires an array of numbers".to_string())),
                 }
             }
@@ -5467,40 +5977,40 @@ impl Evaluator {
 
                 // Convert first to array if needed
                 let mut result = match first {
-                    Value::Array(arr) => arr.clone(),
-                    Value::Null => vec![],
+                    JValue::Array(arr) => arr.to_vec(),
+                    JValue::Null => vec![],
                     other => vec![other.clone()],
                 };
 
                 // Append second (flatten if array)
                 match second {
-                    Value::Array(arr) => result.extend(arr.clone()),
-                    Value::Null => {}
+                    JValue::Array(arr) => result.extend(arr.iter().cloned()),
+                    JValue::Null => {}
                     other => result.push(other.clone()),
                 }
 
-                Ok(Value::Array(result))
+                Ok(JValue::array(result))
             }
             "reverse" => {
                 match arg {
-                    Value::Array(arr) => {
-                        let mut reversed = arr.clone();
+                    JValue::Array(arr) => {
+                        let mut reversed = arr.to_vec();
                         reversed.reverse();
-                        Ok(Value::Array(reversed))
+                        Ok(JValue::array(reversed))
                     }
-                    Value::Null => Ok(Value::Null),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("reverse() requires an array".to_string())),
                 }
             }
             "keys" => {
                 match arg {
-                    Value::Object(obj) => {
-                        let keys: Vec<Value> = obj.keys()
-                            .map(|k| Value::String(k.clone()))
+                    JValue::Object(obj) => {
+                        let keys: Vec<JValue> = obj.keys()
+                            .map(|k| JValue::string(k.clone()))
                             .collect();
-                        Ok(Value::Array(keys))
+                        Ok(JValue::array(keys))
                     }
-                    Value::Null => Ok(Value::Null),
+                    JValue::Null => Ok(JValue::Null),
                     _ => Err(EvaluatorError::TypeError("keys() requires an object".to_string())),
                 }
             }
@@ -5513,15 +6023,15 @@ impl Evaluator {
     }
 
     /// Collect all descendant values recursively
-    fn collect_descendants(&self, value: &Value) -> Vec<Value> {
+    fn collect_descendants(&self, value: &JValue) -> Vec<JValue> {
         let mut descendants = Vec::new();
 
         match value {
-            Value::Null => {
+            JValue::Null => {
                 // Null has no descendants, return empty
                 return descendants;
             }
-            Value::Object(obj) => {
+            JValue::Object(obj) => {
                 // Include the current object
                 descendants.push(value.clone());
 
@@ -5530,10 +6040,10 @@ impl Evaluator {
                     descendants.extend(self.collect_descendants(val));
                 }
             }
-            Value::Array(arr) => {
+            JValue::Array(arr) => {
                 // DO NOT include the array itself - only recurse into elements
                 // This matches JavaScript behavior: arrays are traversed but not collected
-                for val in arr {
+                for val in arr.iter() {
                     // Recursively collect descendants
                     descendants.extend(self.collect_descendants(val));
                 }
@@ -5548,40 +6058,40 @@ impl Evaluator {
     }
 
     /// Evaluate a predicate (array filter or index)
-    fn evaluate_predicate(&mut self, current: &Value, predicate: &AstNode) -> Result<Value, EvaluatorError> {
+    fn evaluate_predicate(&mut self, current: &JValue, predicate: &AstNode) -> Result<JValue, EvaluatorError> {
         // Special case: empty brackets [] (represented as Boolean(true))
         // This forces the value to be wrapped in an array
         if matches!(predicate, AstNode::Boolean(true)) {
             return match current {
-                Value::Array(arr) => Ok(Value::Array(arr.clone())),
-                Value::Null => Ok(Value::Null),
-                other => Ok(Value::Array(vec![other.clone()])),
+                JValue::Array(arr) => Ok(JValue::Array(arr.clone())),
+                JValue::Null => Ok(JValue::Null),
+                other => Ok(JValue::array(vec![other.clone()])),
             };
         }
 
         match current {
-            Value::Array(_arr) => {
+            JValue::Array(_arr) => {
                 // Standalone predicates do simple array operations (no mapping over sub-arrays)
 
                 // First, try to evaluate predicate as a simple number (array index)
                 if let AstNode::Number(n) = predicate {
                     // Direct array indexing
-                    return self.array_index(current, &serde_json::json!(n));
+                    return self.array_index(current, &JValue::Number(*n));
                 }
 
                 // Try to evaluate the predicate to see if it's a numeric index
                 // If evaluation succeeds and yields a number, use it as an index
                 // If evaluation fails (e.g., comparison error), treat as filter
                 match self.evaluate_internal(predicate, current) {
-                    Ok(Value::Number(_)) => {
+                    Ok(JValue::Number(_)) => {
                         // It's a numeric index
                         let pred_result = self.evaluate_internal(predicate, current)?;
                         return self.array_index(current, &pred_result);
                     }
-                    Ok(Value::Array(indices)) => {
+                    Ok(JValue::Array(indices)) => {
                         // Multiple array selectors [[indices]]
                         // Check if array contains any non-numeric values
-                        let has_non_numeric = indices.iter().any(|v| !matches!(v, Value::Number(_)));
+                        let has_non_numeric = indices.iter().any(|v| !matches!(v, JValue::Number(_)));
 
                         if has_non_numeric {
                             // If array contains non-numeric values, return entire array
@@ -5593,8 +6103,8 @@ impl Evaluator {
                         let mut resolved_indices: Vec<i64> = indices
                             .iter()
                             .filter_map(|v| {
-                                if let Value::Number(n) = v {
-                                    let idx = n.as_f64().unwrap() as i64;
+                                if let JValue::Number(n) = v {
+                                    let idx = *n as i64;
                                     // Resolve negative indices
                                     let actual_idx = if idx < 0 { arr_len + idx } else { idx };
                                     // Only include valid indices
@@ -5614,12 +6124,12 @@ impl Evaluator {
                         resolved_indices.dedup();
 
                         // Select elements at each sorted index
-                        let result: Vec<Value> = resolved_indices
+                        let result: Vec<JValue> = resolved_indices
                             .iter()
                             .map(|&idx| _arr[idx as usize].clone())
                             .collect();
 
-                        return Ok(Value::Array(result));
+                        return Ok(JValue::array(result));
                     }
                     Ok(_) => {
                         // Evaluated successfully but not a number - might be a filter
@@ -5631,9 +6141,18 @@ impl Evaluator {
                     }
                 }
 
+                // Try specialized fast path for simple field comparisons
+                if let Some(spec) = try_specialize_predicate(predicate) {
+                    let filtered: Vec<JValue> = _arr.iter()
+                        .filter(|item| evaluate_specialized(item, &spec))
+                        .cloned()
+                        .collect();
+                    return Ok(JValue::array(filtered));
+                }
+
                 // It's a filter expression - evaluate the predicate for each array element
                 let mut filtered = Vec::new();
-                for item in _arr {
+                for item in _arr.iter() {
                     let item_result = self.evaluate_internal(predicate, item)?;
 
                     // If result is truthy, include this item
@@ -5642,17 +6161,17 @@ impl Evaluator {
                     }
                 }
 
-                Ok(Value::Array(filtered))
+                Ok(JValue::array(filtered))
             }
-            Value::Object(obj) => {
+            JValue::Object(obj) => {
                 // For objects, predicate can be either:
                 // 1. A string - property access (computed property name)
                 // 2. A boolean expression - filter (return object if truthy)
                 let pred_result = self.evaluate_internal(predicate, current)?;
 
                 // If it's a string, use it as a key for property access
-                if let Value::String(key) = &pred_result {
-                    return Ok(obj.get(key).cloned().unwrap_or(Value::Null));
+                if let JValue::String(key) = &pred_result {
+                    return Ok(obj.get(&**key).cloned().unwrap_or(JValue::Null));
                 }
 
                 // Otherwise, treat as a filter expression
@@ -5660,7 +6179,7 @@ impl Evaluator {
                 if self.is_truthy(&pred_result) {
                     Ok(current.clone())
                 } else {
-                    Ok(undefined_value())
+                    Ok(JValue::Undefined)
                 }
             }
             _ => {
@@ -5675,20 +6194,20 @@ impl Evaluator {
                     if idx == 0 || idx == -1 {
                         return Ok(current.clone());
                     } else {
-                        return Ok(undefined_value());
+                        return Ok(JValue::Undefined);
                     }
                 }
 
                 // Try to evaluate the predicate to see if it's a numeric index
                 let pred_result = self.evaluate_internal(predicate, current)?;
 
-                if let Value::Number(n) = &pred_result {
+                if let JValue::Number(n) = &pred_result {
                     // It's a numeric index - treat scalar as single-element array
-                    let idx = n.as_f64().unwrap().floor() as i64;
+                    let idx = n.floor() as i64;
                     if idx == 0 || idx == -1 {
                         return Ok(current.clone());
                     } else {
-                        return Ok(undefined_value());
+                        return Ok(JValue::Undefined);
                     }
                 }
 
@@ -5699,19 +6218,19 @@ impl Evaluator {
                     Ok(current.clone())
                 } else {
                     // Return undefined (not null) so $map can filter it out
-                    Ok(undefined_value())
+                    Ok(JValue::Undefined)
                 }
             }
         }
     }
 
     /// Evaluate a sort term expression, distinguishing missing fields from explicit null
-    /// Returns undefined_value() for missing fields, Value::Null for explicit null
-    fn evaluate_sort_term(&mut self, term_expr: &AstNode, element: &Value) -> Result<Value, EvaluatorError> {
+    /// Returns JValue::Undefined for missing fields, JValue::Null for explicit null
+    fn evaluate_sort_term(&mut self, term_expr: &AstNode, element: &JValue) -> Result<JValue, EvaluatorError> {
         // For tuples (from index binding), extract the actual value from @ field
-        let actual_element = if let Value::Object(obj) = element {
-            if obj.get("__tuple__") == Some(&Value::Bool(true)) {
-                obj.get("@").cloned().unwrap_or(Value::Null)
+        let actual_element = if let JValue::Object(obj) = element {
+            if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                obj.get("@").cloned().unwrap_or(JValue::Null)
             } else {
                 element.clone()
             }
@@ -5724,14 +6243,14 @@ impl Evaluator {
             if steps.len() == 1 && steps[0].stages.is_empty() {
                 if let AstNode::Name(field_name) = &steps[0].node {
                     // Check if the field exists in the element
-                    if let Value::Object(obj) = &actual_element {
+                    if let JValue::Object(obj) = &actual_element {
                         return match obj.get(field_name) {
                             Some(val) => Ok(val.clone()),  // Field exists (may be null)
-                            None => Ok(undefined_value()), // Field is missing
+                            None => Ok(JValue::Undefined), // Field is missing
                         };
                     } else {
                         // Not an object - return undefined
-                        return Ok(undefined_value());
+                        return Ok(JValue::Undefined);
                     }
                 }
             }
@@ -5745,33 +6264,33 @@ impl Evaluator {
         // "missing field" or "explicit null". For now, treat null results as undefined
         // to maintain compatibility with existing tests.
         // TODO: For full JS compatibility, would need deeper analysis of the expression
-        if matches!(result, Value::Null) {
-            return Ok(undefined_value());
+        if matches!(result, JValue::Null) {
+            return Ok(JValue::Undefined);
         }
 
         Ok(result)
     }
 
     /// Evaluate sort operator
-    fn evaluate_sort(&mut self, data: &Value, terms: &[(AstNode, bool)]) -> Result<Value, EvaluatorError> {
+    fn evaluate_sort(&mut self, data: &JValue, terms: &[(AstNode, bool)]) -> Result<JValue, EvaluatorError> {
         // If data is null, return null
-        if matches!(data, Value::Null) {
-            return Ok(Value::Null);
+        if matches!(data, JValue::Null) {
+            return Ok(JValue::Null);
         }
 
         // If data is not an array, return it as-is (can't sort a single value)
         let array = match data {
-            Value::Array(arr) => arr.clone(),
+            JValue::Array(arr) => arr.clone(),
             other => return Ok(other.clone()),
         };
 
         // If empty array, return as-is
         if array.is_empty() {
-            return Ok(Value::Array(array));
+            return Ok(JValue::Array(array));
         }
 
         // Evaluate sort keys for each element
-        let mut indexed_array: Vec<(usize, Vec<Value>)> = Vec::new();
+        let mut indexed_array: Vec<(usize, Vec<JValue>)> = Vec::new();
 
         for (idx, element) in array.iter().enumerate() {
             let mut sort_keys = Vec::new();
@@ -5810,19 +6329,20 @@ impl Evaluator {
                 let sort_value = &sort_keys[term_idx];
 
                 // Skip undefined markers (missing fields) - these are allowed and sort to end
-                if is_undefined(sort_value) {
+                if sort_value.is_undefined() {
                     continue;
                 }
 
                 // Get the type name for this value
                 // Note: explicit null is NOT allowed - typeof null === 'object' in JS
                 let value_type = match sort_value {
-                    Value::Number(_) => "number",
-                    Value::String(_) => "string",
-                    Value::Bool(_) => "boolean",
-                    Value::Array(_) => "array",
-                    Value::Object(_) => "object",  // This catches non-undefined objects
-                    Value::Null => "null",         // Explicit null from data
+                    JValue::Number(_) => "number",
+                    JValue::String(_) => "string",
+                    JValue::Bool(_) => "boolean",
+                    JValue::Array(_) => "array",
+                    JValue::Object(_) => "object",  // This catches non-undefined objects
+                    JValue::Null => "null",         // Explicit null from data
+                    _ => "unknown",
                 };
 
                 // Check that sort keys are only numbers or strings
@@ -5870,21 +6390,21 @@ impl Evaluator {
         });
 
         // Extract sorted elements
-        let sorted: Vec<Value> = indexed_array
+        let sorted: Vec<JValue> = indexed_array
             .iter()
             .map(|(idx, _)| array[*idx].clone())
             .collect();
 
-        Ok(Value::Array(sorted))
+        Ok(JValue::array(sorted))
     }
 
     /// Compare two values for sorting (JSONata semantics)
-    fn compare_values(&self, left: &Value, right: &Value) -> std::cmp::Ordering {
+    fn compare_values(&self, left: &JValue, right: &JValue) -> std::cmp::Ordering {
         use std::cmp::Ordering;
 
         // Handle undefined markers first - they sort to the end
-        let left_undef = is_undefined(left);
-        let right_undef = is_undefined(right);
+        let left_undef = left.is_undefined();
+        let right_undef = right.is_undefined();
 
         if left_undef && right_undef {
             return Ordering::Equal;
@@ -5898,25 +6418,25 @@ impl Evaluator {
 
         match (left, right) {
             // Nulls also sort last (explicit null in data)
-            (Value::Null, Value::Null) => Ordering::Equal,
-            (Value::Null, _) => Ordering::Greater,
-            (_, Value::Null) => Ordering::Less,
+            (JValue::Null, JValue::Null) => Ordering::Equal,
+            (JValue::Null, _) => Ordering::Greater,
+            (_, JValue::Null) => Ordering::Less,
 
             // Numbers
-            (Value::Number(a), Value::Number(b)) => {
-                let a_f64 = a.as_f64().unwrap();
-                let b_f64 = b.as_f64().unwrap();
+            (JValue::Number(a), JValue::Number(b)) => {
+                let a_f64 = *a;
+                let b_f64 = *b;
                 a_f64.partial_cmp(&b_f64).unwrap_or(Ordering::Equal)
             }
 
             // Strings
-            (Value::String(a), Value::String(b)) => a.cmp(b),
+            (JValue::String(a), JValue::String(b)) => a.cmp(b),
 
             // Booleans
-            (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+            (JValue::Bool(a), JValue::Bool(b)) => a.cmp(b),
 
             // Arrays (lexicographic comparison)
-            (Value::Array(a), Value::Array(b)) => {
+            (JValue::Array(a), JValue::Array(b)) => {
                 for (a_elem, b_elem) in a.iter().zip(b.iter()) {
                     let cmp = self.compare_values(a_elem, b_elem);
                     if cmp != Ordering::Equal {
@@ -5928,42 +6448,41 @@ impl Evaluator {
 
             // Different types: use type ordering
             // null < bool < number < string < array < object
-            (Value::Bool(_), Value::Number(_)) => Ordering::Less,
-            (Value::Bool(_), Value::String(_)) => Ordering::Less,
-            (Value::Bool(_), Value::Array(_)) => Ordering::Less,
-            (Value::Bool(_), Value::Object(_)) => Ordering::Less,
+            (JValue::Bool(_), JValue::Number(_)) => Ordering::Less,
+            (JValue::Bool(_), JValue::String(_)) => Ordering::Less,
+            (JValue::Bool(_), JValue::Array(_)) => Ordering::Less,
+            (JValue::Bool(_), JValue::Object(_)) => Ordering::Less,
 
-            (Value::Number(_), Value::Bool(_)) => Ordering::Greater,
-            (Value::Number(_), Value::String(_)) => Ordering::Less,
-            (Value::Number(_), Value::Array(_)) => Ordering::Less,
-            (Value::Number(_), Value::Object(_)) => Ordering::Less,
+            (JValue::Number(_), JValue::Bool(_)) => Ordering::Greater,
+            (JValue::Number(_), JValue::String(_)) => Ordering::Less,
+            (JValue::Number(_), JValue::Array(_)) => Ordering::Less,
+            (JValue::Number(_), JValue::Object(_)) => Ordering::Less,
 
-            (Value::String(_), Value::Bool(_)) => Ordering::Greater,
-            (Value::String(_), Value::Number(_)) => Ordering::Greater,
-            (Value::String(_), Value::Array(_)) => Ordering::Less,
-            (Value::String(_), Value::Object(_)) => Ordering::Less,
+            (JValue::String(_), JValue::Bool(_)) => Ordering::Greater,
+            (JValue::String(_), JValue::Number(_)) => Ordering::Greater,
+            (JValue::String(_), JValue::Array(_)) => Ordering::Less,
+            (JValue::String(_), JValue::Object(_)) => Ordering::Less,
 
-            (Value::Array(_), Value::Bool(_)) => Ordering::Greater,
-            (Value::Array(_), Value::Number(_)) => Ordering::Greater,
-            (Value::Array(_), Value::String(_)) => Ordering::Greater,
-            (Value::Array(_), Value::Object(_)) => Ordering::Less,
+            (JValue::Array(_), JValue::Bool(_)) => Ordering::Greater,
+            (JValue::Array(_), JValue::Number(_)) => Ordering::Greater,
+            (JValue::Array(_), JValue::String(_)) => Ordering::Greater,
+            (JValue::Array(_), JValue::Object(_)) => Ordering::Less,
 
-            (Value::Object(_), _) => Ordering::Greater,
+            (JValue::Object(_), _) => Ordering::Greater,
+            _ => Ordering::Equal,
         }
     }
 
-    /// Check if a value is truthy (JSONata semantics)
-    fn is_truthy(&self, value: &Value) -> bool {
-        if is_undefined(value) {
-            return false;
-        }
+    /// Check if a value is truthy (JSONata semantics).
+    fn is_truthy(&self, value: &JValue) -> bool {
         match value {
-            Value::Null => false,
-            Value::Bool(b) => *b,
-            Value::Number(n) => n.as_f64().unwrap() != 0.0,
-            Value::String(s) => !s.is_empty(),
-            Value::Array(arr) => !arr.is_empty(),
-            Value::Object(obj) => !obj.is_empty(),
+            JValue::Null | JValue::Undefined => false,
+            JValue::Bool(b) => *b,
+            JValue::Number(n) => *n != 0.0,
+            JValue::String(s) => !s.is_empty(),
+            JValue::Array(arr) => !arr.is_empty(),
+            JValue::Object(obj) => !obj.is_empty(),
+            _ => false,
         }
     }
 
@@ -5972,12 +6491,12 @@ impl Evaluator {
     /// - Lambda/function objects are not values, so they're falsy
     /// - Arrays containing only falsy elements are falsy
     /// - Otherwise, use standard truthiness
-    fn is_truthy_for_default(&self, value: &Value) -> bool {
+    fn is_truthy_for_default(&self, value: &JValue) -> bool {
         match value {
-            // Check if this is a lambda object (has __lambda__ marker)
-            Value::Object(obj) if obj.contains_key("__lambda__") => false,
+            // Lambda/function values are not data values, so they're falsy
+            JValue::Lambda { .. } | JValue::Builtin { .. } => false,
             // Arrays need special handling - check if all elements are falsy
-            Value::Array(arr) => {
+            JValue::Array(arr) => {
                 if arr.is_empty() {
                     return false;
                 }
@@ -5991,39 +6510,49 @@ impl Evaluator {
 
     /// Unwrap singleton arrays to scalar values
     /// This is used when no explicit array-keeping operation (like []) was used
-    fn unwrap_singleton(&self, value: Value) -> Value {
+    fn unwrap_singleton(&self, value: JValue) -> JValue {
         match value {
-            Value::Array(ref arr) if arr.len() == 1 => arr[0].clone(),
+            JValue::Array(ref arr) if arr.len() == 1 => arr[0].clone(),
             _ => value,
         }
     }
 
     /// Extract lambda IDs from a value (used for closure preservation)
-    /// Finds any _lambda_id references in the value so they can be preserved
+    /// Finds any lambda_id references in the value so they can be preserved
     /// when exiting a block scope
-    fn extract_lambda_ids(&self, value: &Value) -> Vec<String> {
+    fn extract_lambda_ids(&self, value: &JValue) -> Vec<String> {
         let mut ids = Vec::new();
         self.collect_lambda_ids(value, &mut ids);
         ids
     }
 
-    fn collect_lambda_ids(&self, value: &Value, ids: &mut Vec<String>) {
+    fn collect_lambda_ids(&self, value: &JValue, ids: &mut Vec<String>) {
         match value {
-            Value::Object(map) => {
-                // Check if this is a lambda value
-                if map.contains_key("__lambda__") {
-                    if let Some(Value::String(lambda_id)) = map.get("_lambda_id") {
-                        ids.push(lambda_id.clone());
+            JValue::Lambda { lambda_id, .. } => {
+                let id_str = lambda_id.to_string();
+                if !ids.contains(&id_str) {
+                    ids.push(id_str);
+                    // Transitively follow the stored lambda's captured_env
+                    // to find all referenced lambdas. This is critical for
+                    // closures like the Y-combinator where returned lambdas
+                    // capture other lambdas in their environment.
+                    if let Some(stored) = self.context.lookup_lambda(&**lambda_id) {
+                        let env_values: Vec<JValue> = stored.captured_env.values().cloned().collect();
+                        for env_value in &env_values {
+                            self.collect_lambda_ids(env_value, ids);
+                        }
                     }
                 }
+            }
+            JValue::Object(map) => {
                 // Recurse into object values
                 for v in map.values() {
                     self.collect_lambda_ids(v, ids);
                 }
             }
-            Value::Array(arr) => {
+            JValue::Array(arr) => {
                 // Recurse into array elements
-                for v in arr {
+                for v in arr.iter() {
                     self.collect_lambda_ids(v, ids);
                 }
             }
@@ -6032,37 +6561,37 @@ impl Evaluator {
     }
 
     /// Equality comparison (JSONata semantics)
-    fn equals(&self, left: &Value, right: &Value) -> bool {
+    fn equals(&self, left: &JValue, right: &JValue) -> bool {
         crate::functions::array::values_equal(left, right)
     }
 
     /// Addition
-    fn add(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn add(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                Ok(serde_json::json!(a.as_f64().unwrap() + b.as_f64().unwrap()))
+            (JValue::Number(a), JValue::Number(b)) => {
+                Ok(JValue::Number(*a + *b))
             }
             // Explicit null literal with number -> T2002 error
-            (Value::Null, Value::Number(_)) if left_is_explicit_null => {
+            (JValue::Null, JValue::Number(_)) if left_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The left side of the + operator must evaluate to a number".to_string()))
             }
-            (Value::Number(_), Value::Null) if right_is_explicit_null => {
+            (JValue::Number(_), JValue::Null) if right_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The right side of the + operator must evaluate to a number".to_string()))
             }
-            (Value::Null, Value::Null) if left_is_explicit_null || right_is_explicit_null => {
+            (JValue::Null, JValue::Null) if left_is_explicit_null || right_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The left side of the + operator must evaluate to a number".to_string()))
             }
             // Undefined variable (null) with number -> undefined result
-            (Value::Null, Value::Number(_)) | (Value::Number(_), Value::Null) => Ok(Value::Null),
+            (JValue::Null, JValue::Number(_)) | (JValue::Number(_), JValue::Null) => Ok(JValue::Null),
             // Boolean with anything (including undefined) -> T2001 error
-            (Value::Bool(_), _) => {
+            (JValue::Bool(_), _) => {
                 Err(EvaluatorError::TypeError("T2001: The left side of the '+' operator must evaluate to a number or a string".to_string()))
             }
-            (_, Value::Bool(_)) => {
+            (_, JValue::Bool(_)) => {
                 Err(EvaluatorError::TypeError("T2001: The right side of the '+' operator must evaluate to a number or a string".to_string()))
             }
             // Undefined with undefined -> undefined
-            (Value::Null, Value::Null) => Ok(Value::Null),
+            (JValue::Null, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot add {:?} and {:?}",
                 left, right
@@ -6071,20 +6600,20 @@ impl Evaluator {
     }
 
     /// Subtraction
-    fn subtract(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn subtract(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                Ok(serde_json::json!(a.as_f64().unwrap() - b.as_f64().unwrap()))
+            (JValue::Number(a), JValue::Number(b)) => {
+                Ok(JValue::Number(*a - *b))
             }
             // Explicit null literal -> error
-            (Value::Null, _) if left_is_explicit_null => {
+            (JValue::Null, _) if left_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The left side of the - operator must evaluate to a number".to_string()))
             }
-            (_, Value::Null) if right_is_explicit_null => {
+            (_, JValue::Null) if right_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The right side of the - operator must evaluate to a number".to_string()))
             }
             // Undefined variables -> undefined result
-            (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+            (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot subtract {:?} and {:?}",
                 left, right
@@ -6093,27 +6622,27 @@ impl Evaluator {
     }
 
     /// Multiplication
-    fn multiply(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn multiply(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                let result = a.as_f64().unwrap() * b.as_f64().unwrap();
+            (JValue::Number(a), JValue::Number(b)) => {
+                let result = *a * *b;
                 // Check for overflow to Infinity
                 if result.is_infinite() {
                     return Err(EvaluatorError::EvaluationError(
                         "D1001: Number out of range".to_string()
                     ));
                 }
-                Ok(serde_json::json!(result))
+                Ok(JValue::Number(result))
             }
             // Explicit null literal -> error
-            (Value::Null, _) if left_is_explicit_null => {
+            (JValue::Null, _) if left_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The left side of the * operator must evaluate to a number".to_string()))
             }
-            (_, Value::Null) if right_is_explicit_null => {
+            (_, JValue::Null) if right_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The right side of the * operator must evaluate to a number".to_string()))
             }
             // Undefined variables -> undefined result
-            (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+            (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot multiply {:?} and {:?}",
                 left, right
@@ -6122,26 +6651,26 @@ impl Evaluator {
     }
 
     /// Division
-    fn divide(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn divide(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                let denominator = b.as_f64().unwrap();
+            (JValue::Number(a), JValue::Number(b)) => {
+                let denominator = *b;
                 if denominator == 0.0 {
                     return Err(EvaluatorError::EvaluationError(
                         "Division by zero".to_string(),
                     ));
                 }
-                Ok(serde_json::json!(a.as_f64().unwrap() / denominator))
+                Ok(JValue::Number(*a / denominator))
             }
             // Explicit null literal -> error
-            (Value::Null, _) if left_is_explicit_null => {
+            (JValue::Null, _) if left_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The left side of the / operator must evaluate to a number".to_string()))
             }
-            (_, Value::Null) if right_is_explicit_null => {
+            (_, JValue::Null) if right_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The right side of the / operator must evaluate to a number".to_string()))
             }
             // Undefined variables -> undefined result
-            (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+            (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot divide {:?} and {:?}",
                 left, right
@@ -6150,26 +6679,26 @@ impl Evaluator {
     }
 
     /// Modulo
-    fn modulo(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn modulo(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                let denominator = b.as_f64().unwrap();
+            (JValue::Number(a), JValue::Number(b)) => {
+                let denominator = *b;
                 if denominator == 0.0 {
                     return Err(EvaluatorError::EvaluationError(
                         "Division by zero".to_string(),
                     ));
                 }
-                Ok(serde_json::json!(a.as_f64().unwrap() % denominator))
+                Ok(JValue::Number(*a % denominator))
             }
             // Explicit null literal -> error
-            (Value::Null, _) if left_is_explicit_null => {
+            (JValue::Null, _) if left_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The left side of the % operator must evaluate to a number".to_string()))
             }
-            (_, Value::Null) if right_is_explicit_null => {
+            (_, JValue::Null) if right_is_explicit_null => {
                 Err(EvaluatorError::TypeError("T2002: The right side of the % operator must evaluate to a number".to_string()))
             }
             // Undefined variables -> undefined result
-            (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+            (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot compute modulo of {:?} and {:?}",
                 left, right
@@ -6178,14 +6707,15 @@ impl Evaluator {
     }
 
     /// Get human-readable type name for error messages
-    fn type_name(value: &Value) -> &'static str {
+    fn type_name(value: &JValue) -> &'static str {
         match value {
-            Value::Null => "null",
-            Value::Bool(_) => "boolean",
-            Value::Number(_) => "number",
-            Value::String(_) => "string",
-            Value::Array(_) => "array",
-            Value::Object(_) => "object",
+            JValue::Null => "null",
+            JValue::Bool(_) => "boolean",
+            JValue::Number(_) => "number",
+            JValue::String(_) => "string",
+            JValue::Array(_) => "array",
+            JValue::Object(_) => "object",
+            _ => "unknown",
         }
     }
 
@@ -6196,46 +6726,46 @@ impl Evaluator {
     /// `op_symbol` is used in the T2009 error message (e.g. "<", ">=").
     fn ordered_compare(
         &self,
-        left: &Value,
-        right: &Value,
+        left: &JValue,
+        right: &JValue,
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
         op_symbol: &str,
         compare_nums: fn(f64, f64) -> bool,
         compare_strs: fn(&str, &str) -> bool,
-    ) -> Result<Value, EvaluatorError> {
+    ) -> Result<JValue, EvaluatorError> {
         match (left, right) {
-            (Value::Number(a), Value::Number(b)) => {
-                Ok(Value::Bool(compare_nums(a.as_f64().unwrap(), b.as_f64().unwrap())))
+            (JValue::Number(a), JValue::Number(b)) => {
+                Ok(JValue::Bool(compare_nums(*a, *b)))
             }
-            (Value::String(a), Value::String(b)) => Ok(Value::Bool(compare_strs(a, b))),
+            (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(compare_strs(a, b))),
             // Both null/undefined -> return undefined
-            (Value::Null, Value::Null) => Ok(Value::Null),
+            (JValue::Null, JValue::Null) => Ok(JValue::Null),
             // Explicit null literal with any type (except null) -> T2010 error
-            (Value::Null, _) if left_is_explicit_null => {
+            (JValue::Null, _) if left_is_explicit_null => {
                 Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
             }
-            (_, Value::Null) if right_is_explicit_null => {
+            (_, JValue::Null) if right_is_explicit_null => {
                 Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
             }
             // Boolean with undefined -> T2010 error
-            (Value::Bool(_), Value::Null) | (Value::Null, Value::Bool(_)) => {
+            (JValue::Bool(_), JValue::Null) | (JValue::Null, JValue::Bool(_)) => {
                 Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
             }
             // Number or String with undefined (not explicit null) -> undefined result
-            (Value::Number(_), Value::Null) | (Value::Null, Value::Number(_)) |
-            (Value::String(_), Value::Null) | (Value::Null, Value::String(_)) => {
-                Ok(Value::Null)
+            (JValue::Number(_), JValue::Null) | (JValue::Null, JValue::Number(_)) |
+            (JValue::String(_), JValue::Null) | (JValue::Null, JValue::String(_)) => {
+                Ok(JValue::Null)
             }
             // String vs Number -> T2009
-            (Value::String(_), Value::Number(_)) | (Value::Number(_), Value::String(_)) => {
+            (JValue::String(_), JValue::Number(_)) | (JValue::Number(_), JValue::String(_)) => {
                 Err(EvaluatorError::EvaluationError(format!(
                     "T2009: The expressions on either side of operator \"{}\" must be of the same data type",
                     op_symbol
                 )))
             }
             // Boolean comparisons -> T2010
-            (Value::Bool(_), _) | (_, Value::Bool(_)) => {
+            (JValue::Bool(_), _) | (_, JValue::Bool(_)) => {
                 Err(EvaluatorError::EvaluationError(format!(
                     "T2010: Cannot compare {} and {}",
                     Self::type_name(left), Self::type_name(right)
@@ -6250,55 +6780,56 @@ impl Evaluator {
     }
 
     /// Less than comparison
-    fn less_than(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn less_than(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, "<", |a, b| a < b, |a, b| a < b)
     }
 
     /// Less than or equal comparison
-    fn less_than_or_equal(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn less_than_or_equal(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, "<=", |a, b| a <= b, |a, b| a <= b)
     }
 
     /// Greater than comparison
-    fn greater_than(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn greater_than(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, ">", |a, b| a > b, |a, b| a > b)
     }
 
     /// Greater than or equal comparison
-    fn greater_than_or_equal(&self, left: &Value, right: &Value, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<Value, EvaluatorError> {
+    fn greater_than_or_equal(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
         self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, ">=", |a, b| a >= b, |a, b| a >= b)
     }
 
     /// Convert a value to a string for concatenation
-    fn value_to_concat_string(value: &Value) -> Result<String, EvaluatorError> {
+    fn value_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
         match value {
-            Value::String(s) => Ok(s.clone()),
-            Value::Null => Ok(String::new()),
-            Value::Number(_) | Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
+            JValue::String(s) => Ok(s.to_string()),
+            JValue::Null => Ok(String::new()),
+            JValue::Number(_) | JValue::Bool(_) | JValue::Array(_) | JValue::Object(_) => {
                 match crate::functions::string::string(value, None) {
-                    Ok(Value::String(s)) => Ok(s),
-                    Ok(Value::Null) => Ok(String::new()),
+                    Ok(JValue::String(s)) => Ok(s.to_string()),
+                    Ok(JValue::Null) => Ok(String::new()),
                     _ => Err(EvaluatorError::TypeError(
                         "Cannot concatenate complex types".to_string(),
                     )),
                 }
             }
+            _ => Ok(String::new()),
         }
     }
 
     /// String concatenation
-    fn concatenate(&self, left: &Value, right: &Value) -> Result<Value, EvaluatorError> {
+    fn concatenate(&self, left: &JValue, right: &JValue) -> Result<JValue, EvaluatorError> {
         let left_str = Self::value_to_concat_string(left)?;
         let right_str = Self::value_to_concat_string(right)?;
-        Ok(Value::String(format!("{}{}", left_str, right_str)))
+        Ok(JValue::string(format!("{}{}", left_str, right_str)))
     }
 
     /// Range operator (e.g., 1..5 produces [1,2,3,4,5])
-    fn range(&self, left: &Value, right: &Value) -> Result<Value, EvaluatorError> {
+    fn range(&self, left: &JValue, right: &JValue) -> Result<JValue, EvaluatorError> {
         // Check left operand is a number or null
         let start_f64 = match left {
-            Value::Number(n) => Some(n.as_f64().unwrap()),
-            Value::Null => None,
+            JValue::Number(n) => Some(*n),
+            JValue::Null => None,
             _ => {
                 return Err(EvaluatorError::EvaluationError(
                     "T2003: Left operand of range operator must be a number".to_string(),
@@ -6317,8 +6848,8 @@ impl Evaluator {
 
         // Check right operand is a number or null
         let end_f64 = match right {
-            Value::Number(n) => Some(n.as_f64().unwrap()),
-            Value::Null => None,
+            JValue::Number(n) => Some(*n),
+            JValue::Null => None,
             _ => {
                 return Err(EvaluatorError::EvaluationError(
                     "T2004: Right operand of range operator must be a number".to_string(),
@@ -6337,7 +6868,7 @@ impl Evaluator {
 
         // If either operand is null, return empty array
         if start_f64.is_none() || end_f64.is_none() {
-            return Ok(Value::Array(vec![]));
+            return Ok(JValue::array(vec![]));
         }
 
         let start = start_f64.unwrap() as i64;
@@ -6358,19 +6889,19 @@ impl Evaluator {
         let mut result = Vec::with_capacity(size);
         if start <= end {
             for i in start..=end {
-                result.push(serde_json::json!(i));
+                result.push(JValue::Number(i as f64));
             }
         }
         // Note: if start > end, return empty array (not reversed)
-        Ok(Value::Array(result))
+        Ok(JValue::array(result))
     }
 
     /// In operator (checks if left is in right array/object)
     /// Array indexing: array[index]
-    fn array_index(&self, array: &Value, index: &Value) -> Result<Value, EvaluatorError> {
+    fn array_index(&self, array: &JValue, index: &JValue) -> Result<JValue, EvaluatorError> {
         match (array, index) {
-            (Value::Array(arr), Value::Number(n)) => {
-                let idx = n.as_f64().unwrap() as i64;
+            (JValue::Array(arr), JValue::Number(n)) => {
+                let idx = *n as i64;
                 let len = arr.len() as i64;
 
                 // Handle negative indexing (offset from end)
@@ -6381,7 +6912,7 @@ impl Evaluator {
                 };
 
                 if actual_idx < 0 || actual_idx >= len {
-                    Ok(Value::Null)
+                    Ok(JValue::Null)
                 } else {
                     Ok(arr[actual_idx as usize].clone())
                 }
@@ -6398,15 +6929,15 @@ impl Evaluator {
         &mut self,
         _lhs_node: &AstNode,
         rhs_node: &AstNode,
-        array: &Value,
-        _original_data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        array: &JValue,
+        _original_data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         match array {
-            Value::Array(arr) => {
+            JValue::Array(arr) => {
                 // Pre-allocate with estimated capacity (assume ~50% will match)
                 let mut filtered = Vec::with_capacity(arr.len() / 2);
 
-                for item in arr {
+                for item in arr.iter() {
                     // Evaluate the predicate in the context of this array item
                     // The item becomes the new "current context" ($)
                     let predicate_result = self.evaluate_internal(rhs_node, item)?;
@@ -6417,7 +6948,7 @@ impl Evaluator {
                     }
                 }
 
-                Ok(Value::Array(filtered))
+                Ok(JValue::array(filtered))
             }
             _ => Err(EvaluatorError::TypeError(
                 "Array filtering requires an array".to_string(),
@@ -6425,28 +6956,28 @@ impl Evaluator {
         }
     }
 
-    fn in_operator(&self, left: &Value, right: &Value) -> Result<Value, EvaluatorError> {
+    fn in_operator(&self, left: &JValue, right: &JValue) -> Result<JValue, EvaluatorError> {
         // If either side is undefined/null, return false (not an error)
         // This matches JavaScript behavior
-        if matches!(left, Value::Null) || matches!(right, Value::Null) {
-            return Ok(Value::Bool(false));
+        if matches!(left, JValue::Null) || matches!(right, JValue::Null) {
+            return Ok(JValue::Bool(false));
         }
 
         match right {
-            Value::Array(arr) => {
-                Ok(Value::Bool(arr.iter().any(|v| self.equals(left, v))))
+            JValue::Array(arr) => {
+                Ok(JValue::Bool(arr.iter().any(|v| self.equals(left, v))))
             }
-            Value::Object(obj) => {
-                if let Value::String(key) = left {
-                    Ok(Value::Bool(obj.contains_key(key)))
+            JValue::Object(obj) => {
+                if let JValue::String(key) = left {
+                    Ok(JValue::Bool(obj.contains_key(&**key)))
                 } else {
-                    Ok(Value::Bool(false))
+                    Ok(JValue::Bool(false))
                 }
             }
             // If right side is not an array or object (e.g., string, number),
             // wrap it in an array for comparison
             other => {
-                Ok(Value::Bool(self.equals(left, other)))
+                Ok(JValue::Bool(self.equals(left, other)))
             }
         }
     }
@@ -6459,16 +6990,12 @@ impl Evaluator {
         name: &str,
         args: &[AstNode],
         is_builtin: bool,
-        data: &Value,
-    ) -> Result<Value, EvaluatorError> {
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         // First, look up the function to ensure it exists
         let is_lambda = self.context.lookup_lambda(name).is_some() ||
             (self.context.lookup(name).map(|v| {
-                if let Value::Object(map) = v {
-                    map.contains_key("__lambda__")
-                } else {
-                    false
-                }
+                matches!(v, JValue::Lambda { .. })
             }).unwrap_or(false));
 
         // Built-in functions must be called with $ prefix for partial application
@@ -6486,7 +7013,7 @@ impl Evaluator {
         }
 
         // Evaluate non-placeholder arguments and track placeholder positions
-        let mut bound_args: Vec<(usize, Value)> = Vec::new();
+        let mut bound_args: Vec<(usize, JValue)> = Vec::new();
         let mut placeholder_positions: Vec<usize> = Vec::new();
 
         for (i, arg) in args.iter().enumerate() {
@@ -6534,17 +7061,17 @@ impl Evaluator {
                 // Store placeholder positions
                 env.insert(
                     "__placeholder_positions".to_string(),
-                    Value::Array(
+                    JValue::array(
                         placeholder_positions
                             .iter()
-                            .map(|p| Value::Number(serde_json::Number::from(*p)))
-                            .collect()
+                            .map(|p| JValue::Number(*p as f64))
+                            .collect::<Vec<_>>()
                     )
                 );
                 // Store total argument count
                 env.insert(
                     "__total_args".to_string(),
-                    Value::Number(serde_json::Number::from(args.len()))
+                    JValue::Number(args.len() as f64)
                 );
                 env
             },
@@ -6555,13 +7082,12 @@ impl Evaluator {
         self.context.bind_lambda(partial_id.clone(), stored_lambda);
 
         // Return a lambda object that can be invoked
-        let lambda_obj = serde_json::json!({
-            "__lambda__": true,
-            "params": param_names,
-            "body": format!("partial({})", name),
-            "_lambda_id": partial_id,
-            "_is_partial": true
-        });
+        let lambda_obj = JValue::lambda(
+            partial_id.as_str(),
+            param_names,
+            Some(name.to_string()),
+            None::<String>,
+        );
 
         Ok(lambda_obj)
     }
@@ -6581,59 +7107,58 @@ mod tests {
     #[test]
     fn test_evaluate_literals() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // String literal
         let result = evaluator.evaluate(&AstNode::string("hello"), &data).unwrap();
-        assert_eq!(result, Value::String("hello".to_string()));
+        assert_eq!(result, JValue::string("hello".to_string()));
 
         // Number literal
         let result = evaluator.evaluate(&AstNode::number(42.0), &data).unwrap();
-        assert_eq!(result, serde_json::json!(42));
+        assert_eq!(result, JValue::from(42i64));
 
         // Boolean literal
         let result = evaluator.evaluate(&AstNode::boolean(true), &data).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, JValue::Bool(true));
 
         // Null literal
         let result = evaluator.evaluate(&AstNode::null(), &data).unwrap();
-        assert_eq!(result, Value::Null);
+        assert_eq!(result, JValue::Null);
     }
 
     #[test]
     fn test_evaluate_variables() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // Bind a variable
-        evaluator.context.bind("x".to_string(), serde_json::json!(100));
+        evaluator.context.bind("x".to_string(), JValue::from(100i64));
 
         // Look up the variable
         let result = evaluator.evaluate(&AstNode::variable("x"), &data).unwrap();
-        assert_eq!(result, serde_json::json!(100));
+        assert_eq!(result, JValue::from(100i64));
 
         // Undefined variable returns null (undefined in JSONata semantics)
         let result = evaluator.evaluate(&AstNode::variable("undefined"), &data).unwrap();
-        assert_eq!(result, Value::Null);
+        assert_eq!(result, JValue::Null);
     }
 
     #[test]
     fn test_evaluate_path() {
         let mut evaluator = Evaluator::new();
-        let data = serde_json::json!({
+        let data = JValue::from(serde_json::json!({
             "foo": {
                 "bar": {
                     "baz": 42
                 }
             }
-        });
-
+        }));
         // Simple path
         let path = AstNode::Path {
             steps: vec![PathStep::new(AstNode::Name("foo".to_string()))],
         };
         let result = evaluator.evaluate(&path, &data).unwrap();
-        assert_eq!(result, serde_json::json!({"bar": {"baz": 42}}));
+        assert_eq!(result, JValue::from(serde_json::json!({"bar": {"baz": 42}})));
 
         // Nested path
         let path = AstNode::Path {
@@ -6644,20 +7169,20 @@ mod tests {
             ],
         };
         let result = evaluator.evaluate(&path, &data).unwrap();
-        assert_eq!(result, serde_json::json!(42));
+        assert_eq!(result, JValue::from(42i64));
 
         // Missing path returns null
         let path = AstNode::Path {
             steps: vec![PathStep::new(AstNode::Name("missing".to_string()))],
         };
         let result = evaluator.evaluate(&path, &data).unwrap();
-        assert_eq!(result, Value::Null);
+        assert_eq!(result, JValue::Null);
     }
 
     #[test]
     fn test_arithmetic_operations() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // Addition
         let expr = AstNode::Binary {
@@ -6666,7 +7191,7 @@ mod tests {
             rhs: Box::new(AstNode::number(5.0)),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(15.0));
+        assert_eq!(result, JValue::Number(15.0));
 
         // Subtraction
         let expr = AstNode::Binary {
@@ -6675,7 +7200,7 @@ mod tests {
             rhs: Box::new(AstNode::number(5.0)),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(5.0));
+        assert_eq!(result, JValue::Number(5.0));
 
         // Multiplication
         let expr = AstNode::Binary {
@@ -6684,7 +7209,7 @@ mod tests {
             rhs: Box::new(AstNode::number(5.0)),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(50.0));
+        assert_eq!(result, JValue::Number(50.0));
 
         // Division
         let expr = AstNode::Binary {
@@ -6693,7 +7218,7 @@ mod tests {
             rhs: Box::new(AstNode::number(5.0)),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(2.0));
+        assert_eq!(result, JValue::Number(2.0));
 
         // Modulo
         let expr = AstNode::Binary {
@@ -6702,13 +7227,13 @@ mod tests {
             rhs: Box::new(AstNode::number(3.0)),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(1.0));
+        assert_eq!(result, JValue::Number(1.0));
     }
 
     #[test]
     fn test_division_by_zero() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         let expr = AstNode::Binary {
             op: BinaryOp::Divide,
@@ -6722,7 +7247,7 @@ mod tests {
     #[test]
     fn test_comparison_operations() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // Equal
         let expr = AstNode::Binary {
@@ -6730,7 +7255,7 @@ mod tests {
             lhs: Box::new(AstNode::number(5.0)),
             rhs: Box::new(AstNode::number(5.0)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), Value::Bool(true));
+        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
 
         // Not equal
         let expr = AstNode::Binary {
@@ -6738,7 +7263,7 @@ mod tests {
             lhs: Box::new(AstNode::number(5.0)),
             rhs: Box::new(AstNode::number(3.0)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), Value::Bool(true));
+        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
 
         // Less than
         let expr = AstNode::Binary {
@@ -6746,7 +7271,7 @@ mod tests {
             lhs: Box::new(AstNode::number(3.0)),
             rhs: Box::new(AstNode::number(5.0)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), Value::Bool(true));
+        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
 
         // Greater than
         let expr = AstNode::Binary {
@@ -6754,13 +7279,13 @@ mod tests {
             lhs: Box::new(AstNode::number(5.0)),
             rhs: Box::new(AstNode::number(3.0)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), Value::Bool(true));
+        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
     }
 
     #[test]
     fn test_logical_operations() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // And - both true
         let expr = AstNode::Binary {
@@ -6768,7 +7293,7 @@ mod tests {
             lhs: Box::new(AstNode::boolean(true)),
             rhs: Box::new(AstNode::boolean(true)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), Value::Bool(true));
+        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
 
         // And - first false
         let expr = AstNode::Binary {
@@ -6776,7 +7301,7 @@ mod tests {
             lhs: Box::new(AstNode::boolean(false)),
             rhs: Box::new(AstNode::boolean(true)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), Value::Bool(false));
+        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(false));
 
         // Or - first true
         let expr = AstNode::Binary {
@@ -6784,7 +7309,7 @@ mod tests {
             lhs: Box::new(AstNode::boolean(true)),
             rhs: Box::new(AstNode::boolean(false)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), Value::Bool(true));
+        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
 
         // Or - both false
         let expr = AstNode::Binary {
@@ -6792,13 +7317,13 @@ mod tests {
             lhs: Box::new(AstNode::boolean(false)),
             rhs: Box::new(AstNode::boolean(false)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), Value::Bool(false));
+        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(false));
     }
 
     #[test]
     fn test_string_concatenation() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         let expr = AstNode::Binary {
             op: BinaryOp::Concatenate,
@@ -6806,13 +7331,13 @@ mod tests {
             rhs: Box::new(AstNode::string(" World")),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::String("Hello World".to_string()));
+        assert_eq!(result, JValue::string("Hello World".to_string()));
     }
 
     #[test]
     fn test_range_operator() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // Forward range
         let expr = AstNode::Binary {
@@ -6823,7 +7348,7 @@ mod tests {
         let result = evaluator.evaluate(&expr, &data).unwrap();
         assert_eq!(
             result,
-            serde_json::json!([1, 2, 3, 4, 5])
+            JValue::array(vec![JValue::Number(1.0), JValue::Number(2.0), JValue::Number(3.0), JValue::Number(4.0), JValue::Number(5.0)])
         );
 
         // Backward range (start > end) returns empty array
@@ -6835,14 +7360,14 @@ mod tests {
         let result = evaluator.evaluate(&expr, &data).unwrap();
         assert_eq!(
             result,
-            serde_json::json!([])
+            JValue::array(vec![])
         );
     }
 
     #[test]
     fn test_in_operator() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // In array
         let expr = AstNode::Binary {
@@ -6855,7 +7380,7 @@ mod tests {
             ])),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, JValue::Bool(true));
 
         // Not in array
         let expr = AstNode::Binary {
@@ -6868,13 +7393,13 @@ mod tests {
             ])),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, JValue::Bool(false));
     }
 
     #[test]
     fn test_unary_operations() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // Negation
         let expr = AstNode::Unary {
@@ -6882,7 +7407,7 @@ mod tests {
             operand: Box::new(AstNode::number(5.0)),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(-5.0));
+        assert_eq!(result, JValue::Number(-5.0));
 
         // Not
         let expr = AstNode::Unary {
@@ -6890,13 +7415,13 @@ mod tests {
             operand: Box::new(AstNode::boolean(true)),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, JValue::Bool(false));
     }
 
     #[test]
     fn test_array_construction() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         let expr = AstNode::Array(vec![
             AstNode::number(1.0),
@@ -6905,13 +7430,13 @@ mod tests {
         ]);
         let result = evaluator.evaluate(&expr, &data).unwrap();
         // Whole number literals are preserved as integers
-        assert_eq!(result, serde_json::json!([1, 2, 3]));
+        assert_eq!(result, JValue::from(serde_json::json!([1, 2, 3])));
     }
 
     #[test]
     fn test_object_construction() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         let expr = AstNode::Object(vec![
             (AstNode::string("name"), AstNode::string("Alice")),
@@ -6919,16 +7444,16 @@ mod tests {
         ]);
         let result = evaluator.evaluate(&expr, &data).unwrap();
         // Whole number literals are preserved as integers
-        assert_eq!(
-            result,
-            serde_json::json!({"name": "Alice", "age": 30})
-        );
+        let mut expected = IndexMap::new();
+        expected.insert("name".to_string(), JValue::string("Alice"));
+        expected.insert("age".to_string(), JValue::Number(30.0));
+        assert_eq!(result, JValue::object(expected));
     }
 
     #[test]
     fn test_conditional() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // True condition
         let expr = AstNode::Conditional {
@@ -6937,7 +7462,7 @@ mod tests {
             else_branch: Some(Box::new(AstNode::string("no"))),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::String("yes".to_string()));
+        assert_eq!(result, JValue::string("yes".to_string()));
 
         // False condition
         let expr = AstNode::Conditional {
@@ -6946,7 +7471,7 @@ mod tests {
             else_branch: Some(Box::new(AstNode::string("no"))),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::String("no".to_string()));
+        assert_eq!(result, JValue::string("no".to_string()));
 
         // No else branch returns undefined (not null)
         let expr = AstNode::Conditional {
@@ -6955,13 +7480,13 @@ mod tests {
             else_branch: None,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, undefined_value());
+        assert_eq!(result, JValue::Undefined);
     }
 
     #[test]
     fn test_block_expression() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         let expr = AstNode::Block(vec![
             AstNode::number(1.0),
@@ -6970,13 +7495,13 @@ mod tests {
         ]);
         let result = evaluator.evaluate(&expr, &data).unwrap();
         // Block returns the last expression; whole numbers are preserved as integers
-        assert_eq!(result, serde_json::json!(3));
+        assert_eq!(result, JValue::from(3i64));
     }
 
     #[test]
     fn test_function_calls() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // uppercase function
         let expr = AstNode::Function {
@@ -6985,7 +7510,7 @@ mod tests {
             is_builtin: true,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::String("HELLO".to_string()));
+        assert_eq!(result, JValue::string("HELLO".to_string()));
 
         // lowercase function
         let expr = AstNode::Function {
@@ -6994,7 +7519,7 @@ mod tests {
             is_builtin: true,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, Value::String("hello".to_string()));
+        assert_eq!(result, JValue::string("hello".to_string()));
 
         // length function
         let expr = AstNode::Function {
@@ -7003,7 +7528,7 @@ mod tests {
             is_builtin: true,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(5));
+        assert_eq!(result, JValue::from(5i64));
 
         // sum function
         let expr = AstNode::Function {
@@ -7016,7 +7541,7 @@ mod tests {
             is_builtin: true,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(6.0));
+        assert_eq!(result, JValue::Number(6.0));
 
         // count function
         let expr = AstNode::Function {
@@ -7029,13 +7554,13 @@ mod tests {
             is_builtin: true,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, serde_json::json!(3));
+        assert_eq!(result, JValue::from(3i64));
     }
 
     #[test]
     fn test_complex_nested_data() {
         let mut evaluator = Evaluator::new();
-        let data = serde_json::json!({
+        let data = JValue::from(serde_json::json!({
             "users": [
                 {"name": "Alice", "age": 30},
                 {"name": "Bob", "age": 25},
@@ -7045,8 +7570,7 @@ mod tests {
                 "total": 3,
                 "version": "1.0"
             }
-        });
-
+        }));
         // Access nested field
         let path = AstNode::Path {
             steps: vec![
@@ -7055,13 +7579,13 @@ mod tests {
             ],
         };
         let result = evaluator.evaluate(&path, &data).unwrap();
-        assert_eq!(result, Value::String("1.0".to_string()));
+        assert_eq!(result, JValue::string("1.0".to_string()));
     }
 
     #[test]
     fn test_error_handling() {
         let mut evaluator = Evaluator::new();
-        let data = Value::Null;
+        let data = JValue::Null;
 
         // Type error: adding string and number
         let expr = AstNode::Binary {
@@ -7086,15 +7610,15 @@ mod tests {
     fn test_truthiness() {
         let evaluator = Evaluator::new();
 
-        assert!(!evaluator.is_truthy(&Value::Null));
-        assert!(!evaluator.is_truthy(&Value::Bool(false)));
-        assert!(evaluator.is_truthy(&Value::Bool(true)));
-        assert!(!evaluator.is_truthy(&serde_json::json!(0)));
-        assert!(evaluator.is_truthy(&serde_json::json!(1)));
-        assert!(!evaluator.is_truthy(&Value::String("".to_string())));
-        assert!(evaluator.is_truthy(&Value::String("hello".to_string())));
-        assert!(!evaluator.is_truthy(&Value::Array(vec![])));
-        assert!(evaluator.is_truthy(&serde_json::json!([1, 2, 3])));
+        assert!(!evaluator.is_truthy(&JValue::Null));
+        assert!(!evaluator.is_truthy(&JValue::Bool(false)));
+        assert!(evaluator.is_truthy(&JValue::Bool(true)));
+        assert!(!evaluator.is_truthy(&JValue::from(0i64)));
+        assert!(evaluator.is_truthy(&JValue::from(1i64)));
+        assert!(!evaluator.is_truthy(&JValue::string("".to_string())));
+        assert!(evaluator.is_truthy(&JValue::string("hello".to_string())));
+        assert!(!evaluator.is_truthy(&JValue::array(vec![])));
+        assert!(evaluator.is_truthy(&JValue::from(serde_json::json!([1, 2, 3]))));
     }
 
     #[test]
@@ -7102,109 +7626,106 @@ mod tests {
         use crate::parser::parse;
 
         let mut evaluator = Evaluator::new();
-        let data = serde_json::json!({
+        let data = JValue::from(serde_json::json!({
             "price": 10,
             "quantity": 5
-        });
-
+        }));
         // Test simple path
         let ast = parse("price").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, serde_json::json!(10));
+        assert_eq!(result, JValue::from(10i64));
 
         // Test arithmetic
         let ast = parse("price * quantity").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
         // Note: Arithmetic operations produce f64 results in JSON
-        assert_eq!(result, serde_json::json!(50.0));
+        assert_eq!(result, JValue::Number(50.0));
 
         // Test comparison
         let ast = parse("price > 5").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, JValue::Bool(true));
     }
 
     #[test]
     fn test_evaluate_dollar_function_uppercase() {
         use crate::parser::parse;
-        use serde_json::json;
 
         let mut evaluator = Evaluator::new();
         let ast = parse(r#"$uppercase("hello")"#).unwrap();
-        let result = evaluator.evaluate(&ast, &json!({})).unwrap();
-        assert_eq!(result, json!("HELLO"));
+        let empty = JValue::object(IndexMap::new());
+        let result = evaluator.evaluate(&ast, &empty).unwrap();
+        assert_eq!(result, JValue::string("HELLO"));
     }
 
     #[test]
     fn test_evaluate_dollar_function_sum() {
         use crate::parser::parse;
-        use serde_json::json;
 
         let mut evaluator = Evaluator::new();
         let ast = parse("$sum([1, 2, 3, 4, 5])").unwrap();
-        let result = evaluator.evaluate(&ast, &json!({})).unwrap();
-        assert_eq!(result, json!(15.0));
+        let empty = JValue::object(IndexMap::new());
+        let result = evaluator.evaluate(&ast, &empty).unwrap();
+        assert_eq!(result, JValue::Number(15.0));
     }
 
     #[test]
     fn test_evaluate_nested_dollar_functions() {
         use crate::parser::parse;
-        use serde_json::json;
 
         let mut evaluator = Evaluator::new();
         let ast = parse(r#"$length($lowercase("HELLO"))"#).unwrap();
-        let result = evaluator.evaluate(&ast, &json!({})).unwrap();
+        let empty = JValue::object(IndexMap::new());
+        let result = evaluator.evaluate(&ast, &empty).unwrap();
         // length() returns an integer, not a float
-        assert_eq!(result, json!(5));
+        assert_eq!(result, JValue::Number(5.0));
     }
 
     #[test]
     fn test_array_mapping() {
         use crate::parser::parse;
-        use serde_json::json;
 
         let mut evaluator = Evaluator::new();
-        let data = json!({
+        let data: JValue = serde_json::from_str(r#"{
             "products": [
                 {"id": 1, "name": "Laptop", "price": 999.99},
                 {"id": 2, "name": "Mouse", "price": 29.99},
                 {"id": 3, "name": "Keyboard", "price": 79.99}
             ]
-        });
+        }"#).map(|v: serde_json::Value| JValue::from(v)).unwrap();
 
         // Test mapping over array to extract field
         let ast = parse("products.name").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, json!(["Laptop", "Mouse", "Keyboard"]));
+        assert_eq!(result, JValue::array(vec![JValue::string("Laptop"), JValue::string("Mouse"), JValue::string("Keyboard")]));
 
         // Test mapping over array to extract prices
         let ast = parse("products.price").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, json!([999.99, 29.99, 79.99]));
+        assert_eq!(result, JValue::array(vec![JValue::Number(999.99), JValue::Number(29.99), JValue::Number(79.99)]));
 
         // Test with $sum function on mapped array
         let ast = parse("$sum(products.price)").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, json!(1109.97));
+        assert_eq!(result, JValue::Number(1109.97));
     }
 
     #[test]
     fn test_empty_brackets() {
         use crate::parser::parse;
-        use serde_json::json;
 
         let mut evaluator = Evaluator::new();
 
         // Test empty brackets on simple value - should wrap in array
-        let data = json!({"foo": "bar"});
+        let data: JValue = JValue::from(serde_json::json!({"foo": "bar"}));
         let ast = parse("foo[]").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, json!(["bar"]), "Empty brackets should wrap value in array");
+        assert_eq!(result, JValue::array(vec![JValue::string("bar")]), "Empty brackets should wrap value in array");
 
         // Test empty brackets on array - should return array as-is
-        let data2 = json!({"arr": [1, 2, 3]});
+        let data2: JValue = JValue::from(serde_json::json!({"arr": [1, 2, 3]}));
         let ast2 = parse("arr[]").unwrap();
         let result2 = evaluator.evaluate(&ast2, &data2).unwrap();
-        assert_eq!(result2, json!([1, 2, 3]), "Empty brackets should preserve array");
+        assert_eq!(result2, JValue::array(vec![JValue::Number(1.0), JValue::Number(2.0), JValue::Number(3.0)]), "Empty brackets should preserve array");
     }
 }

@@ -82,9 +82,12 @@ jsonatapy/
 │   │   ├── test_functions.py
 │   │   └── test_compatibility.py
 │   ├── rust/              # Rust unit tests (in src/ with #[cfg(test)])
-│   └── jsonata-suite/     # Reference JS test suite (git submodule)
-├── benches/               # Performance benchmarks
-│   └── benchmark.rs
+│   └── jsonata-js/        # Reference JS test suite (git submodule)
+├── benchmarks/            # Performance benchmarks
+│   ├── python/            # Python benchmark scripts
+│   ├── javascript/        # JS comparison benchmarks
+│   ├── rust/              # Rust benchmarks
+│   └── results/           # Benchmark results
 ├── docs/                  # Documentation
 │   ├── source/            # Sphinx docs
 │   └── api/               # API reference

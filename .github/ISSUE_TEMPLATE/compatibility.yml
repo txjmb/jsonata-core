@@ -1,0 +1,182 @@
+name: Compatibility Issue
+description: Report behavior that differs from the JavaScript JSONata reference implementation
+title: "[Compatibility]: "
+labels: ["compatibility", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping ensure jsonatapy maintains 100% compatibility with the JSONata specification!
+
+        This template is for reporting cases where jsonatapy behaves differently from the JavaScript
+        reference implementation (jsonata-js). For other bugs, please use the Bug Report template.
+
+  - type: input
+    id: jsonata-js-version
+    attributes:
+      label: JSONata-JS Version
+      description: Which version of the JavaScript JSONata implementation did you test against?
+      placeholder: "e.g., 2.0.5, 1.8.6"
+    validations:
+      required: true
+
+  - type: input
+    id: jsonatapy-version
+    attributes:
+      label: jsonatapy Version
+      description: Which version of jsonatapy are you using?
+      placeholder: "e.g., 0.1.0, 1.2.3, or 'main' branch"
+    validations:
+      required: true
+
+  - type: textarea
+    id: test-case
+    attributes:
+      label: Test Case
+      description: The JSONata expression and input data that produces different results
+      placeholder: |
+        **JSONata Expression:**
+        ```javascript
+        $.products[price > 100].{
+          "name": name,
+          "discount": price * 0.1
+        }
+        ```
+
+        **Input Data:**
+        ```json
+        {
+          "products": [
+            {"name": "Widget", "price": 150},
+            {"name": "Gadget", "price": 50}
+          ]
+        }
+        ```
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: js-behavior
+    attributes:
+      label: JavaScript JSONata Behavior (Expected)
+      description: What result does the JavaScript implementation produce?
+      placeholder: |
+        Result from jsonata-js:
+        ```json
+        [
+          {"name": "Widget", "discount": 15}
+        ]
+        ```
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: py-behavior
+    attributes:
+      label: jsonatapy Behavior (Actual)
+      description: What result does jsonatapy produce?
+      placeholder: |
+        Result from jsonatapy:
+        ```json
+        [
+          {"name": "Widget", "discount": 15.0}
+        ]
+        ```
+
+        Or if there's an error:
+        ```
+        ValueError: ...
+        ```
+      render: markdown
+    validations:
+      required: true
+
+  - type: input
+    id: reference-link
+    attributes:
+      label: JSONata Reference Link
+      description: Link to relevant JSONata documentation or specification
+      placeholder: "e.g., https://docs.jsonata.org/path-operators or https://try.jsonata.org/..."
+
+  - type: textarea
+    id: test-suite-reference
+    attributes:
+      label: Reference Test Suite
+      description: Is this covered by a test in the official JSONata test suite?
+      placeholder: |
+        Example:
+        - Test group: "object-constructor"
+        - Test case: "test #15"
+        - Location: tests/jsonata-suite/groups/object-constructor.jsonata
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Impact Severity
+      description: How significant is this incompatibility?
+      options:
+        - Critical - Produces completely wrong results
+        - High - Produces incorrect results in common use cases
+        - Medium - Edge case with incorrect results
+        - Low - Minor formatting or type difference
+        - Cosmetic - Insignificant difference (e.g., whitespace)
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Reproduction Steps
+      description: Step-by-step instructions to reproduce the incompatibility
+      placeholder: |
+        **JavaScript (jsonata-js):**
+        1. Install: `npm install jsonata`
+        2. Run:
+           ```javascript
+           const jsonata = require('jsonata');
+           const expr = jsonata('...');
+           const result = expr.evaluate({...});
+           console.log(result);
+           ```
+
+        **Python (jsonatapy):**
+        1. Install: `pip install jsonatapy`
+        2. Run:
+           ```python
+           import jsonatapy
+           expr = jsonatapy.compile('...')
+           result = expr.evaluate({...})
+           print(result)
+           ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other information that might be helpful
+      placeholder: |
+        - Related GitHub issues or discussions
+        - Upstream JSONata issue references
+        - Performance implications
+        - Breaking change considerations
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify the following before submitting
+      options:
+        - label: I have tested this with the latest version of both jsonata-js and jsonatapy
+          required: true
+        - label: I have verified the behavior using https://try.jsonata.org/
+          required: false
+        - label: I have searched for similar compatibility issues and found none
+          required: true
+        - label: I am willing to help implement a fix for this issue
+          required: false
+        - label: I am willing to add test cases to prevent regression
+          required: false

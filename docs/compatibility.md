@@ -11,7 +11,7 @@ The jsonatapy project includes a comprehensive test adapter that runs the comple
 - **Total Test Cases**: 1,273+
 - **Test Groups**: 102
 - **Datasets**: 28 shared input data files
-- **Source**: Official jsonata-js repository (v2.1.0)
+- **Source**: Official jsonata-js repository (v2.1.0) at `tests/jsonata-js/`
 
 ## Current Compatibility Status
 

@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc, TimeZone, NaiveDate, Datelike, Timelike};
 use regex::Regex;
-use serde_json::Value;
+use crate::value::JValue;
 use thiserror::Error;
 
 /// Compiled regex for ISO 8601 partial format parsing (compiled once on first use)
@@ -82,10 +82,10 @@ pub fn parse_iso8601_partial(s: &str) -> Result<i64, DateTimeError> {
         let utc_dt = Utc.from_utc_datetime(&naive);
         let millis = utc_dt.timestamp_millis() - (tz_offset_minutes as i64 * 60 * 1000);
 
-        return Ok(millis);
+        Ok(millis)
+    } else {
+        Err(DateTimeError::ParseError("premature end of input".to_string()))
     }
-
-    Err(DateTimeError::ParseError("premature end of input".to_string()))
 }
 
 /// Format a datetime as ISO 8601 string
@@ -96,28 +96,28 @@ pub fn format_iso8601(dt: &DateTime<Utc>) -> String {
 }
 
 /// $now() - Get current timestamp
-pub fn now() -> Value {
+pub fn now() -> JValue {
     let now = Utc::now();
-    Value::String(format_iso8601(&now))
+    JValue::string(format_iso8601(&now))
 }
 
 /// $millis() - Get milliseconds since epoch
-pub fn millis() -> Value {
+pub fn millis() -> JValue {
     let now = Utc::now();
-    Value::Number(now.timestamp_millis().into())
+    JValue::Number(now.timestamp_millis() as f64)
 }
 
 /// $toMillis(timestamp) - Convert ISO 8601 timestamp to milliseconds since epoch
-pub fn to_millis(timestamp: &str) -> Result<Value, DateTimeError> {
+pub fn to_millis(timestamp: &str) -> Result<JValue, DateTimeError> {
     let millis = parse_iso8601_partial(timestamp)?;
-    Ok(Value::Number(millis.into()))
+    Ok(JValue::Number(millis as f64))
 }
 
 /// $toMillis(timestamp, picture) - Convert formatted timestamp to milliseconds since epoch
 /// Supports format descriptors like [Y0001][M01][D01]
-pub fn to_millis_with_picture(timestamp: &str, picture: &str) -> Result<Value, DateTimeError> {
+pub fn to_millis_with_picture(timestamp: &str, picture: &str) -> Result<JValue, DateTimeError> {
     let millis = parse_datetime_with_picture(timestamp, picture)?;
-    Ok(Value::Number(millis.into()))
+    Ok(JValue::Number(millis as f64))
 }
 
 /// Parse a datetime string using a format picture
@@ -149,14 +149,10 @@ pub fn parse_datetime_with_picture(timestamp: &str, picture: &str) -> Result<i64
     let millis = parsed.millis.unwrap_or(0);
 
     // Handle 12-hour format with AM/PM
-    let hour = if let Some(period) = parsed.period {
-        if period == 1 { // PM
-            if hour == 12 { hour } else { hour + 12 }
-        } else { // AM
-            if hour == 12 { 0 } else { hour }
-        }
-    } else {
-        hour
+    let hour = match parsed.period {
+        Some(1) => if hour == 12 { 12 } else { hour + 12 },  // PM
+        Some(_) => if hour == 12 { 0 } else { hour },         // AM
+        None => hour,
     };
 
     // Create UTC datetime
@@ -299,23 +295,23 @@ fn parse_with_components(timestamp: &str, components: &[PictureComponent]) -> Re
 }
 
 /// $fromMillis(millis) - Convert milliseconds since epoch to ISO 8601 timestamp
-pub fn from_millis(millis: i64) -> Result<Value, DateTimeError> {
+pub fn from_millis(millis: i64) -> Result<JValue, DateTimeError> {
     let dt = Utc.timestamp_millis_opt(millis)
         .single()
         .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {}", millis)))?;
 
-    Ok(Value::String(format_iso8601(&dt)))
+    Ok(JValue::string(format_iso8601(&dt)))
 }
 
 /// $fromMillis(millis, picture) - Convert milliseconds to formatted timestamp
 #[allow(dead_code)]
-pub fn from_millis_with_picture(millis: i64, picture: &str) -> Result<Value, DateTimeError> {
+pub fn from_millis_with_picture(millis: i64, picture: &str) -> Result<JValue, DateTimeError> {
     let dt = Utc.timestamp_millis_opt(millis)
         .single()
         .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {}", millis)))?;
 
     let formatted = format_datetime_with_picture(&dt, picture)?;
-    Ok(Value::String(formatted))
+    Ok(JValue::string(formatted))
 }
 
 /// Format a datetime using a picture string
@@ -359,46 +355,46 @@ mod tests {
     #[test]
     fn test_now() {
         let result = now();
-        assert!(matches!(result, Value::String(_)));
+        assert!(matches!(result, JValue::String(_)));
     }
 
     #[test]
     fn test_millis() {
         let result = millis();
-        assert!(matches!(result, Value::Number(_)));
+        assert!(matches!(result, JValue::Number(_)));
     }
 
     #[test]
     fn test_to_millis() {
         let result = to_millis("1970-01-01T00:00:00.001Z").unwrap();
-        assert_eq!(result, Value::Number(1.into()));
+        assert_eq!(result, JValue::Number(1.0));
     }
 
     #[test]
     fn test_to_millis_partial_date() {
         // Test date only
         let result = to_millis("2017-10-30").unwrap();
-        assert_eq!(result, Value::Number(1509321600000_i64.into()));
+        assert_eq!(result, JValue::Number(1509321600000_i64 as f64));
 
         // Test year only
         let result = to_millis("2018").unwrap();
-        assert_eq!(result, Value::Number(1514764800000_i64.into()));
+        assert_eq!(result, JValue::Number(1514764800000_i64 as f64));
     }
 
     #[test]
     fn test_to_millis_with_picture() {
         // Test custom format
         let result = to_millis_with_picture("201802", "[Y0001][M01]").unwrap();
-        assert_eq!(result, Value::Number(1517443200000_i64.into()));
+        assert_eq!(result, JValue::Number(1517443200000_i64 as f64));
 
         // Test full date format
         let result = to_millis_with_picture("20180205", "[Y0001][M01][D01]").unwrap();
-        assert_eq!(result, Value::Number(1517788800000_i64.into()));
+        assert_eq!(result, JValue::Number(1517788800000_i64 as f64));
     }
 
     #[test]
     fn test_from_millis() {
         let result = from_millis(1).unwrap();
-        assert!(matches!(result, Value::String(_)));
+        assert!(matches!(result, JValue::String(_)));
     }
 }

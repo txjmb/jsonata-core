@@ -23,7 +23,7 @@ This directory contains the complete test suite for jsonatapy, including integra
 ### Reference Test Suite (1,258+ test cases)
 - `test_reference_suite.py` - Adapter for JSONata reference tests
 - `conftest.py` - Pytest configuration and reporting
-- Tests load from `../jsonata-suite/test/test-suite/`
+- Tests load from `../jsonata-js/test/test-suite/`
 
 ## Running Tests
 
@@ -186,7 +186,7 @@ pytest tests/python/test_reference_suite.py::test_reference_suite[group/case000]
 
 Look at the JSON file:
 ```bash
-cat tests/jsonata-suite/test/test-suite/groups/group/case000.json
+cat tests/jsonata-js/test/test-suite/groups/group/case000.json
 ```
 
 ### 3. Test expression in Python
@@ -196,7 +196,7 @@ import jsonatapy
 import json
 
 # Load dataset
-with open('tests/jsonata-suite/test/test-suite/datasets/dataset0.json') as f:
+with open('tests/jsonata-js/test/test-suite/datasets/dataset0.json') as f:
     data = json.load(f)
 
 # Test expression
@@ -208,7 +208,7 @@ print(result)
 ### 4. Compare with JavaScript reference
 
 ```bash
-cd tests/jsonata-suite
+cd tests/jsonata-js
 npm install
 node -e "
 const jsonata = require('jsonata');
@@ -265,10 +265,10 @@ The reference suite is automatically loaded and run. To update:
 
 ```bash
 # Update submodule to latest
-cd tests/jsonata-suite
+cd tests/jsonata-js
 git pull origin master
 cd ../..
-git add tests/jsonata-suite
+git add tests/jsonata-js
 git commit -m "Update reference test suite"
 ```
 
@@ -285,7 +285,7 @@ git submodule status
 git submodule update --init --recursive
 
 # Verify test files exist
-ls tests/jsonata-suite/test/test-suite/groups/
+ls tests/jsonata-js/test/test-suite/groups/
 ```
 
 ### Import error

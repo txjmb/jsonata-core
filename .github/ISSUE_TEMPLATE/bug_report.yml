@@ -1,0 +1,141 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in jsonatapy
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us investigate and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the bug you encountered
+    validations:
+      required: true
+
+  - type: textarea
+    id: jsonata-expression
+    attributes:
+      label: JSONata Expression
+      description: The JSONata expression that produces the bug
+      placeholder: |
+        Example:
+        $.products[price > 100].name
+      render: javascript
+    validations:
+      required: true
+
+  - type: textarea
+    id: input-data
+    attributes:
+      label: Input Data
+      description: The JSON input data used with the expression
+      placeholder: |
+        {
+          "products": [
+            {"name": "Widget", "price": 150},
+            {"name": "Gadget", "price": 50}
+          ]
+        }
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: |
+        Example:
+        Should return ["Widget"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+      placeholder: |
+        Example:
+        Raises ValueError: ...
+        or
+        Returns ["Gadget"] instead
+    validations:
+      required: true
+
+  - type: input
+    id: jsonatapy-version
+    attributes:
+      label: jsonatapy Version
+      description: What version of jsonatapy are you using?
+      placeholder: "e.g., 0.1.0, 1.2.3, or 'main' branch"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: What version of Python are you using?
+      placeholder: "e.g., 3.11.5, 3.12.1"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: What OS are you running?
+      placeholder: "e.g., Ubuntu 22.04, Windows 11, macOS 14.2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the issue
+      placeholder: |
+        1. Install jsonatapy with `pip install jsonatapy`
+        2. Run the following code:
+           ```python
+           import jsonatapy
+           expr = jsonatapy.compile("...")
+           result = expr.evaluate({...})
+           ```
+        3. Observe the error/incorrect result
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: |
+        Any other context about the problem. For example:
+        - Does it work correctly in the JavaScript JSONata implementation?
+        - Stack traces or error messages
+        - Screenshots
+        - Links to related issues or discussions
+      placeholder: Add any other context here
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify the following before submitting
+      options:
+        - label: I have searched for similar issues and found none
+          required: true
+        - label: I have tested this with the latest version of jsonatapy
+          required: false
+        - label: I have verified this works differently in the JavaScript JSONata implementation
+          required: false
+        - label: I am willing to submit a pull request to fix this issue
+          required: false

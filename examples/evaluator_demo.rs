@@ -12,6 +12,7 @@
 // - Arrays and objects
 
 use jsonatapy::{parser::parse, evaluator::Evaluator};
+use jsonatapy::value::JValue;
 use serde_json::json;
 
 fn main() {
@@ -45,7 +46,7 @@ fn main() {
 fn demo_path_traversal() {
     println!("--- Path Traversal ---");
 
-    let data = json!({
+    let data: JValue = json!({
         "user": {
             "name": "Alice",
             "address": {
@@ -53,7 +54,7 @@ fn demo_path_traversal() {
                 "zip": "10001"
             }
         }
-    });
+    }).into();
 
     let examples = vec![
         "user.name",
@@ -79,11 +80,11 @@ fn demo_path_traversal() {
 fn demo_arithmetic() {
     println!("--- Arithmetic Operations ---");
 
-    let data = json!({
+    let data: JValue = json!({
         "price": 100,
         "quantity": 5,
         "tax_rate": 0.1
-    });
+    }).into();
 
     let examples = vec![
         "price + 10",
@@ -112,10 +113,10 @@ fn demo_arithmetic() {
 fn demo_comparisons() {
     println!("--- Comparison Operations ---");
 
-    let data = json!({
+    let data: JValue = json!({
         "age": 25,
         "threshold": 18
-    });
+    }).into();
 
     let examples = vec![
         "age > threshold",
@@ -143,10 +144,10 @@ fn demo_comparisons() {
 fn demo_logical() {
     println!("--- Logical Operations ---");
 
-    let data = json!({
+    let data: JValue = json!({
         "age": 25,
         "has_license": true
-    });
+    }).into();
 
     let examples = vec![
         "age > 18 and has_license",
@@ -172,10 +173,10 @@ fn demo_logical() {
 fn demo_strings() {
     println!("--- String Operations ---");
 
-    let data = json!({
+    let data: JValue = json!({
         "first_name": "Alice",
         "last_name": "Smith"
-    });
+    }).into();
 
     let examples = vec![
         r#"first_name & " " & last_name"#,
@@ -200,10 +201,10 @@ fn demo_strings() {
 fn demo_functions() {
     println!("--- Function Calls ---");
 
-    let data = json!({
+    let data: JValue = json!({
         "name": "alice",
         "numbers": [1, 2, 3, 4, 5]
-    });
+    }).into();
 
     let examples = vec![
         "uppercase(name)",
@@ -231,9 +232,9 @@ fn demo_functions() {
 fn demo_conditionals() {
     println!("--- Conditional Expressions ---");
 
-    let data = json!({
+    let data: JValue = json!({
         "score": 85
-    });
+    }).into();
 
     let examples = vec![
         r#"score >= 90 ? "A" : (score >= 80 ? "B" : "C")"#,
@@ -258,7 +259,7 @@ fn demo_conditionals() {
 fn demo_complex() {
     println!("--- Complex Example: E-commerce Order ---");
 
-    let data = json!({
+    let data: JValue = json!({
         "order": {
             "id": "ORD-123",
             "items": [
@@ -275,7 +276,7 @@ fn demo_complex() {
                 "cost": 15
             }
         }
-    });
+    }).into();
 
     println!("Data: {}\n", serde_json::to_string_pretty(&data).unwrap());
 

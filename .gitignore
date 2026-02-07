@@ -1,19 +1,25 @@
-# Rust
-/target/
-Cargo.lock
-**/*.rs.bk
-*.pdb
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
+# Build artifacts
 *.so
+*.dylib
+*.dll
+*.pdb
 *.egg-info/
 dist/
 build/
 .eggs/
 *.egg
+
+# Rust
+/target/
+Cargo.lock
+**/*.rs.bk
+target/criterion/
+benchmarks/rust/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
 .pytest_cache/
 .coverage
 htmlcov/
@@ -21,30 +27,41 @@ htmlcov/
 .ruff_cache/
 
 # Virtual environments
+.venv/
 venv/
 env/
 ENV/
-.venv
+.venv-wsl/
 
-# IDEs
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
+Thumbs.db
 
 # Documentation builds
 docs/_build/
 docs/api/
 
-# Benchmarking
-target/criterion/
+# Test/benchmark outputs
+test-suite-report.json
+test-suite-run.log
+benchmarks/results/*.json
+benchmarks/charts/*.png
+
+# Node (in benchmark subdirectories)
+node_modules/
+benchmarks/javascript/node_modules/
+benchmarks/javascript/package-lock.json
 
 # Test artifacts
-# tests/jsonata-suite/ - Now a git submodule, don't ignore
+# tests/jsonata-js/ - Now a git submodule, don't ignore
 
 # Temporary files
 *.tmp
 *.bak
-.venv-wsl/

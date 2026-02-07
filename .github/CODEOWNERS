@@ -1,0 +1,71 @@
+# CODEOWNERS for jsonatapy
+#
+# This file defines code ownership for automatic review requests.
+# Lines starting with '#' are comments.
+# Each line is a file pattern followed by one or more owners.
+#
+# Learn more about CODEOWNERS:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+# This is a fallback and will be used for files not matching any pattern below
+* @jsonatapy-maintainers
+
+# Rust source code
+/src/ @jsonatapy-maintainers @rust-team
+/src/evaluator.rs @jsonatapy-maintainers @rust-team @core-team
+/src/parser.rs @jsonatapy-maintainers @rust-team @core-team
+/src/value.rs @jsonatapy-maintainers @rust-team @core-team
+/src/functions.rs @jsonatapy-maintainers @rust-team
+/src/datetime.rs @jsonatapy-maintainers @rust-team
+/src/signature.rs @jsonatapy-maintainers @rust-team
+
+# Python bindings and API
+/python/ @jsonatapy-maintainers @python-team
+/python/jsonatapy/__init__.py @jsonatapy-maintainers @python-team @api-team
+
+# Build configuration
+/Cargo.toml @jsonatapy-maintainers @rust-team
+/pyproject.toml @jsonatapy-maintainers @python-team
+/maturin.toml @jsonatapy-maintainers @rust-team @python-team
+
+# Tests
+/tests/ @jsonatapy-maintainers @test-team
+/tests/python/ @jsonatapy-maintainers @python-team @test-team
+/tests/integration_test.rs @jsonatapy-maintainers @rust-team @test-team
+/tests/jsonata-suite/ @jsonatapy-maintainers @test-team
+
+# Benchmarks and performance
+/benchmarks/ @jsonatapy-maintainers @performance-team
+/benches/ @jsonatapy-maintainers @performance-team @rust-team
+
+# Documentation
+/docs/ @jsonatapy-maintainers @docs-team
+/README.md @jsonatapy-maintainers @docs-team
+/CLAUDE.md @jsonatapy-maintainers
+/CONTRIBUTING.md @jsonatapy-maintainers @docs-team
+/CODE_OF_CONDUCT.md @jsonatapy-maintainers
+/SECURITY.md @jsonatapy-maintainers @security-team
+
+# CI/CD and GitHub workflows
+/.github/ @jsonatapy-maintainers @devops-team
+/.github/workflows/ @jsonatapy-maintainers @devops-team @ci-team
+/.github/dependabot.yml @jsonatapy-maintainers @devops-team
+
+# Issue and PR templates
+/.github/ISSUE_TEMPLATE/ @jsonatapy-maintainers @docs-team
+/.github/PULL_REQUEST_TEMPLATE.md @jsonatapy-maintainers @docs-team
+/.github/CODEOWNERS @jsonatapy-maintainers
+
+# Examples
+/examples/ @jsonatapy-maintainers @docs-team
+
+# License
+/LICENSE @jsonatapy-maintainers
+
+# Configuration files
+/.gitignore @jsonatapy-maintainers
+/.gitmodules @jsonatapy-maintainers @test-team
+/.editorconfig @jsonatapy-maintainers
+/rustfmt.toml @jsonatapy-maintainers @rust-team
+/clippy.toml @jsonatapy-maintainers @rust-team

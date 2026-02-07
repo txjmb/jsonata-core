@@ -1,0 +1,124 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for jsonatapy
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! Please provide as much detail as possible to help us understand and evaluate your request.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature Description
+      description: A clear and concise description of the feature you'd like to see
+      placeholder: Describe the feature you're proposing
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case / Motivation
+      description: Why do you need this feature? What problem does it solve?
+      placeholder: |
+        Example:
+        I'm working with large datasets and need to apply transformations in parallel.
+        Currently, this requires writing custom Python code, but it would be more
+        elegant to have this built into jsonatapy.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this feature to work? Include API examples if applicable.
+      placeholder: |
+        Example:
+        Add a new function `$parallel` that accepts an array and a lambda:
+
+        ```javascript
+        $parallel(items, function($item) {
+          /* transformation */
+        })
+        ```
+
+        Python API:
+        ```python
+        import jsonatapy
+        expr = jsonatapy.compile("$parallel(...)")
+        result = expr.evaluate(data)
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What alternative solutions or workarounds have you considered?
+      placeholder: |
+        Example:
+        - Writing custom Python code to parallelize (verbose, loses JSONata elegance)
+        - Using multiple jsonatapy expressions (inefficient, hard to maintain)
+        - Switching to a different library (loses other jsonatapy benefits)
+
+  - type: input
+    id: jsonata-reference
+    attributes:
+      label: JSONata Reference
+      description: Does this feature exist in the JavaScript JSONata implementation?
+      placeholder: "e.g., 'Yes, in version 2.0.0' or 'No, this is a new proposal' or 'Link to JS implementation'"
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Feature Type
+      description: What type of feature is this?
+      options:
+        - New built-in function
+        - New language syntax
+        - Performance optimization
+        - API enhancement
+        - Developer tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: upstream-alignment
+    attributes:
+      label: Upstream Alignment
+      description: Should this feature be proposed to upstream JSONata first?
+      options:
+        - "Yes - This should be in the JSONata specification"
+        - "No - This is specific to the Python implementation"
+        - "Unsure - Needs discussion"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: |
+        Any other context, screenshots, code examples, or links that would help understand the feature request.
+      placeholder: Add any other context here
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify the following before submitting
+      options:
+        - label: I have searched for similar feature requests and found none
+          required: true
+        - label: I have checked if this exists in the JavaScript JSONata implementation
+          required: true
+        - label: I am willing to contribute to implementing this feature
+          required: false
+        - label: I am willing to help test this feature once implemented
+          required: false

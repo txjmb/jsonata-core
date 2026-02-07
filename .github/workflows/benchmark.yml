@@ -1,0 +1,475 @@
+name: Performance Benchmarks
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'benchmarks/**'
+      - '.github/workflows/benchmark.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'benchmarks/**'
+  schedule:
+    # Run weekly on Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+    inputs:
+      full_benchmark:
+        description: 'Run full benchmark suite (longer iterations)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  pages: write
+  id-token: write
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    outputs:
+      results_file: ${{ steps.run_benchmark.outputs.results_file }}
+      regression_detected: ${{ steps.compare.outputs.regression_detected }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: benchmarks/package.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Python dependencies
+        run: |
+          uv pip install --system maturin rich matplotlib pandas
+
+      - name: Install JavaScript dependencies
+        run: |
+          cd benchmarks
+          npm install
+
+      - name: Build jsonatapy (optimized)
+        run: |
+          maturin build --release --out dist
+          uv pip install --system --find-links dist jsonatapy
+
+      - name: Verify installation
+        run: |
+          python -c "import jsonatapy; print(f'jsonatapy version: {jsonatapy.__version__}')"
+          node -e "const jsonata = require('jsonata'); console.log('jsonata installed');"
+
+      - name: Run benchmark suite
+        id: run_benchmark
+        env:
+          FULL_BENCHMARK: ${{ github.event.inputs.full_benchmark }}
+        run: |
+          cd benchmarks
+
+          # Run benchmarks
+          if [ "$FULL_BENCHMARK" = "true" ]; then
+            python python/benchmark.py --iterations 5000
+          else
+            python python/benchmark.py
+          fi
+
+          # Find the latest results file
+          RESULTS_FILE=$(ls -t results/benchmark_results_*.json | head -1)
+          echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
+          echo "Benchmark results saved to: $RESULTS_FILE"
+
+      - name: Generate enhanced report
+        run: |
+          cd benchmarks
+          python python/enhanced_report.py
+
+      - name: Download baseline (main branch)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          mkdir -p benchmarks/baseline
+
+          # Try to download from gh-pages branch
+          git fetch origin gh-pages:gh-pages 2>/dev/null || true
+
+          if git show gh-pages:benchmark-results/latest.json > benchmarks/baseline/baseline.json 2>/dev/null; then
+            echo "Baseline results downloaded from gh-pages"
+          else
+            echo "No baseline results found"
+          fi
+
+      - name: Compare with baseline
+        id: compare
+        if: github.event_name == 'pull_request' && hashFiles('benchmarks/baseline/baseline.json') != ''
+        run: |
+          cd benchmarks
+
+          # Create comparison script
+          cat > compare.py << 'EOF'
+          import json
+          import sys
+
+          with open('baseline/baseline.json') as f:
+              baseline = json.load(f)
+
+          results_file = sys.argv[1]
+          with open(results_file) as f:
+              current = json.load(f)
+
+          # Compare results
+          regressions = []
+          improvements = []
+
+          for curr_result in current['results']:
+              name = curr_result['name']
+              # Find matching baseline
+              baseline_result = next((r for r in baseline['results'] if r['name'] == name), None)
+
+              if baseline_result and curr_result.get('jsonatapy_ms') and baseline_result.get('jsonatapy_ms'):
+                  curr_time = curr_result['jsonatapy_ms']
+                  base_time = baseline_result['jsonatapy_ms']
+                  change_pct = ((curr_time - base_time) / base_time) * 100
+
+                  if change_pct > 10:  # 10% slower
+                      regressions.append({
+                          'name': name,
+                          'baseline_ms': base_time,
+                          'current_ms': curr_time,
+                          'change_pct': change_pct
+                      })
+                  elif change_pct < -10:  # 10% faster
+                      improvements.append({
+                          'name': name,
+                          'baseline_ms': base_time,
+                          'current_ms': curr_time,
+                          'change_pct': change_pct
+                      })
+
+          # Output results
+          print(f"Found {len(regressions)} regressions and {len(improvements)} improvements")
+
+          if regressions:
+              print("\n⚠️ Performance Regressions Detected:")
+              for r in regressions:
+                  print(f"  - {r['name']}: {r['baseline_ms']:.2f}ms → {r['current_ms']:.2f}ms ({r['change_pct']:+.1f}%)")
+
+          if improvements:
+              print("\n✅ Performance Improvements:")
+              for i in improvements:
+                  print(f"  - {i['name']}: {i['baseline_ms']:.2f}ms → {i['current_ms']:.2f}ms ({i['change_pct']:+.1f}%)")
+
+          # Save for PR comment
+          with open('comparison.json', 'w') as f:
+              json.dump({
+                  'regressions': regressions,
+                  'improvements': improvements
+              }, f, indent=2)
+
+          # Set output
+          if regressions:
+              print("regression_detected=true")
+              with open('$GITHUB_OUTPUT', 'a') as f:
+                  f.write("regression_detected=true\n")
+          EOF
+
+          python compare.py "${{ steps.run_benchmark.outputs.results_file }}"
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmarks/results/*.json
+            benchmarks/results/*.png
+            benchmarks/comparison.json
+          retention-days: 90
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const resultsFile = '${{ steps.run_benchmark.outputs.results_file }}';
+            const results = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
+
+            // Calculate summary statistics
+            const jsImplemented = results.implementations.javascript || false;
+            const allResults = results.results.filter(r => r.jsonatapy_speedup !== null);
+            const fasterCount = allResults.filter(r => r.jsonatapy_speedup > 1.0).length;
+            const slowerCount = allResults.filter(r => r.jsonatapy_speedup < 1.0).length;
+            const avgSpeedup = allResults.reduce((sum, r) => sum + r.jsonatapy_speedup, 0) / allResults.length;
+
+            // Load comparison if available
+            let comparisonText = '';
+            try {
+              const comparison = JSON.parse(fs.readFileSync('benchmarks/comparison.json', 'utf8'));
+              if (comparison.regressions.length > 0 || comparison.improvements.length > 0) {
+                comparisonText = '\n## 📊 Comparison with Baseline\n\n';
+
+                if (comparison.regressions.length > 0) {
+                  comparisonText += '### ⚠️ Performance Regressions (>10% slower)\n\n';
+                  comparisonText += '| Test | Baseline | Current | Change |\n';
+                  comparisonText += '|------|----------|---------|--------|\n';
+                  for (const r of comparison.regressions) {
+                    comparisonText += `| ${r.name} | ${r.baseline_ms.toFixed(2)}ms | ${r.current_ms.toFixed(2)}ms | **${r.change_pct.toFixed(1)}%** |\n`;
+                  }
+                  comparisonText += '\n';
+                }
+
+                if (comparison.improvements.length > 0) {
+                  comparisonText += '### ✅ Performance Improvements (>10% faster)\n\n';
+                  comparisonText += '| Test | Baseline | Current | Change |\n';
+                  comparisonText += '|------|----------|---------|--------|\n';
+                  for (const i of comparison.improvements) {
+                    comparisonText += `| ${i.name} | ${i.baseline_ms.toFixed(2)}ms | ${i.current_ms.toFixed(2)}ms | **${i.change_pct.toFixed(1)}%** |\n`;
+                  }
+                }
+              }
+            } catch (e) {
+              // No comparison file
+            }
+
+            // Get top performers
+            const topFastest = allResults
+              .filter(r => r.jsonatapy_speedup > 1.0)
+              .sort((a, b) => b.jsonatapy_speedup - a.jsonatapy_speedup)
+              .slice(0, 5);
+
+            const topSlowest = allResults
+              .filter(r => r.jsonatapy_speedup < 1.0)
+              .sort((a, b) => a.jsonatapy_speedup - b.jsonatapy_speedup)
+              .slice(0, 5);
+
+            const body = `## ⚡ Benchmark Results
+
+            **Overall Performance:** ${avgSpeedup.toFixed(2)}x average speedup vs JavaScript
+
+            - ✅ **Faster:** ${fasterCount}/${allResults.length} tests
+            - ⚠️ **Slower:** ${slowerCount}/${allResults.length} tests
+
+            ${comparisonText}
+
+            ### 🏆 Top 5 Fastest Operations
+
+            | Test | Category | Speedup |
+            |------|----------|---------|
+            ${topFastest.map(r => `| ${r.name} | ${r.category} | **${r.jsonatapy_speedup.toFixed(2)}x** |`).join('\n')}
+
+            ### 🐌 Top 5 Areas for Optimization
+
+            | Test | Category | Speedup |
+            |------|----------|---------|
+            ${topSlowest.map(r => `| ${r.name} | ${r.category} | ${r.jsonatapy_speedup.toFixed(2)}x |`).join('\n')}
+
+            <details>
+            <summary>📈 View all results</summary>
+
+            | Test | Category | jsonatapy | JavaScript | Speedup |
+            |------|----------|-----------|------------|---------|
+            ${allResults.map(r =>
+              `| ${r.name} | ${r.category} | ${r.jsonatapy_ms.toFixed(2)}ms | ${r.js_ms.toFixed(2)}ms | ${r.jsonatapy_speedup.toFixed(2)}x |`
+            ).join('\n')}
+
+            </details>
+
+            ---
+            *Benchmark results are automatically posted on every PR. Charts and detailed analysis available in workflow artifacts.*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes('Benchmark Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Fail on regression
+        if: steps.compare.outputs.regression_detected == 'true'
+        run: |
+          echo "::error::Performance regression detected (>10% slower on some tests)"
+          echo "Review the PR comment for details."
+          exit 1
+
+      - name: Add job summary
+        if: always()
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # Benchmark Results 📊
+
+          Benchmark suite completed successfully!
+
+          ## Artifacts
+
+          - 📁 **benchmark-results** - JSON results and performance charts
+          - 📊 Charts generated: speedup_comparison.png, category_comparison.png
+
+          ## Next Steps
+
+          - Review the benchmark results in the artifacts
+          - For PRs, check the automated comment for performance comparison
+          - Charts are available for visual analysis
+
+          EOF
+
+  publish-results:
+    name: Publish Results to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Download benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results
+          path: results
+
+      - name: Update results
+        run: |
+          mkdir -p gh-pages/benchmark-results
+
+          # Copy latest results
+          cp results/*.json gh-pages/benchmark-results/
+          cp results/*.png gh-pages/benchmark-results/ 2>/dev/null || true
+
+          # Create a 'latest' symlink
+          LATEST=$(ls -t results/benchmark_results_*.json | head -1)
+          cp "$LATEST" gh-pages/benchmark-results/latest.json
+
+          # Create index with historical results
+          cd gh-pages/benchmark-results
+
+          cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>jsonatapy Benchmark Results</title>
+            <style>
+              body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+              h1 { color: #2563eb; }
+              .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+              .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; }
+              .card h3 { margin-top: 0; color: #1f2937; }
+              img { max-width: 100%; height: auto; }
+            </style>
+          </head>
+          <body>
+            <h1>jsonatapy Performance Benchmarks</h1>
+            <p>Automated benchmark results tracking jsonatapy performance over time.</p>
+
+            <h2>Latest Results</h2>
+            <div class="results">
+              <div class="card">
+                <h3>Speedup Comparison</h3>
+                <img src="speedup_comparison.png" alt="Speedup Comparison">
+              </div>
+              <div class="card">
+                <h3>Category Comparison</h3>
+                <img src="category_comparison.png" alt="Category Comparison">
+              </div>
+            </div>
+
+            <h2>Historical Data</h2>
+            <ul id="results-list"></ul>
+
+            <script>
+              // List all JSON files
+              fetch('.')
+                .then(res => res.text())
+                .then(html => {
+                  const parser = new DOMParser();
+                  const doc = parser.parseFromString(html, 'text/html');
+                  const links = Array.from(doc.querySelectorAll('a'))
+                    .map(a => a.href)
+                    .filter(href => href.endsWith('.json') && href.includes('benchmark_results_'))
+                    .sort()
+                    .reverse();
+
+                  const list = document.getElementById('results-list');
+                  links.forEach(link => {
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = link;
+                    a.textContent = link.split('/').pop();
+                    li.appendChild(a);
+                    list.appendChild(li);
+                  });
+                });
+            </script>
+          </body>
+          </html>
+          EOF
+
+      - name: Commit and push
+        run: |
+          cd gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Update benchmark results - $(date -I)" || echo "No changes"
+          git push

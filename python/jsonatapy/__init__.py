@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional
 
 from ._jsonatapy import (
     JsonataExpression as _JsonataExpression,
+    JsonataData as _JsonataData,
     compile as _compile,
     evaluate as _evaluate,
     __version__,
@@ -29,9 +30,51 @@ __all__ = [
     "compile",
     "evaluate",
     "JsonataExpression",
+    "JsonataData",
     "__version__",
     "__jsonata_version__",
 ]
+
+
+class JsonataData:
+    """
+    Pre-converted data handle for efficient repeated evaluation.
+
+    Convert Python data to an internal representation once, then reuse it
+    across multiple evaluations to avoid repeated Python-to-Rust conversion overhead.
+
+    Example:
+        >>> data = JsonataData({"orders": [{"price": 150}, {"price": 50}]})
+        >>> expr = compile("orders[price > 100]")
+        >>> result = expr.evaluate_with_data(data)
+    """
+
+    def __init__(self, data: Any) -> None:
+        """
+        Create a JsonataData handle from a Python object.
+
+        Args:
+            data: The data to pre-convert (typically a dict or list)
+        """
+        self._data = _JsonataData(data)
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "JsonataData":
+        """
+        Create a JsonataData handle from a JSON string (fastest path).
+
+        Args:
+            json_str: Input data as a JSON string
+
+        Returns:
+            A JsonataData handle
+
+        Raises:
+            ValueError: If the JSON string is invalid
+        """
+        obj = cls.__new__(cls)
+        obj._data = _JsonataData.from_json(json_str)
+        return obj
 
 
 class JsonataExpression:
@@ -117,6 +160,58 @@ class JsonataExpression:
             due to avoiding the Python↔Rust object conversion overhead.
         """
         return self._expr.evaluate_json(json_str, bindings)
+
+    def evaluate_with_data(
+        self, data: "JsonataData", bindings: Optional[Dict[str, Any]] = None
+    ) -> Any:
+        """
+        Evaluate with pre-converted data (fastest for repeated evaluation).
+
+        Args:
+            data: A JsonataData handle (pre-converted data)
+            bindings: Optional additional variable bindings
+
+        Returns:
+            The result of evaluating the expression
+
+        Raises:
+            ValueError: If evaluation fails
+
+        Example:
+            >>> data = JsonataData({"orders": [{"price": 150}, {"price": 50}]})
+            >>> expr = compile("orders[price > 100]")
+            >>> result = expr.evaluate_with_data(data)
+        """
+        return self._expr.evaluate_with_data(data._data, bindings)
+
+    def evaluate_data_to_json(
+        self, data: "JsonataData", bindings: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Evaluate with pre-converted data, return JSON string (zero-overhead output).
+
+        This is the fastest evaluation path: no Python-to-Rust conversion on input
+        (data is pre-converted), and no Rust-to-Python conversion on output (returns
+        a JSON string).
+
+        Args:
+            data: A JsonataData handle (pre-converted data)
+            bindings: Optional additional variable bindings
+
+        Returns:
+            The result as a JSON string
+
+        Raises:
+            ValueError: If evaluation fails
+
+        Example:
+            >>> import json
+            >>> data = JsonataData.from_json('{"orders": [{"price": 150}, {"price": 50}]}')
+            >>> expr = compile("orders[price > 100]")
+            >>> result_str = expr.evaluate_data_to_json(data)
+            >>> result = json.loads(result_str)
+        """
+        return self._expr.evaluate_data_to_json(data._data, bindings)
 
     @classmethod
     def compile(cls, expression: str) -> "JsonataExpression":

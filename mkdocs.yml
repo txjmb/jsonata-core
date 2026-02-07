@@ -1,0 +1,135 @@
+site_name: jsonatapy
+site_description: High-performance Python implementation of JSONata - JSON query and transformation language
+site_author: jsonatapy contributors
+site_url: https://github.com/jsonata-js/jsonatapy
+
+repo_name: jsonatapy
+repo_url: https://github.com/jsonata-js/jsonatapy
+edit_uri: edit/master/docs/
+
+copyright: Copyright &copy; 2024-2026 jsonatapy contributors
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [python]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_category_heading: true
+            members_order: source
+            group_by_category: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.arithmatex:
+      generic: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - Quick Start: usage.md
+      - Examples: examples.md
+  - User Guide:
+      - API Reference: api.md
+      - JSONata Language: jsonata-language.md
+      - Error Handling: error-handling.md
+  - Performance:
+      - Performance Overview: performance.md
+      - Benchmarks: benchmarks.md
+      - Optimization Tips: optimization-tips.md
+  - Compatibility:
+      - Compatibility Status: compatibility.md
+      - Migration from JS: migration-from-js.md
+      - Migration from jsonata-python: migration-from-jsonata-python.md
+  - Development:
+      - Building from Source: development/building.md
+      - Parser Details: development/parser.md
+      - Contributing: development/contributing.md
+      - Testing: development/testing.md
+      - Architecture: development/architecture.md
+  - About:
+      - Changelog: changelog.md
+      - License: license.md
+      - Credits: credits.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/jsonata-js/jsonatapy
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/jsonatapy/
+  version:
+    provider: mike
+  analytics:
+    provider: google
+    property: !ENV GOOGLE_ANALYTICS_KEY
+
+extra_css:
+  - stylesheets/extra.css
+
+watch:
+  - python/jsonatapy

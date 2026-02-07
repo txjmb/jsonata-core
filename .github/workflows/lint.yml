@@ -1,0 +1,491 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  rust-format:
+    name: Rust Formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --all -- --check
+
+          if [ $? -ne 0 ]; then
+            echo "## ❌ Rust Formatting Issues Found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Run \`cargo fmt\` to fix formatting issues." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "## ✅ Rust Formatting Passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  rust-clippy:
+    name: Rust Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Clippy
+        run: |
+          cargo clippy --all-targets --all-features -- -D warnings 2>&1 | tee clippy-output.txt
+          CLIPPY_EXIT=${PIPESTATUS[0]}
+
+          if [ $CLIPPY_EXIT -ne 0 ]; then
+            echo "## ❌ Clippy Found Issues" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            tail -n 50 clippy-output.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "## ✅ Clippy Passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Clippy results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-results
+          path: clippy-output.txt
+          retention-days: 30
+
+  python-format:
+    name: Python Formatting (Black)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Black
+        run: pip install black
+
+      - name: Check Python formatting
+        run: |
+          black --check python/ tests/ benchmarks/ 2>&1 | tee black-output.txt
+          BLACK_EXIT=${PIPESTATUS[0]}
+
+          if [ $BLACK_EXIT -ne 0 ]; then
+            echo "## ❌ Black Formatting Issues Found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Run \`black python/ tests/ benchmarks/\` to fix formatting." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            cat black-output.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "## ✅ Black Formatting Passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  python-ruff:
+    name: Python Linting (Ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run Ruff check
+        run: |
+          ruff check python/ tests/ benchmarks/ --output-format github 2>&1 | tee ruff-output.txt
+          RUFF_EXIT=${PIPESTATUS[0]}
+
+          if [ $RUFF_EXIT -ne 0 ]; then
+            echo "## ❌ Ruff Found Issues" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            cat ruff-output.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "## ✅ Ruff Passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Ruff results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruff-results
+          path: ruff-output.txt
+          retention-days: 30
+
+  python-mypy:
+    name: Python Type Checking (mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install mypy pytest types-all
+
+      - name: Run mypy
+        continue-on-error: true
+        run: |
+          mypy python/ --strict --pretty 2>&1 | tee mypy-output.txt
+          MYPY_EXIT=${PIPESTATUS[0]}
+
+          if [ $MYPY_EXIT -ne 0 ]; then
+            echo "## ⚠️ mypy Found Type Issues" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            cat mypy-output.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            # Don't fail - type hints are being improved
+          else
+            echo "## ✅ mypy Passed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload mypy results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mypy-results
+          path: mypy-output.txt
+          retention-days: 30
+
+  commit-message:
+    name: Commit Message Format
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit messages
+        run: |
+          # Get commits in PR
+          git fetch origin ${{ github.base_ref }}
+          COMMITS=$(git log --pretty=format:"%s" origin/${{ github.base_ref }}..HEAD)
+
+          echo "Checking commit messages for conventional commit format..."
+          echo ""
+
+          FAIL=0
+          while IFS= read -r commit; do
+            # Check if commit follows conventional commit format
+            if echo "$commit" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?: .+"; then
+              echo "✅ $commit"
+            else
+              echo "❌ $commit"
+              FAIL=1
+            fi
+          done <<< "$COMMITS"
+
+          if [ $FAIL -eq 1 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## ❌ Commit Message Format Issues" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Commits should follow the [Conventional Commits](https://www.conventionalcommits.org/) format:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "type(scope): description" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Examples:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`feat: Add new evaluation function\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`fix(parser): Handle edge case in tokenization\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`docs: Update README with examples\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "## ✅ All Commit Messages Follow Convention" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  spell-check:
+    name: Spell Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install codespell
+        run: pip install codespell
+
+      - name: Run spell check
+        continue-on-error: true
+        run: |
+          # Check documentation and comments
+          codespell \
+            --skip=".git,*.lock,target,node_modules,.venv,dist" \
+            --ignore-words-list="crate,ser,ba,nd,te" \
+            README.md CLAUDE.md docs/ python/ src/ \
+            2>&1 | tee codespell-output.txt
+
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "## ⚠️ Potential Spelling Issues Found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            cat codespell-output.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            # Don't fail - just warn
+          fi
+
+  file-size-check:
+    name: File Size Limits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check file sizes
+        run: |
+          echo "Checking for files larger than 500KB..."
+
+          LARGE_FILES=$(find . -type f \
+            -not -path "./.git/*" \
+            -not -path "./target/*" \
+            -not -path "./node_modules/*" \
+            -not -path "./.venv/*" \
+            -not -path "./dist/*" \
+            -not -path "*/benchmark_results_*.json" \
+            -size +500k)
+
+          if [ -n "$LARGE_FILES" ]; then
+            echo "## ⚠️ Large Files Detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The following files are larger than 500KB:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$LARGE_FILES" | while read -r file; do
+              SIZE=$(du -h "$file" | cut -f1)
+              echo "$file - $SIZE"
+            done >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Consider:" >> $GITHUB_STEP_SUMMARY
+            echo "- Using Git LFS for large binary files" >> $GITHUB_STEP_SUMMARY
+            echo "- Compressing assets" >> $GITHUB_STEP_SUMMARY
+            echo "- Storing large test data externally" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ No Large Files Found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  todo-check:
+    name: Check for TODO/FIXME
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for TODO/FIXME in main
+        run: |
+          # Find TODO/FIXME in source files
+          TODOS=$(grep -rn "TODO\|FIXME" src/ python/ --include="*.rs" --include="*.py" || true)
+
+          if [ -n "$TODOS" ]; then
+            echo "## ⚠️ TODO/FIXME Found in Main Branch" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Consider creating issues for these items:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$TODOS" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            # Don't fail - just notify
+          fi
+
+  code-coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Generate coverage
+        run: |
+          cargo tarpaulin \
+            --out xml \
+            --out html \
+            --output-dir coverage \
+            --exclude-files "target/*" \
+            --timeout 300
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Comment coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Read coverage XML and extract percentage (simplified)
+            try {
+              const xml = fs.readFileSync('coverage/cobertura.xml', 'utf8');
+              const match = xml.match(/line-rate="([0-9.]+)"/);
+              const coverage = match ? (parseFloat(match[1]) * 100).toFixed(2) : 'N/A';
+
+              const body = `## 📊 Code Coverage
+
+              **Coverage:** ${coverage}%
+
+              Full coverage report available in workflow artifacts.`;
+
+              github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            } catch (e) {
+              console.log('Could not read coverage data');
+            }
+
+  lint-summary:
+    name: Lint Summary
+    runs-on: ubuntu-latest
+    needs: [rust-format, rust-clippy, python-format, python-ruff, python-mypy, spell-check, file-size-check]
+    if: always()
+    timeout-minutes: 5
+
+    steps:
+      - name: Create summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # Code Quality Summary 📋
+
+          ## Check Results
+
+          | Check | Status |
+          |-------|--------|
+          | Rust Formatting | ${{ needs.rust-format.result == 'success' && '✅ Passed' || '❌ Failed' }} |
+          | Rust Clippy | ${{ needs.rust-clippy.result == 'success' && '✅ Passed' || '❌ Failed' }} |
+          | Python Formatting (Black) | ${{ needs.python-format.result == 'success' && '✅ Passed' || '❌ Failed' }} |
+          | Python Linting (Ruff) | ${{ needs.python-ruff.result == 'success' && '✅ Passed' || '❌ Failed' }} |
+          | Python Type Checking (mypy) | ${{ needs.python-mypy.result == 'success' && '✅ Passed' || '⚠️ Issues' }} |
+          | Spell Check | ${{ needs.spell-check.result == 'success' && '✅ Passed' || '⚠️ Issues' }} |
+          | File Size Check | ${{ needs.file-size-check.result == 'success' && '✅ Passed' || '⚠️ Large files' }} |
+
+          ## Quick Fixes
+
+          ```bash
+          # Fix Rust formatting
+          cargo fmt
+
+          # Fix Python formatting
+          black python/ tests/ benchmarks/
+
+          # Auto-fix Ruff issues
+          ruff check --fix python/ tests/ benchmarks/
+
+          # Run all checks locally
+          cargo fmt && cargo clippy --fix --allow-dirty
+          black python/ tests/ benchmarks/
+          ruff check --fix python/ tests/ benchmarks/
+          ```
+
+          ---
+
+          *Review failed checks above for detailed error messages.*
+          EOF
+
+      - name: Check required jobs
+        run: |
+          # Fail if any required job failed
+          if [ "${{ needs.rust-format.result }}" != "success" ] || \
+             [ "${{ needs.rust-clippy.result }}" != "success" ] || \
+             [ "${{ needs.python-format.result }}" != "success" ] || \
+             [ "${{ needs.python-ruff.result }}" != "success" ]; then
+            echo "::error::One or more required linting checks failed"
+            exit 1
+          fi

@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional, Tuple
 
 # Load all datasets once at module level
 DATASETS: Dict[str, Any] = {}
-DATASET_DIR = Path(__file__).parent.parent / "jsonata-suite/test/test-suite/datasets"
+DATASET_DIR = Path(__file__).parent.parent / "jsonata-js/test/test-suite/datasets"
 
 if DATASET_DIR.exists():
     for dataset_file in DATASET_DIR.glob("*.json"):
@@ -27,13 +27,13 @@ if DATASET_DIR.exists():
 
 def load_test_cases() -> List[Tuple[str, str, Dict[str, Any]]]:
     """
-    Load all test cases from jsonata-suite test groups.
+    Load all test cases from jsonata-js test groups.
 
     Returns:
         List of tuples: (test_id, group_name, test_spec)
     """
     test_cases = []
-    groups_dir = Path(__file__).parent.parent / "jsonata-suite/test/test-suite/groups"
+    groups_dir = Path(__file__).parent.parent / "jsonata-js/test/test-suite/groups"
 
     if not groups_dir.exists():
         print(f"Warning: Test suite directory not found: {groups_dir}")
@@ -117,7 +117,7 @@ def test_reference_suite(test_id: str, group_name: str, spec: Dict[str, Any]):
     # Handle expr-file for tests that load expression from external file (e.g., comment tests)
     if expr is None and "expr-file" in spec:
         expr_file = spec["expr-file"]
-        groups_dir = Path(__file__).parent.parent / "jsonata-suite/test/test-suite/groups"
+        groups_dir = Path(__file__).parent.parent / "jsonata-js/test/test-suite/groups"
         expr_file_path = groups_dir / group_name / expr_file
         try:
             with open(expr_file_path, encoding='utf-8') as f:

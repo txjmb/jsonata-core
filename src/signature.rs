@@ -1,7 +1,7 @@
 // Function signature validation and type checking
 // Mirrors signature.js from the reference implementation
 
-use serde_json::Value;
+use crate::value::JValue;
 use thiserror::Error;
 
 /// Signature validation errors
@@ -54,19 +54,17 @@ impl ParamType {
     }
 
     /// Check if a value matches this type
-    pub fn matches(&self, value: &Value) -> bool {
+    pub fn matches(&self, value: &JValue) -> bool {
         match (self, value) {
             (ParamType::Any, _) => true,
-            (ParamType::Null, Value::Null) => true,
-            (ParamType::String, Value::String(_)) => true,
-            (ParamType::Number, Value::Number(_)) => true,
-            (ParamType::Boolean, Value::Bool(_)) => true,
-            (ParamType::Object, Value::Object(_)) => true,
-            (ParamType::Function(_), Value::Object(map)) => {
-                // Functions are represented as objects with special markers
-                map.contains_key("__lambda__") || map.contains_key("__builtin__")
-            }
-            (ParamType::Array(elem_type), Value::Array(arr)) => {
+            (ParamType::Null, JValue::Null) => true,
+            (ParamType::String, JValue::String(_)) => true,
+            (ParamType::Number, JValue::Number(_)) => true,
+            (ParamType::Boolean, JValue::Bool(_)) => true,
+            (ParamType::Object, JValue::Object(_)) => true,
+            (ParamType::Function(_), JValue::Lambda { .. }) |
+            (ParamType::Function(_), JValue::Builtin { .. }) => true,
+            (ParamType::Array(elem_type), JValue::Array(arr)) => {
                 if let Some(expected_elem) = elem_type {
                     // Check all elements match the expected type
                     arr.iter().all(|v| expected_elem.matches(v))
@@ -83,17 +81,6 @@ impl ParamType {
         }
     }
 
-    /// Check if this is a function type
-    #[allow(dead_code)]
-    pub fn is_function(&self) -> bool {
-        matches!(self, ParamType::Function(_))
-    }
-
-    /// Check if this is an array type
-    #[allow(dead_code)]
-    pub fn is_array(&self) -> bool {
-        matches!(self, ParamType::Array(_))
-    }
 }
 
 /// Function parameter definition
@@ -308,19 +295,13 @@ impl Signature {
         Ok(())
     }
 
-    /// Validate argument types (non-coercing version for simple type checking)
-    #[allow(dead_code)]
-    pub fn validate_args(&self, args: &[Value]) -> Result<(), SignatureError> {
-        self.validate_and_coerce(args).map(|_| ())
-    }
-
     /// Validate and coerce arguments according to signature rules
     ///
     /// Like the JavaScript implementation, this:
     /// - Wraps non-array values in arrays when expecting array type
     /// - Checks array element types when specified
     /// - Returns the validated (and possibly coerced) arguments
-    pub fn validate_and_coerce(&self, args: &[Value]) -> Result<Vec<Value>, SignatureError> {
+    pub fn validate_and_coerce(&self, args: &[JValue]) -> Result<Vec<JValue>, SignatureError> {
         // Check argument count first
         self.validate_arg_count(args.len())?;
 
@@ -330,13 +311,13 @@ impl Signature {
         for (i, (param, arg)) in self.params.iter().zip(args.iter()).enumerate() {
             // Special case: if argument is null (undefined), return UndefinedArgument
             // This allows the caller to decide whether to return undefined or error
-            if matches!(arg, Value::Null) && !matches!(param.param_type, ParamType::Null | ParamType::Any) {
+            if matches!(arg, JValue::Null) && !matches!(param.param_type, ParamType::Null | ParamType::Any) {
                 return Err(SignatureError::UndefinedArgument);
             }
 
             // Handle array coercion: any value can be coerced to an array
             if let ParamType::Array(elem_type) = &param.param_type {
-                let arr = if let Value::Array(arr) = arg {
+                let arr = if let JValue::Array(arr) = arg {
                     // Already an array - check element types if specified
                     if let Some(expected_elem) = elem_type {
                         if !arr.is_empty() && !arr.iter().all(|v| expected_elem.matches(v)) {
@@ -359,7 +340,7 @@ impl Signature {
                         }
                     }
                     // Wrap the value in an array
-                    Value::Array(vec![arg.clone()])
+                    JValue::array(vec![arg.clone()])
                 };
                 coerced_args.push(arr);
                 continue;
@@ -392,7 +373,7 @@ impl Signature {
             ParamType::Any => "Any".to_string(),
             ParamType::Null => "Null".to_string(),
             ParamType::Union(types) => {
-                let names: Vec<_> = types.iter().map(|t| Self::type_name(t)).collect();
+                let names: Vec<_> = types.iter().map(Self::type_name).collect();
                 format!("({})", names.join(" or "))
             }
         }

@@ -1,0 +1,334 @@
+name: Sync JSONata Reference
+
+# Monitor jsonata-js releases and auto-update submodule
+# Creates branch and runs tests when new version detected
+
+on:
+  schedule:
+    # Check daily at 6 AM UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      target_version:
+        description: 'Specific JSONata version to sync (e.g., v2.1.0)'
+        required: false
+        type: string
+  repository_dispatch:
+    types: [jsonata-release]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  check-version:
+    name: Check for New JSONata Release
+    runs-on: ubuntu-latest
+    outputs:
+      has_update: ${{ steps.compare.outputs.has_update }}
+      current_version: ${{ steps.compare.outputs.current_version }}
+      latest_version: ${{ steps.compare.outputs.latest_version }}
+      current_full: ${{ steps.compare.outputs.current_full }}
+      latest_full: ${{ steps.compare.outputs.latest_full }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Get current JSONata version
+        id: current
+        run: |
+          cd tests/jsonata-js
+          CURRENT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "unknown")
+          CURRENT_VERSION=${CURRENT_TAG#v}
+          echo "tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current JSONata version: $CURRENT_VERSION"
+
+      - name: Get latest JSONata release
+        id: latest
+        run: |
+          if [ -n "${{ inputs.target_version }}" ]; then
+            LATEST_TAG="${{ inputs.target_version }}"
+          else
+            LATEST_TAG=$(curl -s https://api.github.com/repos/jsonata-js/jsonata/releases/latest | jq -r .tag_name)
+          fi
+          LATEST_VERSION=${LATEST_TAG#v}
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "Latest JSONata version: $LATEST_VERSION"
+
+      - name: Compare versions
+        id: compare
+        run: |
+          CURRENT="${{ steps.current.outputs.version }}"
+          LATEST="${{ steps.latest.outputs.version }}"
+
+          echo "current_version=$CURRENT" >> $GITHUB_OUTPUT
+          echo "latest_version=$LATEST" >> $GITHUB_OUTPUT
+          echo "current_full=${{ steps.current.outputs.tag }}" >> $GITHUB_OUTPUT
+          echo "latest_full=${{ steps.latest.outputs.tag }}" >> $GITHUB_OUTPUT
+
+          if [ "$CURRENT" != "$LATEST" ]; then
+            echo "has_update=true" >> $GITHUB_OUTPUT
+            echo "::notice::New JSONata version available: $LATEST (current: $CURRENT)"
+          else
+            echo "has_update=false" >> $GITHUB_OUTPUT
+            echo "::notice::Already at latest JSONata version: $CURRENT"
+          fi
+
+  update-and-test:
+    name: Update Submodule and Test
+    needs: check-version
+    if: needs.check-version.outputs.has_update == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Create sync branch
+        id: branch
+        run: |
+          BRANCH_NAME="sync/jsonata-${{ needs.check-version.outputs.latest_version }}"
+          echo "name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+
+          # Check if branch already exists
+          if git ls-remote --heads origin "$BRANCH_NAME" | grep -q "$BRANCH_NAME"; then
+            echo "Branch $BRANCH_NAME already exists, checking out"
+            git fetch origin "$BRANCH_NAME"
+            git checkout "$BRANCH_NAME"
+          else
+            echo "Creating new branch $BRANCH_NAME"
+            git checkout -b "$BRANCH_NAME"
+          fi
+
+      - name: Update submodule to new version
+        run: |
+          cd tests/jsonata-js
+          git fetch --tags
+          git checkout ${{ needs.check-version.outputs.latest_full }}
+          cd ../..
+          git add tests/jsonata-js
+
+          # Update .gitmodules if needed
+          git submodule update --remote tests/jsonata-js
+
+          git commit -m "chore: update jsonata-js submodule to ${{ needs.check-version.outputs.latest_full }}" || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build jsonatapy
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install maturin pytest
+          maturin develop --release
+
+      - name: Run reference test suite
+        id: test
+        continue-on-error: true
+        run: |
+          source .venv/bin/activate
+          pytest tests/python/test_reference_suite.py -v --tb=short --maxfail=50 > test_results.txt 2>&1 || true
+
+          # Extract test summary
+          PASSED=$(grep -oP '\d+(?= passed)' test_results.txt | tail -1 || echo "0")
+          FAILED=$(grep -oP '\d+(?= failed)' test_results.txt | tail -1 || echo "0")
+          TOTAL=$((PASSED + FAILED))
+
+          echo "passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+          if [ "$FAILED" -eq 0 ]; then
+            echo "result=success" >> $GITHUB_OUTPUT
+          else
+            echo "result=failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-jsonata-${{ needs.check-version.outputs.latest_version }}
+          path: test_results.txt
+
+      - name: Push branch
+        run: |
+          git push origin ${{ steps.branch.outputs.name }} || true
+
+      - name: Create success PR
+        if: steps.test.outputs.result == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --head ${{ steps.branch.outputs.name }} \
+            --title "chore: sync with JSONata ${{ needs.check-version.outputs.latest_version }}" \
+            --body "$(cat << 'EOF'
+          ## JSONata Reference Update
+
+          This PR updates the jsonata-js submodule to version **${{ needs.check-version.outputs.latest_version }}**.
+
+          ### Test Results ✅
+          - **All tests passing**: ${{ steps.test.outputs.passed }}/${{ steps.test.outputs.total }}
+          - **Compatibility**: 100%
+
+          ### Version Update
+          - Previous: `${{ needs.check-version.outputs.current_version }}`
+          - New: `${{ needs.check-version.outputs.latest_version }}`
+
+          ### Next Steps
+          After merging, create a new release:
+          - Version: `${{ needs.check-version.outputs.latest_version }}.0`
+          - Run: `gh workflow run release.yml -f version=${{ needs.check-version.outputs.latest_version }}.0`
+
+          ### Automated Changes
+          - Updated `tests/jsonata-js` submodule to `${{ needs.check-version.outputs.latest_full }}`
+
+          ---
+          🤖 This PR was automatically created by the sync-jsonata workflow.
+          EOF
+          )" \
+            --label "dependencies,automated" || echo "PR may already exist"
+
+      - name: Create compatibility issue
+        if: steps.test.outputs.result == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Compatibility: JSONata ${{ needs.check-version.outputs.latest_version }} - ${{ steps.test.outputs.failed }} tests failing" \
+            --label "compatibility,enhancement,help wanted" \
+            --body "$(cat << 'EOF'
+          ## New JSONata Release Detected
+
+          JSONata has released version **${{ needs.check-version.outputs.latest_version }}**.
+
+          ### Test Results ⚠️
+          - **Passing**: ${{ steps.test.outputs.passed }}/${{ steps.test.outputs.total }}
+          - **Failing**: ${{ steps.test.outputs.failed }}/${{ steps.test.outputs.total }}
+          - **Compatibility**: $(( (${{ steps.test.outputs.passed }} * 100) / ${{ steps.test.outputs.total }} ))%
+
+          ### Work Required
+          A sync branch has been created: `${{ steps.branch.outputs.name }}`
+
+          To work on this:
+          ```bash
+          git fetch origin
+          git checkout ${{ steps.branch.outputs.name }}
+          ```
+
+          ### Test Results
+          Full test output is available in the workflow artifacts.
+
+          ### Implementation Steps
+          1. Review failing tests in the artifact
+          2. Identify new features or changed behavior
+          3. Update implementation to match new behavior
+          4. Run tests: `pytest tests/python/test_reference_suite.py -v`
+          5. When all tests pass, update version to `${{ needs.check-version.outputs.latest_version }}.0`
+
+          ### Target Release
+          - Version: `${{ needs.check-version.outputs.latest_version }}.0`
+          - Compatibility: 100% (1258/1258 tests)
+
+          ### Resources
+          - JSONata Release: https://github.com/jsonata-js/jsonata/releases/tag/${{ needs.check-version.outputs.latest_full }}
+          - Sync Branch: `${{ steps.branch.outputs.name }}`
+          - Test Results: [Workflow Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+          🤖 This issue was automatically created by the sync-jsonata workflow.
+          EOF
+          )" || echo "Issue may already exist"
+
+      - name: Create draft PR for failing tests
+        if: steps.test.outputs.result == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --head ${{ steps.branch.outputs.name }} \
+            --title "[WIP] Sync with JSONata ${{ needs.check-version.outputs.latest_version }} (${{ steps.test.outputs.failed }} tests failing)" \
+            --draft \
+            --body "$(cat << 'EOF'
+          ## JSONata Reference Update (Work in Progress)
+
+          This PR tracks compatibility work for JSONata **${{ needs.check-version.outputs.latest_version }}**.
+
+          ### Test Results ⚠️
+          - **Passing**: ${{ steps.test.outputs.passed }}/${{ steps.test.outputs.total }}
+          - **Failing**: ${{ steps.test.outputs.failed }}/${{ steps.test.outputs.total }}
+          - **Compatibility**: $(( (${{ steps.test.outputs.passed }} * 100) / ${{ steps.test.outputs.total }} ))%
+
+          ### What's Needed
+          - [ ] Review failing tests
+          - [ ] Implement new features/changes
+          - [ ] All tests passing (1258/1258)
+          - [ ] Update CHANGELOG.md
+          - [ ] Update version to `${{ needs.check-version.outputs.latest_version }}.0`
+          - [ ] Ready for review
+
+          ### Test Results
+          See workflow artifacts for full test output.
+
+          ### Resources
+          - Related Issue: #(issue number)
+          - JSONata Release Notes: https://github.com/jsonata-js/jsonata/releases/tag/${{ needs.check-version.outputs.latest_full }}
+
+          ---
+          🤖 This draft PR was automatically created by the sync-jsonata workflow.
+          Remove draft status when ready for review.
+          EOF
+          )" \
+            --label "compatibility,work-in-progress" || echo "PR may already exist"
+
+  notify:
+    name: Notify Results
+    needs: [check-version, update-and-test]
+    if: always() && needs.check-version.outputs.has_update == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Summary
+        run: |
+          echo "### JSONata Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Current Version**: ${{ needs.check-version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Version**: ${{ needs.check-version.outputs.latest_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests Passed**: ${{ needs.update-and-test.outputs.passed || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests Failed**: ${{ needs.update-and-test.outputs.failed || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.update-and-test.outputs.result }}" == "success" ]; then
+            echo "✅ **All tests passing!** Ready to merge." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Some tests failing.** Implementation work needed." >> $GITHUB_STEP_SUMMARY
+          fi

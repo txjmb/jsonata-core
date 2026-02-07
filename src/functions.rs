@@ -1,7 +1,8 @@
 // Built-in function implementations
 // Mirrors functions.js from the reference implementation
 
-use serde_json::Value;
+use crate::value::JValue;
+use indexmap::IndexMap;
 use thiserror::Error;
 
 /// Function errors
@@ -17,29 +18,15 @@ pub enum FunctionError {
     RuntimeError(String),
 }
 
-/// Check if a Value is a function marker (lambda or builtin)
-pub fn is_function_value(value: &Value) -> bool {
-    if let Value::Object(obj) = value {
-        obj.contains_key("__lambda__") || obj.contains_key("__builtin__")
-    } else {
-        false
-    }
-}
-
 /// Built-in string functions
 pub mod string {
     use super::*;
     use regex::Regex;
 
-    /// Helper to detect and extract regex from a Value object
-    pub fn extract_regex(value: &Value) -> Option<(String, String)> {
-        if let Value::Object(obj) = value {
-            if obj.get("__jsonata_regex__") == Some(&Value::Bool(true)) {
-                if let (Some(Value::String(pattern)), Some(Value::String(flags))) =
-                    (obj.get("pattern"), obj.get("flags")) {
-                    return Some((pattern.clone(), flags.clone()));
-                }
-            }
+    /// Helper to detect and extract regex from a JValue
+    pub fn extract_regex(value: &JValue) -> Option<(String, String)> {
+        if let JValue::Regex { pattern, flags } = value {
+            return Some((pattern.to_string(), flags.to_string()));
         }
         None
     }
@@ -79,21 +66,19 @@ pub mod string {
     /// - non-finite numbers (Infinity, NaN) throw error D3001
     /// - other values use JSON.stringify with number precision
     /// - prettify=true uses 2-space indentation
-    pub fn string(value: &Value, prettify: Option<bool>) -> Result<Value, FunctionError> {
-        // Check if this is a function or undefined first (before checking other types)
-        if let Value::Object(obj) = value {
-            if obj.get("__undefined__") == Some(&Value::Bool(true)) {
-                return Ok(Value::String(String::new()));
-            }
-            if super::is_function_value(value) {
-                return Ok(Value::String(String::new()));
-            }
+    pub fn string(value: &JValue, prettify: Option<bool>) -> Result<JValue, FunctionError> {
+        // Check if this is undefined or a function first
+        if value.is_undefined() {
+            return Ok(JValue::string(""));
+        }
+        if value.is_function() {
+            return Ok(JValue::string(""));
         }
 
         let result = match value {
-            Value::String(s) => s.clone(),
-            Value::Number(n) => {
-                let f = n.as_f64().unwrap_or(0.0);
+            JValue::String(s) => s.to_string(),
+            JValue::Number(n) => {
+                let f = *n;
                 // Check for non-finite numbers (Infinity, NaN)
                 if !f.is_finite() {
                     return Err(FunctionError::RuntimeError(
@@ -102,28 +87,29 @@ pub mod string {
                 }
 
                 // Format numbers like JavaScript does
-                if let Some(i) = n.as_i64() {
-                    i.to_string()
+                if f.fract() == 0.0 && f.abs() < (i64::MAX as f64) {
+                    (f as i64).to_string()
                 } else {
                     // Non-integer - use precision formatting
                     // JavaScript uses toPrecision(15) for non-integers in JSON.stringify
                     format_number_with_precision(f)
                 }
             }
-            Value::Bool(b) => b.to_string(),
-            Value::Null => {
+            JValue::Bool(b) => b.to_string(),
+            JValue::Null => {
                 // Explicit null goes through JSON.stringify to become "null"
                 // Undefined variables are handled at the evaluator level
                 "null".to_string()
             }
-            Value::Array(_) | Value::Object(_) => {
+            JValue::Array(_) | JValue::Object(_) => {
                 // JSON.stringify with optional prettification
                 // Uses custom serialization to handle numbers and functions correctly
                 let indent = if prettify.unwrap_or(false) { Some(2) } else { None };
                 stringify_value_custom(value, indent)?
             }
+            _ => String::new(),
         };
-        Ok(Value::String(result))
+        Ok(JValue::string(result))
     }
 
     /// Helper to format a number with precision like JavaScript's toPrecision(15)
@@ -193,7 +179,7 @@ pub mod string {
     /// - Converts non-integer numbers to 15 significant figures
     /// - Keeps integers without decimal point
     /// - Converts functions to empty string
-    fn stringify_value_custom(value: &Value, indent: Option<usize>) -> Result<String, FunctionError> {
+    fn stringify_value_custom(value: &JValue, indent: Option<usize>) -> Result<String, FunctionError> {
         // Transform the value recursively before stringifying
         let transformed = transform_for_stringify(value);
 
@@ -208,55 +194,45 @@ pub mod string {
     }
 
     /// Transform a value for JSON.stringify, applying the replacer logic
-    fn transform_for_stringify(value: &Value) -> Value {
+    fn transform_for_stringify(value: &JValue) -> JValue {
         match value {
-            Value::Number(n) => {
+            JValue::Number(n) => {
+                let f = *n;
                 // Check if it's an integer first
-                if n.is_i64() || n.is_u64() {
-                    // Keep as integer - serde_json will serialize without .0
+                if f.fract() == 0.0 && f.is_finite() && f.abs() < (1i64 << 53) as f64 {
+                    // Keep as integer
                     value.clone()
                 } else {
-                    // Check if the f64 value is actually an integer
-                    let f = n.as_f64().unwrap_or(0.0);
-                    if f.fract() == 0.0 && f.is_finite() && f.abs() < (1i64 << 53) as f64 {
-                        // It's a whole number that can be represented as i64
-                        if let Some(i) = n.as_i64() {
-                            return Value::Number(i.into());
-                        }
-                    }
-
                     // Non-integer: apply toPrecision(15) and keep as f64
-                    // We don't parse back to avoid losing precision
                     let formatted = format_number_with_precision(f);
                     if let Ok(parsed) = formatted.parse::<f64>() {
-                        // Return as f64 but serde_json will format it nicely
-                        serde_json::json!(parsed)
+                        JValue::Number(parsed)
                     } else {
                         value.clone()
                     }
                 }
             }
-            Value::Array(arr) => {
-                let transformed: Vec<Value> = arr.iter().map(|v| {
-                    if super::is_function_value(v) {
-                        return Value::String(String::new());
+            JValue::Array(arr) => {
+                let transformed: Vec<JValue> = arr.iter().map(|v| {
+                    if v.is_function() {
+                        return JValue::string("");
                     }
                     transform_for_stringify(v)
                 }).collect();
-                Value::Array(transformed)
+                JValue::array(transformed)
             }
-            Value::Object(obj) => {
-                if super::is_function_value(value) {
-                    return Value::String(String::new());
+            JValue::Object(obj) => {
+                if value.is_function() {
+                    return JValue::string("");
                 }
 
-                let transformed: serde_json::Map<String, Value> = obj.iter().map(|(k, v)| {
-                    if super::is_function_value(v) {
-                        return (k.clone(), Value::String(String::new()));
+                let transformed: IndexMap<String, JValue> = obj.iter().map(|(k, v)| {
+                    if v.is_function() {
+                        return (k.clone(), JValue::string(""));
                     }
                     (k.clone(), transform_for_stringify(v))
                 }).collect();
-                Value::Object(transformed)
+                JValue::object(transformed)
             }
             _ => value.clone()
         }
@@ -264,23 +240,23 @@ pub mod string {
 
     /// $length() - Get string length with proper Unicode support
     /// Returns the number of Unicode characters (not bytes)
-    pub fn length(s: &str) -> Result<Value, FunctionError> {
-        Ok(Value::Number((s.chars().count() as i64).into()))
+    pub fn length(s: &str) -> Result<JValue, FunctionError> {
+        Ok(JValue::Number(s.chars().count() as f64))
     }
 
     /// $uppercase() - Convert to uppercase
-    pub fn uppercase(s: &str) -> Result<Value, FunctionError> {
-        Ok(Value::String(s.to_uppercase()))
+    pub fn uppercase(s: &str) -> Result<JValue, FunctionError> {
+        Ok(JValue::string(s.to_uppercase()))
     }
 
     /// $lowercase() - Convert to lowercase
-    pub fn lowercase(s: &str) -> Result<Value, FunctionError> {
-        Ok(Value::String(s.to_lowercase()))
+    pub fn lowercase(s: &str) -> Result<JValue, FunctionError> {
+        Ok(JValue::string(s.to_lowercase()))
     }
 
     /// $substring(str, start, length) - Extract substring
     /// Extracts a substring from a string using Unicode character positions
-    pub fn substring(s: &str, start: i64, length: Option<i64>) -> Result<Value, FunctionError> {
+    pub fn substring(s: &str, start: i64, length: Option<i64>) -> Result<JValue, FunctionError> {
         let chars: Vec<char> = s.chars().collect();
         let total_len = chars.len() as i64;
 
@@ -294,7 +270,7 @@ pub mod string {
         let end_pos = if let Some(len) = length {
             if len < 0 {
                 // Negative length returns empty string
-                return Ok(Value::String(String::new()));
+                return Ok(JValue::string(""));
             }
             (start_pos + len as usize).min(chars.len())
         } else {
@@ -302,31 +278,31 @@ pub mod string {
         };
 
         let result: String = chars[start_pos..end_pos].iter().collect();
-        Ok(Value::String(result))
+        Ok(JValue::string(result))
     }
 
     /// $substringBefore(str, separator) - Get substring before separator
-    pub fn substring_before(s: &str, separator: &str) -> Result<Value, FunctionError> {
+    pub fn substring_before(s: &str, separator: &str) -> Result<JValue, FunctionError> {
         if separator.is_empty() {
-            return Ok(Value::String(String::new()));
+            return Ok(JValue::string(""));
         }
 
         let result = s.split(separator).next().unwrap_or(s).to_string();
-        Ok(Value::String(result))
+        Ok(JValue::string(result))
     }
 
     /// $substringAfter(str, separator) - Get substring after separator
-    pub fn substring_after(s: &str, separator: &str) -> Result<Value, FunctionError> {
+    pub fn substring_after(s: &str, separator: &str) -> Result<JValue, FunctionError> {
         if separator.is_empty() {
-            return Ok(Value::String(s.to_string()));
+            return Ok(JValue::string(s));
         }
 
         if let Some(pos) = s.find(separator) {
             let result = s[pos + separator.len()..].to_string();
-            Ok(Value::String(result))
+            Ok(JValue::string(result))
         } else {
             // If separator not found, return the original string
-            Ok(Value::String(s.to_string()))
+            Ok(JValue::string(s))
         }
     }
 
@@ -334,52 +310,43 @@ pub mod string {
     ///
     /// Normalizes whitespace by replacing runs of whitespace characters (space, tab, newline, etc.)
     /// with a single space, then strips leading and trailing spaces.
-    pub fn trim(s: &str) -> Result<Value, FunctionError> {
+    pub fn trim(s: &str) -> Result<JValue, FunctionError> {
+        use std::sync::OnceLock;
         use regex::Regex;
 
-        // Normalize whitespace: replace runs of [ \t\n\r]+ with single space
-        let ws_regex = Regex::new(r"[ \t\n\r]+").unwrap();
-        let mut result = ws_regex.replace_all(s, " ").to_string();
+        static WS_REGEX: OnceLock<Regex> = OnceLock::new();
+        let ws_regex = WS_REGEX.get_or_init(|| Regex::new(r"[ \t\n\r]+").unwrap());
 
-        // Strip leading space
-        if result.starts_with(' ') {
-            result = result[1..].to_string();
-        }
-
-        // Strip trailing space
-        if result.ends_with(' ') {
-            result = result[..result.len()-1].to_string();
-        }
-
-        Ok(Value::String(result))
+        let normalized = ws_regex.replace_all(s, " ");
+        Ok(JValue::string(normalized.trim()))
     }
 
     /// $contains(str, pattern) - Check if string contains substring or matches regex
-    pub fn contains(s: &str, pattern: &Value) -> Result<Value, FunctionError> {
+    pub fn contains(s: &str, pattern: &JValue) -> Result<JValue, FunctionError> {
         // Check if pattern is a regex
         if let Some((pat, flags)) = extract_regex(pattern) {
             let re = build_regex(&pat, &flags)?;
-            return Ok(Value::Bool(re.is_match(s)));
+            return Ok(JValue::Bool(re.is_match(s)));
         }
 
         // Handle string pattern
         let pat = match pattern {
-            Value::String(s) => s.as_str(),
+            JValue::String(s) => &**s,
             _ => return Err(FunctionError::TypeError("contains() requires string arguments".to_string())),
         };
 
-        Ok(Value::Bool(s.contains(pat)))
+        Ok(JValue::Bool(s.contains(pat)))
     }
 
     /// $split(str, separator, limit) - Split string into array
     /// separator can be a string or a regex object
-    pub fn split(s: &str, separator: &Value, limit: Option<usize>) -> Result<Value, FunctionError> {
+    pub fn split(s: &str, separator: &JValue, limit: Option<usize>) -> Result<JValue, FunctionError> {
         // Check if separator is a regex
         if let Some((pattern, flags)) = extract_regex(separator) {
             let re = build_regex(&pattern, &flags)?;
 
-            let parts: Vec<Value> = re.split(s)
-                .map(|p| Value::String(p.to_string()))
+            let parts: Vec<JValue> = re.split(s)
+                .map(JValue::string)
                 .collect();
 
             // Truncate to limit if specified (limit is max number of results)
@@ -389,19 +356,19 @@ pub mod string {
                 parts
             };
 
-            return Ok(Value::Array(result));
+            return Ok(JValue::array(result));
         }
 
         // Handle string separator
         let sep = match separator {
-            Value::String(s) => s.as_str(),
+            JValue::String(s) => &**s,
             _ => return Err(FunctionError::TypeError("split() requires string arguments".to_string())),
         };
 
         if sep.is_empty() {
             // Split into individual characters
-            let chars: Vec<Value> = s.chars()
-                .map(|c| Value::String(c.to_string()))
+            let chars: Vec<JValue> = s.chars()
+                .map(|c| JValue::string(c.to_string()))
                 .collect();
             // Truncate to limit if specified
             let result = if let Some(lim) = limit {
@@ -409,11 +376,11 @@ pub mod string {
             } else {
                 chars
             };
-            return Ok(Value::Array(result));
+            return Ok(JValue::array(result));
         }
 
-        let parts: Vec<Value> = s.split(sep)
-            .map(|p| Value::String(p.to_string()))
+        let parts: Vec<JValue> = s.split(sep)
+            .map(JValue::string)
             .collect();
 
         // Truncate to limit if specified (limit is max number of results)
@@ -423,19 +390,19 @@ pub mod string {
             parts
         };
 
-        Ok(Value::Array(result))
+        Ok(JValue::array(result))
     }
 
     /// $join(array, separator) - Join array into string
-    pub fn join(arr: &[Value], separator: Option<&str>) -> Result<Value, FunctionError> {
+    pub fn join(arr: &[JValue], separator: Option<&str>) -> Result<JValue, FunctionError> {
         let sep = separator.unwrap_or("");
         let parts: Result<Vec<String>, FunctionError> = arr
             .iter()
             .map(|v| match v {
-                Value::String(s) => Ok(s.clone()),
-                Value::Number(n) => Ok(n.to_string()),
-                Value::Bool(b) => Ok(b.to_string()),
-                Value::Null => Ok(String::new()),
+                JValue::String(s) => Ok(s.to_string()),
+                JValue::Number(n) => Ok(format_join_number(*n)),
+                JValue::Bool(b) => Ok(b.to_string()),
+                JValue::Null => Ok(String::new()),
                 _ => Err(FunctionError::TypeError(
                     "Cannot join array containing objects or nested arrays".to_string(),
                 )),
@@ -443,7 +410,16 @@ pub mod string {
             .collect();
 
         let parts = parts?;
-        Ok(Value::String(parts.join(sep)))
+        Ok(JValue::string(parts.join(sep)))
+    }
+
+    /// Helper to format a number for $join (matching serde_json Number's Display)
+    fn format_join_number(n: f64) -> String {
+        if n.fract() == 0.0 && n.abs() < (i64::MAX as f64) {
+            (n as i64).to_string()
+        } else {
+            n.to_string()
+        }
     }
 
     /// Helper to perform capture group substitution in replacement string
@@ -551,10 +527,10 @@ pub mod string {
     /// $replace(str, pattern, replacement, limit) - Replace substring or regex matches
     pub fn replace(
         s: &str,
-        pattern: &Value,
+        pattern: &JValue,
         replacement: &str,
         limit: Option<usize>,
-    ) -> Result<Value, FunctionError> {
+    ) -> Result<JValue, FunctionError> {
         // Check if pattern is a regex
         if let Some((pat, flags)) = extract_regex(pattern) {
             let re = build_regex(&pat, &flags)?;
@@ -593,12 +569,12 @@ pub mod string {
             }
 
             output.push_str(&s[last_match..]);
-            return Ok(Value::String(output));
+            return Ok(JValue::string(output));
         }
 
         // Handle string pattern
         let pat = match pattern {
-            Value::String(s) => s.as_str(),
+            JValue::String(s) => &**s,
             _ => return Err(FunctionError::TypeError("replace() requires string arguments".to_string())),
         };
 
@@ -632,7 +608,7 @@ pub mod string {
             s.replace(pat, replacement)
         };
 
-        Ok(Value::String(result))
+        Ok(JValue::string(result))
     }
 }
 
@@ -650,39 +626,28 @@ pub mod boolean {
     /// - array: empty -> false; single element -> recursive; multi-element -> any truthy
     /// - object: empty -> false; non-empty -> true
     /// - function -> false
-    pub fn boolean(value: &Value) -> Result<Value, FunctionError> {
-        Ok(Value::Bool(to_boolean(value)))
+    pub fn boolean(value: &JValue) -> Result<JValue, FunctionError> {
+        Ok(JValue::Bool(to_boolean(value)))
     }
 
-    /// Helper function to recursively convert values to boolean
-    fn to_boolean(value: &Value) -> bool {
+    /// Helper function to recursively convert values to boolean.
+    fn to_boolean(value: &JValue) -> bool {
         match value {
-            Value::Null => false,
-            Value::Bool(b) => *b,
-            Value::Number(n) => {
-                let f = n.as_f64().unwrap_or(0.0);
-                f != 0.0
-            }
-            Value::String(s) => !s.is_empty(),
-            Value::Array(arr) => {
-                if arr.is_empty() {
-                    false
-                } else if arr.len() == 1 {
-                    // Single element: recursively evaluate
+            JValue::Null | JValue::Undefined => false,
+            JValue::Bool(b) => *b,
+            JValue::Number(n) => *n != 0.0,
+            JValue::String(s) => !s.is_empty(),
+            JValue::Array(arr) => {
+                if arr.len() == 1 {
                     to_boolean(&arr[0])
                 } else {
-                    // Multiple elements: true if any element is truthy
+                    // Empty arrays are falsy; multi-element: true if any element is truthy
                     arr.iter().any(to_boolean)
                 }
             }
-            Value::Object(obj) => {
-                // Functions are falsy in JSONata
-                if super::is_function_value(value) {
-                    false
-                } else {
-                    !obj.is_empty()
-                }
-            }
+            JValue::Object(obj) => !obj.is_empty(),
+            JValue::Lambda { .. } | JValue::Builtin { .. } => false,
+            JValue::Regex { .. } => true,
         }
     }
 }
@@ -693,39 +658,39 @@ pub mod numeric {
 
     /// $number(value) - Convert value to number
     /// Supports decimal, hex (0x), octal (0o), and binary (0b) formats
-    pub fn number(value: &Value) -> Result<Value, FunctionError> {
+    pub fn number(value: &JValue) -> Result<JValue, FunctionError> {
         match value {
-            Value::Number(n) => {
-                let f = n.as_f64().unwrap_or(0.0);
+            JValue::Number(n) => {
+                let f = *n;
                 if !f.is_finite() {
                     return Err(FunctionError::RuntimeError(
                         "D3030: Cannot convert infinite number".to_string()
                     ));
                 }
-                Ok(Value::Number(n.clone()))
+                Ok(JValue::Number(f))
             }
-            Value::String(s) => {
+            JValue::String(s) => {
                 let trimmed = s.trim();
 
                 // Try hex, octal, or binary format first (0x, 0o, 0b)
                 if let Some(stripped) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
                     // Hexadecimal
                     return i64::from_str_radix(stripped, 16)
-                        .map(|n| serde_json::json!(n))
+                        .map(|n| JValue::Number(n as f64))
                         .map_err(|_| FunctionError::RuntimeError(
                             format!("D3030: Cannot convert '{}' to number", s)
                         ));
                 } else if let Some(stripped) = trimmed.strip_prefix("0o").or_else(|| trimmed.strip_prefix("0O")) {
                     // Octal
                     return i64::from_str_radix(stripped, 8)
-                        .map(|n| serde_json::json!(n))
+                        .map(|n| JValue::Number(n as f64))
                         .map_err(|_| FunctionError::RuntimeError(
                             format!("D3030: Cannot convert '{}' to number", s)
                         ));
                 } else if let Some(stripped) = trimmed.strip_prefix("0b").or_else(|| trimmed.strip_prefix("0B")) {
                     // Binary
                     return i64::from_str_radix(stripped, 2)
-                        .map(|n| serde_json::json!(n))
+                        .map(|n| JValue::Number(n as f64))
                         .map_err(|_| FunctionError::RuntimeError(
                             format!("D3030: Cannot convert '{}' to number", s)
                         ));
@@ -740,16 +705,16 @@ pub mod numeric {
                                 format!("D3030: Cannot convert '{}' to number", s)
                             ));
                         }
-                        Ok(serde_json::json!(n))
+                        Ok(JValue::Number(n))
                     }
                     Err(_) => Err(FunctionError::RuntimeError(
                         format!("D3030: Cannot convert '{}' to number", s)
                     ))
                 }
             }
-            Value::Bool(true) => Ok(serde_json::json!(1)),
-            Value::Bool(false) => Ok(serde_json::json!(0)),
-            Value::Null => Err(FunctionError::RuntimeError(
+            JValue::Bool(true) => Ok(JValue::Number(1.0)),
+            JValue::Bool(false) => Ok(JValue::Number(0.0)),
+            JValue::Null => Err(FunctionError::RuntimeError(
                 "D3030: Cannot convert null to number".to_string(),
             )),
             _ => Err(FunctionError::RuntimeError(
@@ -759,18 +724,16 @@ pub mod numeric {
     }
 
     /// $sum(array) - Sum array of numbers
-    pub fn sum(arr: &[Value]) -> Result<Value, FunctionError> {
+    pub fn sum(arr: &[JValue]) -> Result<JValue, FunctionError> {
         if arr.is_empty() {
-            return Ok(serde_json::json!(0));
+            return Ok(JValue::Number(0.0));
         }
 
         let mut total = 0.0;
         for value in arr {
             match value {
-                Value::Number(n) => {
-                    total += n.as_f64().ok_or_else(|| {
-                        FunctionError::TypeError("Invalid number in array".to_string())
-                    })?;
+                JValue::Number(n) => {
+                    total += n;
                 }
                 _ => {
                     return Err(FunctionError::TypeError(format!(
@@ -780,24 +743,21 @@ pub mod numeric {
                 }
             }
         }
-        Ok(serde_json::json!(total))
+        Ok(JValue::Number(total))
     }
 
     /// $max(array) - Maximum value
-    pub fn max(arr: &[Value]) -> Result<Value, FunctionError> {
+    pub fn max(arr: &[JValue]) -> Result<JValue, FunctionError> {
         if arr.is_empty() {
-            return Ok(Value::Null);
+            return Ok(JValue::Null);
         }
 
         let mut max_val = f64::NEG_INFINITY;
         for value in arr {
             match value {
-                Value::Number(n) => {
-                    let num = n.as_f64().ok_or_else(|| {
-                        FunctionError::TypeError("Invalid number in array".to_string())
-                    })?;
-                    if num > max_val {
-                        max_val = num;
+                JValue::Number(n) => {
+                    if *n > max_val {
+                        max_val = *n;
                     }
                 }
                 _ => {
@@ -807,24 +767,21 @@ pub mod numeric {
                 }
             }
         }
-        Ok(serde_json::json!(max_val))
+        Ok(JValue::Number(max_val))
     }
 
     /// $min(array) - Minimum value
-    pub fn min(arr: &[Value]) -> Result<Value, FunctionError> {
+    pub fn min(arr: &[JValue]) -> Result<JValue, FunctionError> {
         if arr.is_empty() {
-            return Ok(Value::Null);
+            return Ok(JValue::Null);
         }
 
         let mut min_val = f64::INFINITY;
         for value in arr {
             match value {
-                Value::Number(n) => {
-                    let num = n.as_f64().ok_or_else(|| {
-                        FunctionError::TypeError("Invalid number in array".to_string())
-                    })?;
-                    if num < min_val {
-                        min_val = num;
+                JValue::Number(n) => {
+                    if *n < min_val {
+                        min_val = *n;
                     }
                 }
                 _ => {
@@ -834,37 +791,37 @@ pub mod numeric {
                 }
             }
         }
-        Ok(serde_json::json!(min_val))
+        Ok(JValue::Number(min_val))
     }
 
     /// $average(array) - Average value
-    pub fn average(arr: &[Value]) -> Result<Value, FunctionError> {
+    pub fn average(arr: &[JValue]) -> Result<JValue, FunctionError> {
         if arr.is_empty() {
-            return Ok(Value::Null);
+            return Ok(JValue::Null);
         }
 
         let sum_result = sum(arr)?;
-        if let Value::Number(n) = sum_result {
-            let avg = n.as_f64().unwrap() / arr.len() as f64;
-            Ok(serde_json::json!(avg))
+        if let JValue::Number(n) = sum_result {
+            let avg = n / arr.len() as f64;
+            Ok(JValue::Number(avg))
         } else {
             Err(FunctionError::RuntimeError("Sum failed".to_string()))
         }
     }
 
     /// $abs(number) - Absolute value
-    pub fn abs(n: f64) -> Result<Value, FunctionError> {
-        Ok(serde_json::json!(n.abs()))
+    pub fn abs(n: f64) -> Result<JValue, FunctionError> {
+        Ok(JValue::Number(n.abs()))
     }
 
     /// $floor(number) - Floor
-    pub fn floor(n: f64) -> Result<Value, FunctionError> {
-        Ok(serde_json::json!(n.floor()))
+    pub fn floor(n: f64) -> Result<JValue, FunctionError> {
+        Ok(JValue::Number(n.floor()))
     }
 
     /// $ceil(number) - Ceiling
-    pub fn ceil(n: f64) -> Result<Value, FunctionError> {
-        Ok(serde_json::json!(n.ceil()))
+    pub fn ceil(n: f64) -> Result<JValue, FunctionError> {
+        Ok(JValue::Number(n.ceil()))
     }
 
     /// $round(number, precision) - Round to precision using "round half to even" (banker's rounding)
@@ -876,7 +833,7 @@ pub mod numeric {
     /// - positive: round to that many decimal places (e.g., 2 -> 0.01)
     /// - zero or omitted: round to nearest integer
     /// - negative: round to powers of 10 (e.g., -2 -> nearest 100)
-    pub fn round(n: f64, precision: Option<i32>) -> Result<Value, FunctionError> {
+    pub fn round(n: f64, precision: Option<i32>) -> Result<JValue, FunctionError> {
         let prec = precision.unwrap_or(0);
 
         // Shift decimal place for precision (works for both positive and negative)
@@ -906,63 +863,58 @@ pub mod numeric {
         // Shift back
         let final_result = result / multiplier;
 
-        // Return as integer if it's a whole number
-        if final_result.fract() == 0.0 && final_result.abs() < (i64::MAX as f64) {
-            Ok(serde_json::json!(final_result as i64))
-        } else {
-            Ok(serde_json::json!(final_result))
-        }
+        Ok(JValue::Number(final_result))
     }
 
     /// $sqrt(number) - Square root
-    pub fn sqrt(n: f64) -> Result<Value, FunctionError> {
+    pub fn sqrt(n: f64) -> Result<JValue, FunctionError> {
         if n < 0.0 {
             return Err(FunctionError::ArgumentError(
                 "Cannot take square root of negative number".to_string(),
             ));
         }
-        Ok(serde_json::json!(n.sqrt()))
+        Ok(JValue::Number(n.sqrt()))
     }
 
     /// $power(base, exponent) - Power
-    pub fn power(base: f64, exponent: f64) -> Result<Value, FunctionError> {
+    pub fn power(base: f64, exponent: f64) -> Result<JValue, FunctionError> {
         let result = base.powf(exponent);
         if result.is_nan() || result.is_infinite() {
             return Err(FunctionError::RuntimeError(
                 "Power operation resulted in invalid number".to_string(),
             ));
         }
-        Ok(serde_json::json!(result))
+        Ok(JValue::Number(result))
     }
 
     /// $formatNumber(value, picture, options) - Format number with picture string
     /// Implements XPath F&O number formatting specification
-    pub fn format_number(value: f64, picture: &str, options: Option<&Value>) -> Result<Value, FunctionError> {
+    pub fn format_number(value: f64, picture: &str, options: Option<&JValue>) -> Result<JValue, FunctionError> {
         // Default format properties (can be overridden by options)
         let mut decimal_separator = '.';
         let mut grouping_separator = ',';
         let mut zero_digit = '0';
         let mut percent_symbol = "%".to_string();
-        let mut per_mille_symbol = "‰".to_string();
+        let mut per_mille_symbol = "\u{2030}".to_string();
         let digit_char = '#';
         let pattern_separator = ';';
 
         // Parse options if provided
-        if let Some(Value::Object(opts)) = options {
-            if let Some(Value::String(s)) = opts.get("decimal-separator") {
+        if let Some(JValue::Object(opts)) = options {
+            if let Some(JValue::String(s)) = opts.get("decimal-separator") {
                 decimal_separator = s.chars().next().unwrap_or('.');
             }
-            if let Some(Value::String(s)) = opts.get("grouping-separator") {
+            if let Some(JValue::String(s)) = opts.get("grouping-separator") {
                 grouping_separator = s.chars().next().unwrap_or(',');
             }
-            if let Some(Value::String(s)) = opts.get("zero-digit") {
+            if let Some(JValue::String(s)) = opts.get("zero-digit") {
                 zero_digit = s.chars().next().unwrap_or('0');
             }
-            if let Some(Value::String(s)) = opts.get("percent") {
-                percent_symbol = s.clone();
+            if let Some(JValue::String(s)) = opts.get("percent") {
+                percent_symbol = s.to_string();
             }
-            if let Some(Value::String(s)) = opts.get("per-mille") {
-                per_mille_symbol = s.clone();
+            if let Some(JValue::String(s)) = opts.get("per-mille") {
+                per_mille_symbol = s.to_string();
             }
         }
 
@@ -1034,7 +986,7 @@ pub mod numeric {
             format!("{}{}{}", parts.prefix, formatted, parts.suffix)
         };
 
-        Ok(Value::String(result))
+        Ok(JValue::string(result))
     }
 
     /// Helper to check if a character is in the digit family (0-9 or custom zero-digit family)
@@ -1531,7 +1483,7 @@ pub mod numeric {
 
     /// $formatBase(value, radix) - Convert number to string in specified base
     /// radix defaults to 10, must be between 2 and 36
-    pub fn format_base(value: f64, radix: Option<i64>) -> Result<Value, FunctionError> {
+    pub fn format_base(value: f64, radix: Option<i64>) -> Result<JValue, FunctionError> {
         // Round to integer
         let int_value = value.round() as i64;
 
@@ -1569,7 +1521,7 @@ pub mod numeric {
             result.insert(0, '-');
         }
 
-        Ok(Value::String(result))
+        Ok(JValue::string(result))
     }
 }
 
@@ -1578,34 +1530,34 @@ pub mod array {
     use super::*;
 
     /// $count(array) - Count array elements
-    pub fn count(arr: &[Value]) -> Result<Value, FunctionError> {
-        Ok(Value::Number((arr.len() as i64).into()))
+    pub fn count(arr: &[JValue]) -> Result<JValue, FunctionError> {
+        Ok(JValue::Number(arr.len() as f64))
     }
 
     /// $append(array1, array2) - Append arrays/values
-    pub fn append(arr1: &[Value], val: &Value) -> Result<Value, FunctionError> {
+    pub fn append(arr1: &[JValue], val: &JValue) -> Result<JValue, FunctionError> {
         let mut result = arr1.to_vec();
         match val {
-            Value::Array(arr2) => result.extend_from_slice(arr2),
+            JValue::Array(arr2) => result.extend(arr2.iter().cloned()),
             other => result.push(other.clone()),
         }
-        Ok(Value::Array(result))
+        Ok(JValue::array(result))
     }
 
     /// $reverse(array) - Reverse array
-    pub fn reverse(arr: &[Value]) -> Result<Value, FunctionError> {
+    pub fn reverse(arr: &[JValue]) -> Result<JValue, FunctionError> {
         let mut result = arr.to_vec();
         result.reverse();
-        Ok(Value::Array(result))
+        Ok(JValue::array(result))
     }
 
     /// $sort(array) - Sort array
-    pub fn sort(arr: &[Value]) -> Result<Value, FunctionError> {
+    pub fn sort(arr: &[JValue]) -> Result<JValue, FunctionError> {
         let mut result = arr.to_vec();
 
         // Check if all elements are of comparable types
-        let all_numbers = result.iter().all(|v| matches!(v, Value::Number(_)));
-        let all_strings = result.iter().all(|v| matches!(v, Value::String(_)));
+        let all_numbers = result.iter().all(|v| matches!(v, JValue::Number(_)));
+        let all_strings = result.iter().all(|v| matches!(v, JValue::String(_)));
 
         if all_numbers {
             result.sort_by(|a, b| {
@@ -1625,11 +1577,11 @@ pub mod array {
             ));
         }
 
-        Ok(Value::Array(result))
+        Ok(JValue::array(result))
     }
 
     /// $distinct(array) - Get unique elements
-    pub fn distinct(arr: &[Value]) -> Result<Value, FunctionError> {
+    pub fn distinct(arr: &[JValue]) -> Result<JValue, FunctionError> {
         let mut result = Vec::new();
         let mut seen = Vec::new();
 
@@ -1647,29 +1599,28 @@ pub mod array {
             }
         }
 
-        Ok(Value::Array(result))
+        Ok(JValue::array(result))
     }
 
     /// $exists(value) - Check if value exists (not null/undefined)
-    pub fn exists(value: &Value) -> Result<Value, FunctionError> {
-        let is_missing = matches!(value, Value::Null)
-            || matches!(value, Value::Object(map) if map.contains_key("__undefined__"));
-        Ok(Value::Bool(!is_missing))
+    pub fn exists(value: &JValue) -> Result<JValue, FunctionError> {
+        let is_missing = matches!(value, JValue::Null) || value.is_undefined();
+        Ok(JValue::Bool(!is_missing))
     }
 
     /// Compare two JSON values for deep equality (JSONata semantics)
-    pub fn values_equal(a: &Value, b: &Value) -> bool {
+    pub fn values_equal(a: &JValue, b: &JValue) -> bool {
         match (a, b) {
-            (Value::Null, Value::Null) => true,
-            (Value::Bool(a), Value::Bool(b)) => a == b,
-            (Value::Number(a), Value::Number(b)) => {
-                a.as_f64().unwrap() == b.as_f64().unwrap()
+            (JValue::Null, JValue::Null) => true,
+            (JValue::Bool(a), JValue::Bool(b)) => a == b,
+            (JValue::Number(a), JValue::Number(b)) => {
+                a == b
             }
-            (Value::String(a), Value::String(b)) => a == b,
-            (Value::Array(a), Value::Array(b)) => {
+            (JValue::String(a), JValue::String(b)) => a == b,
+            (JValue::Array(a), JValue::Array(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
             }
-            (Value::Object(a), Value::Object(b)) => {
+            (JValue::Object(a), JValue::Object(b)) => {
                 a.len() == b.len()
                     && a.iter()
                         .all(|(k, v)| b.get(k).map_or(false, |v2| values_equal(v, v2)))
@@ -1680,9 +1631,9 @@ pub mod array {
 
     /// $shuffle(array) - Randomly shuffle array elements
     /// Uses Fisher-Yates (inside-out variant) algorithm
-    pub fn shuffle(arr: &[Value]) -> Result<Value, FunctionError> {
+    pub fn shuffle(arr: &[JValue]) -> Result<JValue, FunctionError> {
         if arr.len() <= 1 {
-            return Ok(Value::Array(arr.to_vec()));
+            return Ok(JValue::array(arr.to_vec()));
         }
 
         use rand::seq::SliceRandom;
@@ -1692,7 +1643,7 @@ pub mod array {
         let mut rng = thread_rng();
         result.shuffle(&mut rng);
 
-        Ok(Value::Array(result))
+        Ok(JValue::array(result))
     }
 }
 
@@ -1701,38 +1652,38 @@ pub mod object {
     use super::*;
 
     /// $keys(object) - Get object keys
-    pub fn keys(obj: &serde_json::Map<String, Value>) -> Result<Value, FunctionError> {
-        let keys: Vec<Value> = obj.keys().map(|k| Value::String(k.clone())).collect();
-        Ok(Value::Array(keys))
+    pub fn keys(obj: &IndexMap<String, JValue>) -> Result<JValue, FunctionError> {
+        let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.as_str())).collect();
+        Ok(JValue::array(keys))
     }
 
     /// $lookup(object, key) - Lookup value by key
-    pub fn lookup(obj: &serde_json::Map<String, Value>, key: &str) -> Result<Value, FunctionError> {
-        Ok(obj.get(key).cloned().unwrap_or(Value::Null))
+    pub fn lookup(obj: &IndexMap<String, JValue>, key: &str) -> Result<JValue, FunctionError> {
+        Ok(obj.get(key).cloned().unwrap_or(JValue::Null))
     }
 
     /// $spread(object) - Spread object into array of key-value pairs
-    pub fn spread(obj: &serde_json::Map<String, Value>) -> Result<Value, FunctionError> {
+    pub fn spread(obj: &IndexMap<String, JValue>) -> Result<JValue, FunctionError> {
         // Each key-value pair becomes a single-key object: {"key": value}
-        let pairs: Vec<Value> = obj
+        let pairs: Vec<JValue> = obj
             .iter()
             .map(|(k, v)| {
-                let mut pair = serde_json::Map::new();
+                let mut pair = IndexMap::new();
                 pair.insert(k.clone(), v.clone());
-                Value::Object(pair)
+                JValue::object(pair)
             })
             .collect();
-        Ok(Value::Array(pairs))
+        Ok(JValue::array(pairs))
     }
 
     /// $merge(objects) - Merge multiple objects
-    pub fn merge(objects: &[Value]) -> Result<Value, FunctionError> {
-        let mut result = serde_json::Map::new();
+    pub fn merge(objects: &[JValue]) -> Result<JValue, FunctionError> {
+        let mut result = IndexMap::new();
 
         for obj in objects {
             match obj {
-                Value::Object(map) => {
-                    for (k, v) in map {
+                JValue::Object(map) => {
+                    for (k, v) in map.iter() {
                         result.insert(k.clone(), v.clone());
                     }
                 }
@@ -1744,7 +1695,7 @@ pub mod object {
             }
         }
 
-        Ok(Value::Object(result))
+        Ok(JValue::object(result))
     }
 }
 
@@ -1754,16 +1705,16 @@ pub mod encoding {
     use base64::{Engine as _, engine::general_purpose};
 
     /// $base64encode(string) - Encode string to base64
-    pub fn base64encode(s: &str) -> Result<Value, FunctionError> {
+    pub fn base64encode(s: &str) -> Result<JValue, FunctionError> {
         let encoded = general_purpose::STANDARD.encode(s.as_bytes());
-        Ok(Value::String(encoded))
+        Ok(JValue::string(encoded))
     }
 
     /// $base64decode(string) - Decode base64 string
-    pub fn base64decode(s: &str) -> Result<Value, FunctionError> {
+    pub fn base64decode(s: &str) -> Result<JValue, FunctionError> {
         match general_purpose::STANDARD.decode(s.as_bytes()) {
             Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(decoded) => Ok(Value::String(decoded)),
+                Ok(decoded) => Ok(JValue::string(decoded)),
                 Err(_) => Err(FunctionError::RuntimeError(
                     "Invalid UTF-8 in decoded base64".to_string()
                 )),
@@ -1775,18 +1726,18 @@ pub mod encoding {
     }
 
     /// $encodeUrlComponent(string) - Encode URL component
-    pub fn encode_url_component(s: &str) -> Result<Value, FunctionError> {
+    pub fn encode_url_component(s: &str) -> Result<JValue, FunctionError> {
         let encoded = percent_encoding::utf8_percent_encode(
             s,
             percent_encoding::NON_ALPHANUMERIC
         ).to_string();
-        Ok(Value::String(encoded))
+        Ok(JValue::string(encoded))
     }
 
     /// $decodeUrlComponent(string) - Decode URL component
-    pub fn decode_url_component(s: &str) -> Result<Value, FunctionError> {
+    pub fn decode_url_component(s: &str) -> Result<JValue, FunctionError> {
         match percent_encoding::percent_decode_str(s).decode_utf8() {
-            Ok(decoded) => Ok(Value::String(decoded.to_string())),
+            Ok(decoded) => Ok(JValue::string(decoded.to_string())),
             Err(_) => Err(FunctionError::RuntimeError(
                 "Invalid percent-encoded string".to_string()
             )),
@@ -1795,19 +1746,19 @@ pub mod encoding {
 
     /// $encodeUrl(string) - Encode full URL
     /// More permissive than encodeUrlComponent - allows URL structure characters
-    pub fn encode_url(s: &str) -> Result<Value, FunctionError> {
+    pub fn encode_url(s: &str) -> Result<JValue, FunctionError> {
         // Use CONTROLS to preserve URL structure (://?#[]@!$&'()*+,;=)
         let encoded = percent_encoding::utf8_percent_encode(
             s,
             percent_encoding::CONTROLS
         ).to_string();
-        Ok(Value::String(encoded))
+        Ok(JValue::string(encoded))
     }
 
     /// $decodeUrl(string) - Decode full URL
-    pub fn decode_url(s: &str) -> Result<Value, FunctionError> {
+    pub fn decode_url(s: &str) -> Result<JValue, FunctionError> {
         match percent_encoding::percent_decode_str(s).decode_utf8() {
-            Ok(decoded) => Ok(Value::String(decoded.to_string())),
+            Ok(decoded) => Ok(JValue::string(decoded.to_string())),
             Err(_) => Err(FunctionError::RuntimeError(
                 "Invalid percent-encoded URL".to_string()
             )),
@@ -1825,63 +1776,63 @@ mod tests {
     fn test_string_conversion() {
         // String to string
         assert_eq!(
-            string::string(&Value::String("hello".to_string()), None).unwrap(),
-            Value::String("hello".to_string())
+            string::string(&JValue::string("hello"), None).unwrap(),
+            JValue::string("hello")
         );
 
         // Number to string
         assert_eq!(
-            string::string(&serde_json::json!(42), None).unwrap(),
-            Value::String("42".to_string())
+            string::string(&JValue::Number(42.0), None).unwrap(),
+            JValue::string("42")
         );
 
         // Float to string
         assert_eq!(
-            string::string(&serde_json::json!(3.14), None).unwrap(),
-            Value::String("3.14".to_string())
+            string::string(&JValue::Number(3.14), None).unwrap(),
+            JValue::string("3.14")
         );
 
         // Boolean to string
         assert_eq!(
-            string::string(&Value::Bool(true), None).unwrap(),
-            Value::String("true".to_string())
+            string::string(&JValue::Bool(true), None).unwrap(),
+            JValue::string("true")
         );
 
         // Null becomes "null" via JSON.stringify
         assert_eq!(
-            string::string(&Value::Null, None).unwrap(),
-            Value::String("null".to_string())
+            string::string(&JValue::Null, None).unwrap(),
+            JValue::string("null")
         );
 
         // Array gets JSON.stringify'd
         assert_eq!(
-            string::string(&serde_json::json!([1, 2, 3]), None).unwrap(),
-            Value::String("[1,2,3]".to_string())
+            string::string(&JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)]), None).unwrap(),
+            JValue::string("[1,2,3]")
         );
     }
 
     #[test]
     fn test_length() {
-        assert_eq!(string::length("hello").unwrap(), serde_json::json!(5));
-        assert_eq!(string::length("").unwrap(), serde_json::json!(0));
+        assert_eq!(string::length("hello").unwrap(), JValue::Number(5.0));
+        assert_eq!(string::length("").unwrap(), JValue::Number(0.0));
         // Unicode support
-        assert_eq!(string::length("Hello 世界").unwrap(), serde_json::json!(8));
-        assert_eq!(string::length("🎉🎊").unwrap(), serde_json::json!(2));
+        assert_eq!(string::length("Hello \u{4e16}\u{754c}").unwrap(), JValue::Number(8.0));
+        assert_eq!(string::length("\u{1f389}\u{1f38a}").unwrap(), JValue::Number(2.0));
     }
 
     #[test]
     fn test_uppercase_lowercase() {
         assert_eq!(
             string::uppercase("hello").unwrap(),
-            Value::String("HELLO".to_string())
+            JValue::string("HELLO")
         );
         assert_eq!(
             string::lowercase("HELLO").unwrap(),
-            Value::String("hello".to_string())
+            JValue::string("hello")
         );
         assert_eq!(
             string::uppercase("Hello World").unwrap(),
-            Value::String("HELLO WORLD".to_string())
+            JValue::string("HELLO WORLD")
         );
     }
 
@@ -1890,31 +1841,31 @@ mod tests {
         // Basic substring
         assert_eq!(
             string::substring("hello world", 0, Some(5)).unwrap(),
-            Value::String("hello".to_string())
+            JValue::string("hello")
         );
 
         // From position to end
         assert_eq!(
             string::substring("hello world", 6, None).unwrap(),
-            Value::String("world".to_string())
+            JValue::string("world")
         );
 
         // Negative start position
         assert_eq!(
             string::substring("hello world", -5, Some(5)).unwrap(),
-            Value::String("world".to_string())
+            JValue::string("world")
         );
 
         // Unicode support
         assert_eq!(
-            string::substring("Hello 世界", 6, Some(2)).unwrap(),
-            Value::String("世界".to_string())
+            string::substring("Hello \u{4e16}\u{754c}", 6, Some(2)).unwrap(),
+            JValue::string("\u{4e16}\u{754c}")
         );
 
         // Negative length returns empty string
         assert_eq!(
             string::substring("hello", 0, Some(-1)).unwrap(),
-            Value::String(String::new())
+            JValue::string("")
         );
     }
 
@@ -1923,30 +1874,30 @@ mod tests {
         // substringBefore
         assert_eq!(
             string::substring_before("hello world", " ").unwrap(),
-            Value::String("hello".to_string())
+            JValue::string("hello")
         );
         assert_eq!(
             string::substring_before("hello world", "x").unwrap(),
-            Value::String("hello world".to_string())
+            JValue::string("hello world")
         );
         assert_eq!(
             string::substring_before("hello world", "").unwrap(),
-            Value::String(String::new())
+            JValue::string("")
         );
 
         // substringAfter
         assert_eq!(
             string::substring_after("hello world", " ").unwrap(),
-            Value::String("world".to_string())
+            JValue::string("world")
         );
         // When separator is not found, return the original string
         assert_eq!(
             string::substring_after("hello world", "x").unwrap(),
-            Value::String("hello world".to_string())
+            JValue::string("hello world")
         );
         assert_eq!(
             string::substring_after("hello world", "").unwrap(),
-            Value::String("hello world".to_string())
+            JValue::string("hello world")
         );
     }
 
@@ -1954,43 +1905,43 @@ mod tests {
     fn test_trim() {
         assert_eq!(
             string::trim("  hello  ").unwrap(),
-            Value::String("hello".to_string())
+            JValue::string("hello")
         );
         assert_eq!(
             string::trim("hello").unwrap(),
-            Value::String("hello".to_string())
+            JValue::string("hello")
         );
         assert_eq!(
             string::trim("\t\nhello\r\n").unwrap(),
-            Value::String("hello".to_string())
+            JValue::string("hello")
         );
     }
 
     #[test]
     fn test_contains() {
-        assert_eq!(string::contains("hello world", &Value::String("world".to_string())).unwrap(), Value::Bool(true));
-        assert_eq!(string::contains("hello world", &Value::String("xyz".to_string())).unwrap(), Value::Bool(false));
-        assert_eq!(string::contains("hello world", &Value::String("".to_string())).unwrap(), Value::Bool(true));
+        assert_eq!(string::contains("hello world", &JValue::string("world")).unwrap(), JValue::Bool(true));
+        assert_eq!(string::contains("hello world", &JValue::string("xyz")).unwrap(), JValue::Bool(false));
+        assert_eq!(string::contains("hello world", &JValue::string("")).unwrap(), JValue::Bool(true));
     }
 
     #[test]
     fn test_split() {
         // Split with separator
         assert_eq!(
-            string::split("a,b,c", &Value::String(",".to_string()), None).unwrap(),
-            serde_json::json!(["a", "b", "c"])
+            string::split("a,b,c", &JValue::string(","), None).unwrap(),
+            JValue::array(vec![JValue::string("a"), JValue::string("b"), JValue::string("c")])
         );
 
         // Split with limit - truncates to limit number of results
         assert_eq!(
-            string::split("a,b,c,d", &Value::String(",".to_string()), Some(2)).unwrap(),
-            serde_json::json!(["a", "b"])
+            string::split("a,b,c,d", &JValue::string(","), Some(2)).unwrap(),
+            JValue::array(vec![JValue::string("a"), JValue::string("b")])
         );
 
         // Split with empty separator (split into chars)
         assert_eq!(
-            string::split("abc", &Value::String("".to_string()), None).unwrap(),
-            serde_json::json!(["a", "b", "c"])
+            string::split("abc", &JValue::string(""), None).unwrap(),
+            JValue::array(vec![JValue::string("a"), JValue::string("b"), JValue::string("c")])
         );
     }
 
@@ -1998,26 +1949,26 @@ mod tests {
     fn test_join() {
         // Join with separator
         let arr = vec![
-            Value::String("a".to_string()),
-            Value::String("b".to_string()),
-            Value::String("c".to_string()),
+            JValue::string("a"),
+            JValue::string("b"),
+            JValue::string("c"),
         ];
         assert_eq!(
             string::join(&arr, Some(",")).unwrap(),
-            Value::String("a,b,c".to_string())
+            JValue::string("a,b,c")
         );
 
         // Join without separator
         assert_eq!(
             string::join(&arr, None).unwrap(),
-            Value::String("abc".to_string())
+            JValue::string("abc")
         );
 
         // Join with numbers
-        let arr = vec![serde_json::json!(1), serde_json::json!(2), serde_json::json!(3)];
+        let arr = vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)];
         assert_eq!(
             string::join(&arr, Some("-")).unwrap(),
-            Value::String("1-2-3".to_string())
+            JValue::string("1-2-3")
         );
     }
 
@@ -2025,18 +1976,18 @@ mod tests {
     fn test_replace() {
         // Replace all occurrences
         assert_eq!(
-            string::replace("hello hello", &Value::String("hello".to_string()), "hi", None).unwrap(),
-            Value::String("hi hi".to_string())
+            string::replace("hello hello", &JValue::string("hello"), "hi", None).unwrap(),
+            JValue::string("hi hi")
         );
 
         // Replace with limit
         assert_eq!(
-            string::replace("hello hello hello", &Value::String("hello".to_string()), "hi", Some(2)).unwrap(),
-            Value::String("hi hi hello".to_string())
+            string::replace("hello hello hello", &JValue::string("hello"), "hi", Some(2)).unwrap(),
+            JValue::string("hi hi hello")
         );
 
         // Replace empty pattern returns error D3010
-        assert!(string::replace("hello", &Value::String("".to_string()), "x", None).is_err());
+        assert!(string::replace("hello", &JValue::string(""), "x", None).is_err());
     }
 
     // ===== Numeric Functions Tests =====
@@ -2044,186 +1995,186 @@ mod tests {
     #[test]
     fn test_number_conversion() {
         // Number to number
-        assert_eq!(numeric::number(&serde_json::json!(42)).unwrap(), serde_json::json!(42));
+        assert_eq!(numeric::number(&JValue::Number(42.0)).unwrap(), JValue::Number(42.0));
 
         // String to number
         assert_eq!(
-            numeric::number(&Value::String("42".to_string())).unwrap(),
-            serde_json::json!(42.0)
+            numeric::number(&JValue::string("42")).unwrap(),
+            JValue::Number(42.0)
         );
         assert_eq!(
-            numeric::number(&Value::String("3.14".to_string())).unwrap(),
-            serde_json::json!(3.14)
+            numeric::number(&JValue::string("3.14")).unwrap(),
+            JValue::Number(3.14)
         );
         assert_eq!(
-            numeric::number(&Value::String("  123  ".to_string())).unwrap(),
-            serde_json::json!(123.0)
+            numeric::number(&JValue::string("  123  ")).unwrap(),
+            JValue::Number(123.0)
         );
 
         // Boolean to number
-        assert_eq!(numeric::number(&Value::Bool(true)).unwrap(), serde_json::json!(1));
-        assert_eq!(numeric::number(&Value::Bool(false)).unwrap(), serde_json::json!(0));
+        assert_eq!(numeric::number(&JValue::Bool(true)).unwrap(), JValue::Number(1.0));
+        assert_eq!(numeric::number(&JValue::Bool(false)).unwrap(), JValue::Number(0.0));
 
         // Invalid conversions
-        assert!(numeric::number(&Value::Null).is_err());
-        assert!(numeric::number(&Value::String("not a number".to_string())).is_err());
+        assert!(numeric::number(&JValue::Null).is_err());
+        assert!(numeric::number(&JValue::string("not a number")).is_err());
     }
 
     #[test]
     fn test_sum() {
         // Sum of numbers
-        let arr = vec![serde_json::json!(1), serde_json::json!(2), serde_json::json!(3)];
-        assert_eq!(numeric::sum(&arr).unwrap(), serde_json::json!(6.0));
+        let arr = vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)];
+        assert_eq!(numeric::sum(&arr).unwrap(), JValue::Number(6.0));
 
         // Empty array
-        assert_eq!(numeric::sum(&[]).unwrap(), serde_json::json!(0));
+        assert_eq!(numeric::sum(&[]).unwrap(), JValue::Number(0.0));
 
         // Array with non-numbers should error
-        let arr = vec![serde_json::json!(1), Value::String("2".to_string())];
+        let arr = vec![JValue::from(1i64), JValue::string("2")];
         assert!(numeric::sum(&arr).is_err());
     }
 
     #[test]
     fn test_max_min() {
-        let arr = vec![serde_json::json!(3), serde_json::json!(1), serde_json::json!(4), serde_json::json!(2)];
+        let arr = vec![JValue::from(3i64), JValue::from(1i64), JValue::from(4i64), JValue::from(2i64)];
 
-        assert_eq!(numeric::max(&arr).unwrap(), serde_json::json!(4.0));
-        assert_eq!(numeric::min(&arr).unwrap(), serde_json::json!(1.0));
+        assert_eq!(numeric::max(&arr).unwrap(), JValue::Number(4.0));
+        assert_eq!(numeric::min(&arr).unwrap(), JValue::Number(1.0));
 
         // Empty array
-        assert_eq!(numeric::max(&[]).unwrap(), Value::Null);
-        assert_eq!(numeric::min(&[]).unwrap(), Value::Null);
+        assert_eq!(numeric::max(&[]).unwrap(), JValue::Null);
+        assert_eq!(numeric::min(&[]).unwrap(), JValue::Null);
     }
 
     #[test]
     fn test_average() {
-        let arr = vec![serde_json::json!(1), serde_json::json!(2), serde_json::json!(3), serde_json::json!(4)];
-        assert_eq!(numeric::average(&arr).unwrap(), serde_json::json!(2.5));
+        let arr = vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64), JValue::from(4i64)];
+        assert_eq!(numeric::average(&arr).unwrap(), JValue::Number(2.5));
 
         // Empty array
-        assert_eq!(numeric::average(&[]).unwrap(), Value::Null);
+        assert_eq!(numeric::average(&[]).unwrap(), JValue::Null);
     }
 
     #[test]
     fn test_math_functions() {
         // abs
-        assert_eq!(numeric::abs(-5.5).unwrap(), serde_json::json!(5.5));
-        assert_eq!(numeric::abs(5.5).unwrap(), serde_json::json!(5.5));
+        assert_eq!(numeric::abs(-5.5).unwrap(), JValue::Number(5.5));
+        assert_eq!(numeric::abs(5.5).unwrap(), JValue::Number(5.5));
 
         // floor
-        assert_eq!(numeric::floor(3.7).unwrap(), serde_json::json!(3.0));
-        assert_eq!(numeric::floor(-3.7).unwrap(), serde_json::json!(-4.0));
+        assert_eq!(numeric::floor(3.7).unwrap(), JValue::Number(3.0));
+        assert_eq!(numeric::floor(-3.7).unwrap(), JValue::Number(-4.0));
 
         // ceil
-        assert_eq!(numeric::ceil(3.2).unwrap(), serde_json::json!(4.0));
-        assert_eq!(numeric::ceil(-3.2).unwrap(), serde_json::json!(-3.0));
+        assert_eq!(numeric::ceil(3.2).unwrap(), JValue::Number(4.0));
+        assert_eq!(numeric::ceil(-3.2).unwrap(), JValue::Number(-3.0));
 
-        // round - whole number results are returned as integers
-        assert_eq!(numeric::round(3.14159, Some(2)).unwrap(), serde_json::json!(3.14));
-        assert_eq!(numeric::round(3.14159, None).unwrap(), serde_json::json!(3));
+        // round - whole number results are returned as numbers
+        assert_eq!(numeric::round(3.14159, Some(2)).unwrap(), JValue::Number(3.14));
+        assert_eq!(numeric::round(3.14159, None).unwrap(), JValue::Number(3.0));
         // Negative precision is supported (rounds to powers of 10)
-        assert_eq!(numeric::round(3.14, Some(-1)).unwrap(), serde_json::json!(0));
+        assert_eq!(numeric::round(3.14, Some(-1)).unwrap(), JValue::Number(0.0));
 
         // sqrt
-        assert_eq!(numeric::sqrt(16.0).unwrap(), serde_json::json!(4.0));
+        assert_eq!(numeric::sqrt(16.0).unwrap(), JValue::Number(4.0));
         assert!(numeric::sqrt(-1.0).is_err());
 
         // power
-        assert_eq!(numeric::power(2.0, 3.0).unwrap(), serde_json::json!(8.0));
-        assert_eq!(numeric::power(9.0, 0.5).unwrap(), serde_json::json!(3.0));
+        assert_eq!(numeric::power(2.0, 3.0).unwrap(), JValue::Number(8.0));
+        assert_eq!(numeric::power(9.0, 0.5).unwrap(), JValue::Number(3.0));
     }
 
     // ===== Array Functions Tests =====
 
     #[test]
     fn test_count() {
-        let arr = vec![serde_json::json!(1), serde_json::json!(2), serde_json::json!(3)];
-        assert_eq!(array::count(&arr).unwrap(), serde_json::json!(3));
-        assert_eq!(array::count(&[]).unwrap(), serde_json::json!(0));
+        let arr = vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)];
+        assert_eq!(array::count(&arr).unwrap(), JValue::Number(3.0));
+        assert_eq!(array::count(&[]).unwrap(), JValue::Number(0.0));
     }
 
     #[test]
     fn test_append() {
-        let arr1 = vec![serde_json::json!(1), serde_json::json!(2)];
+        let arr1 = vec![JValue::from(1i64), JValue::from(2i64)];
 
         // Append a single value
-        let result = array::append(&arr1, &serde_json::json!(3)).unwrap();
-        assert_eq!(result, serde_json::json!([1, 2, 3]));
+        let result = array::append(&arr1, &JValue::from(3i64)).unwrap();
+        assert_eq!(result, JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)]));
 
         // Append an array
-        let arr2 = serde_json::json!([3, 4]);
+        let arr2 = JValue::array(vec![JValue::from(3i64), JValue::from(4i64)]);
         let result = array::append(&arr1, &arr2).unwrap();
-        assert_eq!(result, serde_json::json!([1, 2, 3, 4]));
+        assert_eq!(result, JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64), JValue::from(4i64)]));
     }
 
     #[test]
     fn test_reverse() {
-        let arr = vec![serde_json::json!(1), serde_json::json!(2), serde_json::json!(3)];
-        assert_eq!(array::reverse(&arr).unwrap(), serde_json::json!([3, 2, 1]));
+        let arr = vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)];
+        assert_eq!(array::reverse(&arr).unwrap(), JValue::array(vec![JValue::from(3i64), JValue::from(2i64), JValue::from(1i64)]));
     }
 
     #[test]
     fn test_sort() {
         // Sort numbers
-        let arr = vec![serde_json::json!(3), serde_json::json!(1), serde_json::json!(4), serde_json::json!(2)];
-        assert_eq!(array::sort(&arr).unwrap(), serde_json::json!([1, 2, 3, 4]));
+        let arr = vec![JValue::from(3i64), JValue::from(1i64), JValue::from(4i64), JValue::from(2i64)];
+        assert_eq!(array::sort(&arr).unwrap(), JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64), JValue::from(4i64)]));
 
         // Sort strings
         let arr = vec![
-            Value::String("charlie".to_string()),
-            Value::String("alice".to_string()),
-            Value::String("bob".to_string()),
+            JValue::string("charlie"),
+            JValue::string("alice"),
+            JValue::string("bob"),
         ];
         assert_eq!(
             array::sort(&arr).unwrap(),
-            serde_json::json!(["alice", "bob", "charlie"])
+            JValue::array(vec![JValue::string("alice"), JValue::string("bob"), JValue::string("charlie")])
         );
 
         // Mixed types should error
-        let arr = vec![serde_json::json!(1), Value::String("a".to_string())];
+        let arr = vec![JValue::from(1i64), JValue::string("a")];
         assert!(array::sort(&arr).is_err());
     }
 
     #[test]
     fn test_distinct() {
         let arr = vec![
-            serde_json::json!(1),
-            serde_json::json!(2),
-            serde_json::json!(1),
-            serde_json::json!(3),
-            serde_json::json!(2),
+            JValue::from(1i64),
+            JValue::from(2i64),
+            JValue::from(1i64),
+            JValue::from(3i64),
+            JValue::from(2i64),
         ];
-        assert_eq!(array::distinct(&arr).unwrap(), serde_json::json!([1, 2, 3]));
+        assert_eq!(array::distinct(&arr).unwrap(), JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)]));
 
         // With strings
         let arr = vec![
-            Value::String("a".to_string()),
-            Value::String("b".to_string()),
-            Value::String("a".to_string()),
+            JValue::string("a"),
+            JValue::string("b"),
+            JValue::string("a"),
         ];
-        assert_eq!(array::distinct(&arr).unwrap(), serde_json::json!(["a", "b"]));
+        assert_eq!(array::distinct(&arr).unwrap(), JValue::array(vec![JValue::string("a"), JValue::string("b")]));
     }
 
     #[test]
     fn test_exists() {
-        assert_eq!(array::exists(&serde_json::json!(42)).unwrap(), Value::Bool(true));
-        assert_eq!(array::exists(&Value::String("hello".to_string())).unwrap(), Value::Bool(true));
-        assert_eq!(array::exists(&Value::Null).unwrap(), Value::Bool(false));
+        assert_eq!(array::exists(&JValue::Number(42.0)).unwrap(), JValue::Bool(true));
+        assert_eq!(array::exists(&JValue::string("hello")).unwrap(), JValue::Bool(true));
+        assert_eq!(array::exists(&JValue::Null).unwrap(), JValue::Bool(false));
     }
 
     // ===== Object Functions Tests =====
 
     #[test]
     fn test_keys() {
-        let mut obj = serde_json::Map::new();
-        obj.insert("name".to_string(), Value::String("Alice".to_string()));
-        obj.insert("age".to_string(), serde_json::json!(30));
+        let mut obj = IndexMap::new();
+        obj.insert("name".to_string(), JValue::string("Alice"));
+        obj.insert("age".to_string(), JValue::Number(30.0));
 
         let result = object::keys(&obj).unwrap();
-        if let Value::Array(keys) = result {
+        if let JValue::Array(keys) = result {
             assert_eq!(keys.len(), 2);
-            assert!(keys.contains(&Value::String("name".to_string())));
-            assert!(keys.contains(&Value::String("age".to_string())));
+            assert!(keys.contains(&JValue::string("name")));
+            assert!(keys.contains(&JValue::string("age")));
         } else {
             panic!("Expected array of keys");
         }
@@ -2231,30 +2182,30 @@ mod tests {
 
     #[test]
     fn test_lookup() {
-        let mut obj = serde_json::Map::new();
-        obj.insert("name".to_string(), Value::String("Alice".to_string()));
-        obj.insert("age".to_string(), serde_json::json!(30));
+        let mut obj = IndexMap::new();
+        obj.insert("name".to_string(), JValue::string("Alice"));
+        obj.insert("age".to_string(), JValue::Number(30.0));
 
         assert_eq!(
             object::lookup(&obj, "name").unwrap(),
-            Value::String("Alice".to_string())
+            JValue::string("Alice")
         );
-        assert_eq!(object::lookup(&obj, "age").unwrap(), serde_json::json!(30));
-        assert_eq!(object::lookup(&obj, "missing").unwrap(), Value::Null);
+        assert_eq!(object::lookup(&obj, "age").unwrap(), JValue::Number(30.0));
+        assert_eq!(object::lookup(&obj, "missing").unwrap(), JValue::Null);
     }
 
     #[test]
     fn test_spread() {
-        let mut obj = serde_json::Map::new();
-        obj.insert("a".to_string(), serde_json::json!(1));
-        obj.insert("b".to_string(), serde_json::json!(2));
+        let mut obj = IndexMap::new();
+        obj.insert("a".to_string(), JValue::from(1i64));
+        obj.insert("b".to_string(), JValue::from(2i64));
 
         let result = object::spread(&obj).unwrap();
-        if let Value::Array(pairs) = result {
+        if let JValue::Array(pairs) = result {
             assert_eq!(pairs.len(), 2);
             // Each key-value pair becomes a single-key object: {"key": value}
-            for pair in &pairs {
-                if let Value::Object(p) = pair {
+            for pair in pairs.iter() {
+                if let JValue::Object(p) = pair {
                     assert_eq!(p.len(), 1, "Each spread element should be a single-key object");
                 } else {
                     panic!("Expected Object in spread result");
@@ -2262,7 +2213,7 @@ mod tests {
             }
             // Verify the actual spread results contain expected keys
             let all_keys: Vec<String> = pairs.iter().filter_map(|p| {
-                if let Value::Object(m) = p {
+                if let JValue::Object(m) = p {
                     m.keys().next().cloned()
                 } else {
                     None
@@ -2277,21 +2228,21 @@ mod tests {
 
     #[test]
     fn test_merge() {
-        let mut obj1 = serde_json::Map::new();
-        obj1.insert("a".to_string(), serde_json::json!(1));
-        obj1.insert("b".to_string(), serde_json::json!(2));
+        let mut obj1 = IndexMap::new();
+        obj1.insert("a".to_string(), JValue::from(1i64));
+        obj1.insert("b".to_string(), JValue::from(2i64));
 
-        let mut obj2 = serde_json::Map::new();
-        obj2.insert("b".to_string(), serde_json::json!(3));
-        obj2.insert("c".to_string(), serde_json::json!(4));
+        let mut obj2 = IndexMap::new();
+        obj2.insert("b".to_string(), JValue::from(3i64));
+        obj2.insert("c".to_string(), JValue::from(4i64));
 
-        let arr = vec![Value::Object(obj1), Value::Object(obj2)];
+        let arr = vec![JValue::object(obj1), JValue::object(obj2)];
         let result = object::merge(&arr).unwrap();
 
-        if let Value::Object(merged) = result {
-            assert_eq!(merged.get("a"), Some(&serde_json::json!(1)));
-            assert_eq!(merged.get("b"), Some(&serde_json::json!(3))); // Later value wins
-            assert_eq!(merged.get("c"), Some(&serde_json::json!(4)));
+        if let JValue::Object(merged) = result {
+            assert_eq!(merged.get("a"), Some(&JValue::from(1i64)));
+            assert_eq!(merged.get("b"), Some(&JValue::from(3i64))); // Later value wins
+            assert_eq!(merged.get("c"), Some(&JValue::from(4i64)));
         } else {
             panic!("Expected merged object");
         }
