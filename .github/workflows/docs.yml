@@ -51,9 +51,12 @@ jobs:
       - name: Install UV
         uses: astral-sh/setup-uv@v4
 
+      - name: Create virtual environment
+        run: uv venv
+
       - name: Install documentation dependencies
         run: |
-          uv pip install --system \
+          uv pip install \
             mkdocs \
             mkdocs-material \
             mkdocstrings[python] \
@@ -65,8 +68,8 @@ jobs:
 
       - name: Build jsonatapy
         run: |
-          uv pip install --system maturin
-          maturin develop --release
+          uv pip install maturin
+          uv run maturin develop --release
 
       - name: Generate API documentation
         run: |
@@ -564,7 +567,7 @@ jobs:
           EOF
 
       - name: Build documentation
-        run: mkdocs build --strict
+        run: uv run mkdocs build --strict
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
