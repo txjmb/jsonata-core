@@ -2,6 +2,7 @@
 // Mirrors functions.js from the reference implementation
 
 #![allow(clippy::explicit_counter_loop)]
+#![allow(clippy::approx_constant)]
 
 use crate::value::JValue;
 use indexmap::IndexMap;

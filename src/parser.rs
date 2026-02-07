@@ -1,6 +1,8 @@
 // JSONata expression parser
 // Mirrors parser.js from the reference implementation
 
+#![allow(clippy::approx_constant)]
+
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage, UnaryOp};
 use thiserror::Error;
 

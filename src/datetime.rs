@@ -1,6 +1,8 @@
 // Date and time handling functions
 // Mirrors datetime.js from the reference implementation
 
+#![allow(clippy::unnecessary_cast)]
+
 use std::sync::OnceLock;
 
 use crate::value::JValue;
