@@ -48,6 +48,7 @@ Thumbs.db
 # Documentation builds
 docs/_build/
 docs/api/
+site/
 
 # Test/benchmark outputs
 test-suite-report.json

@@ -15,24 +15,32 @@ Example:
     >>> result = expr.evaluate(data)
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from ._jsonatapy import (
-    JsonataExpression as _JsonataExpression,
     JsonataData as _JsonataData,
-    compile as _compile,
-    evaluate as _evaluate,
-    __version__,
+)
+from ._jsonatapy import (
+    JsonataExpression as _JsonataExpression,
+)
+from ._jsonatapy import (
     __jsonata_version__,
+    __version__,
+)
+from ._jsonatapy import (
+    compile as _compile,
+)
+from ._jsonatapy import (
+    evaluate as _evaluate,
 )
 
 __all__ = [
+    "JsonataData",
+    "JsonataExpression",
+    "__jsonata_version__",
+    "__version__",
     "compile",
     "evaluate",
-    "JsonataExpression",
-    "JsonataData",
-    "__version__",
-    "__jsonata_version__",
 ]
 
 
@@ -106,7 +114,7 @@ class JsonataExpression:
         """
         self._expr = expr
 
-    def evaluate(self, data: Any, bindings: Optional[Dict[str, Any]] = None) -> Any:
+    def evaluate(self, data: Any, bindings: dict[str, Any] | None = None) -> Any:
         """
         Evaluate this expression against data.
 
@@ -129,7 +137,7 @@ class JsonataExpression:
         """
         return self._expr.evaluate(data, bindings)
 
-    def evaluate_json(self, json_str: str, bindings: Optional[Dict[str, Any]] = None) -> str:
+    def evaluate_json(self, json_str: str, bindings: dict[str, Any] | None = None) -> str:
         """
         Evaluate this expression with JSON string input/output (faster for large data).
 
@@ -162,7 +170,7 @@ class JsonataExpression:
         return self._expr.evaluate_json(json_str, bindings)
 
     def evaluate_with_data(
-        self, data: "JsonataData", bindings: Optional[Dict[str, Any]] = None
+        self, data: "JsonataData", bindings: dict[str, Any] | None = None
     ) -> Any:
         """
         Evaluate with pre-converted data (fastest for repeated evaluation).
@@ -185,7 +193,7 @@ class JsonataExpression:
         return self._expr.evaluate_with_data(data._data, bindings)
 
     def evaluate_data_to_json(
-        self, data: "JsonataData", bindings: Optional[Dict[str, Any]] = None
+        self, data: "JsonataData", bindings: dict[str, Any] | None = None
     ) -> str:
         """
         Evaluate with pre-converted data, return JSON string (zero-overhead output).
@@ -260,7 +268,7 @@ def compile(expression: str) -> JsonataExpression:
     return JsonataExpression(_compile(expression))
 
 
-def evaluate(expression: str, data: Any, bindings: Optional[Dict[str, Any]] = None) -> Any:
+def evaluate(expression: str, data: Any, bindings: dict[str, Any] | None = None) -> Any:
     """
     Compile and evaluate a JSONata expression in one step.
 
