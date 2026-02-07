@@ -165,7 +165,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install mypy pytest types-all
+          pip install mypy
 
       - name: Run mypy
         continue-on-error: true
