@@ -18,6 +18,7 @@ try:
     from rich import box
     from rich.console import Console
     from rich.table import Table
+
     RICH_AVAILABLE = True
 except ImportError:
     print("⚠ rich not available - install with: pip install rich")
@@ -25,9 +26,11 @@ except ImportError:
 
 try:
     import matplotlib
-    matplotlib.use('Agg')
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import numpy as np
+
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     print("⚠ matplotlib not available - install with: pip install matplotlib")
@@ -58,7 +61,7 @@ class EnhancedReport:
             title="[bold cyan]JSONata Performance Comparison[/bold cyan]",
             box=box.ROUNDED,
             show_header=True,
-            header_style="bold magenta"
+            header_style="bold magenta",
         )
 
         table.add_column("Category", style="cyan", width=20)
@@ -79,11 +82,7 @@ class EnhancedReport:
 
         for category, results in categories.items():
             # Category header
-            table.add_row(
-                f"[bold]{category}[/bold]",
-                "", "", "", "", "", "",
-                style="dim"
-            )
+            table.add_row(f"[bold]{category}[/bold]", "", "", "", "", "", "", style="dim")
 
             for result in results:
                 name = result.get("name", "")
@@ -104,19 +103,11 @@ class EnhancedReport:
                 if speedup and speedup > 1:
                     speedup_str = f"[green]{speedup:.2f}x faster[/green]"
                 elif speedup:
-                    speedup_str = f"[red]{1/speedup:.2f}x slower[/red]"
+                    speedup_str = f"[red]{1 / speedup:.2f}x slower[/red]"
                 else:
                     speedup_str = "N/A"
 
-                table.add_row(
-                    "",
-                    name,
-                    jsonatapy_str,
-                    js_str,
-                    python_str,
-                    rs_str,
-                    speedup_str
-                )
+                table.add_row("", name, jsonatapy_str, js_str, python_str, rs_str, speedup_str)
 
         self.console.print(table)
 
@@ -126,9 +117,7 @@ class EnhancedReport:
             return
 
         stats_table = Table(
-            title="[bold cyan]Overall Statistics[/bold cyan]",
-            box=box.ROUNDED,
-            show_header=True
+            title="[bold cyan]Overall Statistics[/bold cyan]", box=box.ROUNDED, show_header=True
         )
 
         stats_table.add_column("Metric", style="cyan")
@@ -143,36 +132,28 @@ class EnhancedReport:
             max_speedup = max(speedups)
             faster_count = sum(1 for s in speedups if s > 1)
 
-            stats_table.add_row(
-                "Average speedup (jsonatapy vs JS)",
-                f"{avg_speedup:.2f}x"
-            )
+            stats_table.add_row("Average speedup (jsonatapy vs JS)", f"{avg_speedup:.2f}x")
             stats_table.add_row("Min speedup", f"{min_speedup:.2f}x")
             stats_table.add_row("Max speedup", f"{max_speedup:.2f}x")
             stats_table.add_row(
-                "Tests where jsonatapy is faster",
-                f"{faster_count}/{len(speedups)}"
+                "Tests where jsonatapy is faster", f"{faster_count}/{len(speedups)}"
             )
 
         # jsonata-python stats
-        python_speedups = [r.get("jsonata_python_speedup") for r in self.results
-                          if r.get("jsonata_python_speedup")]
+        python_speedups = [
+            r.get("jsonata_python_speedup") for r in self.results if r.get("jsonata_python_speedup")
+        ]
         if python_speedups:
             avg_python = sum(python_speedups) / len(python_speedups)
-            stats_table.add_row(
-                "Average speedup (jsonata-python vs JS)",
-                f"{avg_python:.2f}x"
-            )
+            stats_table.add_row("Average speedup (jsonata-python vs JS)", f"{avg_python:.2f}x")
 
         # jsonata-rs stats
-        rs_speedups = [r.get("jsonata_rs_speedup") for r in self.results
-                      if r.get("jsonata_rs_speedup")]
+        rs_speedups = [
+            r.get("jsonata_rs_speedup") for r in self.results if r.get("jsonata_rs_speedup")
+        ]
         if rs_speedups:
             avg_rs = sum(rs_speedups) / len(rs_speedups)
-            stats_table.add_row(
-                "Average speedup (jsonata-rs vs JS)",
-                f"{avg_rs:.2f}x"
-            )
+            stats_table.add_row("Average speedup (jsonata-rs vs JS)", f"{avg_rs:.2f}x")
 
         self.console.print(stats_table)
 
@@ -208,24 +189,33 @@ class EnhancedReport:
             rs_times = [r.get("jsonata_rs_ms") or 0 for r in results]
 
             # Plot bars (only if they have data)
-            ax.bar(x - 1.5*width, jsonatapy_times, width, label='jsonatapy', color='green', alpha=0.8)
-            ax.bar(x - 0.5*width, js_times, width, label='JavaScript', color='orange', alpha=0.8)
+            ax.bar(
+                x - 1.5 * width, jsonatapy_times, width, label="jsonatapy", color="green", alpha=0.8
+            )
+            ax.bar(x - 0.5 * width, js_times, width, label="JavaScript", color="orange", alpha=0.8)
             if any(python_times):
-                ax.bar(x + 0.5*width, python_times, width, label='jsonata-python', color='blue', alpha=0.8)
+                ax.bar(
+                    x + 0.5 * width,
+                    python_times,
+                    width,
+                    label="jsonata-python",
+                    color="blue",
+                    alpha=0.8,
+                )
             if any(rs_times):
-                ax.bar(x + 1.5*width, rs_times, width, label='jsonata-rs', color='red', alpha=0.8)
+                ax.bar(x + 1.5 * width, rs_times, width, label="jsonata-rs", color="red", alpha=0.8)
 
-            ax.set_xlabel('Test', fontsize=10)
-            ax.set_ylabel('Time (ms)', fontsize=10)
-            ax.set_title(f'{category} - Performance Comparison', fontsize=12, fontweight='bold')
+            ax.set_xlabel("Test", fontsize=10)
+            ax.set_ylabel("Time (ms)", fontsize=10)
+            ax.set_title(f"{category} - Performance Comparison", fontsize=12, fontweight="bold")
             ax.set_xticks(x)
-            ax.set_xticklabels(names, rotation=45, ha='right', fontsize=8)
+            ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
             ax.legend(fontsize=9)
-            ax.grid(axis='y', alpha=0.3)
+            ax.grid(axis="y", alpha=0.3)
 
             plt.tight_layout()
             chart_file = output_path / f"{category.lower().replace(' ', '_')}.png"
-            plt.savefig(chart_file, dpi=150, bbox_inches='tight')
+            plt.savefig(chart_file, dpi=150, bbox_inches="tight")
             plt.close()
 
             print(f"✓ Chart saved: {chart_file}")
@@ -238,25 +228,29 @@ class EnhancedReport:
         _fig, ax = plt.subplots(figsize=(14, 8))
 
         names = [r.get("name", "")[:40] for r in self.results if r.get("jsonatapy_speedup")]
-        speedups = [r.get("jsonatapy_speedup", 0) for r in self.results if r.get("jsonatapy_speedup")]
+        speedups = [
+            r.get("jsonatapy_speedup", 0) for r in self.results if r.get("jsonatapy_speedup")
+        ]
 
         # Color code: green for faster, red for slower
-        colors = ['green' if s > 1 else 'red' for s in speedups]
+        colors = ["green" if s > 1 else "red" for s in speedups]
 
         y_pos = np.arange(len(names))
         ax.barh(y_pos, speedups, color=colors, alpha=0.7)
-        ax.axvline(x=1, color='black', linestyle='--', linewidth=1, alpha=0.5)
+        ax.axvline(x=1, color="black", linestyle="--", linewidth=1, alpha=0.5)
 
         ax.set_yticks(y_pos)
         ax.set_yticklabels(names, fontsize=8)
-        ax.set_xlabel('Speedup vs JavaScript (log scale)', fontsize=10)
-        ax.set_xscale('log')
-        ax.set_title('jsonatapy Performance vs JavaScript Reference', fontsize=12, fontweight='bold')
-        ax.grid(axis='x', alpha=0.3)
+        ax.set_xlabel("Speedup vs JavaScript (log scale)", fontsize=10)
+        ax.set_xscale("log")
+        ax.set_title(
+            "jsonatapy Performance vs JavaScript Reference", fontsize=12, fontweight="bold"
+        )
+        ax.grid(axis="x", alpha=0.3)
 
         plt.tight_layout()
         chart_file = output_path / "overall_speedup.png"
-        plt.savefig(chart_file, dpi=150, bbox_inches='tight')
+        plt.savefig(chart_file, dpi=150, bbox_inches="tight")
         plt.close()
 
         print(f"✓ Speedup chart saved: {chart_file}")
@@ -283,12 +277,12 @@ def main():
 
     report = EnhancedReport(results_file)
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("ENHANCED BENCHMARK REPORT")
-    print("="*70)
+    print("=" * 70)
     print(f"Timestamp: {report.timestamp}")
     print(f"Implementations: {', '.join(k for k, v in report.implementations.items() if v)}")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
 
     report.print_summary_table()
     report.print_statistics()

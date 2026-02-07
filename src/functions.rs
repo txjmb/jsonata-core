@@ -40,22 +40,21 @@ pub mod string {
         if !flags.is_empty() {
             regex_pattern.push_str("(?");
             if flags.contains('i') {
-                regex_pattern.push('i');  // case-insensitive
+                regex_pattern.push('i'); // case-insensitive
             }
             if flags.contains('m') {
-                regex_pattern.push('m');  // multi-line
+                regex_pattern.push('m'); // multi-line
             }
             if flags.contains('s') {
-                regex_pattern.push('s');  // dot matches newline
+                regex_pattern.push('s'); // dot matches newline
             }
             regex_pattern.push(')');
         }
 
         regex_pattern.push_str(pattern);
 
-        Regex::new(&regex_pattern).map_err(|e|
-            FunctionError::ArgumentError(format!("Invalid regex: {}", e))
-        )
+        Regex::new(&regex_pattern)
+            .map_err(|e| FunctionError::ArgumentError(format!("Invalid regex: {}", e)))
     }
 
     /// $string(value, prettify) - Convert value to string
@@ -81,9 +80,10 @@ pub mod string {
                 let f = *n;
                 // Check for non-finite numbers (Infinity, NaN)
                 if !f.is_finite() {
-                    return Err(FunctionError::RuntimeError(
-                        format!("D3001: Attempting to invoke string function with non-finite number: {}", f)
-                    ));
+                    return Err(FunctionError::RuntimeError(format!(
+                        "D3001: Attempting to invoke string function with non-finite number: {}",
+                        f
+                    )));
                 }
 
                 // Format numbers like JavaScript does
@@ -104,7 +104,11 @@ pub mod string {
             JValue::Array(_) | JValue::Object(_) => {
                 // JSON.stringify with optional prettification
                 // Uses custom serialization to handle numbers and functions correctly
-                let indent = if prettify.unwrap_or(false) { Some(2) } else { None };
+                let indent = if prettify.unwrap_or(false) {
+                    Some(2)
+                } else {
+                    None
+                };
                 stringify_value_custom(value, indent)?
             }
             _ => String::new(),
@@ -179,7 +183,10 @@ pub mod string {
     /// - Converts non-integer numbers to 15 significant figures
     /// - Keeps integers without decimal point
     /// - Converts functions to empty string
-    fn stringify_value_custom(value: &JValue, indent: Option<usize>) -> Result<String, FunctionError> {
+    fn stringify_value_custom(
+        value: &JValue,
+        indent: Option<usize>,
+    ) -> Result<String, FunctionError> {
         // Transform the value recursively before stringifying
         let transformed = transform_for_stringify(value);
 
@@ -213,12 +220,15 @@ pub mod string {
                 }
             }
             JValue::Array(arr) => {
-                let transformed: Vec<JValue> = arr.iter().map(|v| {
-                    if v.is_function() {
-                        return JValue::string("");
-                    }
-                    transform_for_stringify(v)
-                }).collect();
+                let transformed: Vec<JValue> = arr
+                    .iter()
+                    .map(|v| {
+                        if v.is_function() {
+                            return JValue::string("");
+                        }
+                        transform_for_stringify(v)
+                    })
+                    .collect();
                 JValue::array(transformed)
             }
             JValue::Object(obj) => {
@@ -226,15 +236,18 @@ pub mod string {
                     return JValue::string("");
                 }
 
-                let transformed: IndexMap<String, JValue> = obj.iter().map(|(k, v)| {
-                    if v.is_function() {
-                        return (k.clone(), JValue::string(""));
-                    }
-                    (k.clone(), transform_for_stringify(v))
-                }).collect();
+                let transformed: IndexMap<String, JValue> = obj
+                    .iter()
+                    .map(|(k, v)| {
+                        if v.is_function() {
+                            return (k.clone(), JValue::string(""));
+                        }
+                        (k.clone(), transform_for_stringify(v))
+                    })
+                    .collect();
                 JValue::object(transformed)
             }
-            _ => value.clone()
+            _ => value.clone(),
         }
     }
 
@@ -311,8 +324,8 @@ pub mod string {
     /// Normalizes whitespace by replacing runs of whitespace characters (space, tab, newline, etc.)
     /// with a single space, then strips leading and trailing spaces.
     pub fn trim(s: &str) -> Result<JValue, FunctionError> {
-        use std::sync::OnceLock;
         use regex::Regex;
+        use std::sync::OnceLock;
 
         static WS_REGEX: OnceLock<Regex> = OnceLock::new();
         let ws_regex = WS_REGEX.get_or_init(|| Regex::new(r"[ \t\n\r]+").unwrap());
@@ -332,7 +345,11 @@ pub mod string {
         // Handle string pattern
         let pat = match pattern {
             JValue::String(s) => &**s,
-            _ => return Err(FunctionError::TypeError("contains() requires string arguments".to_string())),
+            _ => {
+                return Err(FunctionError::TypeError(
+                    "contains() requires string arguments".to_string(),
+                ))
+            }
         };
 
         Ok(JValue::Bool(s.contains(pat)))
@@ -340,14 +357,16 @@ pub mod string {
 
     /// $split(str, separator, limit) - Split string into array
     /// separator can be a string or a regex object
-    pub fn split(s: &str, separator: &JValue, limit: Option<usize>) -> Result<JValue, FunctionError> {
+    pub fn split(
+        s: &str,
+        separator: &JValue,
+        limit: Option<usize>,
+    ) -> Result<JValue, FunctionError> {
         // Check if separator is a regex
         if let Some((pattern, flags)) = extract_regex(separator) {
             let re = build_regex(&pattern, &flags)?;
 
-            let parts: Vec<JValue> = re.split(s)
-                .map(JValue::string)
-                .collect();
+            let parts: Vec<JValue> = re.split(s).map(JValue::string).collect();
 
             // Truncate to limit if specified (limit is max number of results)
             let result = if let Some(lim) = limit {
@@ -362,14 +381,16 @@ pub mod string {
         // Handle string separator
         let sep = match separator {
             JValue::String(s) => &**s,
-            _ => return Err(FunctionError::TypeError("split() requires string arguments".to_string())),
+            _ => {
+                return Err(FunctionError::TypeError(
+                    "split() requires string arguments".to_string(),
+                ))
+            }
         };
 
         if sep.is_empty() {
             // Split into individual characters
-            let chars: Vec<JValue> = s.chars()
-                .map(|c| JValue::string(c.to_string()))
-                .collect();
+            let chars: Vec<JValue> = s.chars().map(|c| JValue::string(c.to_string())).collect();
             // Truncate to limit if specified
             let result = if let Some(lim) = limit {
                 chars.into_iter().take(lim).collect()
@@ -379,9 +400,7 @@ pub mod string {
             return Ok(JValue::array(result));
         }
 
-        let parts: Vec<JValue> = s.split(sep)
-            .map(JValue::string)
-            .collect();
+        let parts: Vec<JValue> = s.split(sep).map(JValue::string).collect();
 
         // Truncate to limit if specified (limit is max number of results)
         let result = if let Some(lim) = limit {
@@ -468,7 +487,8 @@ pub mod string {
                     let mut digit_count = 0;
                     while digits_end < chars.len()
                         && chars[digits_end].is_ascii_digit()
-                        && digit_count < max_digits {
+                        && digit_count < max_digits
+                    {
                         digits_end += 1;
                         digit_count += 1;
                     }
@@ -482,7 +502,8 @@ pub mod string {
                         // try parsing with one fewer digit (fallback logic)
                         let mut used_digits = digit_count;
                         if max_digits > 1 && group_num > groups.len() && digit_count > 1 {
-                            let fallback_str: String = chars[position..digits_end-1].iter().collect();
+                            let fallback_str: String =
+                                chars[position..digits_end - 1].iter().collect();
                             if let Ok(fallback_num) = fallback_str.parse::<usize>() {
                                 group_num = fallback_num;
                                 used_digits = digit_count - 1;
@@ -549,16 +570,15 @@ pub mod string {
                 // D1004: Regular expression matches zero length string
                 if m.as_str().is_empty() {
                     return Err(FunctionError::RuntimeError(
-                        "D1004: Regular expression matches zero length string".to_string()
+                        "D1004: Regular expression matches zero length string".to_string(),
                     ));
                 }
 
                 output.push_str(&s[last_match..m.start()]);
 
                 // Collect capture groups
-                let groups: Vec<Option<regex::Match>> = (1..cap.len())
-                    .map(|i| cap.get(i))
-                    .collect();
+                let groups: Vec<Option<regex::Match>> =
+                    (1..cap.len()).map(|i| cap.get(i)).collect();
 
                 // Perform capture group substitution
                 let substituted = substitute_capture_groups(replacement, m.as_str(), &groups);
@@ -575,12 +595,16 @@ pub mod string {
         // Handle string pattern
         let pat = match pattern {
             JValue::String(s) => &**s,
-            _ => return Err(FunctionError::TypeError("replace() requires string arguments".to_string())),
+            _ => {
+                return Err(FunctionError::TypeError(
+                    "replace() requires string arguments".to_string(),
+                ))
+            }
         };
 
         if pat.is_empty() {
             return Err(FunctionError::RuntimeError(
-                "D3010: Pattern cannot be empty".to_string()
+                "D3010: Pattern cannot be empty".to_string(),
             ));
         }
 
@@ -664,7 +688,7 @@ pub mod numeric {
                 let f = *n;
                 if !f.is_finite() {
                     return Err(FunctionError::RuntimeError(
-                        "D3030: Cannot convert infinite number".to_string()
+                        "D3030: Cannot convert infinite number".to_string(),
                     ));
                 }
                 Ok(JValue::Number(f))
@@ -673,27 +697,45 @@ pub mod numeric {
                 let trimmed = s.trim();
 
                 // Try hex, octal, or binary format first (0x, 0o, 0b)
-                if let Some(stripped) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+                if let Some(stripped) = trimmed
+                    .strip_prefix("0x")
+                    .or_else(|| trimmed.strip_prefix("0X"))
+                {
                     // Hexadecimal
                     return i64::from_str_radix(stripped, 16)
                         .map(|n| JValue::Number(n as f64))
-                        .map_err(|_| FunctionError::RuntimeError(
-                            format!("D3030: Cannot convert '{}' to number", s)
-                        ));
-                } else if let Some(stripped) = trimmed.strip_prefix("0o").or_else(|| trimmed.strip_prefix("0O")) {
+                        .map_err(|_| {
+                            FunctionError::RuntimeError(format!(
+                                "D3030: Cannot convert '{}' to number",
+                                s
+                            ))
+                        });
+                } else if let Some(stripped) = trimmed
+                    .strip_prefix("0o")
+                    .or_else(|| trimmed.strip_prefix("0O"))
+                {
                     // Octal
                     return i64::from_str_radix(stripped, 8)
                         .map(|n| JValue::Number(n as f64))
-                        .map_err(|_| FunctionError::RuntimeError(
-                            format!("D3030: Cannot convert '{}' to number", s)
-                        ));
-                } else if let Some(stripped) = trimmed.strip_prefix("0b").or_else(|| trimmed.strip_prefix("0B")) {
+                        .map_err(|_| {
+                            FunctionError::RuntimeError(format!(
+                                "D3030: Cannot convert '{}' to number",
+                                s
+                            ))
+                        });
+                } else if let Some(stripped) = trimmed
+                    .strip_prefix("0b")
+                    .or_else(|| trimmed.strip_prefix("0B"))
+                {
                     // Binary
                     return i64::from_str_radix(stripped, 2)
                         .map(|n| JValue::Number(n as f64))
-                        .map_err(|_| FunctionError::RuntimeError(
-                            format!("D3030: Cannot convert '{}' to number", s)
-                        ));
+                        .map_err(|_| {
+                            FunctionError::RuntimeError(format!(
+                                "D3030: Cannot convert '{}' to number",
+                                s
+                            ))
+                        });
                 }
 
                 // Try decimal format
@@ -701,15 +743,17 @@ pub mod numeric {
                     Ok(n) => {
                         // Validate the number is finite
                         if !n.is_finite() {
-                            return Err(FunctionError::RuntimeError(
-                                format!("D3030: Cannot convert '{}' to number", s)
-                            ));
+                            return Err(FunctionError::RuntimeError(format!(
+                                "D3030: Cannot convert '{}' to number",
+                                s
+                            )));
                         }
                         Ok(JValue::Number(n))
                     }
-                    Err(_) => Err(FunctionError::RuntimeError(
-                        format!("D3030: Cannot convert '{}' to number", s)
-                    ))
+                    Err(_) => Err(FunctionError::RuntimeError(format!(
+                        "D3030: Cannot convert '{}' to number",
+                        s
+                    ))),
                 }
             }
             JValue::Bool(true) => Ok(JValue::Number(1.0)),
@@ -850,14 +894,14 @@ pub mod numeric {
             // Exactly at .5 (within tolerance) - round to even
             let floor_int = floor_val as i64;
             if floor_int % 2 == 0 {
-                floor_val  // floor is even, stay there
+                floor_val // floor is even, stay there
             } else {
-                floor_val + 1.0  // floor is odd, round up to even
+                floor_val + 1.0 // floor is odd, round up to even
             }
         } else if frac > 0.5 {
-            floor_val + 1.0  // round up
+            floor_val + 1.0 // round up
         } else {
-            floor_val  // round down
+            floor_val // round down
         };
 
         // Shift back
@@ -889,7 +933,11 @@ pub mod numeric {
 
     /// $formatNumber(value, picture, options) - Format number with picture string
     /// Implements XPath F&O number formatting specification
-    pub fn format_number(value: f64, picture: &str, options: Option<&JValue>) -> Result<JValue, FunctionError> {
+    pub fn format_number(
+        value: f64,
+        picture: &str,
+        options: Option<&JValue>,
+    ) -> Result<JValue, FunctionError> {
         // Default format properties (can be overridden by options)
         let mut decimal_separator = '.';
         let mut grouping_separator = ',';
@@ -922,7 +970,7 @@ pub mod numeric {
         let sub_pictures: Vec<&str> = picture.split(pattern_separator).collect();
         if sub_pictures.len() > 2 {
             return Err(FunctionError::ArgumentError(
-                "D3080: Too many pattern separators in picture string".to_string()
+                "D3080: Too many pattern separators in picture string".to_string(),
             ));
         }
 
@@ -1016,18 +1064,28 @@ pub mod numeric {
         // Find prefix (chars before any active char)
         // Active chars for prefix/suffix: decimal sep, grouping sep, digit char, or digit family members
         // NOTE: 'e'/'E' are NOT included here to avoid treating them as exponent markers in prefix/suffix
-        let prefix_end = chars.iter().position(|&c| {
-            c == decimal_sep || c == grouping_sep || c == digit_char
-            || is_digit_in_family(c, zero_digit)
-        }).unwrap_or(chars.len());
+        let prefix_end = chars
+            .iter()
+            .position(|&c| {
+                c == decimal_sep
+                    || c == grouping_sep
+                    || c == digit_char
+                    || is_digit_in_family(c, zero_digit)
+            })
+            .unwrap_or(chars.len());
         let prefix: String = chars[..prefix_end].iter().collect();
 
         // Find suffix (chars after last active char)
-        let suffix_start = chars.iter().rposition(|&c| {
-            c == decimal_sep || c == grouping_sep || c == digit_char
-            || is_digit_in_family(c, zero_digit)
-        }).map(|pos| pos + 1)
-        .unwrap_or(chars.len());
+        let suffix_start = chars
+            .iter()
+            .rposition(|&c| {
+                c == decimal_sep
+                    || c == grouping_sep
+                    || c == digit_char
+                    || is_digit_in_family(c, zero_digit)
+            })
+            .map(|pos| pos + 1)
+            .unwrap_or(chars.len());
         let suffix: String = chars[suffix_start..].iter().collect();
 
         // Active part (between prefix and suffix)
@@ -1036,10 +1094,7 @@ pub mod numeric {
         // Check for exponential notation (e.g., "00.000e0")
         let exponent_pos = active.find('e').or_else(|| active.find('E'));
         let (mantissa_part, exponent_part): (String, String) = if let Some(pos) = exponent_pos {
-            (
-                active[..pos].to_string(),
-                active[pos + 1..].to_string()
-            )
+            (active[..pos].to_string(), active[pos + 1..].to_string())
         } else {
             (active.clone(), String::new())
         };
@@ -1050,7 +1105,7 @@ pub mod numeric {
         let (integer_part, fractional_part): (String, String) = if let Some(pos) = decimal_pos {
             (
                 mantissa_chars[..pos].iter().collect(),
-                mantissa_chars[pos + 1..].iter().collect()
+                mantissa_chars[pos + 1..].iter().collect(),
             )
         } else {
             (mantissa_part.clone(), String::new())
@@ -1059,7 +1114,7 @@ pub mod numeric {
         // Validate: only one decimal separator
         if active.matches(decimal_sep).count() > 1 {
             return Err(FunctionError::ArgumentError(
-                "D3081: Multiple decimal separators in picture".to_string()
+                "D3081: Multiple decimal separators in picture".to_string(),
             ));
         }
 
@@ -1067,12 +1122,12 @@ pub mod numeric {
         if let Some(pos) = decimal_pos {
             if pos > 0 && active.chars().nth(pos - 1) == Some(grouping_sep) {
                 return Err(FunctionError::ArgumentError(
-                    "D3087: Grouping separator adjacent to decimal separator".to_string()
+                    "D3087: Grouping separator adjacent to decimal separator".to_string(),
                 ));
             }
             if pos + 1 < active.len() && active.chars().nth(pos + 1) == Some(grouping_sep) {
                 return Err(FunctionError::ArgumentError(
-                    "D3087: Grouping separator adjacent to decimal separator".to_string()
+                    "D3087: Grouping separator adjacent to decimal separator".to_string(),
                 ));
             }
         }
@@ -1081,7 +1136,7 @@ pub mod numeric {
         let grouping_str = format!("{}{}", grouping_sep, grouping_sep);
         if picture.contains(&grouping_str) {
             return Err(FunctionError::ArgumentError(
-                "D3089: Consecutive grouping separators in picture".to_string()
+                "D3089: Consecutive grouping separators in picture".to_string(),
             ));
         }
 
@@ -1092,50 +1147,57 @@ pub mod numeric {
         // Validate: multiple percent signs
         if picture.matches(percent_symbol).count() > 1 {
             return Err(FunctionError::ArgumentError(
-                "D3082: Multiple percent signs in picture".to_string()
+                "D3082: Multiple percent signs in picture".to_string(),
             ));
         }
 
         // Validate: multiple per-mille signs
         if picture.matches(per_mille_symbol).count() > 1 {
             return Err(FunctionError::ArgumentError(
-                "D3083: Multiple per-mille signs in picture".to_string()
+                "D3083: Multiple per-mille signs in picture".to_string(),
             ));
         }
 
         // Validate: cannot have both percent and per-mille
         if has_percent && has_per_mille {
             return Err(FunctionError::ArgumentError(
-                "D3084: Cannot have both percent and per-mille in picture".to_string()
+                "D3084: Cannot have both percent and per-mille in picture".to_string(),
             ));
         }
 
         // Validate: integer part cannot end with grouping separator
         if !integer_part.is_empty() && integer_part.ends_with(grouping_sep) {
             return Err(FunctionError::ArgumentError(
-                "D3088: Integer part ends with grouping separator".to_string()
+                "D3088: Integer part ends with grouping separator".to_string(),
             ));
         }
 
         // Validate: at least one digit in mantissa (integer or fractional part)
-        let has_digit_in_integer = integer_part.chars().any(|c| is_digit_in_family(c, zero_digit) || c == digit_char);
-        let has_digit_in_fractional = fractional_part.chars().any(|c| is_digit_in_family(c, zero_digit) || c == digit_char);
+        let has_digit_in_integer = integer_part
+            .chars()
+            .any(|c| is_digit_in_family(c, zero_digit) || c == digit_char);
+        let has_digit_in_fractional = fractional_part
+            .chars()
+            .any(|c| is_digit_in_family(c, zero_digit) || c == digit_char);
         if !has_digit_in_integer && !has_digit_in_fractional {
             return Err(FunctionError::ArgumentError(
-                "D3085: Picture must contain at least one digit".to_string()
+                "D3085: Picture must contain at least one digit".to_string(),
             ));
         }
 
         // Count minimum integer digits (mandatory digits in digit family)
-        let min_integer_digits = integer_part.chars()
+        let min_integer_digits = integer_part
+            .chars()
             .filter(|&c| is_digit_in_family(c, zero_digit))
             .count();
 
         // Count minimum and maximum fractional digits
-        let min_fractional_digits = fractional_part.chars()
+        let min_fractional_digits = fractional_part
+            .chars()
             .filter(|&c| is_digit_in_family(c, zero_digit))
             .count();
-        let mut max_fractional_digits = fractional_part.chars()
+        let mut max_fractional_digits = fractional_part
+            .chars()
             .filter(|&c| is_digit_in_family(c, zero_digit) || c == digit_char)
             .count();
 
@@ -1168,8 +1230,9 @@ pub mod numeric {
             // Check if all intervals are the same
             let first_interval = grouping_positions[0];
             if grouping_positions.iter().all(|&p| {
-                grouping_positions.iter().filter(|&&x| x == p).count() == grouping_positions.len() / first_interval
-                || (p % first_interval == 0 && grouping_positions.contains(&first_interval))
+                grouping_positions.iter().filter(|&&x| x == p).count()
+                    == grouping_positions.len() / first_interval
+                    || (p % first_interval == 0 && grouping_positions.contains(&first_interval))
             }) {
                 first_interval
             } else {
@@ -1193,7 +1256,8 @@ pub mod numeric {
 
         // Process exponent part if present (recognize both ASCII and custom digit families)
         let min_exponent_digits = if !exponent_part.is_empty() {
-            exponent_part.chars()
+            exponent_part
+                .chars()
                 .filter(|&c| is_digit_in_family(c, zero_digit))
                 .count()
         } else {
@@ -1201,23 +1265,27 @@ pub mod numeric {
         };
 
         // Validate: exponent part must contain only digit characters (ASCII or custom digit family)
-        if !exponent_part.is_empty() && exponent_part.chars().any(|c| !is_digit_in_family(c, zero_digit)) {
+        if !exponent_part.is_empty()
+            && exponent_part
+                .chars()
+                .any(|c| !is_digit_in_family(c, zero_digit))
+        {
             return Err(FunctionError::ArgumentError(
-                "D3093: Exponent must contain only digit characters".to_string()
+                "D3093: Exponent must contain only digit characters".to_string(),
             ));
         }
 
         // Validate: exponent cannot be empty if 'e' is present
         if exponent_pos.is_some() && min_exponent_digits == 0 {
             return Err(FunctionError::ArgumentError(
-                "D3093: Exponent cannot be empty".to_string()
+                "D3093: Exponent cannot be empty".to_string(),
             ));
         }
 
         // Validate: percent/per-mille not allowed with exponential notation
         if min_exponent_digits > 0 && (has_percent || has_per_mille) {
             return Err(FunctionError::ArgumentError(
-                "D3092: Percent/per-mille not allowed with exponential notation".to_string()
+                "D3092: Percent/per-mille not allowed with exponential notation".to_string(),
             ));
         }
 
@@ -1249,12 +1317,14 @@ pub mod numeric {
 
         // Validate: invalid characters in picture
         // All characters in the active part must be valid (digits, decimal, grouping, or 'e'/'E')
-        let valid_chars: Vec<char> = vec![decimal_sep, grouping_sep, zero_digit, digit_char, 'e', 'E'];
+        let valid_chars: Vec<char> =
+            vec![decimal_sep, grouping_sep, zero_digit, digit_char, 'e', 'E'];
         for c in mantissa_part.chars() {
             if !is_digit_in_family(c, zero_digit) && !valid_chars.contains(&c) {
-                return Err(FunctionError::ArgumentError(
-                    format!("D3086: Invalid character in picture: '{}'", c)
-                ));
+                return Err(FunctionError::ArgumentError(format!(
+                    "D3086: Invalid character in picture: '{}'",
+                    c
+                )));
             }
         }
 
@@ -1421,14 +1491,17 @@ pub mod numeric {
         // Convert digits to custom zero-digit base if needed (mantissa part)
         if zero_digit != '0' {
             let zero_code = zero_digit as u32;
-            result = result.chars().map(|c| {
-                if c.is_ascii_digit() {
-                    let digit_value = c as u32 - '0' as u32;
-                    char::from_u32(zero_code + digit_value).unwrap_or(c)
-                } else {
-                    c
-                }
-            }).collect();
+            result = result
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_digit() {
+                        let digit_value = c as u32 - '0' as u32;
+                        char::from_u32(zero_code + digit_value).unwrap_or(c)
+                    } else {
+                        c
+                    }
+                })
+                .collect();
         }
 
         // Append exponent if present
@@ -1439,14 +1512,17 @@ pub mod numeric {
             // Convert exponent digits to custom zero-digit base if needed
             let exp_formatted = if zero_digit != '0' {
                 let zero_code = zero_digit as u32;
-                exp_str.chars().map(|c| {
-                    if c.is_ascii_digit() {
-                        let digit_value = c as u32 - '0' as u32;
-                        char::from_u32(zero_code + digit_value).unwrap_or(c)
-                    } else {
-                        c
-                    }
-                }).collect()
+                exp_str
+                    .chars()
+                    .map(|c| {
+                        if c.is_ascii_digit() {
+                            let digit_value = c as u32 - '0' as u32;
+                            char::from_u32(zero_code + digit_value).unwrap_or(c)
+                        } else {
+                            c
+                        }
+                    })
+                    .collect()
             } else {
                 exp_str
             };
@@ -1492,9 +1568,10 @@ pub mod numeric {
 
         // Validate radix is between 2 and 36
         if radix < 2 || radix > 36 {
-            return Err(FunctionError::ArgumentError(
-                format!("D3100: Radix must be between 2 and 36, got {}", radix)
-            ));
+            return Err(FunctionError::ArgumentError(format!(
+                "D3100: Radix must be between 2 and 36, got {}",
+                radix
+            )));
         }
 
         // Handle negative numbers
@@ -1563,7 +1640,9 @@ pub mod array {
             result.sort_by(|a, b| {
                 let a_num = a.as_f64().unwrap();
                 let b_num = b.as_f64().unwrap();
-                a_num.partial_cmp(&b_num).unwrap_or(std::cmp::Ordering::Equal)
+                a_num
+                    .partial_cmp(&b_num)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
         } else if all_strings {
             result.sort_by(|a, b| {
@@ -1613,9 +1692,7 @@ pub mod array {
         match (a, b) {
             (JValue::Null, JValue::Null) => true,
             (JValue::Bool(a), JValue::Bool(b)) => a == b,
-            (JValue::Number(a), JValue::Number(b)) => {
-                a == b
-            }
+            (JValue::Number(a), JValue::Number(b)) => a == b,
             (JValue::String(a), JValue::String(b)) => a == b,
             (JValue::Array(a), JValue::Array(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
@@ -1702,7 +1779,7 @@ pub mod object {
 /// Encoding/decoding functions
 pub mod encoding {
     use super::*;
-    use base64::{Engine as _, engine::general_purpose};
+    use base64::{engine::general_purpose, Engine as _};
 
     /// $base64encode(string) - Encode string to base64
     pub fn base64encode(s: &str) -> Result<JValue, FunctionError> {
@@ -1716,21 +1793,19 @@ pub mod encoding {
             Ok(bytes) => match String::from_utf8(bytes) {
                 Ok(decoded) => Ok(JValue::string(decoded)),
                 Err(_) => Err(FunctionError::RuntimeError(
-                    "Invalid UTF-8 in decoded base64".to_string()
+                    "Invalid UTF-8 in decoded base64".to_string(),
                 )),
             },
             Err(_) => Err(FunctionError::RuntimeError(
-                "Invalid base64 string".to_string()
+                "Invalid base64 string".to_string(),
             )),
         }
     }
 
     /// $encodeUrlComponent(string) - Encode URL component
     pub fn encode_url_component(s: &str) -> Result<JValue, FunctionError> {
-        let encoded = percent_encoding::utf8_percent_encode(
-            s,
-            percent_encoding::NON_ALPHANUMERIC
-        ).to_string();
+        let encoded = percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC)
+            .to_string();
         Ok(JValue::string(encoded))
     }
 
@@ -1739,7 +1814,7 @@ pub mod encoding {
         match percent_encoding::percent_decode_str(s).decode_utf8() {
             Ok(decoded) => Ok(JValue::string(decoded.to_string())),
             Err(_) => Err(FunctionError::RuntimeError(
-                "Invalid percent-encoded string".to_string()
+                "Invalid percent-encoded string".to_string(),
             )),
         }
     }
@@ -1748,10 +1823,8 @@ pub mod encoding {
     /// More permissive than encodeUrlComponent - allows URL structure characters
     pub fn encode_url(s: &str) -> Result<JValue, FunctionError> {
         // Use CONTROLS to preserve URL structure (://?#[]@!$&'()*+,;=)
-        let encoded = percent_encoding::utf8_percent_encode(
-            s,
-            percent_encoding::CONTROLS
-        ).to_string();
+        let encoded =
+            percent_encoding::utf8_percent_encode(s, percent_encoding::CONTROLS).to_string();
         Ok(JValue::string(encoded))
     }
 
@@ -1760,7 +1833,7 @@ pub mod encoding {
         match percent_encoding::percent_decode_str(s).decode_utf8() {
             Ok(decoded) => Ok(JValue::string(decoded.to_string())),
             Err(_) => Err(FunctionError::RuntimeError(
-                "Invalid percent-encoded URL".to_string()
+                "Invalid percent-encoded URL".to_string(),
             )),
         }
     }
@@ -1806,7 +1879,15 @@ mod tests {
 
         // Array gets JSON.stringify'd
         assert_eq!(
-            string::string(&JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)]), None).unwrap(),
+            string::string(
+                &JValue::array(vec![
+                    JValue::from(1i64),
+                    JValue::from(2i64),
+                    JValue::from(3i64)
+                ]),
+                None
+            )
+            .unwrap(),
             JValue::string("[1,2,3]")
         );
     }
@@ -1816,20 +1897,20 @@ mod tests {
         assert_eq!(string::length("hello").unwrap(), JValue::Number(5.0));
         assert_eq!(string::length("").unwrap(), JValue::Number(0.0));
         // Unicode support
-        assert_eq!(string::length("Hello \u{4e16}\u{754c}").unwrap(), JValue::Number(8.0));
-        assert_eq!(string::length("\u{1f389}\u{1f38a}").unwrap(), JValue::Number(2.0));
+        assert_eq!(
+            string::length("Hello \u{4e16}\u{754c}").unwrap(),
+            JValue::Number(8.0)
+        );
+        assert_eq!(
+            string::length("\u{1f389}\u{1f38a}").unwrap(),
+            JValue::Number(2.0)
+        );
     }
 
     #[test]
     fn test_uppercase_lowercase() {
-        assert_eq!(
-            string::uppercase("hello").unwrap(),
-            JValue::string("HELLO")
-        );
-        assert_eq!(
-            string::lowercase("HELLO").unwrap(),
-            JValue::string("hello")
-        );
+        assert_eq!(string::uppercase("hello").unwrap(), JValue::string("HELLO"));
+        assert_eq!(string::lowercase("HELLO").unwrap(), JValue::string("hello"));
         assert_eq!(
             string::uppercase("Hello World").unwrap(),
             JValue::string("HELLO WORLD")
@@ -1903,14 +1984,8 @@ mod tests {
 
     #[test]
     fn test_trim() {
-        assert_eq!(
-            string::trim("  hello  ").unwrap(),
-            JValue::string("hello")
-        );
-        assert_eq!(
-            string::trim("hello").unwrap(),
-            JValue::string("hello")
-        );
+        assert_eq!(string::trim("  hello  ").unwrap(), JValue::string("hello"));
+        assert_eq!(string::trim("hello").unwrap(), JValue::string("hello"));
         assert_eq!(
             string::trim("\t\nhello\r\n").unwrap(),
             JValue::string("hello")
@@ -1919,9 +1994,18 @@ mod tests {
 
     #[test]
     fn test_contains() {
-        assert_eq!(string::contains("hello world", &JValue::string("world")).unwrap(), JValue::Bool(true));
-        assert_eq!(string::contains("hello world", &JValue::string("xyz")).unwrap(), JValue::Bool(false));
-        assert_eq!(string::contains("hello world", &JValue::string("")).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            string::contains("hello world", &JValue::string("world")).unwrap(),
+            JValue::Bool(true)
+        );
+        assert_eq!(
+            string::contains("hello world", &JValue::string("xyz")).unwrap(),
+            JValue::Bool(false)
+        );
+        assert_eq!(
+            string::contains("hello world", &JValue::string("")).unwrap(),
+            JValue::Bool(true)
+        );
     }
 
     #[test]
@@ -1929,7 +2013,11 @@ mod tests {
         // Split with separator
         assert_eq!(
             string::split("a,b,c", &JValue::string(","), None).unwrap(),
-            JValue::array(vec![JValue::string("a"), JValue::string("b"), JValue::string("c")])
+            JValue::array(vec![
+                JValue::string("a"),
+                JValue::string("b"),
+                JValue::string("c")
+            ])
         );
 
         // Split with limit - truncates to limit number of results
@@ -1941,7 +2029,11 @@ mod tests {
         // Split with empty separator (split into chars)
         assert_eq!(
             string::split("abc", &JValue::string(""), None).unwrap(),
-            JValue::array(vec![JValue::string("a"), JValue::string("b"), JValue::string("c")])
+            JValue::array(vec![
+                JValue::string("a"),
+                JValue::string("b"),
+                JValue::string("c")
+            ])
         );
     }
 
@@ -1959,10 +2051,7 @@ mod tests {
         );
 
         // Join without separator
-        assert_eq!(
-            string::join(&arr, None).unwrap(),
-            JValue::string("abc")
-        );
+        assert_eq!(string::join(&arr, None).unwrap(), JValue::string("abc"));
 
         // Join with numbers
         let arr = vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)];
@@ -1995,7 +2084,10 @@ mod tests {
     #[test]
     fn test_number_conversion() {
         // Number to number
-        assert_eq!(numeric::number(&JValue::Number(42.0)).unwrap(), JValue::Number(42.0));
+        assert_eq!(
+            numeric::number(&JValue::Number(42.0)).unwrap(),
+            JValue::Number(42.0)
+        );
 
         // String to number
         assert_eq!(
@@ -2012,8 +2104,14 @@ mod tests {
         );
 
         // Boolean to number
-        assert_eq!(numeric::number(&JValue::Bool(true)).unwrap(), JValue::Number(1.0));
-        assert_eq!(numeric::number(&JValue::Bool(false)).unwrap(), JValue::Number(0.0));
+        assert_eq!(
+            numeric::number(&JValue::Bool(true)).unwrap(),
+            JValue::Number(1.0)
+        );
+        assert_eq!(
+            numeric::number(&JValue::Bool(false)).unwrap(),
+            JValue::Number(0.0)
+        );
 
         // Invalid conversions
         assert!(numeric::number(&JValue::Null).is_err());
@@ -2036,7 +2134,12 @@ mod tests {
 
     #[test]
     fn test_max_min() {
-        let arr = vec![JValue::from(3i64), JValue::from(1i64), JValue::from(4i64), JValue::from(2i64)];
+        let arr = vec![
+            JValue::from(3i64),
+            JValue::from(1i64),
+            JValue::from(4i64),
+            JValue::from(2i64),
+        ];
 
         assert_eq!(numeric::max(&arr).unwrap(), JValue::Number(4.0));
         assert_eq!(numeric::min(&arr).unwrap(), JValue::Number(1.0));
@@ -2048,7 +2151,12 @@ mod tests {
 
     #[test]
     fn test_average() {
-        let arr = vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64), JValue::from(4i64)];
+        let arr = vec![
+            JValue::from(1i64),
+            JValue::from(2i64),
+            JValue::from(3i64),
+            JValue::from(4i64),
+        ];
         assert_eq!(numeric::average(&arr).unwrap(), JValue::Number(2.5));
 
         // Empty array
@@ -2070,7 +2178,10 @@ mod tests {
         assert_eq!(numeric::ceil(-3.2).unwrap(), JValue::Number(-3.0));
 
         // round - whole number results are returned as numbers
-        assert_eq!(numeric::round(3.14159, Some(2)).unwrap(), JValue::Number(3.14));
+        assert_eq!(
+            numeric::round(3.14159, Some(2)).unwrap(),
+            JValue::Number(3.14)
+        );
         assert_eq!(numeric::round(3.14159, None).unwrap(), JValue::Number(3.0));
         // Negative precision is supported (rounds to powers of 10)
         assert_eq!(numeric::round(3.14, Some(-1)).unwrap(), JValue::Number(0.0));
@@ -2099,25 +2210,60 @@ mod tests {
 
         // Append a single value
         let result = array::append(&arr1, &JValue::from(3i64)).unwrap();
-        assert_eq!(result, JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)]));
+        assert_eq!(
+            result,
+            JValue::array(vec![
+                JValue::from(1i64),
+                JValue::from(2i64),
+                JValue::from(3i64)
+            ])
+        );
 
         // Append an array
         let arr2 = JValue::array(vec![JValue::from(3i64), JValue::from(4i64)]);
         let result = array::append(&arr1, &arr2).unwrap();
-        assert_eq!(result, JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64), JValue::from(4i64)]));
+        assert_eq!(
+            result,
+            JValue::array(vec![
+                JValue::from(1i64),
+                JValue::from(2i64),
+                JValue::from(3i64),
+                JValue::from(4i64)
+            ])
+        );
     }
 
     #[test]
     fn test_reverse() {
         let arr = vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)];
-        assert_eq!(array::reverse(&arr).unwrap(), JValue::array(vec![JValue::from(3i64), JValue::from(2i64), JValue::from(1i64)]));
+        assert_eq!(
+            array::reverse(&arr).unwrap(),
+            JValue::array(vec![
+                JValue::from(3i64),
+                JValue::from(2i64),
+                JValue::from(1i64)
+            ])
+        );
     }
 
     #[test]
     fn test_sort() {
         // Sort numbers
-        let arr = vec![JValue::from(3i64), JValue::from(1i64), JValue::from(4i64), JValue::from(2i64)];
-        assert_eq!(array::sort(&arr).unwrap(), JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64), JValue::from(4i64)]));
+        let arr = vec![
+            JValue::from(3i64),
+            JValue::from(1i64),
+            JValue::from(4i64),
+            JValue::from(2i64),
+        ];
+        assert_eq!(
+            array::sort(&arr).unwrap(),
+            JValue::array(vec![
+                JValue::from(1i64),
+                JValue::from(2i64),
+                JValue::from(3i64),
+                JValue::from(4i64)
+            ])
+        );
 
         // Sort strings
         let arr = vec![
@@ -2127,7 +2273,11 @@ mod tests {
         ];
         assert_eq!(
             array::sort(&arr).unwrap(),
-            JValue::array(vec![JValue::string("alice"), JValue::string("bob"), JValue::string("charlie")])
+            JValue::array(vec![
+                JValue::string("alice"),
+                JValue::string("bob"),
+                JValue::string("charlie")
+            ])
         );
 
         // Mixed types should error
@@ -2144,7 +2294,14 @@ mod tests {
             JValue::from(3i64),
             JValue::from(2i64),
         ];
-        assert_eq!(array::distinct(&arr).unwrap(), JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)]));
+        assert_eq!(
+            array::distinct(&arr).unwrap(),
+            JValue::array(vec![
+                JValue::from(1i64),
+                JValue::from(2i64),
+                JValue::from(3i64)
+            ])
+        );
 
         // With strings
         let arr = vec![
@@ -2152,13 +2309,22 @@ mod tests {
             JValue::string("b"),
             JValue::string("a"),
         ];
-        assert_eq!(array::distinct(&arr).unwrap(), JValue::array(vec![JValue::string("a"), JValue::string("b")]));
+        assert_eq!(
+            array::distinct(&arr).unwrap(),
+            JValue::array(vec![JValue::string("a"), JValue::string("b")])
+        );
     }
 
     #[test]
     fn test_exists() {
-        assert_eq!(array::exists(&JValue::Number(42.0)).unwrap(), JValue::Bool(true));
-        assert_eq!(array::exists(&JValue::string("hello")).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            array::exists(&JValue::Number(42.0)).unwrap(),
+            JValue::Bool(true)
+        );
+        assert_eq!(
+            array::exists(&JValue::string("hello")).unwrap(),
+            JValue::Bool(true)
+        );
         assert_eq!(array::exists(&JValue::Null).unwrap(), JValue::Bool(false));
     }
 
@@ -2206,19 +2372,26 @@ mod tests {
             // Each key-value pair becomes a single-key object: {"key": value}
             for pair in pairs.iter() {
                 if let JValue::Object(p) = pair {
-                    assert_eq!(p.len(), 1, "Each spread element should be a single-key object");
+                    assert_eq!(
+                        p.len(),
+                        1,
+                        "Each spread element should be a single-key object"
+                    );
                 } else {
                     panic!("Expected Object in spread result");
                 }
             }
             // Verify the actual spread results contain expected keys
-            let all_keys: Vec<String> = pairs.iter().filter_map(|p| {
-                if let JValue::Object(m) = p {
-                    m.keys().next().cloned()
-                } else {
-                    None
-                }
-            }).collect();
+            let all_keys: Vec<String> = pairs
+                .iter()
+                .filter_map(|p| {
+                    if let JValue::Object(m) = p {
+                        m.keys().next().cloned()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             assert!(all_keys.contains(&"a".to_string()));
             assert!(all_keys.contains(&"b".to_string()));
         } else {

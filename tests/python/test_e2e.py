@@ -2,9 +2,9 @@ import jsonatapy
 import json
 import time
 
-print("="*60)
+print("=" * 60)
 print("End-to-End Validation Tests")
-print("="*60)
+print("=" * 60)
 
 # Test 1: Basic object construction
 print("\nTest 1: Basic object construction")
@@ -42,14 +42,16 @@ data4 = {
         {"name": "Item 3", "price": 70, "stock": 120},
     ]
 }
-expr4 = jsonatapy.compile('items[price > 50 and stock < 150].{"name": name, "value": price * stock}')
+expr4 = jsonatapy.compile(
+    'items[price > 50 and stock < 150].{"name": name, "value": price * stock}'
+)
 result4 = expr4.evaluate(data4)
 assert len(result4) == 2, f"Complex filter failed: expected 2 items, got {len(result4)}"
 print("✓ PASSED")
 
 # Test 5: Performance benchmark (1000 items)
 print("\nTest 5: Performance benchmark (1000 items)")
-large_data = {"items": [{"name": f"Item {i}", "price": i, "stock": i*10} for i in range(1000)]}
+large_data = {"items": [{"name": f"Item {i}", "price": i, "stock": i * 10} for i in range(1000)]}
 expr5 = jsonatapy.compile('items[price > 500].{"name": name, "value": price * stock}')
 
 # Warmup
@@ -71,7 +73,7 @@ print("\nTest 6: Nested object construction")
 data6 = {
     "users": [
         {"name": "Alice", "orders": [{"id": 1, "total": 100}]},
-        {"name": "Bob", "orders": [{"id": 2, "total": 200}]}
+        {"name": "Bob", "orders": [{"id": 2, "total": 200}]},
     ]
 }
 expr6 = jsonatapy.compile('users.{"user": name, "orderCount": (orders)}')
@@ -80,6 +82,6 @@ assert len(result6) == 2, f"Nested construction failed: {len(result6)}"
 assert result6[0]["user"] == "Alice", f"Nested field failed: {result6[0]}"
 print("✓ PASSED")
 
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 print("✅ ALL TESTS PASSED!")
-print("="*60)
+print("=" * 60)

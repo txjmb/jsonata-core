@@ -31,6 +31,7 @@ from typing import Any
 # Try to import all available implementations
 try:
     import jsonatapy
+
     JSONATAPY_AVAILABLE = True
 except ImportError:
     print("⚠ jsonatapy not available. Run 'maturin develop' first.")
@@ -38,6 +39,7 @@ except ImportError:
 
 try:
     import jsonata as jsonata_python
+
     JSONATA_PYTHON_AVAILABLE = True
 except ImportError:
     JSONATA_PYTHON_AVAILABLE = False
@@ -46,6 +48,7 @@ except ImportError:
 @dataclass
 class BenchmarkResult:
     """Single benchmark result."""
+
     name: str
     category: str
     expression: str
@@ -82,8 +85,10 @@ class BenchmarkSuite:
         if output_graphs:
             try:
                 import matplotlib
-                matplotlib.use('Agg')  # Non-interactive backend
+
+                matplotlib.use("Agg")  # Non-interactive backend
                 import matplotlib.pyplot as plt
+
                 self.plt = plt
                 self.has_matplotlib = True
             except ImportError:
@@ -92,6 +97,7 @@ class BenchmarkSuite:
         try:
             from rich.console import Console
             from rich.table import Table
+
             self.Console = Console
             self.Table = Table
             self.has_rich = True
@@ -102,10 +108,7 @@ class BenchmarkSuite:
         """Check if Node.js is available."""
         try:
             result = subprocess.run(
-                ["node", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5
+                ["node", "--version"], capture_output=True, text=True, timeout=5
             )
             if result.returncode == 0:
                 print(f"✓ Node.js detected: {result.stdout.strip()}")
@@ -141,11 +144,7 @@ class BenchmarkSuite:
             print(f"⚠ JavaScript benchmark script not found at {js_script}")
             return -1.0
 
-        benchmark_data = {
-            "expression": expression,
-            "data": data,
-            "iterations": iterations
-        }
+        benchmark_data = {"expression": expression, "data": data, "iterations": iterations}
 
         try:
             result = subprocess.run(
@@ -153,7 +152,7 @@ class BenchmarkSuite:
                 input=json.dumps(benchmark_data),
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=60,
             )
 
             if result.returncode != 0:
@@ -236,17 +235,13 @@ class BenchmarkSuite:
             "expression": expression,
             "data": data,
             "iterations": iterations,
-            "warmup": min(100, max(10, iterations // 10))
+            "warmup": min(100, max(10, iterations // 10)),
         }
         input_json = json.dumps(input_data)
 
         try:
             result = subprocess.run(
-                [str(binary_path)],
-                input=input_json,
-                capture_output=True,
-                text=True,
-                timeout=60
+                [str(binary_path)], input=input_json, capture_output=True, text=True, timeout=60
             )
 
             if result.returncode != 0:
@@ -287,13 +282,13 @@ class BenchmarkSuite:
                 input=input_data,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=60,
             )
             # Parse maximum resident set size from stderr
-            for line in result.stderr.split('\n'):
-                if 'Maximum resident set size' in line:
+            for line in result.stderr.split("\n"):
+                if "Maximum resident set size" in line:
                     # Value is in KB
-                    kb = int(line.split(':')[1].strip())
+                    kb = int(line.split(":")[1].strip())
                     return kb / 1024  # Convert to MB
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
@@ -309,24 +304,24 @@ class BenchmarkSuite:
         data: Any,
         data_size: str,
         iterations: int = 1000,
-        verbose: bool = True
+        verbose: bool = True,
     ):
         """Run a single benchmark test across all implementations."""
         if verbose:
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print(f"Benchmark: {name}")
             print(f"Category: {category}")
             print(f"Expression: {expression[:60]}{'...' if len(expression) > 60 else ''}")
             print(f"Data Size: {data_size}")
             print(f"Iterations: {iterations:,}")
-            print(f"{'='*70}")
+            print(f"{'=' * 70}")
 
         result = BenchmarkResult(
             name=name,
             category=category,
             expression=expression,
             data_size=data_size,
-            iterations=iterations
+            iterations=iterations,
         )
 
         # Run jsonatapy benchmark
@@ -335,7 +330,9 @@ class BenchmarkSuite:
             if jsonatapy_time > 0:
                 result.jsonatapy_ms = jsonatapy_time
                 if verbose:
-                    print(f"jsonatapy:       {jsonatapy_time:8.2f} ms ({jsonatapy_time/iterations:8.4f} ms/iter)")
+                    print(
+                        f"jsonatapy:       {jsonatapy_time:8.2f} ms ({jsonatapy_time / iterations:8.4f} ms/iter)"
+                    )
             else:
                 if verbose:
                     print("jsonatapy:       FAILED")
@@ -348,7 +345,7 @@ class BenchmarkSuite:
         if js_time > 0:
             result.js_ms = js_time
             if verbose:
-                print(f"JavaScript:      {js_time:8.2f} ms ({js_time/iterations:8.4f} ms/iter)")
+                print(f"JavaScript:      {js_time:8.2f} ms ({js_time / iterations:8.4f} ms/iter)")
 
             # Calculate speedup vs JS
             if result.jsonatapy_ms and result.jsonatapy_ms > 0:
@@ -357,7 +354,9 @@ class BenchmarkSuite:
                     if result.jsonatapy_speedup > 1:
                         print(f"  → jsonatapy is {result.jsonatapy_speedup:6.2f}x faster than JS")
                     else:
-                        print(f"  → jsonatapy is {1/result.jsonatapy_speedup:6.2f}x slower than JS")
+                        print(
+                            f"  → jsonatapy is {1 / result.jsonatapy_speedup:6.2f}x slower than JS"
+                        )
         else:
             if verbose:
                 print("JavaScript:      SKIPPED")
@@ -368,16 +367,22 @@ class BenchmarkSuite:
             if jsonata_python_time > 0:
                 result.jsonata_python_ms = jsonata_python_time
                 if verbose:
-                    print(f"jsonata-python:  {jsonata_python_time:8.2f} ms ({jsonata_python_time/iterations:8.4f} ms/iter)")
+                    print(
+                        f"jsonata-python:  {jsonata_python_time:8.2f} ms ({jsonata_python_time / iterations:8.4f} ms/iter)"
+                    )
 
                 # Calculate speedup vs JS
                 if result.js_ms and result.js_ms > 0:
                     result.jsonata_python_speedup = result.js_ms / jsonata_python_time
                     if verbose:
                         if result.jsonata_python_speedup > 1:
-                            print(f"  → jsonata-python is {result.jsonata_python_speedup:6.2f}x faster than JS")
+                            print(
+                                f"  → jsonata-python is {result.jsonata_python_speedup:6.2f}x faster than JS"
+                            )
                         else:
-                            print(f"  → jsonata-python is {1/result.jsonata_python_speedup:6.2f}x slower than JS")
+                            print(
+                                f"  → jsonata-python is {1 / result.jsonata_python_speedup:6.2f}x slower than JS"
+                            )
             else:
                 if verbose:
                     print("jsonata-python:  FAILED")
@@ -391,16 +396,22 @@ class BenchmarkSuite:
             if jsonata_rs_time > 0:
                 result.jsonata_rs_ms = jsonata_rs_time
                 if verbose:
-                    print(f"jsonata-rs:      {jsonata_rs_time:8.2f} ms ({jsonata_rs_time/iterations:8.4f} ms/iter)")
+                    print(
+                        f"jsonata-rs:      {jsonata_rs_time:8.2f} ms ({jsonata_rs_time / iterations:8.4f} ms/iter)"
+                    )
 
                 # Calculate speedup vs JS
                 if result.js_ms and result.js_ms > 0:
                     result.jsonata_rs_speedup = result.js_ms / jsonata_rs_time
                     if verbose:
                         if result.jsonata_rs_speedup > 1:
-                            print(f"  → jsonata-rs is {result.jsonata_rs_speedup:6.2f}x faster than JS")
+                            print(
+                                f"  → jsonata-rs is {result.jsonata_rs_speedup:6.2f}x faster than JS"
+                            )
                         else:
-                            print(f"  → jsonata-rs is {1/result.jsonata_rs_speedup:6.2f}x slower than JS")
+                            print(
+                                f"  → jsonata-rs is {1 / result.jsonata_rs_speedup:6.2f}x slower than JS"
+                            )
             else:
                 if verbose:
                     print("jsonata-rs:      FAILED")
@@ -419,11 +430,11 @@ class BenchmarkSuite:
 
     def _print_plain_summary(self):
         """Print plain text summary."""
-        print("\n" + "="*100)
+        print("\n" + "=" * 100)
         print("BENCHMARK SUMMARY")
-        print("="*100)
+        print("=" * 100)
         print(f"{'Category':<20} {'Test Name':<30} {'jsonatapy':<12} {'JS':<12} {'speedup':<10}")
-        print("-"*100)
+        print("-" * 100)
 
         categories = {}
         for result in self.results:
@@ -433,19 +444,23 @@ class BenchmarkSuite:
 
         for category, results in categories.items():
             print(f"\n{category}")
-            print("-"*100)
+            print("-" * 100)
 
             for result in results:
                 jsonatapy_str = f"{result.jsonatapy_ms:.2f} ms" if result.jsonatapy_ms else "N/A"
                 js_str = f"{result.js_ms:.2f} ms" if result.js_ms else "N/A"
-                speedup_str = f"{result.jsonatapy_speedup:.2f}x" if result.jsonatapy_speedup else "N/A"
+                speedup_str = (
+                    f"{result.jsonatapy_speedup:.2f}x" if result.jsonatapy_speedup else "N/A"
+                )
 
-                print(f"{'':20} {result.name:<30} {jsonatapy_str:<12} {js_str:<12} {speedup_str:<10}")
+                print(
+                    f"{'':20} {result.name:<30} {jsonatapy_str:<12} {js_str:<12} {speedup_str:<10}"
+                )
 
         # Overall statistics
-        print("\n" + "="*100)
+        print("\n" + "=" * 100)
         print("OVERALL STATISTICS")
-        print("="*100)
+        print("=" * 100)
 
         [r.jsonatapy_ms for r in self.results if r.jsonatapy_ms]
         [r.js_ms for r in self.results if r.js_ms]
@@ -464,7 +479,9 @@ class BenchmarkSuite:
             print(f"Tests where jsonatapy is faster: {faster_count}/{len(speedups)}")
 
         if JSONATA_PYTHON_AVAILABLE:
-            python_speedups = [r.jsonata_python_speedup for r in self.results if r.jsonata_python_speedup]
+            python_speedups = [
+                r.jsonata_python_speedup for r in self.results if r.jsonata_python_speedup
+            ]
             if python_speedups:
                 avg_python_speedup = sum(python_speedups) / len(python_speedups)
                 print(f"\nAverage speedup (jsonata-python vs JS): {avg_python_speedup:.2f}x")
@@ -486,7 +503,9 @@ class BenchmarkSuite:
             categories[result.category].append(result)
 
         for category, results in categories.items():
-            table = Table(title=f"[bold]{category}[/bold]", show_header=True, header_style="bold magenta")
+            table = Table(
+                title=f"[bold]{category}[/bold]", show_header=True, header_style="bold magenta"
+            )
             table.add_column("Test Name", style="cyan", width=35)
             table.add_column("jsonatapy", justify="right", style="green")
             table.add_column("JavaScript", justify="right", style="yellow")
@@ -499,13 +518,15 @@ class BenchmarkSuite:
             for result in results:
                 jsonatapy_str = f"{result.jsonatapy_ms:.2f} ms" if result.jsonatapy_ms else "N/A"
                 js_str = f"{result.js_ms:.2f} ms" if result.js_ms else "N/A"
-                python_str = f"{result.jsonata_python_ms:.2f} ms" if result.jsonata_python_ms else "N/A"
+                python_str = (
+                    f"{result.jsonata_python_ms:.2f} ms" if result.jsonata_python_ms else "N/A"
+                )
 
                 if result.jsonatapy_speedup:
                     if result.jsonatapy_speedup > 1:
                         speedup_str = f"[green]{result.jsonatapy_speedup:.2f}x faster[/green]"
                     else:
-                        speedup_str = f"[red]{1/result.jsonatapy_speedup:.2f}x slower[/red]"
+                        speedup_str = f"[red]{1 / result.jsonatapy_speedup:.2f}x slower[/red]"
                 else:
                     speedup_str = "N/A"
 
@@ -521,7 +542,11 @@ class BenchmarkSuite:
         speedups = [r.jsonatapy_speedup for r in self.results if r.jsonatapy_speedup]
 
         if speedups:
-            stats_table = Table(title="[bold]Overall Statistics[/bold]", show_header=True, header_style="bold magenta")
+            stats_table = Table(
+                title="[bold]Overall Statistics[/bold]",
+                show_header=True,
+                header_style="bold magenta",
+            )
             stats_table.add_column("Metric", style="cyan")
             stats_table.add_column("Value", justify="right", style="green")
 
@@ -533,13 +558,19 @@ class BenchmarkSuite:
             stats_table.add_row("Average speedup (jsonatapy vs JS)", f"{avg_speedup:.2f}x")
             stats_table.add_row("Min speedup", f"{min_speedup:.2f}x")
             stats_table.add_row("Max speedup", f"{max_speedup:.2f}x")
-            stats_table.add_row("Tests where jsonatapy is faster", f"{faster_count}/{len(speedups)}")
+            stats_table.add_row(
+                "Tests where jsonatapy is faster", f"{faster_count}/{len(speedups)}"
+            )
 
             if JSONATA_PYTHON_AVAILABLE:
-                python_speedups = [r.jsonata_python_speedup for r in self.results if r.jsonata_python_speedup]
+                python_speedups = [
+                    r.jsonata_python_speedup for r in self.results if r.jsonata_python_speedup
+                ]
                 if python_speedups:
                     avg_python_speedup = sum(python_speedups) / len(python_speedups)
-                    stats_table.add_row("Average speedup (jsonata-python vs JS)", f"{avg_python_speedup:.2f}x")
+                    stats_table.add_row(
+                        "Average speedup (jsonata-python vs JS)", f"{avg_python_speedup:.2f}x"
+                    )
 
             console.print(stats_table)
 
@@ -565,10 +596,10 @@ class BenchmarkSuite:
                 "jsonata_python": JSONATA_PYTHON_AVAILABLE,
                 "jsonata_rs": self.jsonata_rs_available,
             },
-            "results": [asdict(r) for r in self.results]
+            "results": [asdict(r) for r in self.results],
         }
 
-        with open(output_path, 'w') as f:
+        with open(output_path, "w") as f:
             json.dump(data, f, indent=2)
 
         print(f"\n✓ Results saved to {output_path}")
@@ -604,22 +635,24 @@ class BenchmarkSuite:
             if result.jsonatapy_speedup:
                 test_names.append(f"{result.category}:\n{result.name}")
                 speedups.append(result.jsonatapy_speedup)
-                colors.append('green' if result.jsonatapy_speedup > 1 else 'red')
+                colors.append("green" if result.jsonatapy_speedup > 1 else "red")
 
         y_pos = np.arange(len(test_names))
         bars = ax.barh(y_pos, speedups, color=colors, alpha=0.7)
 
         ax.set_yticks(y_pos)
         ax.set_yticklabels(test_names, fontsize=8)
-        ax.set_xlabel('Speedup vs JavaScript (x)', fontsize=10)
-        ax.set_title('jsonatapy Performance vs JavaScript Reference', fontsize=12, fontweight='bold')
-        ax.axvline(x=1, color='black', linestyle='--', linewidth=0.8, label='Equal performance')
+        ax.set_xlabel("Speedup vs JavaScript (x)", fontsize=10)
+        ax.set_title(
+            "jsonatapy Performance vs JavaScript Reference", fontsize=12, fontweight="bold"
+        )
+        ax.axvline(x=1, color="black", linestyle="--", linewidth=0.8, label="Equal performance")
         ax.legend()
-        ax.grid(axis='x', alpha=0.3)
+        ax.grid(axis="x", alpha=0.3)
 
         plt.tight_layout()
         speedup_path = output_dir / "speedup_comparison.png"
-        plt.savefig(speedup_path, dpi=150, bbox_inches='tight')
+        plt.savefig(speedup_path, dpi=150, bbox_inches="tight")
         plt.close()
 
         print(f"✓ Speedup graph saved to {speedup_path}")
@@ -641,24 +674,33 @@ class BenchmarkSuite:
             jsonatapy_times = [r.jsonatapy_ms if r.jsonatapy_ms else 0 for r in results]
             js_times = [r.js_ms if r.js_ms else 0 for r in results]
 
-            ax.bar(x - width/2, jsonatapy_times, width, label='jsonatapy', color='green', alpha=0.7)
-            ax.bar(x + width/2, js_times, width, label='JavaScript', color='orange', alpha=0.7)
+            ax.bar(
+                x - width / 2, jsonatapy_times, width, label="jsonatapy", color="green", alpha=0.7
+            )
+            ax.bar(x + width / 2, js_times, width, label="JavaScript", color="orange", alpha=0.7)
 
             if JSONATA_PYTHON_AVAILABLE:
                 python_times = [r.jsonata_python_ms if r.jsonata_python_ms else 0 for r in results]
-                ax.bar(x + 1.5*width, python_times, width, label='jsonata-python', color='blue', alpha=0.7)
+                ax.bar(
+                    x + 1.5 * width,
+                    python_times,
+                    width,
+                    label="jsonata-python",
+                    color="blue",
+                    alpha=0.7,
+                )
 
-            ax.set_xlabel('Test', fontsize=9)
-            ax.set_ylabel('Time (ms)', fontsize=9)
-            ax.set_title(category, fontsize=10, fontweight='bold')
+            ax.set_xlabel("Test", fontsize=9)
+            ax.set_ylabel("Time (ms)", fontsize=9)
+            ax.set_title(category, fontsize=10, fontweight="bold")
             ax.set_xticks(x)
-            ax.set_xticklabels(test_names_cat, rotation=45, ha='right', fontsize=7)
+            ax.set_xticklabels(test_names_cat, rotation=45, ha="right", fontsize=7)
             ax.legend(fontsize=8)
-            ax.grid(axis='y', alpha=0.3)
+            ax.grid(axis="y", alpha=0.3)
 
         plt.tight_layout()
         category_path = output_dir / "category_comparison.png"
-        plt.savefig(category_path, dpi=150, bbox_inches='tight')
+        plt.savefig(category_path, dpi=150, bbox_inches="tight")
         plt.close()
 
         print(f"✓ Category comparison graph saved to {category_path}")
@@ -671,16 +713,20 @@ class BenchmarkSuite:
             faster_count = sum(1 for s in speedups if s > 1)
             slower_count = len(speedups) - faster_count
 
-            ax1.pie([faster_count, slower_count],
-                   labels=['Faster than JS', 'Slower than JS'],
-                   colors=['green', 'red'],
-                   autopct='%1.1f%%',
-                   startangle=90,
-                   textprops={'fontsize': 10})
-            ax1.set_title('jsonatapy vs JavaScript\n(Number of Tests)', fontsize=11, fontweight='bold')
+            ax1.pie(
+                [faster_count, slower_count],
+                labels=["Faster than JS", "Slower than JS"],
+                colors=["green", "red"],
+                autopct="%1.1f%%",
+                startangle=90,
+                textprops={"fontsize": 10},
+            )
+            ax1.set_title(
+                "jsonatapy vs JavaScript\n(Number of Tests)", fontsize=11, fontweight="bold"
+            )
 
             # Bar chart: speedup distribution
-            speedup_ranges = ['<0.5x', '0.5-1x', '1-2x', '2-5x', '5-10x', '>10x']
+            speedup_ranges = ["<0.5x", "0.5-1x", "1-2x", "2-5x", "5-10x", ">10x"]
             counts = [
                 sum(1 for s in speedups if s < 0.5),
                 sum(1 for s in speedups if 0.5 <= s < 1),
@@ -690,25 +736,33 @@ class BenchmarkSuite:
                 sum(1 for s in speedups if s >= 10),
             ]
 
-            bars = ax2.bar(speedup_ranges, counts,
-                          color=['darkred', 'red', 'yellow', 'lightgreen', 'green', 'darkgreen'],
-                          alpha=0.7)
-            ax2.set_xlabel('Speedup Range', fontsize=10)
-            ax2.set_ylabel('Number of Tests', fontsize=10)
-            ax2.set_title('Speedup Distribution', fontsize=11, fontweight='bold')
-            ax2.grid(axis='y', alpha=0.3)
+            bars = ax2.bar(
+                speedup_ranges,
+                counts,
+                color=["darkred", "red", "yellow", "lightgreen", "green", "darkgreen"],
+                alpha=0.7,
+            )
+            ax2.set_xlabel("Speedup Range", fontsize=10)
+            ax2.set_ylabel("Number of Tests", fontsize=10)
+            ax2.set_title("Speedup Distribution", fontsize=11, fontweight="bold")
+            ax2.grid(axis="y", alpha=0.3)
 
             # Add value labels on bars
             for bar in bars:
                 height = bar.get_height()
                 if height > 0:
-                    ax2.text(bar.get_x() + bar.get_width()/2., height,
-                            f'{int(height)}',
-                            ha='center', va='bottom', fontsize=9)
+                    ax2.text(
+                        bar.get_x() + bar.get_width() / 2.0,
+                        height,
+                        f"{int(height)}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=9,
+                    )
 
             plt.tight_layout()
             stats_path = output_dir / "statistics.png"
-            plt.savefig(stats_path, dpi=150, bbox_inches='tight')
+            plt.savefig(stats_path, dpi=150, bbox_inches="tight")
             plt.close()
 
             print(f"✓ Statistics graph saved to {stats_path}")
@@ -718,7 +772,10 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
     """Compare all 4 evaluation paths on the same data and expression."""
     expressions = [
         ("Filter by category", 'products[category = "Electronics"]'),
-        ("Complex transformation", 'products[price > 50 and inStock].{"name": name, "price": price, "vendor": vendor.name}'),
+        (
+            "Complex transformation",
+            'products[price > 50 and inStock].{"name": name, "price": price, "vendor": vendor.name}',
+        ),
         ("Aggregate", "$sum(products[inStock].price)"),
     ]
     iterations = 500
@@ -736,11 +793,11 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
             compiled.evaluate_with_data(data_handle)
             compiled.evaluate_data_to_json(data_handle_json)
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f"Path Comparison: {name}")
         print(f"Expression: {expression[:60]}{'...' if len(expression) > 60 else ''}")
         print(f"Data: 100 products, Iterations: {iterations}")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
         # Path 1: evaluate(dict)
         start = time.perf_counter()
@@ -766,35 +823,43 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
             compiled.evaluate_data_to_json(data_handle_json)
         t4 = (time.perf_counter() - start) * 1000
 
-        print(f"  evaluate(dict):             {t1:8.2f} ms ({t1/iterations:.4f} ms/iter)")
-        print(f"  evaluate_json(str):         {t2:8.2f} ms ({t2/iterations:.4f} ms/iter)")
-        print(f"  evaluate_with_data(handle): {t3:8.2f} ms ({t3/iterations:.4f} ms/iter)  [{t1/t3:.1f}x vs dict]")
-        print(f"  evaluate_data_to_json():    {t4:8.2f} ms ({t4/iterations:.4f} ms/iter)  [{t1/t4:.1f}x vs dict]")
+        print(f"  evaluate(dict):             {t1:8.2f} ms ({t1 / iterations:.4f} ms/iter)")
+        print(f"  evaluate_json(str):         {t2:8.2f} ms ({t2 / iterations:.4f} ms/iter)")
+        print(
+            f"  evaluate_with_data(handle): {t3:8.2f} ms ({t3 / iterations:.4f} ms/iter)  [{t1 / t3:.1f}x vs dict]"
+        )
+        print(
+            f"  evaluate_data_to_json():    {t4:8.2f} ms ({t4 / iterations:.4f} ms/iter)  [{t1 / t4:.1f}x vs dict]"
+        )
 
         # Record as benchmark results for the summary
-        suite.results.append(BenchmarkResult(
-            name=f"{name} (data handle)",
-            category="Path Comparison",
-            expression=expression,
-            data_size="100 products",
-            iterations=iterations,
-            jsonatapy_ms=t3,
-        ))
-        suite.results.append(BenchmarkResult(
-            name=f"{name} (data→json)",
-            category="Path Comparison",
-            expression=expression,
-            data_size="100 products",
-            iterations=iterations,
-            jsonatapy_ms=t4,
-        ))
+        suite.results.append(
+            BenchmarkResult(
+                name=f"{name} (data handle)",
+                category="Path Comparison",
+                expression=expression,
+                data_size="100 products",
+                iterations=iterations,
+                jsonatapy_ms=t3,
+            )
+        )
+        suite.results.append(
+            BenchmarkResult(
+                name=f"{name} (data→json)",
+                category="Path Comparison",
+                expression=expression,
+                data_size="100 products",
+                iterations=iterations,
+                jsonatapy_ms=t4,
+            )
+        )
 
 
 def main():
     """Run comprehensive benchmark suite."""
-    print("="*70)
+    print("=" * 70)
     print("JSONata Comprehensive Benchmark Suite")
-    print("="*70)
+    print("=" * 70)
     print("\nAvailable implementations:")
     suite_check = BenchmarkSuite(output_json=False, output_graphs=False)
     print(f"  - jsonatapy (Rust/PyO3): {'✓' if JSONATAPY_AVAILABLE else '✗'}")
@@ -811,9 +876,9 @@ def main():
     # ========================================================================
     # PART 1: SIMPLE PATHS (WARM-UP)
     # ========================================================================
-    print("\n" + "█"*70)
+    print("\n" + "█" * 70)
     print("PART 1: SIMPLE PATHS (WARM-UP)")
-    print("█"*70)
+    print("█" * 70)
 
     suite.benchmark(
         name="Simple Path",
@@ -821,7 +886,7 @@ def main():
         expression="user.name",
         data={"user": {"name": "Alice", "age": 30}},
         data_size="tiny",
-        iterations=10000
+        iterations=10000,
     )
 
     suite.benchmark(
@@ -830,7 +895,7 @@ def main():
         expression="a.b.c.d.e",
         data={"a": {"b": {"c": {"d": {"e": 42}}}}},
         data_size="tiny",
-        iterations=10000
+        iterations=10000,
     )
 
     suite.benchmark(
@@ -839,7 +904,7 @@ def main():
         expression="values[50]",
         data={"values": list(range(100))},
         data_size="100 elements",
-        iterations=5000
+        iterations=5000,
     )
 
     suite.benchmark(
@@ -848,15 +913,15 @@ def main():
         expression="price * quantity",
         data={"price": 10.5, "quantity": 3},
         data_size="tiny",
-        iterations=10000
+        iterations=10000,
     )
 
     # ========================================================================
     # PART 2: ARRAY OPERATIONS
     # ========================================================================
-    print("\n" + "█"*70)
+    print("\n" + "█" * 70)
     print("PART 2: ARRAY OPERATIONS")
-    print("█"*70)
+    print("█" * 70)
 
     # Small arrays (100 elements)
     array_100 = {"values": list(range(100))}
@@ -867,7 +932,7 @@ def main():
         expression="$sum(values)",
         data=array_100,
         data_size="100 elements",
-        iterations=1000
+        iterations=1000,
     )
 
     suite.benchmark(
@@ -876,7 +941,7 @@ def main():
         expression="$max(values)",
         data=array_100,
         data_size="100 elements",
-        iterations=1000
+        iterations=1000,
     )
 
     suite.benchmark(
@@ -885,7 +950,7 @@ def main():
         expression="$count(values)",
         data=array_100,
         data_size="100 elements",
-        iterations=2000
+        iterations=2000,
     )
 
     # Medium arrays (1000 elements)
@@ -897,7 +962,7 @@ def main():
         expression="$sum(values)",
         data=array_1000,
         data_size="1000 elements",
-        iterations=200
+        iterations=200,
     )
 
     suite.benchmark(
@@ -906,7 +971,7 @@ def main():
         expression="$max(values)",
         data=array_1000,
         data_size="1000 elements",
-        iterations=200
+        iterations=200,
     )
 
     # Large arrays (10000 elements)
@@ -918,7 +983,7 @@ def main():
         expression="$sum(values)",
         data=array_10000,
         data_size="10000 elements",
-        iterations=50
+        iterations=50,
     )
 
     # Array mapping
@@ -935,7 +1000,7 @@ def main():
         expression="products.price",
         data=products_100,
         data_size="100 objects",
-        iterations=1000
+        iterations=1000,
     )
 
     suite.benchmark(
@@ -944,7 +1009,7 @@ def main():
         expression="$sum(products.price)",
         data=products_100,
         data_size="100 objects",
-        iterations=1000
+        iterations=1000,
     )
 
     suite.benchmark(
@@ -953,15 +1018,15 @@ def main():
         expression="products[price > 100]",
         data=products_100,
         data_size="100 objects",
-        iterations=500
+        iterations=500,
     )
 
     # ========================================================================
     # PART 3: COMPLEX TRANSFORMATIONS
     # ========================================================================
-    print("\n" + "█"*70)
+    print("\n" + "█" * 70)
     print("PART 3: COMPLEX TRANSFORMATIONS")
-    print("█"*70)
+    print("█" * 70)
 
     suite.benchmark(
         name="Object Construction (simple)",
@@ -969,7 +1034,7 @@ def main():
         expression='{"fullName": first & " " & last, "age": age}',
         data={"first": "John", "last": "Doe", "age": 30},
         data_size="tiny",
-        iterations=5000
+        iterations=5000,
     )
 
     suite.benchmark(
@@ -978,7 +1043,7 @@ def main():
         expression='{"user": {"name": name, "contact": {"email": email, "phone": phone}}}',
         data={"name": "Alice", "email": "alice@example.com", "phone": "555-1234"},
         data_size="tiny",
-        iterations=5000
+        iterations=5000,
     )
 
     suite.benchmark(
@@ -987,7 +1052,7 @@ def main():
         expression='age >= 18 ? "adult" : "minor"',
         data={"age": 25},
         data_size="tiny",
-        iterations=5000
+        iterations=5000,
     )
 
     suite.benchmark(
@@ -996,18 +1061,20 @@ def main():
         expression="$length($uppercase(name))",
         data={"name": "JSONata Performance Test"},
         data_size="tiny",
-        iterations=5000
+        iterations=5000,
     )
 
     # ========================================================================
     # PART 4: DEEP NESTING (10+ LEVELS)
     # ========================================================================
-    print("\n" + "█"*70)
+    print("\n" + "█" * 70)
     print("PART 4: DEEP NESTING (10+ LEVELS)")
-    print("█"*70)
+    print("█" * 70)
 
     # Create deeply nested structure
-    deep_data = {"a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"i": {"j": {"k": {"l": 42}}}}}}}}}}}}
+    deep_data = {
+        "a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"i": {"j": {"k": {"l": 42}}}}}}}}}}}
+    }
 
     suite.benchmark(
         name="Deep Path (12 levels)",
@@ -1015,21 +1082,12 @@ def main():
         expression="a.b.c.d.e.f.g.h.i.j.k.l",
         data=deep_data,
         data_size="12 levels",
-        iterations=5000
+        iterations=5000,
     )
 
     # Nested arrays
     nested_arrays = {
-        "data": [
-            [
-                [
-                    [i, i+1, i+2]
-                    for i in range(0, 30, 3)
-                ]
-                for _ in range(3)
-            ]
-            for _ in range(3)
-        ]
+        "data": [[[[i, i + 1, i + 2] for i in range(0, 30, 3)] for _ in range(3)] for _ in range(3)]
     }
 
     suite.benchmark(
@@ -1038,15 +1096,15 @@ def main():
         expression="data[1][1][1][1]",
         data=nested_arrays,
         data_size="4-level nested arrays",
-        iterations=2000
+        iterations=2000,
     )
 
     # ========================================================================
     # PART 5: STRING OPERATIONS
     # ========================================================================
-    print("\n" + "█"*70)
+    print("\n" + "█" * 70)
     print("PART 5: STRING OPERATIONS")
-    print("█"*70)
+    print("█" * 70)
 
     suite.benchmark(
         name="String Uppercase",
@@ -1054,7 +1112,7 @@ def main():
         expression="$uppercase(name)",
         data={"name": "hello world"},
         data_size="tiny",
-        iterations=10000
+        iterations=10000,
     )
 
     suite.benchmark(
@@ -1063,7 +1121,7 @@ def main():
         expression="$lowercase(name)",
         data={"name": "HELLO WORLD"},
         data_size="tiny",
-        iterations=10000
+        iterations=10000,
     )
 
     suite.benchmark(
@@ -1072,7 +1130,7 @@ def main():
         expression="$length(name)",
         data={"name": "JSONata Performance Benchmark Suite"},
         data_size="tiny",
-        iterations=10000
+        iterations=10000,
     )
 
     suite.benchmark(
@@ -1081,7 +1139,7 @@ def main():
         expression='$join([first, last], " ")',
         data={"first": "John", "last": "Doe"},
         data_size="tiny",
-        iterations=5000
+        iterations=5000,
     )
 
     suite.benchmark(
@@ -1090,7 +1148,7 @@ def main():
         expression="$substring(text, 0, 10)",
         data={"text": "This is a long string that we will extract a substring from"},
         data_size="tiny",
-        iterations=5000
+        iterations=5000,
     )
 
     suite.benchmark(
@@ -1099,15 +1157,15 @@ def main():
         expression='$contains(text, "JSONata")',
         data={"text": "JSONata is a query and transformation language for JSON"},
         data_size="tiny",
-        iterations=5000
+        iterations=5000,
     )
 
     # ========================================================================
     # PART 6: HIGHER-ORDER FUNCTIONS
     # ========================================================================
-    print("\n" + "█"*70)
+    print("\n" + "█" * 70)
     print("PART 6: HIGHER-ORDER FUNCTIONS")
-    print("█"*70)
+    print("█" * 70)
 
     numbers_data = {"numbers": list(range(1, 101))}
 
@@ -1117,7 +1175,7 @@ def main():
         expression="$map(numbers, function($v) { $v * 2 })",
         data=numbers_data,
         data_size="100 elements",
-        iterations=200
+        iterations=200,
     )
 
     suite.benchmark(
@@ -1126,7 +1184,7 @@ def main():
         expression="$filter(numbers, function($v) { $v > 50 })",
         data=numbers_data,
         data_size="100 elements",
-        iterations=200
+        iterations=200,
     )
 
     suite.benchmark(
@@ -1135,15 +1193,15 @@ def main():
         expression="$reduce(numbers, function($acc, $v) { $acc + $v }, 0)",
         data=numbers_data,
         data_size="100 elements",
-        iterations=200
+        iterations=200,
     )
 
     # ========================================================================
     # PART 7: REALISTIC WORKLOAD (E-COMMERCE PRODUCT CATALOG)
     # ========================================================================
-    print("\n" + "█"*70)
+    print("\n" + "█" * 70)
     print("PART 7: REALISTIC WORKLOAD (E-COMMERCE)")
-    print("█"*70)
+    print("█" * 70)
 
     # Create realistic e-commerce data
     ecommerce_data = {
@@ -1157,10 +1215,7 @@ def main():
                 "rating": 3.0 + (i % 3) * 0.5,
                 "reviews": i * 2,
                 "tags": [f"tag{j}" for j in range(i % 5)],
-                "vendor": {
-                    "name": f"Vendor {i % 10}",
-                    "rating": 4.0 + (i % 5) * 0.2
-                }
+                "vendor": {"name": f"Vendor {i % 10}", "rating": 4.0 + (i % 5) * 0.2},
             }
             for i in range(100)
         ]
@@ -1172,7 +1227,7 @@ def main():
         expression='products[category = "Electronics"]',
         data=ecommerce_data,
         data_size="100 products",
-        iterations=500
+        iterations=500,
     )
 
     suite.benchmark(
@@ -1181,7 +1236,7 @@ def main():
         expression="$sum(products[inStock].price)",
         data=ecommerce_data,
         data_size="100 products",
-        iterations=500
+        iterations=500,
     )
 
     suite.benchmark(
@@ -1190,23 +1245,23 @@ def main():
         expression='products[price > 50 and inStock].{"name": name, "price": price, "vendor": vendor.name}',
         data=ecommerce_data,
         data_size="100 products",
-        iterations=200
+        iterations=200,
     )
 
     suite.benchmark(
         name="Group by category (aggregate)",
         category="Realistic Workload",
-        expression='''
+        expression="""
             {
                 "Electronics": $sum(products[category = "Electronics"].price),
                 "Clothing": $sum(products[category = "Clothing"].price),
                 "Books": $sum(products[category = "Books"].price),
                 "Home": $sum(products[category = "Home"].price)
             }
-        ''',
+        """,
         data=ecommerce_data,
         data_size="100 products",
-        iterations=200
+        iterations=200,
     )
 
     suite.benchmark(
@@ -1215,15 +1270,15 @@ def main():
         expression="$sort(products[rating >= 4], function($l, $r) { $r.rating - $l.rating })",
         data=ecommerce_data,
         data_size="100 products",
-        iterations=100
+        iterations=100,
     )
 
     # ========================================================================
     # PART 8: EVALUATION PATH COMPARISON (DATA HANDLE OPTIMIZATION)
     # ========================================================================
-    print("\n" + "█"*70)
+    print("\n" + "█" * 70)
     print("PART 8: EVALUATION PATH COMPARISON")
-    print("█"*70)
+    print("█" * 70)
 
     if JSONATAPY_AVAILABLE:
         _run_path_comparison(ecommerce_data, suite)
@@ -1235,9 +1290,9 @@ def main():
     suite.save_results()
     suite.generate_graphs()
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("Benchmark suite complete!")
-    print("="*70)
+    print("=" * 70)
 
 
 if __name__ == "__main__":

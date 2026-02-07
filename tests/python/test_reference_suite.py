@@ -19,7 +19,7 @@ if DATASET_DIR.exists():
     for dataset_file in DATASET_DIR.glob("*.json"):
         dataset_name = dataset_file.stem  # e.g., "dataset0"
         try:
-            with open(dataset_file, encoding='utf-8') as f:
+            with open(dataset_file, encoding="utf-8") as f:
                 DATASETS[dataset_name] = json.load(f)
         except Exception as e:
             print(f"Warning: Could not load dataset {dataset_name}: {e}")
@@ -47,7 +47,7 @@ def load_test_cases() -> List[Tuple[str, str, Dict[str, Any]]]:
 
         for case_file in sorted(group_dir.glob("case*.json")):
             try:
-                with open(case_file, encoding='utf-8') as f:
+                with open(case_file, encoding="utf-8") as f:
                     test_spec = json.load(f)
 
                 # Handle both single test and array of tests
@@ -78,27 +78,23 @@ def extract_error_code(error_msg: str) -> Optional[str]:
         The error code if found, None otherwise
     """
     # Error format: "T2001: Unknown function: foo"
-    match = re.match(r'^([TDUS]\d{4}):', str(error_msg))
+    match = re.match(r"^([TDUS]\d{4}):", str(error_msg))
     return match.group(1) if match else None
 
 
 # Load all test cases
 test_cases = load_test_cases()
 
-print(f"\n{'='*70}")
+print(f"\n{'=' * 70}")
 print(f"JSONata Reference Suite Test Loader")
-print(f"{'='*70}")
+print(f"{'=' * 70}")
 print(f"Loaded {len(DATASETS)} datasets from {DATASET_DIR}")
 print(f"Loaded {len(test_cases)} test cases")
-print(f"{'='*70}\n")
+print(f"{'=' * 70}\n")
 
 
 @pytest.mark.reference
-@pytest.mark.parametrize(
-    "test_id,group_name,spec",
-    test_cases,
-    ids=[tc[0] for tc in test_cases]
-)
+@pytest.mark.parametrize("test_id,group_name,spec", test_cases, ids=[tc[0] for tc in test_cases])
 def test_reference_suite(test_id: str, group_name: str, spec: Dict[str, Any]):
     """
     Run a single test case from the reference JSONata suite.
@@ -120,7 +116,7 @@ def test_reference_suite(test_id: str, group_name: str, spec: Dict[str, Any]):
         groups_dir = Path(__file__).parent.parent / "jsonata-js/test/test-suite/groups"
         expr_file_path = groups_dir / group_name / expr_file
         try:
-            with open(expr_file_path, encoding='utf-8') as f:
+            with open(expr_file_path, encoding="utf-8") as f:
                 expr = f.read()
         except Exception as e:
             pytest.fail(f"Could not load expression file {expr_file}: {e}")
@@ -165,15 +161,17 @@ def test_reference_suite(test_id: str, group_name: str, spec: Dict[str, Any]):
         # Check for expected result
         if has_result:
             expected = spec["result"]
-            assert result == expected, \
-                f"Result mismatch for expression: {expr}\n" \
-                f"Expected: {json.dumps(expected, indent=2)}\n" \
+            assert result == expected, (
+                f"Result mismatch for expression: {expr}\n"
+                f"Expected: {json.dumps(expected, indent=2)}\n"
                 f"Got:      {json.dumps(result, indent=2)}"
+            )
 
         elif has_undefined:
-            assert result is None, \
-                f"Expected undefined result for expression: {expr}\n" \
+            assert result is None, (
+                f"Expected undefined result for expression: {expr}\n"
                 f"Got: {json.dumps(result, indent=2)}"
+            )
 
         elif has_error_code or has_error_obj:
             pytest.fail(
@@ -235,8 +233,7 @@ def test_reference_suite(test_id: str, group_name: str, spec: Dict[str, Any]):
     except Exception as e:
         # Unexpected exception type
         pytest.fail(
-            f"Unexpected exception type for expression: {expr}\n"
-            f"Exception: {type(e).__name__}: {e}"
+            f"Unexpected exception type for expression: {expr}\nException: {type(e).__name__}: {e}"
         )
 
 

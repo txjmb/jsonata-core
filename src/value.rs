@@ -359,9 +359,16 @@ impl PartialEq for JValue {
             (JValue::Object(a), JValue::Object(b)) => a == b,
             (JValue::Lambda { lambda_id: a, .. }, JValue::Lambda { lambda_id: b, .. }) => a == b,
             (JValue::Builtin { name: a }, JValue::Builtin { name: b }) => a == b,
-            (JValue::Regex { pattern: ap, flags: af }, JValue::Regex { pattern: bp, flags: bf }) => {
-                ap == bp && af == bf
-            }
+            (
+                JValue::Regex {
+                    pattern: ap,
+                    flags: af,
+                },
+                JValue::Regex {
+                    pattern: bp,
+                    flags: bf,
+                },
+            ) => ap == bp && af == bf,
             _ => false,
         }
     }
@@ -576,15 +583,14 @@ impl From<serde_json::Value> for JValue {
         match v {
             serde_json::Value::Null => JValue::Null,
             serde_json::Value::Bool(b) => JValue::Bool(b),
-            serde_json::Value::Number(n) => {
-                JValue::Number(n.as_f64().unwrap_or(0.0))
-            }
+            serde_json::Value::Number(n) => JValue::Number(n.as_f64().unwrap_or(0.0)),
             serde_json::Value::String(s) => JValue::String(s.into()),
             serde_json::Value::Array(arr) => {
                 JValue::Array(Rc::new(arr.into_iter().map(JValue::from).collect()))
             }
             serde_json::Value::Object(map) => {
-                let m: IndexMap<String, JValue> = map.into_iter().map(|(k, v)| (k, JValue::from(v))).collect();
+                let m: IndexMap<String, JValue> =
+                    map.into_iter().map(|(k, v)| (k, JValue::from(v))).collect();
                 JValue::Object(Rc::new(m))
             }
         }
@@ -610,15 +616,23 @@ impl From<&JValue> for serde_json::Value {
                 serde_json::Value::Array(arr.iter().map(serde_json::Value::from).collect())
             }
             JValue::Object(map) => {
-                let m: serde_json::Map<String, serde_json::Value> =
-                    map.iter().map(|(k, v)| (k.clone(), serde_json::Value::from(v))).collect();
+                let m: serde_json::Map<String, serde_json::Value> = map
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::from(v)))
+                    .collect();
                 serde_json::Value::Object(m)
             }
             JValue::Lambda { .. } | JValue::Builtin { .. } => serde_json::Value::Null,
             JValue::Regex { pattern, flags } => {
                 let mut m = serde_json::Map::new();
-                m.insert("pattern".to_string(), serde_json::Value::String(pattern.to_string()));
-                m.insert("flags".to_string(), serde_json::Value::String(flags.to_string()));
+                m.insert(
+                    "pattern".to_string(),
+                    serde_json::Value::String(pattern.to_string()),
+                );
+                m.insert(
+                    "flags".to_string(),
+                    serde_json::Value::String(flags.to_string()),
+                );
                 serde_json::Value::Object(m)
             }
         }
@@ -687,7 +701,11 @@ mod tests {
     #[test]
     fn test_clone_is_cheap() {
         // Array clone should be O(1) — same Rc pointer
-        let arr = JValue::array(vec![JValue::from(1i64), JValue::from(2i64), JValue::from(3i64)]);
+        let arr = JValue::array(vec![
+            JValue::from(1i64),
+            JValue::from(2i64),
+            JValue::from(3i64),
+        ]);
         let arr2 = arr.clone();
         if let (JValue::Array(a), JValue::Array(b)) = (&arr, &arr2) {
             assert!(Rc::ptr_eq(a, b));
@@ -739,7 +757,12 @@ mod tests {
         assert_eq!(JValue::Number(42.5).as_i64(), None);
         assert_eq!(JValue::string("hello").as_str(), Some("hello"));
         assert_eq!(JValue::Bool(true).as_bool(), Some(true));
-        assert_eq!(JValue::array(vec![JValue::from(1i64)]).as_array().map(|a| a.len()), Some(1));
+        assert_eq!(
+            JValue::array(vec![JValue::from(1i64)])
+                .as_array()
+                .map(|a| a.len()),
+            Some(1)
+        );
     }
 
     #[test]

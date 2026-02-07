@@ -11,13 +11,13 @@ pytest_plugins = []
 
 try:
     import jsonatapy
+
     EXTENSION_AVAILABLE = True
 except ImportError:
     EXTENSION_AVAILABLE = False
 
 pytestmark = pytest.mark.skipif(
-    not EXTENSION_AVAILABLE,
-    reason="Extension not built. Run: maturin develop"
+    not EXTENSION_AVAILABLE, reason="Extension not built. Run: maturin develop"
 )
 
 

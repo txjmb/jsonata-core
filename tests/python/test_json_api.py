@@ -2,12 +2,12 @@ import jsonatapy
 import json
 import time
 
-print("="*70)
+print("=" * 70)
 print("Benchmark: JSON String API vs Regular API")
-print("="*70)
+print("=" * 70)
 
 # Test data - 1000 item array
-data = {"items": [{"name": f"Item {i}", "price": i, "stock": i*10} for i in range(1000)]}
+data = {"items": [{"name": f"Item {i}", "price": i, "stock": i * 10} for i in range(1000)]}
 json_str = json.dumps(data)
 
 # Compile expression
@@ -32,15 +32,15 @@ print(f"Time: {elapsed_json:.3f} ms per evaluation")
 
 # Calculate speedup
 speedup = elapsed_regular / elapsed_json
-print("\n" + "="*70)
+print("\n" + "=" * 70)
 print(f"Speedup: {speedup:.2f}x faster with JSON string API")
 print(f"Time saved: {elapsed_regular - elapsed_json:.3f} ms per evaluation")
-print(f"Percentage reduction: {(1 - elapsed_json/elapsed_regular)*100:.1f}%")
-print("="*70)
+print(f"Percentage reduction: {(1 - elapsed_json / elapsed_regular) * 100:.1f}%")
+print("=" * 70)
 
 # Test 3: Smaller data (100 items) for comparison
 print("\n\nTest 3: Smaller Data (100 items)")
-small_data = {"items": [{"name": f"Item {i}", "price": i, "stock": i*10} for i in range(100)]}
+small_data = {"items": [{"name": f"Item {i}", "price": i, "stock": i * 10} for i in range(100)]}
 small_json_str = json.dumps(small_data)
 
 start = time.perf_counter()

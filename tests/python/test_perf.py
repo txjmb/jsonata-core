@@ -5,12 +5,7 @@ import time
 sizes = [10, 100, 500, 1000]
 
 for size in sizes:
-    data = {
-        "items": [
-            {"name": f"Item {i}", "price": i * 10}
-            for i in range(size)
-        ]
-    }
+    data = {"items": [{"name": f"Item {i}", "price": i * 10} for i in range(size)]}
 
     expr = jsonatapy.compile("items.name")
 
@@ -28,4 +23,4 @@ for size in sizes:
     avg_time = (end - start) / iterations
     per_item_us = (avg_time * 1_000_000) / size
 
-    print(f"Size {size:4d}: {avg_time*1000:.3f} ms total, {per_item_us:.2f} µs per item")
+    print(f"Size {size:4d}: {avg_time * 1000:.3f} ms total, {per_item_us:.2f} µs per item")

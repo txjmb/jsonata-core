@@ -40,9 +40,9 @@ def print_summary(data: dict):
     results = data["results"]
     implementations = data["implementations"]
 
-    print("="*80)
+    print("=" * 80)
     print("BENCHMARK RESULTS SUMMARY")
-    print("="*80)
+    print("=" * 80)
     print(f"Timestamp: {data['timestamp']}")
     print("\nImplementations tested:")
     for impl, available in implementations.items():
@@ -60,18 +60,20 @@ def print_summary(data: dict):
         max_speedup = max(speedups)
         faster_count = sum(1 for s in speedups if s > 1)
 
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print("jsonatapy vs JavaScript")
-        print("="*80)
+        print("=" * 80)
         print(f"Average speedup:  {avg:6.2f}x")
         print(f"Min speedup:      {min_speedup:6.2f}x")
         print(f"Max speedup:      {max_speedup:6.2f}x")
-        print(f"Tests faster:     {faster_count}/{len(speedups)} ({100*faster_count/len(speedups):.1f}%)")
+        print(
+            f"Tests faster:     {faster_count}/{len(speedups)} ({100 * faster_count / len(speedups):.1f}%)"
+        )
 
     # Category breakdown
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("CATEGORY BREAKDOWN")
-    print("="*80)
+    print("=" * 80)
 
     categories = {}
     for r in results:
@@ -102,16 +104,16 @@ def print_top_performers(data: dict, top_n: int = 5):
     # Sort by speedup
     by_speedup = sorted(valid_results, key=lambda r: r["jsonatapy_speedup"], reverse=True)
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"TOP {top_n} FASTEST (jsonatapy vs JS)")
-    print("="*80)
+    print("=" * 80)
     for i, r in enumerate(by_speedup[:top_n], 1):
         print(f"{i}. {r['name']:40} {r['jsonatapy_speedup']:6.2f}x")
         print(f"   Expression: {r['expression'][:60]}{'...' if len(r['expression']) > 60 else ''}")
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"TOP {top_n} NEEDING OPTIMIZATION (slowest)")
-    print("="*80)
+    print("=" * 80)
     for i, r in enumerate(by_speedup[-top_n:][::-1], 1):
         print(f"{i}. {r['name']:40} {r['jsonatapy_speedup']:6.2f}x")
         print(f"   Expression: {r['expression'][:60]}{'...' if len(r['expression']) > 60 else ''}")
@@ -125,9 +127,9 @@ def compare_results(file1: str, file2: str):
     with open(file2) as f:
         data2 = json.load(f)
 
-    print("="*80)
+    print("=" * 80)
     print("COMPARING BENCHMARK RESULTS")
-    print("="*80)
+    print("=" * 80)
     print(f"File 1: {file1}")
     print(f"  Timestamp: {data1['timestamp']}")
     print(f"\nFile 2: {file2}")
@@ -145,9 +147,9 @@ def compare_results(file1: str, file2: str):
         return
 
     print(f"\nCommon tests: {len(common)}")
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
     print("PERFORMANCE CHANGES")
-    print("="*80)
+    print("=" * 80)
 
     improvements = []
     regressions = []

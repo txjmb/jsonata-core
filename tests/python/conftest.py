@@ -20,22 +20,12 @@ def pytest_configure(config):
         slow: Performance and slow-running tests
         compatibility: JavaScript compatibility tests
     """
+    config.addinivalue_line("markers", "reference: marks tests from the reference JSONata suite")
+    config.addinivalue_line("markers", "group(name): marks tests from specific test group")
     config.addinivalue_line(
-        "markers",
-        "reference: marks tests from the reference JSONata suite"
+        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers",
-        "group(name): marks tests from specific test group"
-    )
-    config.addinivalue_line(
-        "markers",
-        "slow: marks tests as slow (deselect with '-m \"not slow\"')"
-    )
-    config.addinivalue_line(
-        "markers",
-        "compatibility: marks JavaScript compatibility tests"
-    )
+    config.addinivalue_line("markers", "compatibility: marks JavaScript compatibility tests")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -51,8 +41,8 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.reference)
 
             # Extract group name from test parameters
-            if hasattr(item, 'callspec'):
-                group_name = item.callspec.params.get('group_name')
+            if hasattr(item, "callspec"):
+                group_name = item.callspec.params.get("group_name")
                 if group_name:
                     # Add a dynamic marker for the group
                     item.add_marker(pytest.mark.group(group_name))
@@ -89,8 +79,8 @@ class ReferenceSuiteReporter:
 
             # Extract group name from parameters
             group = None
-            if hasattr(item, 'callspec'):
-                group = item.callspec.params.get('group_name')
+            if hasattr(item, "callspec"):
+                group = item.callspec.params.get("group_name")
 
             # Update statistics
             if report.passed:
@@ -106,14 +96,18 @@ class ReferenceSuiteReporter:
                     self.by_group[group]["failed"] += 1
 
                 # Track failed test details
-                test_id = item.callspec.params.get('test_id', 'unknown')
-                expr = item.callspec.params.get('spec', {}).get('expr', 'unknown')
-                self.failed_tests.append({
-                    "test_id": test_id,
-                    "group": group,
-                    "expr": expr,
-                    "error": str(report.longrepr) if hasattr(report, 'longrepr') else "Unknown error"
-                })
+                test_id = item.callspec.params.get("test_id", "unknown")
+                expr = item.callspec.params.get("spec", {}).get("expr", "unknown")
+                self.failed_tests.append(
+                    {
+                        "test_id": test_id,
+                        "group": group,
+                        "expr": expr,
+                        "error": str(report.longrepr)
+                        if hasattr(report, "longrepr")
+                        else "Unknown error",
+                    }
+                )
 
             elif report.skipped:
                 self.skipped += 1
@@ -129,14 +123,14 @@ class ReferenceSuiteReporter:
         pct = (self.passed / self.total * 100) if self.total > 0 else 0
 
         # Print console report
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("JSONata Reference Suite Compatibility Report")
-        print("="*70)
+        print("=" * 70)
         print(f"Total Tests:  {self.total}")
-        print(f"Passed:       {self.passed} ({self.passed/self.total*100:.1f}%)")
-        print(f"Failed:       {self.failed} ({self.failed/self.total*100:.1f}%)")
+        print(f"Passed:       {self.passed} ({self.passed / self.total * 100:.1f}%)")
+        print(f"Failed:       {self.failed} ({self.failed / self.total * 100:.1f}%)")
         if self.skipped > 0:
-            print(f"Skipped:      {self.skipped} ({self.skipped/self.total*100:.1f}%)")
+            print(f"Skipped:      {self.skipped} ({self.skipped / self.total * 100:.1f}%)")
         print(f"\nCompatibility: {pct:.1f}%")
 
         # Print by-group summary
@@ -150,8 +144,10 @@ class ReferenceSuiteReporter:
                 pct_group = stats["passed"] / total_group * 100 if total_group > 0 else 0
                 status_icon = "✓" if stats["failed"] == 0 else "✗"
 
-                print(f"{group:<40} {stats['passed']:>6} {stats['failed']:>6} "
-                      f"{stats['skipped']:>6} {total_group:>6} {pct_group:>5.1f}% {status_icon}")
+                print(
+                    f"{group:<40} {stats['passed']:>6} {stats['failed']:>6} "
+                    f"{stats['skipped']:>6} {total_group:>6} {pct_group:>5.1f}% {status_icon}"
+                )
 
         # Write JSON report
         report_path = Path("test-suite-report.json")
@@ -162,15 +158,15 @@ class ReferenceSuiteReporter:
             "skipped": self.skipped,
             "compatibility_pct": pct,
             "by_group": self.by_group,
-            "failed_tests": self.failed_tests[:50]  # Limit to first 50 failures
+            "failed_tests": self.failed_tests[:50],  # Limit to first 50 failures
         }
 
-        with open(report_path, "w", encoding='utf-8') as f:
+        with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report_data, f, indent=2)
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f"Detailed report written to: {report_path}")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
 
 # Register the reporter plugin
@@ -192,4 +188,5 @@ def jsonatapy():
     This ensures the extension is loaded once and reused across all tests.
     """
     import jsonatapy
+
     return jsonatapy

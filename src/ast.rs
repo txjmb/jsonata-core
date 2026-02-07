@@ -67,9 +67,7 @@ pub enum AstNode {
 
     /// Path expression (e.g., foo.bar)
     /// Each step can have stages (like predicates) attached
-    Path {
-        steps: Vec<PathStep>,
-    },
+    Path { steps: Vec<PathStep> },
 
     /// Binary operation
     Binary {
@@ -79,10 +77,7 @@ pub enum AstNode {
     },
 
     /// Unary operation
-    Unary {
-        op: UnaryOp,
-        operand: Box<AstNode>,
-    },
+    Unary { op: UnaryOp, operand: Box<AstNode> },
 
     /// Function call by name
     Function {

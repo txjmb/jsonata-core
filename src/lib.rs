@@ -22,19 +22,19 @@
 //! - `signature` - Function signature validation
 //! - `ast` - Abstract Syntax Tree definitions
 
-use pyo3::prelude::*;
-use pyo3::exceptions::{PyValueError, PyTypeError};
-use pyo3::types::{PyDict, PyList};
 use crate::value::JValue;
 use indexmap::IndexMap;
+use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList};
 
 pub mod ast;
-pub mod parser;
+mod datetime;
 pub mod evaluator;
 pub mod functions;
-pub mod value;
-mod datetime;
+pub mod parser;
 mod signature;
+pub mod value;
 
 /// Pre-converted data handle for efficient repeated evaluation.
 ///
@@ -116,10 +116,16 @@ impl JsonataExpression {
     ///
     /// Returns ValueError if evaluation fails
     #[pyo3(signature = (data, bindings=None))]
-    fn evaluate(&self, py: Python, data: PyObject, bindings: Option<PyObject>) -> PyResult<PyObject> {
+    fn evaluate(
+        &self,
+        py: Python,
+        data: PyObject,
+        bindings: Option<PyObject>,
+    ) -> PyResult<PyObject> {
         let json_data = python_to_json(py, &data)?;
         let mut evaluator = create_evaluator(py, bindings)?;
-        let result = evaluator.evaluate(&self.ast, &json_data)
+        let result = evaluator
+            .evaluate(&self.ast, &json_data)
             .map_err(evaluator_error_to_py)?;
         json_to_python(py, &result)
     }
@@ -135,9 +141,15 @@ impl JsonataExpression {
     ///
     /// The result of evaluating the expression
     #[pyo3(signature = (data, bindings=None))]
-    fn evaluate_with_data(&self, py: Python, data: &JsonataData, bindings: Option<PyObject>) -> PyResult<PyObject> {
+    fn evaluate_with_data(
+        &self,
+        py: Python,
+        data: &JsonataData,
+        bindings: Option<PyObject>,
+    ) -> PyResult<PyObject> {
         let mut evaluator = create_evaluator(py, bindings)?;
-        let result = evaluator.evaluate(&self.ast, &data.data)
+        let result = evaluator
+            .evaluate(&self.ast, &data.data)
             .map_err(evaluator_error_to_py)?;
         json_to_python(py, &result)
     }
@@ -153,11 +165,18 @@ impl JsonataExpression {
     ///
     /// The result as a JSON string
     #[pyo3(signature = (data, bindings=None))]
-    fn evaluate_data_to_json(&self, py: Python, data: &JsonataData, bindings: Option<PyObject>) -> PyResult<String> {
+    fn evaluate_data_to_json(
+        &self,
+        py: Python,
+        data: &JsonataData,
+        bindings: Option<PyObject>,
+    ) -> PyResult<String> {
         let mut evaluator = create_evaluator(py, bindings)?;
-        let result = evaluator.evaluate(&self.ast, &data.data)
+        let result = evaluator
+            .evaluate(&self.ast, &data.data)
             .map_err(evaluator_error_to_py)?;
-        result.to_json_string()
+        result
+            .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
     }
 
@@ -179,13 +198,20 @@ impl JsonataExpression {
     ///
     /// Returns ValueError if JSON parsing or evaluation fails
     #[pyo3(signature = (json_str, bindings=None))]
-    fn evaluate_json(&self, py: Python, json_str: &str, bindings: Option<PyObject>) -> PyResult<String> {
+    fn evaluate_json(
+        &self,
+        py: Python,
+        json_str: &str,
+        bindings: Option<PyObject>,
+    ) -> PyResult<String> {
         let json_data = JValue::from_json_str(json_str)
             .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
         let mut evaluator = create_evaluator(py, bindings)?;
-        let result = evaluator.evaluate(&self.ast, &json_data)
+        let result = evaluator
+            .evaluate(&self.ast, &json_data)
             .map_err(evaluator_error_to_py)?;
-        result.to_json_string()
+        result
+            .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
     }
 }
@@ -250,7 +276,12 @@ fn compile(expression: &str) -> PyResult<JsonataExpression> {
 /// ```
 #[pyfunction]
 #[pyo3(signature = (expression, data, bindings=None))]
-fn evaluate(py: Python, expression: &str, data: PyObject, bindings: Option<PyObject>) -> PyResult<PyObject> {
+fn evaluate(
+    py: Python,
+    expression: &str,
+    data: PyObject,
+    bindings: Option<PyObject>,
+) -> PyResult<PyObject> {
     let expr = compile(expression)?;
     expr.evaluate(py, data, bindings)
 }
@@ -376,7 +407,12 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
     match value {
         JValue::Null | JValue::Undefined => Ok(py.None()),
 
-        JValue::Bool(b) => Ok((*b).into_pyobject(py).unwrap().to_owned().into_any().unbind()),
+        JValue::Bool(b) => Ok((*b)
+            .into_pyobject(py)
+            .unwrap()
+            .to_owned()
+            .into_any()
+            .unbind()),
 
         JValue::Number(n) => {
             // If it's a whole number that fits in i64, return as Python int
@@ -448,7 +484,7 @@ fn _jsonatapy(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Add version info
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    m.add("__jsonata_version__", "2.1.0")?;  // Reference implementation version
+    m.add("__jsonata_version__", "2.1.0")?; // Reference implementation version
 
     Ok(())
 }

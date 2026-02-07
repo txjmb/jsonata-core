@@ -1,7 +1,7 @@
 // JSONata expression parser
 // Mirrors parser.js from the reference implementation
 
-use crate::ast::{AstNode, BinaryOp, UnaryOp, PathStep, Stage};
+use crate::ast::{AstNode, BinaryOp, PathStep, Stage, UnaryOp};
 use thiserror::Error;
 
 /// Parser errors
@@ -44,14 +44,14 @@ pub enum Token {
     True,
     False,
     Null,
-    Undefined, // The `undefined` keyword
+    Undefined,                                // The `undefined` keyword
     Regex { pattern: String, flags: String }, // /pattern/flags
 
     // Identifiers and operators
     Identifier(String),
     Variable(String),
     ParentVariable(String), // $$ variables
-    Function, // function keyword
+    Function,               // function keyword
 
     // Operators
     Plus,
@@ -74,7 +74,7 @@ pub enum Token {
     DotDot,
     Question,
     QuestionQuestion, // ??
-    QuestionColon, // ?:
+    QuestionColon,    // ?:
     Colon,
     ColonEqual, // :=
     TildeArrow, // ~>
@@ -92,7 +92,7 @@ pub enum Token {
     Pipe,  // | transform operator
 
     // Special
-    Hash,  // # index binding operator
+    Hash, // # index binding operator
     Eof,
 }
 
@@ -218,28 +218,30 @@ impl Lexer {
                                         }
                                         let low = u32::from_str_radix(&low_hex, 16).unwrap();
                                         if (0xDC00..=0xDFFF).contains(&low) {
-                                            let cp = 0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00);
+                                            let cp =
+                                                0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00);
                                             if let Some(ch) = char::from_u32(cp) {
                                                 result.push(ch);
                                             } else {
-                                                return Err(ParserError::InvalidEscape(
-                                                    format!("\\u{}\\u{}", hex, low_hex),
-                                                ));
+                                                return Err(ParserError::InvalidEscape(format!(
+                                                    "\\u{}\\u{}",
+                                                    hex, low_hex
+                                                )));
                                             }
                                         } else {
-                                            return Err(ParserError::InvalidEscape(
-                                                format!("\\u{}\\u{}", hex, low_hex),
-                                            ));
+                                            return Err(ParserError::InvalidEscape(format!(
+                                                "\\u{}\\u{}",
+                                                hex, low_hex
+                                            )));
                                         }
                                     } else {
-                                        return Err(ParserError::InvalidEscape(
-                                            format!("\\u{}", hex),
-                                        ));
+                                        return Err(ParserError::InvalidEscape(format!(
+                                            "\\u{}",
+                                            hex
+                                        )));
                                     }
                                 } else {
-                                    return Err(ParserError::InvalidEscape(
-                                        format!("\\u{}", hex),
-                                    ));
+                                    return Err(ParserError::InvalidEscape(format!("\\u{}", hex)));
                                 }
                             } else if let Some(ch) = char::from_u32(code) {
                                 result.push(ch);
@@ -248,9 +250,7 @@ impl Lexer {
                             }
                             continue; // Don't advance again
                         }
-                        Some(ch) => {
-                            return Err(ParserError::InvalidEscape(format!("\\{}", ch)))
-                        }
+                        Some(ch) => return Err(ParserError::InvalidEscape(format!("\\{}", ch))),
                     }
                     self.advance();
                 }
@@ -313,9 +313,10 @@ impl Lexer {
 
         // Check for overflow to infinity
         if num.is_infinite() {
-            return Err(ParserError::InvalidNumber(
-                format!("S0102: Number out of range: {}", num_str)
-            ));
+            return Err(ParserError::InvalidNumber(format!(
+                "S0102: Number out of range: {}",
+                num_str
+            )));
         }
 
         Ok(num)
@@ -567,14 +568,21 @@ impl Lexer {
 
                     let is_regex = match &self.last_token {
                         None => true, // Start of expression
-                        Some(Token::LeftParen) | Some(Token::LeftBracket) | Some(Token::LeftBrace) => true,
+                        Some(Token::LeftParen)
+                        | Some(Token::LeftBracket)
+                        | Some(Token::LeftBrace) => true,
                         Some(Token::Comma) | Some(Token::Semicolon) | Some(Token::Colon) => true,
                         Some(Token::Equal) | Some(Token::NotEqual) => true,
                         Some(Token::LessThan) | Some(Token::LessThanOrEqual) => true,
                         Some(Token::GreaterThan) | Some(Token::GreaterThanOrEqual) => true,
-                        Some(Token::Plus) | Some(Token::Minus) | Some(Token::Star) | Some(Token::Percent) => true,
-                        Some(Token::Ampersand) | Some(Token::Question) | Some(Token::TildeArrow) => true,
-                        Some(Token::ColonEqual) | Some(Token::QuestionQuestion) | Some(Token::QuestionColon) => true,
+                        Some(Token::Plus) | Some(Token::Minus) | Some(Token::Star)
+                        | Some(Token::Percent) => true,
+                        Some(Token::Ampersand)
+                        | Some(Token::Question)
+                        | Some(Token::TildeArrow) => true,
+                        Some(Token::ColonEqual)
+                        | Some(Token::QuestionQuestion)
+                        | Some(Token::QuestionColon) => true,
                         Some(Token::And) | Some(Token::Or) | Some(Token::In) => true,
                         Some(Token::Function) => true,
                         Some(Token::Identifier(s)) if s == "and" || s == "or" || s == "in" => true,
@@ -690,8 +698,13 @@ impl Parser {
             // Regular operators
             Token::Or => Some((25, 26)),
             Token::And => Some((30, 31)),
-            Token::Equal | Token::NotEqual | Token::LessThan | Token::LessThanOrEqual
-            | Token::GreaterThan | Token::GreaterThanOrEqual | Token::In => Some((40, 41)),
+            Token::Equal
+            | Token::NotEqual
+            | Token::LessThan
+            | Token::LessThanOrEqual
+            | Token::GreaterThan
+            | Token::GreaterThanOrEqual
+            | Token::In => Some((40, 41)),
             Token::Ampersand => Some((50, 51)),
             Token::Plus | Token::Minus => Some((50, 51)),
             Token::Star | Token::Slash | Token::Percent => Some((60, 61)),
@@ -699,11 +712,11 @@ impl Parser {
             Token::LeftBracket => Some((80, 81)),
             Token::LeftParen => Some((80, 81)),
             Token::LeftBrace => Some((80, 81)), // Object constructor as postfix
-            Token::Caret => Some((80, 81)), // Sort operator as postfix
-            Token::Hash => Some((80, 81)),  // Index binding operator as postfix
+            Token::Caret => Some((80, 81)),     // Sort operator as postfix
+            Token::Hash => Some((80, 81)),      // Index binding operator as postfix
             Token::Question => Some((20, 21)),
             Token::QuestionQuestion => Some((15, 16)), // Coalescing operator
-            Token::QuestionColon => Some((15, 16)), // Default operator
+            Token::QuestionColon => Some((15, 16)),    // Default operator
             Token::DotDot => Some((20, 21)),
             Token::ColonEqual => Some((10, 9)), // Right associative
             Token::TildeArrow => Some((70, 71)), // Chain/pipe operator
@@ -767,7 +780,11 @@ impl Parser {
                 }
                 Token::LeftParen | Token::RightParen => {
                     // Handle parentheses for union types like (ns)
-                    let c = if self.current_token == Token::LeftParen { '(' } else { ')' };
+                    let c = if self.current_token == Token::LeftParen {
+                        '('
+                    } else {
+                        ')'
+                    };
                     signature.push(c);
                     self.advance()?;
                 }
@@ -817,7 +834,10 @@ impl Parser {
                 let pat = pattern.clone();
                 let flg = flags.clone();
                 self.advance()?;
-                Ok(AstNode::Regex { pattern: pat, flags: flg })
+                Ok(AstNode::Regex {
+                    pattern: pat,
+                    flags: flg,
+                })
             }
             Token::Identifier(name) => {
                 let name = name.clone();
@@ -1116,7 +1136,9 @@ impl Parser {
                             AstNode::Path { steps } => steps,
                             // Convert string literals to field names when used as first step in path
                             // e.g., "foo".bar should behave like foo.bar
-                            AstNode::String(field_name) => vec![PathStep::new(AstNode::Name(field_name))],
+                            AstNode::String(field_name) => {
+                                vec![PathStep::new(AstNode::Name(field_name))]
+                            }
                             _ => vec![PathStep::new(lhs)],
                         };
 
@@ -1142,7 +1164,9 @@ impl Parser {
                         }
 
                         match rhs {
-                            AstNode::Path { steps: mut rhs_steps } => {
+                            AstNode::Path {
+                                steps: mut rhs_steps,
+                            } => {
                                 steps.append(&mut rhs_steps);
                             }
                             // Convert string literals to field names when they appear after a dot
@@ -1183,7 +1207,8 @@ impl Parser {
                     // Check if lhs is an ObjectTransform (grouping expression)
                     if matches!(lhs, AstNode::ObjectTransform { .. }) {
                         return Err(ParserError::InvalidSyntax(
-                            "S0209: A predicate cannot follow a grouping expression in a step".to_string(),
+                            "S0209: A predicate cannot follow a grouping expression in a step"
+                                .to_string(),
                         ));
                     }
 
@@ -1200,7 +1225,9 @@ impl Parser {
                             _ => vec![PathStep::new(lhs)],
                         };
 
-                        steps.push(PathStep::new(AstNode::Predicate(Box::new(AstNode::Boolean(true)))));
+                        steps.push(PathStep::new(AstNode::Predicate(Box::new(
+                            AstNode::Boolean(true),
+                        ))));
                         lhs = AstNode::Path { steps };
                     } else {
                         // Normal predicate
@@ -1259,11 +1286,17 @@ impl Parser {
                                 AstNode::Path { steps } if steps.len() == 1 => {
                                     let name = match &steps[0].node {
                                         AstNode::Name(s) => s.clone(),
-                                        _ => return Err(ParserError::InvalidSyntax(
-                                            "Invalid function name".to_string()
-                                        )),
+                                        _ => {
+                                            return Err(ParserError::InvalidSyntax(
+                                                "Invalid function name".to_string(),
+                                            ))
+                                        }
                                     };
-                                    lhs = AstNode::Function { name, args, is_builtin: false };
+                                    lhs = AstNode::Function {
+                                        name,
+                                        args,
+                                        is_builtin: false,
+                                    };
                                 }
                                 // Handle path ending with $function: foo.bar.$lowercase(args)
                                 AstNode::Path { steps } if steps.len() > 1 => {
@@ -1283,12 +1316,22 @@ impl Parser {
                                         };
 
                                         // Append function application to the path
-                                        context_steps.push(PathStep::new(AstNode::FunctionApplication(Box::new(func_call))));
+                                        context_steps.push(PathStep::new(
+                                            AstNode::FunctionApplication(Box::new(func_call)),
+                                        ));
 
-                                        lhs = AstNode::Path { steps: context_steps };
+                                        lhs = AstNode::Path {
+                                            steps: context_steps,
+                                        };
                                     }
                                     // Check if last step is a Lambda (inline function in path)
-                                    else if let AstNode::Lambda { params, body, signature, thunk } = last_step {
+                                    else if let AstNode::Lambda {
+                                        params,
+                                        body,
+                                        signature,
+                                        thunk,
+                                    } = last_step
+                                    {
                                         // Extract all but the last step as the path context
                                         let mut context_steps = steps.clone();
                                         context_steps.pop();
@@ -1297,7 +1340,8 @@ impl Parser {
                                         // - If fewer args than params, prepend $ (context value) as first arg
                                         // - If args == params, use args as-is
                                         let full_args = if args.len() < params.len() {
-                                            let mut new_args = vec![AstNode::Variable("$".to_string())];
+                                            let mut new_args =
+                                                vec![AstNode::Variable("$".to_string())];
                                             new_args.extend(args.clone());
                                             new_args
                                         } else {
@@ -1309,7 +1353,9 @@ impl Parser {
                                         let lambda_invocation = AstNode::Block(vec![
                                             AstNode::Binary {
                                                 op: crate::ast::BinaryOp::ColonEqual,
-                                                lhs: Box::new(AstNode::Variable("__path_lambda__".to_string())),
+                                                lhs: Box::new(AstNode::Variable(
+                                                    "__path_lambda__".to_string(),
+                                                )),
                                                 rhs: Box::new(AstNode::Lambda {
                                                     params: params.clone(),
                                                     body: body.clone(),
@@ -1325,22 +1371,34 @@ impl Parser {
                                         ]);
 
                                         // Append as function application to the path
-                                        context_steps.push(PathStep::new(AstNode::FunctionApplication(Box::new(lambda_invocation))));
+                                        context_steps.push(PathStep::new(
+                                            AstNode::FunctionApplication(Box::new(
+                                                lambda_invocation,
+                                            )),
+                                        ));
 
-                                        lhs = AstNode::Path { steps: context_steps };
+                                        lhs = AstNode::Path {
+                                            steps: context_steps,
+                                        };
                                     } else {
                                         return Err(ParserError::InvalidSyntax(
-                                            "Invalid function call".to_string()
+                                            "Invalid function call".to_string(),
                                         ));
                                     }
                                 }
                                 // Handle $-prefixed function names: $uppercase()
                                 AstNode::Variable(name) => {
-                                    lhs = AstNode::Function { name: name.clone(), args, is_builtin: true };
+                                    lhs = AstNode::Function {
+                                        name: name.clone(),
+                                        args,
+                                        is_builtin: true,
+                                    };
                                 }
-                                _ => return Err(ParserError::InvalidSyntax(
-                                    "Invalid function call".to_string()
-                                )),
+                                _ => {
+                                    return Err(ParserError::InvalidSyntax(
+                                        "Invalid function call".to_string(),
+                                    ))
+                                }
                             };
                         }
                     }
@@ -1461,7 +1519,7 @@ impl Parser {
 
                     lhs = AstNode::Sort {
                         input: Box::new(lhs),
-                        terms
+                        terms,
                     };
                 }
                 _ => {
@@ -1551,20 +1609,28 @@ impl Parser {
             AstNode::Call { .. } => true,
 
             // Conditional: both branches must be tail calls (or at least one if only one branch)
-            AstNode::Conditional { then_branch, else_branch, .. } => {
+            AstNode::Conditional {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 let then_is_tail = Self::is_tail_call(then_branch);
-                let else_is_tail = else_branch.as_ref().map_or(false, |e| Self::is_tail_call(e));
+                let else_is_tail = else_branch
+                    .as_ref()
+                    .map_or(false, |e| Self::is_tail_call(e));
                 // At least one branch should be a tail call for TCO to be useful
                 then_is_tail || else_is_tail
             }
 
             // Block: last expression is tail position
-            AstNode::Block(exprs) => {
-                exprs.last().map_or(false, |last| Self::is_tail_call(last))
-            }
+            AstNode::Block(exprs) => exprs.last().map_or(false, |last| Self::is_tail_call(last)),
 
             // Variable binding with result: the result expression is tail position
-            AstNode::Binary { op: BinaryOp::ColonEqual, rhs, .. } => {
+            AstNode::Binary {
+                op: BinaryOp::ColonEqual,
+                rhs,
+                ..
+            } => {
                 // The rhs (or next expression) could be tail position
                 // But typically := is used for assignment within blocks
                 // Check if rhs is a block (common pattern)
@@ -1640,9 +1706,18 @@ mod tests {
         assert_eq!(lexer.next_token().unwrap(), Token::False);
         assert_eq!(lexer.next_token().unwrap(), Token::Null);
         // "and", "or", "in" are now contextual keywords - lexer emits them as identifiers
-        assert_eq!(lexer.next_token().unwrap(), Token::Identifier("and".to_string()));
-        assert_eq!(lexer.next_token().unwrap(), Token::Identifier("or".to_string()));
-        assert_eq!(lexer.next_token().unwrap(), Token::Identifier("in".to_string()));
+        assert_eq!(
+            lexer.next_token().unwrap(),
+            Token::Identifier("and".to_string())
+        );
+        assert_eq!(
+            lexer.next_token().unwrap(),
+            Token::Identifier("or".to_string())
+        );
+        assert_eq!(
+            lexer.next_token().unwrap(),
+            Token::Identifier("in".to_string())
+        );
         assert_eq!(lexer.next_token().unwrap(), Token::Eof);
     }
 
@@ -1887,7 +1962,10 @@ mod tests {
                             _ => panic!("Expected Binary node for addition inside block"),
                         }
                     }
-                    _ => panic!("Expected Block node for parenthesized expression, got {:?}", lhs),
+                    _ => panic!(
+                        "Expected Block node for parenthesized expression, got {:?}",
+                        lhs
+                    ),
                 }
                 assert_eq!(*rhs, AstNode::Number(3.0));
             }
@@ -1941,7 +2019,11 @@ mod tests {
     fn test_parse_function_call() {
         let ast = parse("sum(1, 2, 3)").unwrap();
         match ast {
-            AstNode::Function { name, args, is_builtin } => {
+            AstNode::Function {
+                name,
+                args,
+                is_builtin,
+            } => {
                 assert_eq!(name, "sum");
                 assert_eq!(args.len(), 3);
                 assert_eq!(args[0], AstNode::Number(1.0));
@@ -2051,7 +2133,11 @@ mod tests {
         // Test $uppercase function
         let ast = parse(r#"$uppercase("hello")"#).unwrap();
         match ast {
-            AstNode::Function { name, args, is_builtin } => {
+            AstNode::Function {
+                name,
+                args,
+                is_builtin,
+            } => {
                 assert_eq!(name, "uppercase");
                 assert_eq!(args.len(), 1);
                 assert_eq!(args[0], AstNode::String("hello".to_string()));
@@ -2063,7 +2149,11 @@ mod tests {
         // Test $sum function
         let ast = parse("$sum([1, 2, 3])").unwrap();
         match ast {
-            AstNode::Function { name, args, is_builtin } => {
+            AstNode::Function {
+                name,
+                args,
+                is_builtin,
+            } => {
                 assert_eq!(name, "sum");
                 assert_eq!(args.len(), 1);
                 assert!(is_builtin); // $ prefix means builtin
@@ -2077,13 +2167,21 @@ mod tests {
         // Test nested $function calls
         let ast = parse(r#"$length($lowercase("HELLO"))"#).unwrap();
         match ast {
-            AstNode::Function { name, args, is_builtin } => {
+            AstNode::Function {
+                name,
+                args,
+                is_builtin,
+            } => {
                 assert_eq!(name, "length");
                 assert_eq!(args.len(), 1);
                 assert!(is_builtin);
                 // Check nested function
                 match &args[0] {
-                    AstNode::Function { name: inner_name, is_builtin: inner_builtin, .. } => {
+                    AstNode::Function {
+                        name: inner_name,
+                        is_builtin: inner_builtin,
+                        ..
+                    } => {
                         assert_eq!(inner_name, "lowercase");
                         assert!(inner_builtin);
                     }

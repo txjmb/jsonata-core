@@ -3,9 +3,9 @@
 
 use std::sync::OnceLock;
 
-use chrono::{DateTime, Utc, TimeZone, NaiveDate, Datelike, Timelike};
-use regex::Regex;
 use crate::value::JValue;
+use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc};
+use regex::Regex;
 use thiserror::Error;
 
 /// Compiled regex for ISO 8601 partial format parsing (compiled once on first use)
@@ -84,7 +84,9 @@ pub fn parse_iso8601_partial(s: &str) -> Result<i64, DateTimeError> {
 
         Ok(millis)
     } else {
-        Err(DateTimeError::ParseError("premature end of input".to_string()))
+        Err(DateTimeError::ParseError(
+            "premature end of input".to_string(),
+        ))
     }
 }
 
@@ -150,8 +152,20 @@ pub fn parse_datetime_with_picture(timestamp: &str, picture: &str) -> Result<i64
 
     // Handle 12-hour format with AM/PM
     let hour = match parsed.period {
-        Some(1) => if hour == 12 { 12 } else { hour + 12 },  // PM
-        Some(_) => if hour == 12 { 0 } else { hour },         // AM
+        Some(1) => {
+            if hour == 12 {
+                12
+            } else {
+                hour + 12
+            }
+        } // PM
+        Some(_) => {
+            if hour == 12 {
+                0
+            } else {
+                hour
+            }
+        } // AM
         None => hour,
     };
 
@@ -182,7 +196,7 @@ struct ParsedDateTime {
     minute: Option<u32>,
     second: Option<u32>,
     millis: Option<u32>,
-    period: Option<u32>, // 0=AM, 1=PM
+    period: Option<u32>,    // 0=AM, 1=PM
     tz_offset: Option<i32>, // minutes
 }
 
@@ -194,8 +208,9 @@ fn analyse_picture(picture: &str) -> Result<Vec<PictureComponent>, DateTimeError
     while let Some(c) = chars.next() {
         if c == '[' {
             // Start of a component
-            let component_char = chars.next()
-                .ok_or_else(|| DateTimeError::ParseError("Unexpected end of picture".to_string()))?;
+            let component_char = chars.next().ok_or_else(|| {
+                DateTimeError::ParseError("Unexpected end of picture".to_string())
+            })?;
 
             // Parse optional width specifiers
             let mut width_spec = String::new();
@@ -233,7 +248,8 @@ fn parse_width_spec(spec: &str) -> (usize, usize) {
             if range.contains('-') {
                 // Parse range like "*-4"
                 let range_parts: Vec<&str> = range.split('-').collect();
-                let max = range_parts.get(1)
+                let max = range_parts
+                    .get(1)
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(usize::MAX);
                 return (1, max);
@@ -243,7 +259,11 @@ fn parse_width_spec(spec: &str) -> (usize, usize) {
 
     // Count leading zeros to determine minimum width
     let zeros: usize = spec.chars().take_while(|&c| c == '0').count();
-    let width = zeros + spec.chars().filter(|c| c.is_ascii_digit() && *c != '0').count();
+    let width = zeros
+        + spec
+            .chars()
+            .filter(|c| c.is_ascii_digit() && *c != '0')
+            .count();
 
     if width == 0 {
         (1, usize::MAX)
@@ -253,7 +273,10 @@ fn parse_width_spec(spec: &str) -> (usize, usize) {
 }
 
 /// Parse a timestamp using the analysed picture components
-fn parse_with_components(timestamp: &str, components: &[PictureComponent]) -> Result<ParsedDateTime, DateTimeError> {
+fn parse_with_components(
+    timestamp: &str,
+    components: &[PictureComponent],
+) -> Result<ParsedDateTime, DateTimeError> {
     let mut result = ParsedDateTime::default();
     let mut pos = 0;
     let chars: Vec<char> = timestamp.chars().collect();
@@ -263,15 +286,19 @@ fn parse_with_components(timestamp: &str, components: &[PictureComponent]) -> Re
         let end = (pos + comp.max_width).min(chars.len());
 
         // For numeric components, extract digits
-        let value_str: String = chars[pos..end].iter()
+        let value_str: String = chars[pos..end]
+            .iter()
             .take_while(|c| c.is_ascii_digit())
             .collect();
 
         if value_str.is_empty() {
-            return Err(DateTimeError::ParseError("input contains invalid characters".to_string()));
+            return Err(DateTimeError::ParseError(
+                "input contains invalid characters".to_string(),
+            ));
         }
 
-        let value: u32 = value_str.parse()
+        let value: u32 = value_str
+            .parse()
             .map_err(|_| DateTimeError::ParseError("Invalid number".to_string()))?;
 
         pos += value_str.len().max(comp.min_width);
@@ -296,7 +323,8 @@ fn parse_with_components(timestamp: &str, components: &[PictureComponent]) -> Re
 
 /// $fromMillis(millis) - Convert milliseconds since epoch to ISO 8601 timestamp
 pub fn from_millis(millis: i64) -> Result<JValue, DateTimeError> {
-    let dt = Utc.timestamp_millis_opt(millis)
+    let dt = Utc
+        .timestamp_millis_opt(millis)
         .single()
         .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {}", millis)))?;
 
@@ -306,7 +334,8 @@ pub fn from_millis(millis: i64) -> Result<JValue, DateTimeError> {
 /// $fromMillis(millis, picture) - Convert milliseconds to formatted timestamp
 #[allow(dead_code)]
 pub fn from_millis_with_picture(millis: i64, picture: &str) -> Result<JValue, DateTimeError> {
-    let dt = Utc.timestamp_millis_opt(millis)
+    let dt = Utc
+        .timestamp_millis_opt(millis)
         .single()
         .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {}", millis)))?;
 
@@ -316,7 +345,10 @@ pub fn from_millis_with_picture(millis: i64, picture: &str) -> Result<JValue, Da
 
 /// Format a datetime using a picture string
 #[allow(dead_code)]
-pub fn format_datetime_with_picture(dt: &DateTime<Utc>, picture: &str) -> Result<String, DateTimeError> {
+pub fn format_datetime_with_picture(
+    dt: &DateTime<Utc>,
+    picture: &str,
+) -> Result<String, DateTimeError> {
     let components = analyse_picture(picture)?;
     let mut result = String::new();
 
@@ -328,17 +360,25 @@ pub fn format_datetime_with_picture(dt: &DateTime<Utc>, picture: &str) -> Result
             'H' => format!("{:0width$}", dt.hour(), width = comp.min_width),
             'h' => {
                 let h = dt.hour() % 12;
-                format!("{:0width$}", if h == 0 { 12 } else { h }, width = comp.min_width)
-            },
+                format!(
+                    "{:0width$}",
+                    if h == 0 { 12 } else { h },
+                    width = comp.min_width
+                )
+            }
             'm' => format!("{:0width$}", dt.minute(), width = comp.min_width),
             's' => format!("{:0width$}", dt.second(), width = comp.min_width),
             'f' => {
                 let ms = dt.timestamp_subsec_millis();
                 format!("{:0width$}", ms, width = comp.min_width)
-            },
+            }
             'P' => {
-                if dt.hour() < 12 { "am".to_string() } else { "pm".to_string() }
-            },
+                if dt.hour() < 12 {
+                    "am".to_string()
+                } else {
+                    "pm".to_string()
+                }
+            }
             'Z' => "Z".to_string(),
             _ => String::new(),
         };

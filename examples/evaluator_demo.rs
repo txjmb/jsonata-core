@@ -11,8 +11,8 @@
 // - Conditional expressions
 // - Arrays and objects
 
-use jsonatapy::{parser::parse, evaluator::Evaluator};
 use jsonatapy::value::JValue;
+use jsonatapy::{evaluator::Evaluator, parser::parse};
 use serde_json::json;
 
 fn main() {
@@ -54,13 +54,10 @@ fn demo_path_traversal() {
                 "zip": "10001"
             }
         }
-    }).into();
+    })
+    .into();
 
-    let examples = vec![
-        "user.name",
-        "user.address.city",
-        "user.address.zip",
-    ];
+    let examples = vec!["user.name", "user.address.city", "user.address.zip"];
 
     for expr_str in examples {
         match parse(expr_str) {
@@ -84,7 +81,8 @@ fn demo_arithmetic() {
         "price": 100,
         "quantity": 5,
         "tax_rate": 0.1
-    }).into();
+    })
+    .into();
 
     let examples = vec![
         "price + 10",
@@ -116,7 +114,8 @@ fn demo_comparisons() {
     let data: JValue = json!({
         "age": 25,
         "threshold": 18
-    }).into();
+    })
+    .into();
 
     let examples = vec![
         "age > threshold",
@@ -147,7 +146,8 @@ fn demo_logical() {
     let data: JValue = json!({
         "age": 25,
         "has_license": true
-    }).into();
+    })
+    .into();
 
     let examples = vec![
         "age > 18 and has_license",
@@ -176,7 +176,8 @@ fn demo_strings() {
     let data: JValue = json!({
         "first_name": "Alice",
         "last_name": "Smith"
-    }).into();
+    })
+    .into();
 
     let examples = vec![
         r#"first_name & " " & last_name"#,
@@ -204,7 +205,8 @@ fn demo_functions() {
     let data: JValue = json!({
         "name": "alice",
         "numbers": [1, 2, 3, 4, 5]
-    }).into();
+    })
+    .into();
 
     let examples = vec![
         "uppercase(name)",
@@ -234,7 +236,8 @@ fn demo_conditionals() {
 
     let data: JValue = json!({
         "score": 85
-    }).into();
+    })
+    .into();
 
     let examples = vec![
         r#"score >= 90 ? "A" : (score >= 80 ? "B" : "C")"#,
@@ -276,15 +279,12 @@ fn demo_complex() {
                 "cost": 15
             }
         }
-    }).into();
+    })
+    .into();
 
     println!("Data: {}\n", serde_json::to_string_pretty(&data).unwrap());
 
-    let examples = vec![
-        "order.id",
-        "order.customer.name",
-        "order.shipping.cost",
-    ];
+    let examples = vec!["order.id", "order.customer.name", "order.shipping.cost"];
 
     for expr_str in examples {
         match parse(expr_str) {

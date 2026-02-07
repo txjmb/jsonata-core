@@ -62,8 +62,8 @@ impl ParamType {
             (ParamType::Number, JValue::Number(_)) => true,
             (ParamType::Boolean, JValue::Bool(_)) => true,
             (ParamType::Object, JValue::Object(_)) => true,
-            (ParamType::Function(_), JValue::Lambda { .. }) |
-            (ParamType::Function(_), JValue::Builtin { .. }) => true,
+            (ParamType::Function(_), JValue::Lambda { .. })
+            | (ParamType::Function(_), JValue::Builtin { .. }) => true,
             (ParamType::Array(elem_type), JValue::Array(arr)) => {
                 if let Some(expected_elem) = elem_type {
                     // Check all elements match the expected type
@@ -80,7 +80,6 @@ impl ParamType {
             _ => false,
         }
     }
-
 }
 
 /// Function parameter definition
@@ -115,18 +114,18 @@ impl Signature {
         // Signature format: <params:return>
         if !sig_str.starts_with('<') || !sig_str.ends_with('>') {
             return Err(SignatureError::InvalidSignature(
-                "Signature must be enclosed in angle brackets".to_string()
+                "Signature must be enclosed in angle brackets".to_string(),
             ));
         }
 
-        let inner = &sig_str[1..sig_str.len()-1];
+        let inner = &sig_str[1..sig_str.len() - 1];
 
         // Find the separator colon, skipping over any nested angle brackets
         // This handles cases like <f<n:n>:f<n:n>> where the first : is inside <n:n>
         let separator_pos = Self::find_separator_colon(inner);
 
         let (param_str, return_type_str) = if let Some(pos) = separator_pos {
-            (&inner[..pos], Some(&inner[pos+1..]))
+            (&inner[..pos], Some(&inner[pos + 1..]))
         } else {
             (inner, None)
         };
@@ -144,7 +143,10 @@ impl Signature {
             Self::parse_params(param_str)?
         };
 
-        Ok(Signature { params, return_type })
+        Ok(Signature {
+            params,
+            return_type,
+        })
     }
 
     /// Find the separator colon that divides params from return type,
@@ -184,14 +186,19 @@ impl Signature {
                 false
             };
 
-            params.push(Parameter { param_type, optional });
+            params.push(Parameter {
+                param_type,
+                optional,
+            });
         }
 
         Ok(params)
     }
 
     /// Parse a type from characters
-    fn parse_type_chars(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<ParamType, SignatureError> {
+    fn parse_type_chars(
+        chars: &mut std::iter::Peekable<std::str::Chars>,
+    ) -> Result<ParamType, SignatureError> {
         // Check for union type: (ns) or (nsb)
         if chars.peek() == Some(&'(') {
             chars.next(); // consume '('
@@ -199,27 +206,36 @@ impl Signature {
 
             // Parse all types until we hit ')'
             while chars.peek() != Some(&')') && chars.peek().is_some() {
-                let type_char = chars.next()
-                    .ok_or_else(|| SignatureError::InvalidSignature("Unexpected end in union type".to_string()))?;
+                let type_char = chars.next().ok_or_else(|| {
+                    SignatureError::InvalidSignature("Unexpected end in union type".to_string())
+                })?;
 
-                let param_type = ParamType::from_char(type_char)
-                    .ok_or_else(|| SignatureError::InvalidSignature(format!("Invalid type character in union: {}", type_char)))?;
+                let param_type = ParamType::from_char(type_char).ok_or_else(|| {
+                    SignatureError::InvalidSignature(format!(
+                        "Invalid type character in union: {}",
+                        type_char
+                    ))
+                })?;
 
                 union_types.push(param_type);
             }
 
             if chars.next() != Some(')') {
-                return Err(SignatureError::InvalidSignature("Expected ')' after union type".to_string()));
+                return Err(SignatureError::InvalidSignature(
+                    "Expected ')' after union type".to_string(),
+                ));
             }
 
             return Ok(ParamType::Union(union_types));
         }
 
-        let type_char = chars.next()
-            .ok_or_else(|| SignatureError::InvalidSignature("Unexpected end of signature".to_string()))?;
+        let type_char = chars.next().ok_or_else(|| {
+            SignatureError::InvalidSignature("Unexpected end of signature".to_string())
+        })?;
 
-        let mut param_type = ParamType::from_char(type_char)
-            .ok_or_else(|| SignatureError::InvalidSignature(format!("Invalid type character: {}", type_char)))?;
+        let mut param_type = ParamType::from_char(type_char).ok_or_else(|| {
+            SignatureError::InvalidSignature(format!("Invalid type character: {}", type_char))
+        })?;
 
         // Check for subtype: a<s> for array elements, or f<n:n> for function signature
         if chars.peek() == Some(&'<') {
@@ -229,7 +245,9 @@ impl Signature {
                     let elem_type = Self::parse_type_chars(chars)?;
 
                     if chars.next() != Some('>') {
-                        return Err(SignatureError::InvalidSignature("Expected '>' after array element type".to_string()));
+                        return Err(SignatureError::InvalidSignature(
+                            "Expected '>' after array element type".to_string(),
+                        ));
                     }
 
                     param_type = ParamType::Array(Some(Box::new(elem_type)));
@@ -254,9 +272,11 @@ impl Signature {
                                 }
                             }
                             Some(c) => subtype.push(c),
-                            None => return Err(SignatureError::InvalidSignature(
-                                "Unexpected end in function subtype".to_string()
-                            )),
+                            None => {
+                                return Err(SignatureError::InvalidSignature(
+                                    "Unexpected end in function subtype".to_string(),
+                                ))
+                            }
                         }
                     }
 
@@ -264,9 +284,10 @@ impl Signature {
                 }
                 _ => {
                     // '<' not valid after other types
-                    return Err(SignatureError::InvalidSignature(
-                        format!("Type parameter '<' not valid after type {:?}", param_type)
-                    ));
+                    return Err(SignatureError::InvalidSignature(format!(
+                        "Type parameter '<' not valid after type {:?}",
+                        param_type
+                    )));
                 }
             }
         }
@@ -311,7 +332,9 @@ impl Signature {
         for (i, (param, arg)) in self.params.iter().zip(args.iter()).enumerate() {
             // Special case: if argument is null (undefined), return UndefinedArgument
             // This allows the caller to decide whether to return undefined or error
-            if matches!(arg, JValue::Null) && !matches!(param.param_type, ParamType::Null | ParamType::Any) {
+            if matches!(arg, JValue::Null)
+                && !matches!(param.param_type, ParamType::Null | ParamType::Any)
+            {
                 return Err(SignatureError::UndefinedArgument);
             }
 

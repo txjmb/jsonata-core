@@ -17,6 +17,7 @@ from pathlib import Path
 
 try:
     import jsonatapy
+
     JSONATAPY_AVAILABLE = True
 except ImportError:
     print("⚠ jsonatapy not available. Install with: maturin develop --release")
@@ -56,11 +57,7 @@ def run_javascript(expression: str, data: dict, iterations: int) -> float:
     if not js_script.exists():
         return -1.0, None
 
-    benchmark_data = {
-        "expression": expression,
-        "data": data,
-        "iterations": iterations
-    }
+    benchmark_data = {"expression": expression, "data": data, "iterations": iterations}
 
     try:
         result = subprocess.run(
@@ -68,7 +65,7 @@ def run_javascript(expression: str, data: dict, iterations: int) -> float:
             input=json.dumps(benchmark_data),
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
 
         if result.returncode != 0:
@@ -99,13 +96,13 @@ def main():
         print(f"❌ Invalid JSON data: {e}")
         sys.exit(1)
 
-    print("="*70)
+    print("=" * 70)
     print("Quick Benchmark")
-    print("="*70)
+    print("=" * 70)
     print(f"Expression: {expression}")
     print(f"Data: {json.dumps(data, indent=2)}")
     print(f"Iterations: {iterations:,}")
-    print("="*70)
+    print("=" * 70)
 
     # Run jsonatapy
     if JSONATAPY_AVAILABLE:
@@ -114,7 +111,7 @@ def main():
         if jsonatapy_time > 0:
             print("\n✓ jsonatapy")
             print(f"  Total time:     {jsonatapy_time:8.2f} ms")
-            print(f"  Per iteration:  {jsonatapy_time/iterations:8.6f} ms")
+            print(f"  Per iteration:  {jsonatapy_time / iterations:8.6f} ms")
             print(f"  Result:         {json.dumps(result)}")
         else:
             print("\n✗ jsonatapy FAILED")
@@ -127,21 +124,21 @@ def main():
     if js_time > 0:
         print("\n✓ JavaScript")
         print(f"  Total time:     {js_time:8.2f} ms")
-        print(f"  Per iteration:  {js_time/iterations:8.6f} ms")
+        print(f"  Per iteration:  {js_time / iterations:8.6f} ms")
     else:
         print("\n✗ JavaScript FAILED or NOT AVAILABLE")
 
     # Compare
     if jsonatapy_time > 0 and js_time > 0:
         speedup = js_time / jsonatapy_time
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("Comparison")
-        print("="*70)
+        print("=" * 70)
 
         if speedup > 1:
             print(f"jsonatapy is {speedup:.2f}x FASTER than JavaScript")
         else:
-            print(f"jsonatapy is {1/speedup:.2f}x SLOWER than JavaScript")
+            print(f"jsonatapy is {1 / speedup:.2f}x SLOWER than JavaScript")
 
         print(f"\nSpeedup factor: {speedup:.4f}x")
 

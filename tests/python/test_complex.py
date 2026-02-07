@@ -12,9 +12,11 @@ data = {
 }
 
 try:
-    expr = jsonatapy.compile('items[price > 50 and stock < 150].{"name": name, "value": price * stock}')
+    expr = jsonatapy.compile(
+        'items[price > 50 and stock < 150].{"name": name, "value": price * stock}'
+    )
     result = expr.evaluate(data)
-    print('Complex expression result:')
+    print("Complex expression result:")
     print(json.dumps(result, indent=2))
 except Exception as e:
-    print(f'Error: {e}')
+    print(f"Error: {e}")

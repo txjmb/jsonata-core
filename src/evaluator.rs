@@ -42,49 +42,55 @@ fn try_specialize_predicate(predicate: &AstNode) -> Option<SpecializedPredicate>
         AstNode::Name(field) => Some(SpecializedPredicate::TruthyField(field.clone())),
 
         // arr[field op literal] or arr[literal op field]
-        AstNode::Binary { op, lhs, rhs } => {
-            match op {
-                BinaryOp::Equal => try_field_literal_pair(lhs, rhs)
-                    .map(|(f, v)| SpecializedPredicate::FieldEq(f, v)),
-                BinaryOp::NotEqual => try_field_literal_pair(lhs, rhs)
-                    .map(|(f, v)| SpecializedPredicate::FieldNe(f, v)),
-                BinaryOp::GreaterThan => try_field_number_pair(lhs, rhs)
-                    .map(|(f, n, flipped)| if flipped {
-                        SpecializedPredicate::FieldLt(f, n)
-                    } else {
-                        SpecializedPredicate::FieldGt(f, n)
-                    }),
-                BinaryOp::GreaterThanOrEqual => try_field_number_pair(lhs, rhs)
-                    .map(|(f, n, flipped)| if flipped {
-                        SpecializedPredicate::FieldLte(f, n)
-                    } else {
-                        SpecializedPredicate::FieldGte(f, n)
-                    }),
-                BinaryOp::LessThan => try_field_number_pair(lhs, rhs)
-                    .map(|(f, n, flipped)| if flipped {
-                        SpecializedPredicate::FieldGt(f, n)
-                    } else {
-                        SpecializedPredicate::FieldLt(f, n)
-                    }),
-                BinaryOp::LessThanOrEqual => try_field_number_pair(lhs, rhs)
-                    .map(|(f, n, flipped)| if flipped {
-                        SpecializedPredicate::FieldGte(f, n)
-                    } else {
-                        SpecializedPredicate::FieldLte(f, n)
-                    }),
-                BinaryOp::And => {
-                    let left = try_specialize_predicate(lhs)?;
-                    let right = try_specialize_predicate(rhs)?;
-                    Some(SpecializedPredicate::And(Box::new(left), Box::new(right)))
-                }
-                BinaryOp::Or => {
-                    let left = try_specialize_predicate(lhs)?;
-                    let right = try_specialize_predicate(rhs)?;
-                    Some(SpecializedPredicate::Or(Box::new(left), Box::new(right)))
-                }
-                _ => None,
+        AstNode::Binary { op, lhs, rhs } => match op {
+            BinaryOp::Equal => {
+                try_field_literal_pair(lhs, rhs).map(|(f, v)| SpecializedPredicate::FieldEq(f, v))
             }
-        }
+            BinaryOp::NotEqual => {
+                try_field_literal_pair(lhs, rhs).map(|(f, v)| SpecializedPredicate::FieldNe(f, v))
+            }
+            BinaryOp::GreaterThan => try_field_number_pair(lhs, rhs).map(|(f, n, flipped)| {
+                if flipped {
+                    SpecializedPredicate::FieldLt(f, n)
+                } else {
+                    SpecializedPredicate::FieldGt(f, n)
+                }
+            }),
+            BinaryOp::GreaterThanOrEqual => {
+                try_field_number_pair(lhs, rhs).map(|(f, n, flipped)| {
+                    if flipped {
+                        SpecializedPredicate::FieldLte(f, n)
+                    } else {
+                        SpecializedPredicate::FieldGte(f, n)
+                    }
+                })
+            }
+            BinaryOp::LessThan => try_field_number_pair(lhs, rhs).map(|(f, n, flipped)| {
+                if flipped {
+                    SpecializedPredicate::FieldGt(f, n)
+                } else {
+                    SpecializedPredicate::FieldLt(f, n)
+                }
+            }),
+            BinaryOp::LessThanOrEqual => try_field_number_pair(lhs, rhs).map(|(f, n, flipped)| {
+                if flipped {
+                    SpecializedPredicate::FieldGte(f, n)
+                } else {
+                    SpecializedPredicate::FieldLte(f, n)
+                }
+            }),
+            BinaryOp::And => {
+                let left = try_specialize_predicate(lhs)?;
+                let right = try_specialize_predicate(rhs)?;
+                Some(SpecializedPredicate::And(Box::new(left), Box::new(right)))
+            }
+            BinaryOp::Or => {
+                let left = try_specialize_predicate(lhs)?;
+                let right = try_specialize_predicate(rhs)?;
+                Some(SpecializedPredicate::Or(Box::new(left), Box::new(right)))
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -136,38 +142,36 @@ fn evaluate_specialized(item: &JValue, spec: &SpecializedPredicate) -> bool {
         _ => return false,
     };
     match spec {
-        SpecializedPredicate::TruthyField(field) => {
-            match obj.get(field.as_str()) {
-                Some(v) => match v {
-                    JValue::Null | JValue::Undefined => false,
-                    JValue::Bool(b) => *b,
-                    JValue::Number(n) => *n != 0.0,
-                    JValue::String(s) => !s.is_empty(),
-                    JValue::Array(a) => !a.is_empty(),
-                    JValue::Object(o) => !o.is_empty(),
-                    _ => false,
-                },
-                None => false,
-            }
-        }
-        SpecializedPredicate::FieldEq(field, literal) => {
-            obj.get(field.as_str()) == Some(literal)
-        }
-        SpecializedPredicate::FieldNe(field, literal) => {
-            obj.get(field.as_str()) != Some(literal)
-        }
-        SpecializedPredicate::FieldGt(field, n) => {
-            obj.get(field.as_str()).and_then(|v| v.as_f64()).is_some_and(|v| v > *n)
-        }
-        SpecializedPredicate::FieldGte(field, n) => {
-            obj.get(field.as_str()).and_then(|v| v.as_f64()).is_some_and(|v| v >= *n)
-        }
-        SpecializedPredicate::FieldLt(field, n) => {
-            obj.get(field.as_str()).and_then(|v| v.as_f64()).is_some_and(|v| v < *n)
-        }
-        SpecializedPredicate::FieldLte(field, n) => {
-            obj.get(field.as_str()).and_then(|v| v.as_f64()).is_some_and(|v| v <= *n)
-        }
+        SpecializedPredicate::TruthyField(field) => match obj.get(field.as_str()) {
+            Some(v) => match v {
+                JValue::Null | JValue::Undefined => false,
+                JValue::Bool(b) => *b,
+                JValue::Number(n) => *n != 0.0,
+                JValue::String(s) => !s.is_empty(),
+                JValue::Array(a) => !a.is_empty(),
+                JValue::Object(o) => !o.is_empty(),
+                _ => false,
+            },
+            None => false,
+        },
+        SpecializedPredicate::FieldEq(field, literal) => obj.get(field.as_str()) == Some(literal),
+        SpecializedPredicate::FieldNe(field, literal) => obj.get(field.as_str()) != Some(literal),
+        SpecializedPredicate::FieldGt(field, n) => obj
+            .get(field.as_str())
+            .and_then(|v| v.as_f64())
+            .is_some_and(|v| v > *n),
+        SpecializedPredicate::FieldGte(field, n) => obj
+            .get(field.as_str())
+            .and_then(|v| v.as_f64())
+            .is_some_and(|v| v >= *n),
+        SpecializedPredicate::FieldLt(field, n) => obj
+            .get(field.as_str())
+            .and_then(|v| v.as_f64())
+            .is_some_and(|v| v < *n),
+        SpecializedPredicate::FieldLte(field, n) => obj
+            .get(field.as_str())
+            .and_then(|v| v.as_f64())
+            .is_some_and(|v| v <= *n),
         SpecializedPredicate::And(left, right) => {
             evaluate_specialized(item, left) && evaluate_specialized(item, right)
         }
@@ -181,8 +185,16 @@ fn evaluate_specialized(item: &JValue, spec: &SpecializedPredicate) -> bool {
 /// These functions should return null/undefined when their input path doesn't exist,
 /// rather than throwing a type error.
 const UNDEFINED_PROPAGATING_FUNCTIONS: &[&str] = &[
-    "not", "boolean", "length", "number", "uppercase", "lowercase",
-    "substring", "substringBefore", "substringAfter", "string",
+    "not",
+    "boolean",
+    "length",
+    "number",
+    "uppercase",
+    "lowercase",
+    "substring",
+    "substringBefore",
+    "substringAfter",
+    "string",
 ];
 
 /// Check whether a function propagates undefined values
@@ -197,8 +209,16 @@ mod aggregation {
 
     /// Iterate over all numeric values in a potentially nested array, yielding f64 values.
     /// Returns Err if any non-numeric value is encountered.
-    fn for_each_numeric(arr: &[JValue], func_name: &str, mut f: impl FnMut(f64)) -> Result<(), EvaluatorError> {
-        fn recurse(arr: &[JValue], func_name: &str, f: &mut dyn FnMut(f64)) -> Result<(), EvaluatorError> {
+    fn for_each_numeric(
+        arr: &[JValue],
+        func_name: &str,
+        mut f: impl FnMut(f64),
+    ) -> Result<(), EvaluatorError> {
+        fn recurse(
+            arr: &[JValue],
+            func_name: &str,
+            f: &mut dyn FnMut(f64),
+        ) -> Result<(), EvaluatorError> {
             for value in arr.iter() {
                 match value {
                     JValue::Array(inner) => recurse(inner, func_name, f)?,
@@ -240,7 +260,9 @@ mod aggregation {
         }
         let mut max_val = f64::NEG_INFINITY;
         for_each_numeric(arr, "max", |n| {
-            if n > max_val { max_val = n; }
+            if n > max_val {
+                max_val = n;
+            }
         })?;
         Ok(JValue::Number(max_val))
     }
@@ -251,7 +273,9 @@ mod aggregation {
         }
         let mut min_val = f64::INFINITY;
         for_each_numeric(arr, "min", |n| {
-            if n < min_val { min_val = n; }
+            if n < min_val {
+                min_val = n;
+            }
         })?;
         Ok(JValue::Number(min_val))
     }
@@ -384,11 +408,19 @@ impl Context {
     }
 
     pub fn bind(&mut self, name: String, value: JValue) {
-        self.scope_stack.last_mut().unwrap().bindings.insert(name, value);
+        self.scope_stack
+            .last_mut()
+            .unwrap()
+            .bindings
+            .insert(name, value);
     }
 
     pub fn bind_lambda(&mut self, name: String, lambda: StoredLambda) {
-        self.scope_stack.last_mut().unwrap().lambdas.insert(name, lambda);
+        self.scope_stack
+            .last_mut()
+            .unwrap()
+            .lambdas
+            .insert(name, lambda);
     }
 
     pub fn unbind(&mut self, name: &str) {
@@ -567,11 +599,8 @@ impl Evaluator {
 
         while i < left.len() && j < right.len() {
             // Apply comparator: returns true if left[i] should come AFTER right[j]
-            let cmp_result = self.apply_function(
-                comparator,
-                &[left[i].clone(), right[j].clone()],
-                data,
-            )?;
+            let cmp_result =
+                self.apply_function(comparator, &[left[i].clone(), right[j].clone()], data)?;
 
             if self.is_truthy(&cmp_result) {
                 // left[i] should come after right[j], so take right[j]
@@ -610,14 +639,19 @@ impl Evaluator {
     }
 
     /// Internal evaluation method
-    fn evaluate_internal(&mut self, node: &AstNode, data: &JValue) -> Result<JValue, EvaluatorError> {
+    fn evaluate_internal(
+        &mut self,
+        node: &AstNode,
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         // Check recursion depth to prevent stack overflow
         self.recursion_depth += 1;
         if self.recursion_depth > self.max_recursion_depth {
             self.recursion_depth -= 1;
-            return Err(EvaluatorError::EvaluationError(
-                format!("U1001: Stack overflow - maximum recursion depth ({}) exceeded", self.max_recursion_depth)
-            ));
+            return Err(EvaluatorError::EvaluationError(format!(
+                "U1001: Stack overflow - maximum recursion depth ({}) exceeded",
+                self.max_recursion_depth
+            )));
         }
 
         let result = self.evaluate_internal_impl(node, data);
@@ -627,7 +661,11 @@ impl Evaluator {
     }
 
     /// Internal evaluation implementation (separated to allow depth tracking)
-    fn evaluate_internal_impl(&mut self, node: &AstNode, data: &JValue) -> Result<JValue, EvaluatorError> {
+    fn evaluate_internal_impl(
+        &mut self,
+        node: &AstNode,
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         match node {
             AstNode::String(s) => Ok(JValue::string(s.clone())),
 
@@ -673,7 +711,7 @@ impl Evaluator {
                 // Placeholders should only appear as function arguments
                 // If we reach here, it's an error
                 Err(EvaluatorError::EvaluationError(
-                    "Placeholder '?' can only be used as a function argument".to_string()
+                    "Placeholder '?' can only be used as a function argument".to_string(),
                 ))
             }
             AstNode::Regex { pattern, flags } => {
@@ -751,44 +789,29 @@ impl Evaluator {
             AstNode::ParentVariable(name) => {
                 // Special case: $$ alone (empty name) refers to parent/root context
                 if name.is_empty() {
-                    return self.context
-                        .get_parent()
-                        .cloned()
-                        .ok_or_else(|| {
-                            EvaluatorError::ReferenceError(
-                                "Parent context not available".to_string()
-                            )
-                        });
+                    return self.context.get_parent().cloned().ok_or_else(|| {
+                        EvaluatorError::ReferenceError("Parent context not available".to_string())
+                    });
                 }
 
                 // For $$name, we need to evaluate name against parent context
                 // This is similar to $.name but using parent data
-                let parent_data = self.context
-                    .get_parent()
-                    .ok_or_else(|| {
-                        EvaluatorError::ReferenceError(
-                            "Parent context not available".to_string()
-                        )
-                    })?;
+                let parent_data = self.context.get_parent().ok_or_else(|| {
+                    EvaluatorError::ReferenceError("Parent context not available".to_string())
+                })?;
 
                 // Access field on parent context
                 match parent_data {
-                    JValue::Object(obj) => {
-                        Ok(obj.get(name).cloned().unwrap_or(JValue::Null))
-                    }
-                    _ => Ok(JValue::Null)
+                    JValue::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(JValue::Null)),
+                    _ => Ok(JValue::Null),
                 }
             }
 
             AstNode::Path { steps } => self.evaluate_path(steps, data),
 
-            AstNode::Binary { op, lhs, rhs } => {
-                self.evaluate_binary_op(*op, lhs, rhs, data)
-            }
+            AstNode::Binary { op, lhs, rhs } => self.evaluate_binary_op(*op, lhs, rhs, data),
 
-            AstNode::Unary { op, operand } => {
-                self.evaluate_unary_op(*op, operand, data)
-            }
+            AstNode::Unary { op, operand } => self.evaluate_unary_op(*op, operand, data),
 
             // Array constructor - JSONata semantics:
             AstNode::Array(elements) => {
@@ -825,8 +848,7 @@ impl Evaluator {
             AstNode::Object(pairs) => {
                 let mut result = IndexMap::new();
                 // Track which pair index produced each key (for D1009 checking)
-                let mut key_sources: HashMap<String, usize> =
-                    HashMap::new();
+                let mut key_sources: HashMap<String, usize> = HashMap::new();
 
                 for (pair_index, (key_node, value_node)) in pairs.iter().enumerate() {
                     // Evaluate key (must be a string)
@@ -894,8 +916,7 @@ impl Evaluator {
                 // Phase 1: Group items by key expression
                 // groups maps key -> (grouped_data, expr_index)
                 // When multiple items have same key, their data is appended together
-                let mut groups: HashMap<String, (Vec<JValue>, usize)> =
-                    HashMap::new();
+                let mut groups: HashMap<String, (Vec<JValue>, usize)> = HashMap::new();
 
                 // Save the current $ binding to restore later
                 let saved_dollar = self.context.lookup("$").cloned();
@@ -978,9 +999,11 @@ impl Evaluator {
                 Ok(JValue::object(result))
             }
 
-            AstNode::Function { name, args, is_builtin } => {
-                self.evaluate_function_call(name, args, *is_builtin, data)
-            }
+            AstNode::Function {
+                name,
+                args,
+                is_builtin,
+            } => self.evaluate_function_call(name, args, *is_builtin, data),
 
             // Call: invoke an arbitrary expression as a function
             // Used for IIFE patterns like (function($x){...})(5) or chained calls
@@ -1039,7 +1062,12 @@ impl Evaluator {
             }
 
             // Lambda: capture current environment for closure support
-            AstNode::Lambda { params, body, signature, thunk } => {
+            AstNode::Lambda {
+                params,
+                body,
+                signature,
+                thunk,
+            } => {
                 let lambda_id = format!("__lambda_{}_{:p}", params.len(), body.as_ref());
 
                 let stored_lambda = StoredLambda {
@@ -1094,11 +1122,9 @@ impl Evaluator {
                 }
             }
 
-            AstNode::Predicate(_) => {
-                Err(EvaluatorError::EvaluationError(
-                    "Predicate can only be used in path expressions".to_string()
-                ))
-            }
+            AstNode::Predicate(_) => Err(EvaluatorError::EvaluationError(
+                "Predicate can only be used in path expressions".to_string(),
+            )),
 
             // Array grouping: same as Array but prevents flattening in path contexts
             AstNode::ArrayGroup(elements) => {
@@ -1110,11 +1136,9 @@ impl Evaluator {
                 Ok(JValue::array(result))
             }
 
-            AstNode::FunctionApplication(_) => {
-                Err(EvaluatorError::EvaluationError(
-                    "Function application can only be used in path expressions".to_string()
-                ))
-            }
+            AstNode::FunctionApplication(_) => Err(EvaluatorError::EvaluationError(
+                "Function application can only be used in path expressions".to_string(),
+            )),
 
             AstNode::Sort { input, terms } => {
                 let value = self.evaluate_internal(input, data)?;
@@ -1153,8 +1177,11 @@ impl Evaluator {
             }
 
             // Transform: |location|update[,delete]|
-            AstNode::Transform { location, update, delete } => {
-
+            AstNode::Transform {
+                location,
+                update,
+                delete,
+            } => {
                 // Check if $ is bound (meaning we're being invoked as a lambda)
                 if self.context.lookup("$").is_some() {
                     // Execute the transformation
@@ -1212,13 +1239,22 @@ impl Evaluator {
     /// rather than a potential numeric index. When true, we skip speculative numeric evaluation.
     fn is_filter_predicate(predicate: &AstNode) -> bool {
         match predicate {
-            AstNode::Binary { op, .. } => matches!(op,
-                BinaryOp::GreaterThan | BinaryOp::GreaterThanOrEqual |
-                BinaryOp::LessThan | BinaryOp::LessThanOrEqual |
-                BinaryOp::Equal | BinaryOp::NotEqual |
-                BinaryOp::And | BinaryOp::Or | BinaryOp::In
+            AstNode::Binary { op, .. } => matches!(
+                op,
+                BinaryOp::GreaterThan
+                    | BinaryOp::GreaterThanOrEqual
+                    | BinaryOp::LessThan
+                    | BinaryOp::LessThanOrEqual
+                    | BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::And
+                    | BinaryOp::Or
+                    | BinaryOp::In
             ),
-            AstNode::Unary { op: crate::ast::UnaryOp::Not, .. } => true,
+            AstNode::Unary {
+                op: crate::ast::UnaryOp::Not,
+                ..
+            } => true,
             _ => false,
         }
     }
@@ -1226,7 +1262,11 @@ impl Evaluator {
     /// Evaluate a predicate as a stage during field extraction
     /// This has different semantics than standalone predicates:
     /// - Maps index operations over arrays of extracted values
-    fn evaluate_predicate_as_stage(&mut self, current: &JValue, predicate: &AstNode) -> Result<JValue, EvaluatorError> {
+    fn evaluate_predicate_as_stage(
+        &mut self,
+        current: &JValue,
+        predicate: &AstNode,
+    ) -> Result<JValue, EvaluatorError> {
         // Special case: empty brackets [] (represented as Boolean(true))
         if matches!(predicate, AstNode::Boolean(true)) {
             return match current {
@@ -1244,7 +1284,8 @@ impl Evaluator {
                 // Check if predicate is a numeric index
                 if let AstNode::Number(n) = predicate {
                     // Check if this is an array of arrays (extracted array fields)
-                    let is_array_of_arrays = arr.iter().any(|item| matches!(item, JValue::Array(_)));
+                    let is_array_of_arrays =
+                        arr.iter().any(|item| matches!(item, JValue::Array(_)));
 
                     if !is_array_of_arrays {
                         // Simple values: just index normally
@@ -1276,7 +1317,8 @@ impl Evaluator {
                 if Self::is_filter_predicate(predicate) {
                     // Try specialized fast path for simple field comparisons
                     if let Some(spec) = try_specialize_predicate(predicate) {
-                        let filtered: Vec<JValue> = arr.iter()
+                        let filtered: Vec<JValue> = arr
+                            .iter()
                             .filter(|item| evaluate_specialized(item, &spec))
                             .cloned()
                             .collect();
@@ -1300,7 +1342,8 @@ impl Evaluator {
                 match self.evaluate_internal(predicate, current) {
                     Ok(JValue::Number(n)) => {
                         let n_val = n;
-                        let is_array_of_arrays = arr.iter().any(|item| matches!(item, JValue::Array(_)));
+                        let is_array_of_arrays =
+                            arr.iter().any(|item| matches!(item, JValue::Array(_)));
 
                         if !is_array_of_arrays {
                             let pred_result = JValue::Number(n_val as f64);
@@ -1330,7 +1373,8 @@ impl Evaluator {
                     Ok(JValue::Array(indices)) => {
                         // Array of values - could be indices or filter results
                         // Check if all values are numeric
-                        let has_non_numeric = indices.iter().any(|v| !matches!(v, JValue::Number(_)));
+                        let has_non_numeric =
+                            indices.iter().any(|v| !matches!(v, JValue::Number(_)));
 
                         if has_non_numeric {
                             // Non-numeric values - treat as filter, fall through
@@ -1433,7 +1477,11 @@ impl Evaluator {
     }
 
     /// Evaluate a path expression (e.g., foo.bar.baz)
-    fn evaluate_path(&mut self, steps: &[PathStep], data: &JValue) -> Result<JValue, EvaluatorError> {
+    fn evaluate_path(
+        &mut self,
+        steps: &[PathStep],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         // Avoid cloning by using references and only cloning when necessary
         if steps.is_empty() {
             return Ok(data.clone());
@@ -1464,7 +1512,8 @@ impl Evaluator {
                             match item {
                                 JValue::Object(obj) => {
                                     // Check if this is a tuple - extract '@' value and preserve bindings
-                                    let is_tuple = obj.get("__tuple__") == Some(&JValue::Bool(true));
+                                    let is_tuple =
+                                        obj.get("__tuple__") == Some(&JValue::Bool(true));
 
                                     if is_tuple {
                                         let inner = match obj.get("@") {
@@ -1478,7 +1527,10 @@ impl Evaluator {
                                                 let wrap = |v: JValue| -> JValue {
                                                     let mut wrapper = IndexMap::new();
                                                     wrapper.insert("@".to_string(), v);
-                                                    wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
+                                                    wrapper.insert(
+                                                        "__tuple__".to_string(),
+                                                        JValue::Bool(true),
+                                                    );
                                                     for (k, v) in obj.iter() {
                                                         if k.starts_with('$') {
                                                             wrapper.insert(k.clone(), v.clone());
@@ -1492,7 +1544,7 @@ impl Evaluator {
                                                         for item in arr_val.iter() {
                                                             result.push(wrap(item.clone()));
                                                         }
-                                                    },
+                                                    }
                                                     other => result.push(wrap(other.clone())),
                                                 }
                                             }
@@ -1506,7 +1558,7 @@ impl Evaluator {
                                                         for item in arr_val.iter() {
                                                             result.push(item.clone());
                                                         }
-                                                    },
+                                                    }
                                                     other => result.push(other.clone()),
                                                 }
                                             }
@@ -1515,18 +1567,21 @@ impl Evaluator {
                                 }
                                 JValue::Array(inner_arr) => {
                                     // Recursively map over nested array
-                                    let nested_result = self.evaluate_path(&[PathStep::new(AstNode::Name(field_name.clone()))], &JValue::Array(inner_arr.clone()))?;
+                                    let nested_result = self.evaluate_path(
+                                        &[PathStep::new(AstNode::Name(field_name.clone()))],
+                                        &JValue::Array(inner_arr.clone()),
+                                    )?;
                                     // Add nested result to our results
                                     match nested_result {
                                         JValue::Array(nested) => {
                                             // Flatten nested arrays from recursive mapping
                                             result.extend(nested.iter().cloned());
                                         }
-                                        JValue::Null => {}, // Skip nulls from nested arrays
+                                        JValue::Null => {} // Skip nulls from nested arrays
                                         other => result.push(other),
                                     }
                                 }
-                                _ => {}, // Skip non-object items
+                                _ => {} // Skip non-object items
                             }
                         }
 
@@ -1576,13 +1631,9 @@ impl Evaluator {
             }
             AstNode::ParentVariable(name) => {
                 // Parent variable as first step
-                let parent_data = self.context
-                    .get_parent()
-                    .ok_or_else(|| {
-                        EvaluatorError::ReferenceError(
-                            "Parent context not available".to_string()
-                        )
-                    })?;
+                let parent_data = self.context.get_parent().ok_or_else(|| {
+                    EvaluatorError::ReferenceError("Parent context not available".to_string())
+                })?;
 
                 if name.is_empty() {
                     // $$ alone returns parent context
@@ -1590,10 +1641,8 @@ impl Evaluator {
                 } else {
                     // $$field accesses field on parent
                     match parent_data {
-                        JValue::Object(obj) => {
-                            obj.get(name).cloned().unwrap_or(JValue::Null)
-                        }
-                        _ => JValue::Null
+                        JValue::Object(obj) => obj.get(name).cloned().unwrap_or(JValue::Null),
+                        _ => JValue::Null,
                     }
                 }
             }
@@ -1624,14 +1673,18 @@ impl Evaluator {
                                             let processed_val = self.apply_stages(val, stages)?;
                                             // Stages always return an array (or null); extend results
                                             match processed_val {
-                                                JValue::Array(arr) => result.extend(arr.iter().cloned()),
-                                                JValue::Null => {}, // Skip nulls from stage application
+                                                JValue::Array(arr) => {
+                                                    result.extend(arr.iter().cloned())
+                                                }
+                                                JValue::Null => {} // Skip nulls from stage application
                                                 other => result.push(other), // Shouldn't happen, but handle it
                                             }
                                         } else {
                                             // No stages: flatten arrays, push scalars
                                             match val {
-                                                JValue::Array(arr) => result.extend(arr.iter().cloned()),
+                                                JValue::Array(arr) => {
+                                                    result.extend(arr.iter().cloned())
+                                                }
                                                 other => result.push(other),
                                             }
                                         }
@@ -1639,14 +1692,19 @@ impl Evaluator {
                                 }
                                 JValue::Array(inner_arr) => {
                                     // Recursively map over nested array
-                                    let nested_result = self.evaluate_path(&[steps[0].clone()], &JValue::Array(inner_arr.clone()))?;
+                                    let nested_result = self.evaluate_path(
+                                        &[steps[0].clone()],
+                                        &JValue::Array(inner_arr.clone()),
+                                    )?;
                                     match nested_result {
-                                        JValue::Array(nested) => result.extend(nested.iter().cloned()),
-                                        JValue::Null => {}, // Skip nulls from nested arrays
+                                        JValue::Array(nested) => {
+                                            result.extend(nested.iter().cloned())
+                                        }
+                                        JValue::Null => {} // Skip nulls from nested arrays
                                         other => result.push(other),
                                     }
                                 }
-                                _ => {}, // Skip non-object items
+                                _ => {} // Skip non-object items
                             }
                         }
                         JValue::array(result)
@@ -1721,10 +1779,11 @@ impl Evaluator {
             //
             // Steps like Name (field access) already have proper tuple handling in their
             // specific cases, so we don't intercept those here.
-            let needs_tuple_context_binding = is_tuple_array && matches!(
-                &step.node,
-                AstNode::Object(_) | AstNode::FunctionApplication(_) | AstNode::Variable(_)
-            );
+            let needs_tuple_context_binding = is_tuple_array
+                && matches!(
+                    &step.node,
+                    AstNode::Object(_) | AstNode::FunctionApplication(_) | AstNode::Variable(_)
+                );
 
             if needs_tuple_context_binding {
                 if let JValue::Array(arr) = &current {
@@ -1733,13 +1792,15 @@ impl Evaluator {
                     for tuple in arr.iter() {
                         if let JValue::Object(tuple_obj) = tuple {
                             // Extract tuple bindings (variables starting with $)
-                            let bindings: Vec<(String, JValue)> = tuple_obj.iter()
-                                .filter(|(k, _)| k.starts_with('$') && k.len() > 1)  // $i, $j, etc.
-                                .map(|(k, v)| (k[1..].to_string(), v.clone()))  // Remove $ prefix for context binding
+                            let bindings: Vec<(String, JValue)> = tuple_obj
+                                .iter()
+                                .filter(|(k, _)| k.starts_with('$') && k.len() > 1) // $i, $j, etc.
+                                .map(|(k, v)| (k[1..].to_string(), v.clone())) // Remove $ prefix for context binding
                                 .collect();
 
                             // Save current bindings
-                            let saved_bindings: Vec<(String, Option<JValue>)> = bindings.iter()
+                            let saved_bindings: Vec<(String, Option<JValue>)> = bindings
+                                .iter()
                                 .map(|(name, _)| (name.clone(), self.context.lookup(name).cloned()))
                                 .collect();
 
@@ -1761,7 +1822,7 @@ impl Evaluator {
                                     // Object constructor or function application - evaluate on actual data
                                     self.evaluate_internal(&step.node, &actual_data)?
                                 }
-                                _ => unreachable!()  // We only match specific types above
+                                _ => unreachable!(), // We only match specific types above
                             };
 
                             // Restore previous bindings
@@ -1791,7 +1852,7 @@ impl Evaluator {
                     }
 
                     current = JValue::array(results);
-                    continue;  // Skip the regular step processing
+                    continue; // Skip the regular step processing
                 }
             }
 
@@ -1820,7 +1881,9 @@ impl Evaluator {
                                         for value in obj.values() {
                                             // Flatten arrays
                                             match value {
-                                                JValue::Array(arr) => all_values.extend(arr.iter().cloned()),
+                                                JValue::Array(arr) => {
+                                                    all_values.extend(arr.iter().cloned())
+                                                }
                                                 _ => all_values.push(value.clone()),
                                             }
                                         }
@@ -1889,23 +1952,28 @@ impl Evaluator {
                                 match item {
                                     JValue::Object(obj) => {
                                         // Check if this is a tuple stream element
-                                        let (actual_obj, tuple_bindings) = if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                                            // This is a tuple - extract '@' value and preserve bindings
-                                            if let Some(JValue::Object(inner)) = obj.get("@") {
-                                                // Collect index bindings (variables starting with $)
-                                                let bindings: Vec<(String, JValue)> = obj.iter()
-                                                    .filter(|(k, _)| k.starts_with('$'))
-                                                    .map(|(k, v)| (k.clone(), v.clone()))
-                                                    .collect();
-                                                (inner.clone(), Some(bindings))
+                                        let (actual_obj, tuple_bindings) =
+                                            if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                                                // This is a tuple - extract '@' value and preserve bindings
+                                                if let Some(JValue::Object(inner)) = obj.get("@") {
+                                                    // Collect index bindings (variables starting with $)
+                                                    let bindings: Vec<(String, JValue)> = obj
+                                                        .iter()
+                                                        .filter(|(k, _)| k.starts_with('$'))
+                                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                                        .collect();
+                                                    (inner.clone(), Some(bindings))
+                                                } else {
+                                                    continue; // Invalid tuple
+                                                }
                                             } else {
-                                                continue; // Invalid tuple
-                                            }
-                                        } else {
-                                            (obj.clone(), None)
-                                        };
+                                                (obj.clone(), None)
+                                            };
 
-                                        let val = actual_obj.get(field_name).cloned().unwrap_or(JValue::Null);
+                                        let val = actual_obj
+                                            .get(field_name)
+                                            .cloned()
+                                            .unwrap_or(JValue::Null);
 
                                         if !matches!(val, JValue::Null) {
                                             // Helper to wrap value in tuple if we have bindings
@@ -1925,16 +1993,23 @@ impl Evaluator {
 
                                             if !stages.is_empty() {
                                                 // Apply stages to the extracted value
-                                                let processed_val = self.apply_stages(val, stages)?;
+                                                let processed_val =
+                                                    self.apply_stages(val, stages)?;
                                                 // Stages always return an array (or null); extend results
                                                 match processed_val {
                                                     JValue::Array(arr) => {
                                                         for item in arr.iter() {
-                                                            result.push(wrap_in_tuple(item.clone(), &tuple_bindings));
+                                                            result.push(wrap_in_tuple(
+                                                                item.clone(),
+                                                                &tuple_bindings,
+                                                            ));
                                                         }
-                                                    },
-                                                    JValue::Null => {}, // Skip nulls from stage application
-                                                    other => result.push(wrap_in_tuple(other, &tuple_bindings)),
+                                                    }
+                                                    JValue::Null => {} // Skip nulls from stage application
+                                                    other => result.push(wrap_in_tuple(
+                                                        other,
+                                                        &tuple_bindings,
+                                                    )),
                                                 }
                                             } else {
                                                 // No stages: flatten arrays, push scalars
@@ -1942,24 +2017,33 @@ impl Evaluator {
                                                 match val {
                                                     JValue::Array(arr) => {
                                                         for item in arr.iter() {
-                                                            result.push(wrap_in_tuple(item.clone(), &tuple_bindings));
+                                                            result.push(wrap_in_tuple(
+                                                                item.clone(),
+                                                                &tuple_bindings,
+                                                            ));
                                                         }
-                                                    },
-                                                    other => result.push(wrap_in_tuple(other, &tuple_bindings)),
+                                                    }
+                                                    other => result.push(wrap_in_tuple(
+                                                        other,
+                                                        &tuple_bindings,
+                                                    )),
                                                 }
                                             }
                                         }
                                     }
                                     JValue::Array(_) => {
                                         // Recursively map over nested array
-                                        let nested_result = self.evaluate_path(&[step.clone()], item)?;
+                                        let nested_result =
+                                            self.evaluate_path(&[step.clone()], item)?;
                                         match nested_result {
-                                            JValue::Array(nested) => result.extend(nested.iter().cloned()),
-                                            JValue::Null => {},
+                                            JValue::Array(nested) => {
+                                                result.extend(nested.iter().cloned())
+                                            }
+                                            JValue::Null => {}
                                             other => result.push(other),
                                         }
                                     }
-                                    _ => {},
+                                    _ => {}
                                 }
                             }
 
@@ -2005,8 +2089,10 @@ impl Evaluator {
                                     let value = self.evaluate_internal(element, item)?;
                                     // If the element is an Array/ArrayGroup, preserve its structure (don't flatten)
                                     // This ensures [[expr]] produces properly nested arrays
-                                    let should_preserve_array = matches!(element,
-                                        AstNode::Array(_) | AstNode::ArrayGroup(_));
+                                    let should_preserve_array = matches!(
+                                        element,
+                                        AstNode::Array(_) | AstNode::ArrayGroup(_)
+                                    );
 
                                     if should_preserve_array {
                                         // Keep the array as a single element to preserve nesting
@@ -2014,7 +2100,9 @@ impl Evaluator {
                                     } else {
                                         // Flatten the value into group_values
                                         match value {
-                                            JValue::Array(arr) => group_values.extend(arr.iter().cloned()),
+                                            JValue::Array(arr) => {
+                                                group_values.extend(arr.iter().cloned())
+                                            }
                                             other => group_values.push(other),
                                         }
                                     }
@@ -2098,7 +2186,8 @@ impl Evaluator {
                             for (idx, item) in arr.iter().enumerate() {
                                 let mut wrapper = IndexMap::new();
                                 wrapper.insert("@".to_string(), item.clone());
-                                wrapper.insert(format!("${}", variable), JValue::Number(idx as f64));
+                                wrapper
+                                    .insert(format!("${}", variable), JValue::Number(idx as f64));
                                 wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
                                 result.push(JValue::object(wrapper));
                             }
@@ -2115,7 +2204,7 @@ impl Evaluator {
                     }
                 }
                 // Handle complex path steps (e.g., computed properties, object construction)
-                _ => self.evaluate_path_step(&step.node, &current, data)?
+                _ => self.evaluate_path_step(&step.node, &current, data)?,
             };
         }
 
@@ -2149,27 +2238,28 @@ impl Evaluator {
         //
         // Important: We DON'T unwrap just because original data was an array - what matters is
         // whether the final extraction was from an array mapping context or a single object.
-        let should_unwrap = !has_explicit_array_keep && (
-            steps.iter().any(|step| !step.stages.is_empty()) ||
-            did_array_mapping
-        );
+        let should_unwrap = !has_explicit_array_keep
+            && (steps.iter().any(|step| !step.stages.is_empty()) || did_array_mapping);
 
         let result = match &current {
             // Empty arrays become null/undefined
             JValue::Array(arr) if arr.is_empty() => JValue::Null,
             // Unwrap singleton arrays when appropriate
-            JValue::Array(arr) if arr.len() == 1 && should_unwrap => {
-                arr[0].clone()
-            }
+            JValue::Array(arr) if arr.len() == 1 && should_unwrap => arr[0].clone(),
             // Keep arrays otherwise
-            _ => current
+            _ => current,
         };
 
         Ok(result)
     }
 
     /// Helper to evaluate a complex path step
-    fn evaluate_path_step(&mut self, step: &AstNode, current: &JValue, original_data: &JValue) -> Result<JValue, EvaluatorError> {
+    fn evaluate_path_step(
+        &mut self,
+        step: &AstNode,
+        current: &JValue,
+        original_data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         // Special case: array mapping with object construction
         // e.g., items.{"name": name, "price": price}
         if matches!(current, JValue::Array(_)) && matches!(step, AstNode::Object(_)) {
@@ -2241,7 +2331,17 @@ impl Evaluator {
             // or [0..9] where it's an array constructor
             // or $^(field) where it's a sort operator
             // or (expr).field where (expr) is a block that evaluates to a value
-            if matches!(step, AstNode::Binary { .. } | AstNode::Function { .. } | AstNode::Variable(_) | AstNode::ParentVariable(_) | AstNode::Array(_) | AstNode::Object(_) | AstNode::Sort { .. } | AstNode::Block(_)) {
+            if matches!(
+                step,
+                AstNode::Binary { .. }
+                    | AstNode::Function { .. }
+                    | AstNode::Variable(_)
+                    | AstNode::ParentVariable(_)
+                    | AstNode::Array(_)
+                    | AstNode::Object(_)
+                    | AstNode::Sort { .. }
+                    | AstNode::Block(_)
+            ) {
                 // Evaluate the step in the context of original_data and return the result directly
                 return self.evaluate_internal(step, original_data);
             }
@@ -2257,11 +2357,7 @@ impl Evaluator {
                     let len = arr.len() as i64;
 
                     // Handle negative indexing (offset from end)
-                    let actual_idx = if index < 0 {
-                        len + index
-                    } else {
-                        index
-                    };
+                    let actual_idx = if index < 0 { len + index } else { index };
 
                     if actual_idx < 0 || actual_idx >= len {
                         JValue::Null
@@ -2297,10 +2393,11 @@ impl Evaluator {
                         Ok(value)
                     }
                     // For paths and variables, null means undefined - use RHS
-                    else if matches!(value, JValue::Null) &&
-                       (matches!(lhs, AstNode::Path { .. }) ||
-                        matches!(lhs, AstNode::String(_)) ||
-                        matches!(lhs, AstNode::Variable(_))) {
+                    else if matches!(value, JValue::Null)
+                        && (matches!(lhs, AstNode::Path { .. })
+                            || matches!(lhs, AstNode::String(_))
+                            || matches!(lhs, AstNode::Variable(_)))
+                    {
                         self.evaluate_internal(rhs, data)
                     } else {
                         Ok(value)
@@ -2346,9 +2443,16 @@ impl Evaluator {
                                 if let Some(m) = re.find(&s) {
                                     // Return match object
                                     let mut result = IndexMap::new();
-                                    result.insert("match".to_string(), JValue::string(m.as_str().to_string()));
-                                    result.insert("start".to_string(), JValue::Number(m.start() as f64));
-                                    result.insert("end".to_string(), JValue::Number(m.end() as f64));
+                                    result.insert(
+                                        "match".to_string(),
+                                        JValue::string(m.as_str().to_string()),
+                                    );
+                                    result.insert(
+                                        "start".to_string(),
+                                        JValue::Number(m.start() as f64),
+                                    );
+                                    result
+                                        .insert("end".to_string(), JValue::Number(m.end() as f64));
 
                                     // Capture groups
                                     let mut groups = Vec::new();
@@ -2368,7 +2472,10 @@ impl Evaluator {
                                     Ok(JValue::Null)
                                 }
                             }
-                            Err(e) => Err(EvaluatorError::EvaluationError(format!("Invalid regex: {}", e))),
+                            Err(e) => Err(EvaluatorError::EvaluationError(format!(
+                                "Invalid regex: {}",
+                                e
+                            ))),
                         }
                     }
                     JValue::Null => Ok(JValue::Null),
@@ -2387,10 +2494,15 @@ impl Evaluator {
 
             // Handle different RHS types
             match rhs {
-                AstNode::Function { name, args, is_builtin } => {
+                AstNode::Function {
+                    name,
+                    args,
+                    is_builtin,
+                } => {
                     // RHS is a function call
                     // Check if the function call has placeholder arguments (partial application)
-                    let has_placeholder = args.iter().any(|arg| matches!(arg, AstNode::Placeholder));
+                    let has_placeholder =
+                        args.iter().any(|arg| matches!(arg, AstNode::Placeholder));
 
                     if has_placeholder {
                         // Partial application: replace the first placeholder with LHS value
@@ -2412,7 +2524,8 @@ impl Evaluator {
                         }
 
                         // Evaluate the function with filled args
-                        let result = self.evaluate_function_call(name, &filled_args, *is_builtin, data);
+                        let result =
+                            self.evaluate_function_call(name, &filled_args, *is_builtin, data);
 
                         // Clean up temp bindings
                         for (i, arg) in args.iter().enumerate() {
@@ -2428,7 +2541,8 @@ impl Evaluator {
                         let mut all_args = vec![lhs.clone()];
                         all_args.extend_from_slice(args);
                         // Unwrap singleton results from chain operator
-                        return self.evaluate_function_call(name, &all_args, *is_builtin, data)
+                        return self
+                            .evaluate_function_call(name, &all_args, *is_builtin, data)
                             .map(|v| self.unwrap_singleton(v));
                     }
                 }
@@ -2437,10 +2551,14 @@ impl Evaluator {
                     // e.g., $average($tempReadings) ~> $round
                     let all_args = vec![lhs.clone()];
                     // Unwrap singleton results from chain operator
-                    return self.evaluate_function_call(var_name, &all_args, true, data)
+                    return self
+                        .evaluate_function_call(var_name, &all_args, true, data)
                         .map(|v| self.unwrap_singleton(v));
                 }
-                AstNode::Binary { op: BinaryOp::ChainPipe, .. } => {
+                AstNode::Binary {
+                    op: BinaryOp::ChainPipe,
+                    ..
+                } => {
                     // RHS is another chain pipe - evaluate LHS first, then pipe through RHS
                     // e.g., x ~> (f1 ~> f2) => (x ~> f1) ~> f2
                     let lhs_value = self.evaluate_internal(lhs, data)?;
@@ -2467,11 +2585,17 @@ impl Evaluator {
                     // Unwrap singleton results from chain operator
                     return result.map(|v| self.unwrap_singleton(v));
                 }
-                AstNode::Lambda { params, body, signature, thunk } => {
+                AstNode::Lambda {
+                    params,
+                    body,
+                    signature,
+                    thunk,
+                } => {
                     // RHS is a lambda - invoke it with LHS as argument
                     let lhs_value = self.evaluate_internal(lhs, data)?;
                     // Unwrap singleton results from chain operator
-                    return self.invoke_lambda(params, body, signature.as_ref(), &[lhs_value], data, *thunk)
+                    return self
+                        .invoke_lambda(params, body, signature.as_ref(), &[lhs_value], data, *thunk)
                         .map(|v| self.unwrap_singleton(v));
                 }
                 AstNode::Path { steps } => {
@@ -2479,19 +2603,31 @@ impl Evaluator {
                     // If the first step is a function call, we need to add LHS as first argument
                     if let Some(first_step) = steps.first() {
                         match &first_step.node {
-                            AstNode::Function { name, args, is_builtin } => {
+                            AstNode::Function {
+                                name,
+                                args,
+                                is_builtin,
+                            } => {
                                 // Prepend LHS to the function arguments
                                 let mut all_args = vec![lhs.clone()];
                                 all_args.extend_from_slice(args);
 
                                 // Call the function
-                                let mut result = self.evaluate_function_call(name, &all_args, *is_builtin, data)?;
+                                let mut result = self.evaluate_function_call(
+                                    name,
+                                    &all_args,
+                                    *is_builtin,
+                                    data,
+                                )?;
 
                                 // Apply stages from the first step (e.g., predicates)
                                 for stage in &first_step.stages {
                                     match stage {
                                         Stage::Filter(filter_expr) => {
-                                            result = self.evaluate_predicate_as_stage(&result, filter_expr)?;
+                                            result = self.evaluate_predicate_as_stage(
+                                                &result,
+                                                filter_expr,
+                                            )?;
                                         }
                                     }
                                 }
@@ -2515,13 +2651,17 @@ impl Evaluator {
                             AstNode::Variable(var_name) => {
                                 // Variable that should resolve to a function
                                 let all_args = vec![lhs.clone()];
-                                let mut result = self.evaluate_function_call(var_name, &all_args, true, data)?;
+                                let mut result =
+                                    self.evaluate_function_call(var_name, &all_args, true, data)?;
 
                                 // Apply stages from the first step
                                 for stage in &first_step.stages {
                                     match stage {
                                         Stage::Filter(filter_expr) => {
-                                            result = self.evaluate_predicate_as_stage(&result, filter_expr)?;
+                                            result = self.evaluate_predicate_as_stage(
+                                                &result,
+                                                filter_expr,
+                                            )?;
                                         }
                                     }
                                 }
@@ -2545,7 +2685,8 @@ impl Evaluator {
                             _ => {
                                 // Other path types - just evaluate normally with LHS as context
                                 let lhs_value = self.evaluate_internal(lhs, data)?;
-                                return self.evaluate_internal(rhs, &lhs_value)
+                                return self
+                                    .evaluate_internal(rhs, &lhs_value)
                                     .map(|v| self.unwrap_singleton(v));
                             }
                         }
@@ -2553,12 +2694,14 @@ impl Evaluator {
 
                     // Empty path? Shouldn't happen, but handle it
                     let lhs_value = self.evaluate_internal(lhs, data)?;
-                    return self.evaluate_internal(rhs, &lhs_value)
+                    return self
+                        .evaluate_internal(rhs, &lhs_value)
                         .map(|v| self.unwrap_singleton(v));
                 }
                 _ => {
                     return Err(EvaluatorError::TypeError(
-                        "Right side of ~> must be a function call or function reference".to_string(),
+                        "Right side of ~> must be a function call or function reference"
+                            .to_string(),
                     ));
                 }
             }
@@ -2577,7 +2720,13 @@ impl Evaluator {
             };
 
             // Check if RHS is a lambda - store it specially
-            if let AstNode::Lambda { params, body, signature, thunk } = rhs {
+            if let AstNode::Lambda {
+                params,
+                body,
+                signature,
+                thunk,
+            } = rhs
+            {
                 // Store the lambda AST for later invocation
                 // Capture only the free variables referenced by the lambda body
                 let captured_env = self.capture_environment_for(body, params);
@@ -2595,11 +2744,11 @@ impl Evaluator {
 
                 // Return a lambda marker value (include _lambda_id so it can be found later)
                 let lambda_repr = JValue::lambda(
-                        var_name.as_str(),
-                        lambda_params,
-                        Some(var_name.clone()),
-                        lambda_sig,
-                    );
+                    var_name.as_str(),
+                    lambda_params,
+                    Some(var_name.clone()),
+                    lambda_sig,
+                );
                 return Ok(lambda_repr);
             }
 
@@ -2608,17 +2757,34 @@ impl Evaluator {
             // This creates a lambda that composes the functions.
             // But NOT for data ~> function, which should be evaluated immediately.
             // e.g., $result := data ~> $map($fn) should evaluate the pipe
-            if let AstNode::Binary { op: BinaryOp::ChainPipe, lhs: chain_lhs, rhs: chain_rhs } = rhs {
+            if let AstNode::Binary {
+                op: BinaryOp::ChainPipe,
+                lhs: chain_lhs,
+                rhs: chain_rhs,
+            } = rhs
+            {
                 // Only wrap in lambda if LHS is a function reference (Variable pointing to a function)
                 // If LHS is data (array, object, function call result, etc.), evaluate the pipe
                 let is_function_composition = match chain_lhs.as_ref() {
                     // LHS is a function reference like $trim or $sum
-                    AstNode::Variable(name) if self.is_builtin_function(name) || self.context.lookup_lambda(name).is_some() => true,
+                    AstNode::Variable(name)
+                        if self.is_builtin_function(name)
+                            || self.context.lookup_lambda(name).is_some() =>
+                    {
+                        true
+                    }
                     // LHS is another ChainPipe (nested composition like $f ~> $g ~> $h)
-                    AstNode::Binary { op: BinaryOp::ChainPipe, .. } => true,
+                    AstNode::Binary {
+                        op: BinaryOp::ChainPipe,
+                        ..
+                    } => true,
                     // A function call with placeholder creates a partial application
                     // e.g., $substringAfter(?, "@") ~> $substringBefore(?, ".")
-                    AstNode::Function { args, .. } if args.iter().any(|a| matches!(a, AstNode::Placeholder)) => true,
+                    AstNode::Function { args, .. }
+                        if args.iter().any(|a| matches!(a, AstNode::Placeholder)) =>
+                    {
+                        true
+                    }
                     // Anything else (data, function calls, arrays, etc.) is not pure composition
                     _ => false,
                 };
@@ -2655,11 +2821,11 @@ impl Evaluator {
 
                     // Return a lambda marker value (include _lambda_id for later lookup)
                     let lambda_repr = JValue::lambda(
-                            var_name.as_str(),
-                            vec!["$".to_string()],
-                            Some(var_name.clone()),
-                            None::<String>,
-                        );
+                        var_name.as_str(),
+                        vec!["$".to_string()],
+                        Some(var_name.clone()),
+                        None::<String>,
+                    );
                     return Ok(lambda_repr);
                 }
                 // If not function composition, fall through to normal evaluation below
@@ -2730,17 +2896,39 @@ impl Evaluator {
 
         match op {
             BinaryOp::Add => self.add(&left, &right, left_is_explicit_null, right_is_explicit_null),
-            BinaryOp::Subtract => self.subtract(&left, &right, left_is_explicit_null, right_is_explicit_null),
-            BinaryOp::Multiply => self.multiply(&left, &right, left_is_explicit_null, right_is_explicit_null),
-            BinaryOp::Divide => self.divide(&left, &right, left_is_explicit_null, right_is_explicit_null),
-            BinaryOp::Modulo => self.modulo(&left, &right, left_is_explicit_null, right_is_explicit_null),
+            BinaryOp::Subtract => {
+                self.subtract(&left, &right, left_is_explicit_null, right_is_explicit_null)
+            }
+            BinaryOp::Multiply => {
+                self.multiply(&left, &right, left_is_explicit_null, right_is_explicit_null)
+            }
+            BinaryOp::Divide => {
+                self.divide(&left, &right, left_is_explicit_null, right_is_explicit_null)
+            }
+            BinaryOp::Modulo => {
+                self.modulo(&left, &right, left_is_explicit_null, right_is_explicit_null)
+            }
 
             BinaryOp::Equal => Ok(JValue::Bool(self.equals(&left, &right))),
             BinaryOp::NotEqual => Ok(JValue::Bool(!self.equals(&left, &right))),
-            BinaryOp::LessThan => self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null),
-            BinaryOp::LessThanOrEqual => self.less_than_or_equal(&left, &right, left_is_explicit_null, right_is_explicit_null),
-            BinaryOp::GreaterThan => self.greater_than(&left, &right, left_is_explicit_null, right_is_explicit_null),
-            BinaryOp::GreaterThanOrEqual => self.greater_than_or_equal(&left, &right, left_is_explicit_null, right_is_explicit_null),
+            BinaryOp::LessThan => {
+                self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
+            }
+            BinaryOp::LessThanOrEqual => self.less_than_or_equal(
+                &left,
+                &right,
+                left_is_explicit_null,
+                right_is_explicit_null,
+            ),
+            BinaryOp::GreaterThan => {
+                self.greater_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
+            }
+            BinaryOp::GreaterThanOrEqual => self.greater_than_or_equal(
+                &left,
+                &right,
+                left_is_explicit_null,
+                right_is_explicit_null,
+            ),
 
             // And/Or handled above with short-circuit evaluation
             BinaryOp::And | BinaryOp::Or => unreachable!(),
@@ -2773,7 +2961,7 @@ impl Evaluator {
                 JValue::Null => Ok(JValue::Null),
                 JValue::Number(n) => Ok(JValue::Number(-n)),
                 _ => Err(EvaluatorError::TypeError(
-                    "D1002: Cannot negate non-number value".to_string()
+                    "D1002: Cannot negate non-number value".to_string(),
                 )),
             },
             UnaryOp::Not => Ok(JValue::Bool(!self.is_truthy(&value))),
@@ -2874,7 +3062,9 @@ impl Evaluator {
 
             // For other expressions, evaluate and check if non-null/non-undefined
             let value = self.evaluate_internal(arg, data)?;
-            return Ok(JValue::Bool(!matches!(value, JValue::Null) && !value.is_undefined()));
+            return Ok(JValue::Bool(
+                !matches!(value, JValue::Null) && !value.is_undefined(),
+            ));
         }
 
         // Check if any arguments are undefined variables or undefined paths
@@ -2883,7 +3073,10 @@ impl Evaluator {
             // Check for undefined variable (e.g., $undefined_var)
             if let AstNode::Variable(var_name) = arg {
                 // Skip built-in function names - they're function references, not undefined variables
-                if !var_name.is_empty() && !self.is_builtin_function(var_name) && self.context.lookup(var_name).is_none() {
+                if !var_name.is_empty()
+                    && !self.is_builtin_function(var_name)
+                    && self.context.lookup(var_name).is_none()
+                {
                     // Undefined variable - for functions that should propagate undefined
                     if propagates_undefined(name) {
                         return Ok(JValue::Null); // Return undefined
@@ -2892,7 +3085,8 @@ impl Evaluator {
             }
             // Check for simple field name (e.g., blah) that evaluates to undefined
             if let AstNode::Name(field_name) = arg {
-                let field_exists = matches!(data, JValue::Object(obj) if obj.contains_key(field_name));
+                let field_exists =
+                    matches!(data, JValue::Object(obj) if obj.contains_key(field_name));
                 if !field_exists && propagates_undefined(name) {
                     return Ok(JValue::Null);
                 }
@@ -2994,7 +3188,13 @@ impl Evaluator {
         // This also applies when functions expecting N arguments receive N-1 arguments,
         // in which case the context value becomes the first argument
         let context_functions_zero_arg = ["string", "number", "boolean", "uppercase", "lowercase"];
-        let context_functions_missing_first = ["substringBefore", "substringAfter", "contains", "split", "replace"];
+        let context_functions_missing_first = [
+            "substringBefore",
+            "substringAfter",
+            "contains",
+            "split",
+            "replace",
+        ];
 
         if evaluated_args.is_empty() && context_functions_zero_arg.contains(&name) {
             // Use the current context value as the implicit argument
@@ -3028,9 +3228,11 @@ impl Evaluator {
                 let prettify = if evaluated_args.len() == 2 {
                     match &evaluated_args[1] {
                         JValue::Bool(b) => Some(*b),
-                        _ => return Err(EvaluatorError::TypeError(
-                            "string() prettify parameter must be a boolean".to_string(),
-                        )),
+                        _ => {
+                            return Err(EvaluatorError::TypeError(
+                                "string() prettify parameter must be a boolean".to_string(),
+                            ))
+                        }
                     }
                 } else {
                     None
@@ -3047,7 +3249,8 @@ impl Evaluator {
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::string::length(s)?),
                     _ => Err(EvaluatorError::TypeError(
-                        "T0410: Argument 1 of function length does not match function signature".to_string(),
+                        "T0410: Argument 1 of function length does not match function signature"
+                            .to_string(),
                     )),
                 }
             }
@@ -3060,7 +3263,8 @@ impl Evaluator {
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::string::uppercase(s)?),
                     _ => Err(EvaluatorError::TypeError(
-                        "T0410: Argument 1 of function uppercase does not match function signature".to_string(),
+                        "T0410: Argument 1 of function uppercase does not match function signature"
+                            .to_string(),
                     )),
                 }
             }
@@ -3073,7 +3277,8 @@ impl Evaluator {
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::string::lowercase(s)?),
                     _ => Err(EvaluatorError::TypeError(
-                        "T0410: Argument 1 of function lowercase does not match function signature".to_string(),
+                        "T0410: Argument 1 of function lowercase does not match function signature"
+                            .to_string(),
                     )),
                 }
             }
@@ -3085,7 +3290,8 @@ impl Evaluator {
                 }
                 if evaluated_args.len() > 1 {
                     return Err(EvaluatorError::TypeError(
-                        "T0410: Argument 2 of function number does not match function signature".to_string(),
+                        "T0410: Argument 2 of function number does not match function signature"
+                            .to_string(),
                     ));
                 }
                 Ok(functions::numeric::number(&evaluated_args[0])?)
@@ -3107,9 +3313,7 @@ impl Evaluator {
                         Ok(aggregation::sum(arr)?)
                     }
                     // Non-array values: extract number directly
-                    JValue::Number(n) => {
-                        Ok(JValue::Number(*n))
-                    }
+                    JValue::Number(n) => Ok(JValue::Number(*n)),
                     other => Ok(functions::numeric::sum(&[other.clone()])?),
                 }
             }
@@ -3150,10 +3354,12 @@ impl Evaluator {
                         Ok(functions::string::substring(s, *start as i64, length)?)
                     }
                     (JValue::String(_), _) => Err(EvaluatorError::TypeError(
-                        "T0410: Argument 2 of function substring does not match function signature".to_string(),
+                        "T0410: Argument 2 of function substring does not match function signature"
+                            .to_string(),
                     )),
                     _ => Err(EvaluatorError::TypeError(
-                        "T0410: Argument 1 of function substring does not match function signature".to_string(),
+                        "T0410: Argument 1 of function substring does not match function signature"
+                            .to_string(),
                     )),
                 }
             }
@@ -3200,17 +3406,21 @@ impl Evaluator {
                 let string = match &evaluated_args[0] {
                     JValue::String(s) => s.clone(),
                     JValue::Null => return Ok(JValue::Null),
-                    _ => return Err(EvaluatorError::TypeError(
-                        "pad() first argument must be a string".to_string(),
-                    )),
+                    _ => {
+                        return Err(EvaluatorError::TypeError(
+                            "pad() first argument must be a string".to_string(),
+                        ))
+                    }
                 };
 
                 // Second argument: width (negative = left pad, positive = right pad)
                 let width = match &evaluated_args.get(1) {
                     Some(JValue::Number(n)) => *n as i32,
-                    _ => return Err(EvaluatorError::TypeError(
-                        "pad() second argument must be a number".to_string(),
-                    )),
+                    _ => {
+                        return Err(EvaluatorError::TypeError(
+                            "pad() second argument must be a number".to_string(),
+                        ))
+                    }
                 };
 
                 // Third argument: padding string (optional, defaults to space)
@@ -3304,9 +3514,11 @@ impl Evaluator {
                                     // Floor the value for non-integer limits
                                     Some(f.floor() as usize)
                                 }
-                                _ => return Err(EvaluatorError::TypeError(
-                                    "split() limit must be a number".to_string(),
-                                )),
+                                _ => {
+                                    return Err(EvaluatorError::TypeError(
+                                        "split() limit must be a number".to_string(),
+                                    ))
+                                }
                             }
                         } else {
                             None
@@ -3323,7 +3535,8 @@ impl Evaluator {
                 // But if separator (2nd arg) is undefined, use empty string (default)
                 if evaluated_args.is_empty() {
                     return Err(EvaluatorError::TypeError(
-                        "T0410: Argument 1 of function $join does not match function signature".to_string()
+                        "T0410: Argument 1 of function $join does not match function signature"
+                            .to_string(),
                     ));
                 }
                 if matches!(evaluated_args[0], JValue::Null) {
@@ -3334,41 +3547,60 @@ impl Evaluator {
                 // The signature handles coercion and validation
                 use crate::signature::Signature;
 
-                let signature = Signature::parse("<a<s>s?:s>")
-                    .map_err(|e| EvaluatorError::EvaluationError(format!("Invalid signature: {}", e)))?;
+                let signature = Signature::parse("<a<s>s?:s>").map_err(|e| {
+                    EvaluatorError::EvaluationError(format!("Invalid signature: {}", e))
+                })?;
 
                 let coerced_args = match signature.validate_and_coerce(&evaluated_args) {
                     Ok(args) => args,
                     Err(crate::signature::SignatureError::UndefinedArgument) => {
                         // This can happen if the separator is undefined
                         // In that case, just validate the first arg and use default separator
-                        let sig_first_arg = Signature::parse("<a<s>:a<s>>")
-                            .map_err(|e| EvaluatorError::EvaluationError(format!("Invalid signature: {}", e)))?;
+                        let sig_first_arg = Signature::parse("<a<s>:a<s>>").map_err(|e| {
+                            EvaluatorError::EvaluationError(format!("Invalid signature: {}", e))
+                        })?;
 
                         match sig_first_arg.validate_and_coerce(&evaluated_args[0..1]) {
                             Ok(args) => args,
-                            Err(crate::signature::SignatureError::ArrayTypeMismatch { index, expected }) => {
-                                return Err(EvaluatorError::TypeError(
-                                    format!("T0412: Argument {} of function $join must be an array of {}", index, expected)
-                                ));
+                            Err(crate::signature::SignatureError::ArrayTypeMismatch {
+                                index,
+                                expected,
+                            }) => {
+                                return Err(EvaluatorError::TypeError(format!(
+                                    "T0412: Argument {} of function $join must be an array of {}",
+                                    index, expected
+                                )));
                             }
                             Err(e) => {
-                                return Err(EvaluatorError::TypeError(format!("Signature validation failed: {}", e)));
+                                return Err(EvaluatorError::TypeError(format!(
+                                    "Signature validation failed: {}",
+                                    e
+                                )));
                             }
                         }
                     }
-                    Err(crate::signature::SignatureError::ArgumentTypeMismatch { index, expected }) => {
+                    Err(crate::signature::SignatureError::ArgumentTypeMismatch {
+                        index,
+                        expected,
+                    }) => {
                         return Err(EvaluatorError::TypeError(
                             format!("T0410: Argument {} of function $join does not match function signature (expected {})", index, expected)
                         ));
                     }
-                    Err(crate::signature::SignatureError::ArrayTypeMismatch { index, expected }) => {
-                        return Err(EvaluatorError::TypeError(
-                            format!("T0412: Argument {} of function $join must be an array of {}", index, expected)
-                        ));
+                    Err(crate::signature::SignatureError::ArrayTypeMismatch {
+                        index,
+                        expected,
+                    }) => {
+                        return Err(EvaluatorError::TypeError(format!(
+                            "T0412: Argument {} of function $join must be an array of {}",
+                            index, expected
+                        )));
                     }
                     Err(e) => {
-                        return Err(EvaluatorError::TypeError(format!("Signature validation failed: {}", e)));
+                        return Err(EvaluatorError::TypeError(format!(
+                            "Signature validation failed: {}",
+                            e
+                        )));
                     }
                 };
 
@@ -3378,11 +3610,11 @@ impl Evaluator {
                         let separator = if coerced_args.len() == 2 {
                             match &coerced_args[1] {
                                 JValue::String(s) => Some(&**s),
-                                JValue::Null => None,  // Undefined separator -> use empty string
-                                _ => None,  // Signature should have validated this
+                                JValue::Null => None, // Undefined separator -> use empty string
+                                _ => None,            // Signature should have validated this
                             }
                         } else {
-                            None  // No separator provided -> use empty string
+                            None // No separator provided -> use empty string
                         };
                         Ok(functions::string::join(arr, separator)?)
                     }
@@ -3401,7 +3633,10 @@ impl Evaluator {
                 }
 
                 // Check if replacement (3rd arg) is a function/lambda
-                let replacement_is_lambda = matches!(evaluated_args[2], JValue::Lambda { .. } | JValue::Builtin { .. });
+                let replacement_is_lambda = matches!(
+                    evaluated_args[2],
+                    JValue::Lambda { .. } | JValue::Builtin { .. }
+                );
 
                 if replacement_is_lambda {
                     // Lambda replacement mode
@@ -3409,8 +3644,12 @@ impl Evaluator {
                         &evaluated_args[0],
                         &evaluated_args[1],
                         &evaluated_args[2],
-                        if evaluated_args.len() == 4 { Some(&evaluated_args[3]) } else { None },
-                        data
+                        if evaluated_args.len() == 4 {
+                            Some(&evaluated_args[3])
+                        } else {
+                            None
+                        },
+                        data,
                     );
                 }
 
@@ -3422,20 +3661,28 @@ impl Evaluator {
                                 JValue::Number(n) => {
                                     let lim_f64 = *n;
                                     if lim_f64 < 0.0 {
-                                        return Err(EvaluatorError::EvaluationError(
-                                            format!("D3011: Limit must be non-negative, got {}", lim_f64)
-                                        ));
+                                        return Err(EvaluatorError::EvaluationError(format!(
+                                            "D3011: Limit must be non-negative, got {}",
+                                            lim_f64
+                                        )));
                                     }
                                     Some(lim_f64 as usize)
                                 }
-                                _ => return Err(EvaluatorError::TypeError(
-                                    "replace() limit must be a number".to_string(),
-                                )),
+                                _ => {
+                                    return Err(EvaluatorError::TypeError(
+                                        "replace() limit must be a number".to_string(),
+                                    ))
+                                }
                             }
                         } else {
                             None
                         };
-                        Ok(functions::string::replace(s, &evaluated_args[1], replacement, limit)?)
+                        Ok(functions::string::replace(
+                            s,
+                            &evaluated_args[1],
+                            replacement,
+                            limit,
+                        )?)
                     }
                     _ => Err(EvaluatorError::TypeError(
                         "replace() requires string arguments".to_string(),
@@ -3456,9 +3703,11 @@ impl Evaluator {
 
                 let s = match &evaluated_args[0] {
                     JValue::String(s) => s.clone(),
-                    _ => return Err(EvaluatorError::TypeError(
-                        "match() first argument must be a string".to_string(),
-                    )),
+                    _ => {
+                        return Err(EvaluatorError::TypeError(
+                            "match() first argument must be a string".to_string(),
+                        ))
+                    }
                 };
 
                 // Get optional limit
@@ -3466,9 +3715,11 @@ impl Evaluator {
                     match &evaluated_args[2] {
                         JValue::Number(n) => Some(*n as usize),
                         JValue::Null => None,
-                        _ => return Err(EvaluatorError::TypeError(
-                            "match() limit must be a number".to_string(),
-                        )),
+                        _ => {
+                            return Err(EvaluatorError::TypeError(
+                                "match() limit must be a number".to_string(),
+                            ))
+                        }
                     }
                 } else {
                     None
@@ -3488,13 +3739,13 @@ impl Evaluator {
 
                 // Get regex pattern from second argument
                 let (pattern, flags) = match pattern_value {
-                    Some(val) => crate::functions::string::extract_regex(val)
-                        .ok_or_else(|| EvaluatorError::TypeError(
-                            "match() second argument must be a regex pattern or matcher function".to_string()
-                        ))?,
-                    None => {
-                        (".*".to_string(), "".to_string())
-                    }
+                    Some(val) => crate::functions::string::extract_regex(val).ok_or_else(|| {
+                        EvaluatorError::TypeError(
+                            "match() second argument must be a regex pattern or matcher function"
+                                .to_string(),
+                        )
+                    })?,
+                    None => (".*".to_string(), "".to_string()),
                 };
 
                 // Build regex
@@ -3505,10 +3756,9 @@ impl Evaluator {
                     pattern.clone()
                 };
 
-                let re = regex::Regex::new(&regex_pattern)
-                    .map_err(|e| EvaluatorError::EvaluationError(
-                        format!("Invalid regex pattern: {}", e)
-                    ))?;
+                let re = regex::Regex::new(&regex_pattern).map_err(|e| {
+                    EvaluatorError::EvaluationError(format!("Invalid regex pattern: {}", e))
+                })?;
 
                 let mut results = Vec::new();
                 let mut count = 0;
@@ -3522,8 +3772,14 @@ impl Evaluator {
 
                     let full_match = caps.get(0).unwrap();
                     let mut match_obj = IndexMap::new();
-                    match_obj.insert("match".to_string(), JValue::string(full_match.as_str().to_string()));
-                    match_obj.insert("index".to_string(), JValue::Number(full_match.start() as f64));
+                    match_obj.insert(
+                        "match".to_string(),
+                        JValue::string(full_match.as_str().to_string()),
+                    );
+                    match_obj.insert(
+                        "index".to_string(),
+                        JValue::Number(full_match.start() as f64),
+                    );
 
                     // Collect capture groups
                     let mut groups: Vec<JValue> = Vec::new();
@@ -3676,9 +3932,11 @@ impl Evaluator {
                         let precision = if evaluated_args.len() == 2 {
                             match &evaluated_args[1] {
                                 JValue::Number(p) => Some(*p as i32),
-                                _ => return Err(EvaluatorError::TypeError(
-                                    "round() precision must be a number".to_string(),
-                                )),
+                                _ => {
+                                    return Err(EvaluatorError::TypeError(
+                                        "round() precision must be a number".to_string(),
+                                    ))
+                                }
                             }
                         } else {
                             None
@@ -3760,9 +4018,11 @@ impl Evaluator {
                         let radix = if evaluated_args.len() == 2 {
                             match &evaluated_args[1] {
                                 JValue::Number(r) => Some(r.trunc() as i64),
-                                _ => return Err(EvaluatorError::TypeError(
-                                    "formatBase() radix must be a number".to_string(),
-                                )),
+                                _ => {
+                                    return Err(EvaluatorError::TypeError(
+                                        "formatBase() radix must be a number".to_string(),
+                                    ))
+                                }
                             }
                         } else {
                             None
@@ -3852,7 +4112,12 @@ impl Evaluator {
                 let param_count = self.get_callback_param_count(func_arg);
 
                 // Helper function to sift a single object
-                let sift_object = |evaluator: &mut Self, obj: &IndexMap<String, JValue>, func_node: &AstNode, context_data: &JValue, param_count: usize| -> Result<JValue, EvaluatorError> {
+                let sift_object = |evaluator: &mut Self,
+                                   obj: &IndexMap<String, JValue>,
+                                   func_node: &AstNode,
+                                   context_data: &JValue,
+                                   param_count: usize|
+                 -> Result<JValue, EvaluatorError> {
                     // Only create the object value if callback uses 3 parameters
                     let obj_value = if param_count >= 3 {
                         Some(JValue::object(obj.clone()))
@@ -3866,10 +4131,15 @@ impl Evaluator {
                         let call_args = match param_count {
                             1 => vec![value.clone()],
                             2 => vec![value.clone(), JValue::string(key.clone())],
-                            _ => vec![value.clone(), JValue::string(key.clone()), obj_value.as_ref().unwrap().clone()],
+                            _ => vec![
+                                value.clone(),
+                                JValue::string(key.clone()),
+                                obj_value.as_ref().unwrap().clone(),
+                            ],
                         };
 
-                        let pred_result = evaluator.apply_function(func_node, &call_args, context_data)?;
+                        let pred_result =
+                            evaluator.apply_function(func_node, &call_args, context_data)?;
                         if evaluator.is_truthy(&pred_result) {
                             result.insert(key.clone(), value.clone());
                         }
@@ -3913,9 +4183,11 @@ impl Evaluator {
                             return sift_object(self, o, &args[1], data, param_count);
                         }
                         JValue::Null => return Ok(JValue::Null),
-                        _ => return Err(EvaluatorError::TypeError(
-                            "sift() first argument must be an object".to_string(),
-                        )),
+                        _ => {
+                            return Err(EvaluatorError::TypeError(
+                                "sift() first argument must be an object".to_string(),
+                            ))
+                        }
                     }
                 }
             }
@@ -4044,9 +4316,8 @@ impl Evaluator {
                         if obj.is_empty() {
                             Ok(JValue::Null)
                         } else {
-                            let keys: Vec<JValue> = obj.keys()
-                                .map(|k| JValue::string(k.clone()))
-                                .collect();
+                            let keys: Vec<JValue> =
+                                obj.keys().map(|k| JValue::string(k.clone())).collect();
                             Ok(unwrap_single(keys))
                         }
                     }
@@ -4088,9 +4359,11 @@ impl Evaluator {
 
                 let key = match &evaluated_args[1] {
                     JValue::String(k) => &**k,
-                    _ => return Err(EvaluatorError::TypeError(
-                        "lookup() requires a string key".to_string(),
-                    )),
+                    _ => {
+                        return Err(EvaluatorError::TypeError(
+                            "lookup() requires a string key".to_string(),
+                        ))
+                    }
                 };
 
                 // Helper function to recursively lookup in values
@@ -4133,9 +4406,7 @@ impl Evaluator {
                 match &evaluated_args[0] {
                     JValue::Null => Ok(JValue::Null),
                     JValue::Lambda { .. } | JValue::Builtin { .. } => Ok(JValue::Undefined),
-                    JValue::Object(obj) => {
-                        Ok(functions::object::spread(obj)?)
-                    }
+                    JValue::Object(obj) => Ok(functions::object::spread(obj)?),
                     JValue::Array(arr) => {
                         // Spread each object in the array
                         let mut result = Vec::new();
@@ -4216,7 +4487,11 @@ impl Evaluator {
                             let call_args = match param_count {
                                 1 => vec![item.clone()],
                                 2 => vec![item.clone(), JValue::Number(index as f64)],
-                                _ => vec![item.clone(), JValue::Number(index as f64), arr_value.as_ref().unwrap().clone()],
+                                _ => vec![
+                                    item.clone(),
+                                    JValue::Number(index as f64),
+                                    arr_value.as_ref().unwrap().clone(),
+                                ],
                             };
 
                             let mapped = self.apply_function(&args[1], &call_args, data)?;
@@ -4279,7 +4554,11 @@ impl Evaluator {
                     let call_args = match param_count {
                         1 => vec![item.clone()],
                         2 => vec![item.clone(), JValue::Number(index as f64)],
-                        _ => vec![item.clone(), JValue::Number(index as f64), arr_value.as_ref().unwrap().clone()],
+                        _ => vec![
+                            item.clone(),
+                            JValue::Number(index as f64),
+                            arr_value.as_ref().unwrap().clone(),
+                        ],
                     };
 
                     let predicate_result = self.apply_function(&args[1], &call_args, data)?;
@@ -4368,8 +4647,17 @@ impl Evaluator {
                     // Build argument list based on what callback expects
                     let call_args = match param_count {
                         2 => vec![accumulator.clone(), item.clone()],
-                        3 => vec![accumulator.clone(), item.clone(), JValue::Number(actual_idx as f64)],
-                        _ => vec![accumulator.clone(), item.clone(), JValue::Number(actual_idx as f64), arr_value.as_ref().unwrap().clone()],
+                        3 => vec![
+                            accumulator.clone(),
+                            item.clone(),
+                            JValue::Number(actual_idx as f64),
+                        ],
+                        _ => vec![
+                            accumulator.clone(),
+                            item.clone(),
+                            JValue::Number(actual_idx as f64),
+                            arr_value.as_ref().unwrap().clone(),
+                        ],
                     };
 
                     accumulator = self.apply_function(&args[1], &call_args, data)?;
@@ -4402,9 +4690,10 @@ impl Evaluator {
                             "single() argument is empty".to_string(),
                         )),
                         1 => Ok(arr.into_iter().next().unwrap()),
-                        count => Err(EvaluatorError::EvaluationError(
-                            format!("single() argument has {} values (expected exactly 1)", count),
-                        )),
+                        count => Err(EvaluatorError::EvaluationError(format!(
+                            "single() argument has {} values (expected exactly 1)",
+                            count
+                        ))),
                     }
                 } else {
                     // With predicate - find exactly 1 matching element
@@ -4414,8 +4703,12 @@ impl Evaluator {
                         // Apply predicate function with (item, index, array)
                         let predicate_result = self.apply_function(
                             &args[1],
-                            &[item.clone(), JValue::Number(index as f64), arr_value.clone()],
-                            data
+                            &[
+                                item.clone(),
+                                JValue::Number(index as f64),
+                                arr_value.clone(),
+                            ],
+                            data,
                         )?;
                         if self.is_truthy(&predicate_result) {
                             matches.push(item);
@@ -4427,9 +4720,10 @@ impl Evaluator {
                             "single() predicate matches no values".to_string(),
                         )),
                         1 => Ok(matches.into_iter().next().unwrap()),
-                        count => Err(EvaluatorError::EvaluationError(
-                            format!("single() predicate matches {} values (expected exactly 1)", count),
-                        )),
+                        count => Err(EvaluatorError::EvaluationError(format!(
+                            "single() predicate matches {} values (expected exactly 1)",
+                            count
+                        ))),
                     }
                 }
             }
@@ -4516,7 +4810,9 @@ impl Evaluator {
                     JValue::Array(_) => Ok(JValue::string("array".to_string())),
                     JValue::Object(_) => Ok(JValue::string("object".to_string())),
                     JValue::Undefined => Ok(JValue::Undefined),
-                    JValue::Lambda { .. } | JValue::Builtin { .. } => Ok(JValue::string("function".to_string())),
+                    JValue::Lambda { .. } | JValue::Builtin { .. } => {
+                        Ok(JValue::string("function".to_string()))
+                    }
                     JValue::Regex { .. } => Ok(JValue::string("regex".to_string())),
                 }
             }
@@ -4622,7 +4918,9 @@ impl Evaluator {
                 // $error(message) - throw error with custom message
                 if evaluated_args.is_empty() {
                     // No message provided
-                    return Err(EvaluatorError::EvaluationError("D3137: $error() function evaluated".to_string()));
+                    return Err(EvaluatorError::EvaluationError(
+                        "D3137: $error() function evaluated".to_string(),
+                    ));
                 }
 
                 match &evaluated_args[0] {
@@ -4631,7 +4929,8 @@ impl Evaluator {
                     }
                     _ => {
                         return Err(EvaluatorError::TypeError(
-                            "T0410: Argument 1 of function error does not match function signature".to_string()
+                            "T0410: Argument 1 of function error does not match function signature"
+                                .to_string(),
                         ));
                     }
                 }
@@ -4663,7 +4962,10 @@ impl Evaluator {
                     } else {
                         Rc::from("$assert() statement failed")
                     };
-                    return Err(EvaluatorError::EvaluationError(format!("D3141: {}", message)));
+                    return Err(EvaluatorError::EvaluationError(format!(
+                        "D3141: {}",
+                        message
+                    )));
                 }
 
                 Ok(JValue::Null)
@@ -4789,8 +5091,15 @@ impl Evaluator {
 
                 match &evaluated_args[0] {
                     JValue::Number(n) => {
-                        let millis = (if n.fract() == 0.0 { Ok(*n as i64) } else { Err(()) }).map_err(|_| {
-                            EvaluatorError::TypeError("fromMillis() requires an integer".to_string())
+                        let millis = (if n.fract() == 0.0 {
+                            Ok(*n as i64)
+                        } else {
+                            Err(())
+                        })
+                        .map_err(|_| {
+                            EvaluatorError::TypeError(
+                                "fromMillis() requires an integer".to_string(),
+                            )
                         })?;
                         Ok(crate::datetime::from_millis(millis)?)
                     }
@@ -4813,26 +5122,41 @@ impl Evaluator {
     /// This handles both:
     /// 1. Lambda nodes: function($x) { $x * 2 } - binds parameters and evaluates body
     /// 2. Simple expressions: price * 2 - evaluates with values as context
-    fn apply_function(&mut self, func_node: &AstNode, values: &[JValue], data: &JValue) -> Result<JValue, EvaluatorError> {
+    fn apply_function(
+        &mut self,
+        func_node: &AstNode,
+        values: &[JValue],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         match func_node {
-            AstNode::Lambda { params, body, signature, thunk } => {
+            AstNode::Lambda {
+                params,
+                body,
+                signature,
+                thunk,
+            } => {
                 // Direct lambda - invoke it
                 self.invoke_lambda(params, body, signature.as_ref(), values, data, *thunk)
             }
-            AstNode::Function { name, args, is_builtin } => {
+            AstNode::Function {
+                name,
+                args,
+                is_builtin,
+            } => {
                 // Function call - check if it has placeholders (partial application)
                 let has_placeholder = args.iter().any(|arg| matches!(arg, AstNode::Placeholder));
 
                 if has_placeholder {
                     // This is a partial application - evaluate it to get the lambda value
-                    let partial_lambda = self.create_partial_application(name, args, *is_builtin, data)?;
+                    let partial_lambda =
+                        self.create_partial_application(name, args, *is_builtin, data)?;
 
                     // Now invoke the partial lambda with the provided values
                     if let Some(stored) = self.lookup_lambda_from_value(&partial_lambda) {
                         return self.invoke_stored_lambda(&stored, values, data);
                     }
                     return Err(EvaluatorError::EvaluationError(
-                        "Failed to apply partial application".to_string()
+                        "Failed to apply partial application".to_string(),
                     ));
                 } else {
                     // Regular function call without placeholders
@@ -4897,8 +5221,12 @@ impl Evaluator {
         _original_data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
         // Get the input value from $ binding
-        let input = self.context.lookup("$")
-            .ok_or_else(|| EvaluatorError::EvaluationError("Transform requires $ binding".to_string()))?
+        let input = self
+            .context
+            .lookup("$")
+            .ok_or_else(|| {
+                EvaluatorError::EvaluationError("Transform requires $ binding".to_string())
+            })?
             .clone();
 
         // Evaluate location expression on the input to get objects to transform
@@ -4920,7 +5248,8 @@ impl Evaluator {
         let delete_fields: Vec<String> = if let Some(delete_node) = delete {
             let delete_val = self.evaluate_internal(delete_node, &input)?;
             match delete_val {
-                JValue::Array(arr) => arr.iter()
+                JValue::Array(arr) => arr
+                    .iter()
                     .filter_map(|v| match v {
                         JValue::String(s) => Some(s.to_string()),
                         _ => None,
@@ -4985,7 +5314,7 @@ impl Evaluator {
                     for (k, v) in map.iter() {
                         new_map.insert(
                             k.clone(),
-                            apply_transform_deep(evaluator, v, targets, update, delete_fields)?
+                            apply_transform_deep(evaluator, v, targets, update, delete_fields)?,
                         );
                     }
                     Ok(JValue::object(new_map))
@@ -4993,7 +5322,13 @@ impl Evaluator {
                 JValue::Array(arr) => {
                     let mut new_arr = Vec::new();
                     for item in arr.iter() {
-                        new_arr.push(apply_transform_deep(evaluator, item, targets, update, delete_fields)?);
+                        new_arr.push(apply_transform_deep(
+                            evaluator,
+                            item,
+                            targets,
+                            update,
+                            delete_fields,
+                        )?);
                     }
                     Ok(JValue::array(new_arr))
                 }
@@ -5006,7 +5341,15 @@ impl Evaluator {
     }
 
     /// Helper to invoke a lambda with given parameters
-    fn invoke_lambda(&mut self, params: &[String], body: &AstNode, signature: Option<&String>, values: &[JValue], data: &JValue, thunk: bool) -> Result<JValue, EvaluatorError> {
+    fn invoke_lambda(
+        &mut self,
+        params: &[String],
+        body: &AstNode,
+        signature: Option<&String>,
+        values: &[JValue],
+        data: &JValue,
+        thunk: bool,
+    ) -> Result<JValue, EvaluatorError> {
         self.invoke_lambda_with_env(params, body, signature, values, data, None, None, thunk)
     }
 
@@ -5049,27 +5392,40 @@ impl Evaluator {
                                     return Ok(JValue::Null);
                                 }
                                 // Explicit type mismatch - throw error
-                                crate::signature::SignatureError::ArgumentTypeMismatch { index, expected } => {
+                                crate::signature::SignatureError::ArgumentTypeMismatch {
+                                    index,
+                                    expected,
+                                } => {
                                     return Err(EvaluatorError::TypeError(
                                         format!("T0410: Argument {} of function does not match function signature (expected {})", index, expected)
                                     ));
                                 }
                                 // Array element type mismatch - throw error
-                                crate::signature::SignatureError::ArrayTypeMismatch { index, expected } => {
-                                    return Err(EvaluatorError::TypeError(
-                                        format!("T0412: Argument {} of function must be an array of {}", index, expected)
-                                    ));
+                                crate::signature::SignatureError::ArrayTypeMismatch {
+                                    index,
+                                    expected,
+                                } => {
+                                    return Err(EvaluatorError::TypeError(format!(
+                                        "T0412: Argument {} of function must be an array of {}",
+                                        index, expected
+                                    )));
                                 }
                                 // Other errors - throw generic error
                                 _ => {
-                                    return Err(EvaluatorError::TypeError(format!("Signature validation failed: {}", e)));
+                                    return Err(EvaluatorError::TypeError(format!(
+                                        "Signature validation failed: {}",
+                                        e
+                                    )));
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    return Err(EvaluatorError::EvaluationError(format!("Invalid signature: {}", e)));
+                    return Err(EvaluatorError::EvaluationError(format!(
+                        "Invalid signature: {}",
+                        e
+                    )));
                 }
             }
         } else {
@@ -5110,7 +5466,8 @@ impl Evaluator {
                     // Get placeholder positions from captured env
                     let placeholder_positions: Vec<usize> = if let Some(env) = captured_env {
                         if let Some(JValue::Array(positions)) = env.get("__placeholder_positions") {
-                            positions.iter()
+                            positions
+                                .iter()
                                 .filter_map(|v| v.as_f64().map(|n| n as usize))
                                 .collect()
                         } else {
@@ -5157,7 +5514,8 @@ impl Evaluator {
                     }
 
                     // Call the original function
-                    let result = self.evaluate_function_call(func_name, &temp_args, is_builtin, data);
+                    let result =
+                        self.evaluate_function_call(func_name, &temp_args, is_builtin, data);
 
                     // Pop temp scope
                     self.context.pop_scope();
@@ -5208,16 +5566,13 @@ impl Evaluator {
             if iterations > MAX_TCO_ITERATIONS {
                 self.context.pop_scope();
                 return Err(EvaluatorError::EvaluationError(
-                    "U1001: Stack overflow - maximum recursion depth (500) exceeded".to_string()
+                    "U1001: Stack overflow - maximum recursion depth (500) exceeded".to_string(),
                 ));
             }
 
             // Evaluate the lambda body within the persistent scope
-            let result = self.invoke_lambda_body_for_tco(
-                &current_lambda,
-                &current_args,
-                &current_data,
-            )?;
+            let result =
+                self.invoke_lambda_body_for_tco(&current_lambda, &current_args, &current_data)?;
 
             match result {
                 LambdaResult::JValue(v) => break v,
@@ -5250,33 +5605,39 @@ impl Evaluator {
         // Validate signature if present
         let coerced_values = if let Some(sig_str) = &lambda.signature {
             match crate::signature::Signature::parse(sig_str) {
-                Ok(sig) => {
-                    match sig.validate_and_coerce(values) {
-                        Ok(coerced) => coerced,
-                        Err(e) => {
-                            match e {
-                                crate::signature::SignatureError::UndefinedArgument => {
-                                    return Ok(LambdaResult::JValue(JValue::Null));
-                                }
-                                crate::signature::SignatureError::ArgumentTypeMismatch { index, expected } => {
-                                    return Err(EvaluatorError::TypeError(
+                Ok(sig) => match sig.validate_and_coerce(values) {
+                    Ok(coerced) => coerced,
+                    Err(e) => match e {
+                        crate::signature::SignatureError::UndefinedArgument => {
+                            return Ok(LambdaResult::JValue(JValue::Null));
+                        }
+                        crate::signature::SignatureError::ArgumentTypeMismatch {
+                            index,
+                            expected,
+                        } => {
+                            return Err(EvaluatorError::TypeError(
                                         format!("T0410: Argument {} of function does not match function signature (expected {})", index, expected)
                                     ));
-                                }
-                                crate::signature::SignatureError::ArrayTypeMismatch { index, expected } => {
-                                    return Err(EvaluatorError::TypeError(
-                                        format!("T0412: Argument {} of function must be an array of {}", index, expected)
-                                    ));
-                                }
-                                _ => {
-                                    return Err(EvaluatorError::TypeError(format!("Signature validation failed: {}", e)));
-                                }
-                            }
                         }
-                    }
-                }
+                        crate::signature::SignatureError::ArrayTypeMismatch { index, expected } => {
+                            return Err(EvaluatorError::TypeError(format!(
+                                "T0412: Argument {} of function must be an array of {}",
+                                index, expected
+                            )));
+                        }
+                        _ => {
+                            return Err(EvaluatorError::TypeError(format!(
+                                "Signature validation failed: {}",
+                                e
+                            )));
+                        }
+                    },
+                },
                 Err(e) => {
-                    return Err(EvaluatorError::EvaluationError(format!("Invalid signature: {}", e)));
+                    return Err(EvaluatorError::EvaluationError(format!(
+                        "Invalid signature: {}",
+                        e
+                    )));
                 }
             }
         } else {
@@ -5302,10 +5663,18 @@ impl Evaluator {
 
     /// Evaluate an expression for TCO, detecting tail calls
     /// Returns LambdaResult::TailCall if the expression is a function call to a user lambda
-    fn evaluate_for_tco(&mut self, node: &AstNode, data: &JValue) -> Result<LambdaResult, EvaluatorError> {
+    fn evaluate_for_tco(
+        &mut self,
+        node: &AstNode,
+        data: &JValue,
+    ) -> Result<LambdaResult, EvaluatorError> {
         match node {
             // Conditional: evaluate condition, then evaluate the chosen branch for TCO
-            AstNode::Conditional { condition, then_branch, else_branch } => {
+            AstNode::Conditional {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 let cond_value = self.evaluate_internal(condition, data)?;
                 let is_truthy = self.is_truthy(&cond_value);
 
@@ -5338,7 +5707,11 @@ impl Evaluator {
             }
 
             // Variable binding: evaluate value, bind, then evaluate result for TCO if present
-            AstNode::Binary { op: BinaryOp::ColonEqual, lhs, rhs } => {
+            AstNode::Binary {
+                op: BinaryOp::ColonEqual,
+                lhs,
+                rhs,
+            } => {
                 // This is var := value; get the variable name
                 let var_name = match lhs.as_ref() {
                     AstNode::Variable(name) => name.clone(),
@@ -5350,7 +5723,13 @@ impl Evaluator {
                 };
 
                 // Check if RHS is a lambda - store it specially
-                if let AstNode::Lambda { params, body, signature, thunk } = rhs.as_ref() {
+                if let AstNode::Lambda {
+                    params,
+                    body,
+                    signature,
+                    thunk,
+                } = rhs.as_ref()
+                {
                     let captured_env = self.capture_environment_for(body, params);
                     let stored_lambda = StoredLambda {
                         params: params.clone(),
@@ -5361,7 +5740,8 @@ impl Evaluator {
                         thunk: *thunk,
                     };
                     self.context.bind_lambda(var_name, stored_lambda);
-                    let lambda_repr = JValue::lambda("anon", params.clone(), None::<String>, None::<String>);
+                    let lambda_repr =
+                        JValue::lambda("anon", params.clone(), None::<String>, None::<String>);
                     return Ok(LambdaResult::JValue(lambda_repr));
                 }
 
@@ -5474,7 +5854,8 @@ impl Evaluator {
                 if !has_match && !has_start && !has_end && !has_groups && !has_next {
                     // Invalid matcher result - T1010 error
                     return Err(EvaluatorError::EvaluationError(
-                        "T1010: The matcher function did not return the correct object structure".to_string()
+                        "T1010: The matcher function did not return the correct object structure"
+                            .to_string(),
                     ));
                 }
 
@@ -5535,16 +5916,20 @@ impl Evaluator {
         // Extract string
         let s = match str_value {
             JValue::String(s) => &**s,
-            _ => return Err(EvaluatorError::TypeError(
-                "replace() requires string arguments".to_string()
-            )),
+            _ => {
+                return Err(EvaluatorError::TypeError(
+                    "replace() requires string arguments".to_string(),
+                ))
+            }
         };
 
         // Extract regex pattern
-        let (pattern, flags) = crate::functions::string::extract_regex(pattern_value)
-            .ok_or_else(|| EvaluatorError::TypeError(
-                "replace() pattern must be a regex when using lambda replacement".to_string()
-            ))?;
+        let (pattern, flags) =
+            crate::functions::string::extract_regex(pattern_value).ok_or_else(|| {
+                EvaluatorError::TypeError(
+                    "replace() pattern must be a regex when using lambda replacement".to_string(),
+                )
+            })?;
 
         // Build regex
         let re = crate::functions::string::build_regex(&pattern, &flags)?;
@@ -5555,15 +5940,18 @@ impl Evaluator {
                 JValue::Number(n) => {
                     let lim_f64 = *n;
                     if lim_f64 < 0.0 {
-                        return Err(EvaluatorError::EvaluationError(
-                            format!("D3011: Limit must be non-negative, got {}", lim_f64)
-                        ));
+                        return Err(EvaluatorError::EvaluationError(format!(
+                            "D3011: Limit must be non-negative, got {}",
+                            lim_f64
+                        )));
                     }
                     Some(lim_f64 as usize)
                 }
-                _ => return Err(EvaluatorError::TypeError(
-                    "replace() limit must be a number".to_string(),
-                )),
+                _ => {
+                    return Err(EvaluatorError::TypeError(
+                        "replace() limit must be a number".to_string(),
+                    ))
+                }
             }
         } else {
             None
@@ -5607,16 +5995,20 @@ impl Evaluator {
             let match_obj = JValue::object(match_map);
 
             // Invoke lambda with match object
-            let stored_lambda = self.lookup_lambda_from_value(&lambda_value)
-                .ok_or_else(|| EvaluatorError::TypeError(
-                    "Replacement must be a lambda function".to_string()
-                ))?;
+            let stored_lambda = self
+                .lookup_lambda_from_value(&lambda_value)
+                .ok_or_else(|| {
+                    EvaluatorError::TypeError("Replacement must be a lambda function".to_string())
+                })?;
             let lambda_result = self.invoke_stored_lambda(&stored_lambda, &[match_obj], data)?;
             let replacement_str = match lambda_result {
                 JValue::String(s) => s,
-                _ => return Err(EvaluatorError::TypeError(
-                    format!("D3012: Replacement function must return a string, got {:?}", lambda_result)
-                )),
+                _ => {
+                    return Err(EvaluatorError::TypeError(format!(
+                        "D3012: Replacement function must return a string, got {:?}",
+                        lambda_result
+                    )))
+                }
             };
 
             // Add replacement
@@ -5639,7 +6031,11 @@ impl Evaluator {
 
     /// Capture only the variables referenced by a lambda body (selective capture).
     /// This avoids cloning the entire environment when only a few variables are needed.
-    fn capture_environment_for(&self, body: &AstNode, params: &[String]) -> HashMap<String, JValue> {
+    fn capture_environment_for(
+        &self,
+        body: &AstNode,
+        params: &[String],
+    ) -> HashMap<String, JValue> {
         let free_vars = Self::collect_free_variables(body, params);
         if free_vars.is_empty() {
             return HashMap::new();
@@ -5712,7 +6108,11 @@ impl Evaluator {
                     Self::collect_free_vars_walk(arg, bound, free);
                 }
             }
-            AstNode::Conditional { condition, then_branch, else_branch } => {
+            AstNode::Conditional {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 Self::collect_free_vars_walk(condition, bound, free);
                 Self::collect_free_vars_walk(then_branch, bound, free);
                 if let Some(else_expr) = else_branch {
@@ -5724,7 +6124,12 @@ impl Evaluator {
                 for expr in exprs {
                     Self::collect_free_vars_walk(expr, &block_bound, free);
                     // Bindings introduced via := become bound for subsequent expressions
-                    if let AstNode::Binary { op: BinaryOp::ColonEqual, lhs, .. } = expr {
+                    if let AstNode::Binary {
+                        op: BinaryOp::ColonEqual,
+                        lhs,
+                        ..
+                    } = expr
+                    {
                         if let AstNode::Variable(var_name) = lhs.as_ref() {
                             block_bound.insert(var_name.as_str());
                         }
@@ -5761,7 +6166,11 @@ impl Evaluator {
             AstNode::IndexBind { input, .. } => {
                 Self::collect_free_vars_walk(input, bound, free);
             }
-            AstNode::Transform { location, update, delete } => {
+            AstNode::Transform {
+                location,
+                update,
+                delete,
+            } => {
                 Self::collect_free_vars_walk(location, bound, free);
                 Self::collect_free_vars_walk(update, bound, free);
                 if let Some(del) = delete {
@@ -5769,16 +6178,24 @@ impl Evaluator {
                 }
             }
             // Leaf nodes with no variable references
-            AstNode::String(_) | AstNode::Name(_) | AstNode::Number(_) |
-            AstNode::Boolean(_) | AstNode::Null | AstNode::Undefined |
-            AstNode::Placeholder | AstNode::Regex { .. } |
-            AstNode::Wildcard | AstNode::Descendant | AstNode::ParentVariable(_) => {}
+            AstNode::String(_)
+            | AstNode::Name(_)
+            | AstNode::Number(_)
+            | AstNode::Boolean(_)
+            | AstNode::Null
+            | AstNode::Undefined
+            | AstNode::Placeholder
+            | AstNode::Regex { .. }
+            | AstNode::Wildcard
+            | AstNode::Descendant
+            | AstNode::ParentVariable(_) => {}
         }
     }
 
     /// Check if a name refers to a built-in function
     fn is_builtin_function(&self, name: &str) -> bool {
-        matches!(name,
+        matches!(
+            name,
             // String functions
             "string" | "length" | "substring" | "substringBefore" | "substringAfter" |
             "uppercase" | "lowercase" | "trim" | "pad" | "contains" | "split" |
@@ -5811,13 +6228,18 @@ impl Evaluator {
 
     /// Call a built-in function directly with pre-evaluated Values
     /// This is used when passing built-in functions to higher-order functions like $map
-    fn call_builtin_with_values(&mut self, name: &str, values: &[JValue]) -> Result<JValue, EvaluatorError> {
+    fn call_builtin_with_values(
+        &mut self,
+        name: &str,
+        values: &[JValue],
+    ) -> Result<JValue, EvaluatorError> {
         use crate::functions;
 
         if values.is_empty() {
-            return Err(EvaluatorError::EvaluationError(
-                format!("{}() requires at least 1 argument", name)
-            ));
+            return Err(EvaluatorError::EvaluationError(format!(
+                "{}() requires at least 1 argument",
+                name
+            )));
         }
 
         let arg = &values[0];
@@ -5830,82 +6252,94 @@ impl Evaluator {
                 let b = functions::boolean::boolean(arg)?;
                 match b {
                     JValue::Bool(val) => Ok(JValue::Bool(!val)),
-                    _ => Err(EvaluatorError::TypeError("not() requires a boolean".to_string())),
+                    _ => Err(EvaluatorError::TypeError(
+                        "not() requires a boolean".to_string(),
+                    )),
                 }
             }
             "exists" => Ok(JValue::Bool(!matches!(arg, JValue::Null))),
             "abs" => match arg {
                 JValue::Number(n) => Ok(functions::numeric::abs(*n)?),
-                _ => Err(EvaluatorError::TypeError("abs() requires a number argument".to_string())),
+                _ => Err(EvaluatorError::TypeError(
+                    "abs() requires a number argument".to_string(),
+                )),
             },
             "floor" => match arg {
                 JValue::Number(n) => Ok(functions::numeric::floor(*n)?),
-                _ => Err(EvaluatorError::TypeError("floor() requires a number argument".to_string())),
+                _ => Err(EvaluatorError::TypeError(
+                    "floor() requires a number argument".to_string(),
+                )),
             },
             "ceil" => match arg {
                 JValue::Number(n) => Ok(functions::numeric::ceil(*n)?),
-                _ => Err(EvaluatorError::TypeError("ceil() requires a number argument".to_string())),
+                _ => Err(EvaluatorError::TypeError(
+                    "ceil() requires a number argument".to_string(),
+                )),
             },
             "round" => match arg {
                 JValue::Number(n) => Ok(functions::numeric::round(*n, None)?),
-                _ => Err(EvaluatorError::TypeError("round() requires a number argument".to_string())),
+                _ => Err(EvaluatorError::TypeError(
+                    "round() requires a number argument".to_string(),
+                )),
             },
             "sqrt" => match arg {
                 JValue::Number(n) => Ok(functions::numeric::sqrt(*n)?),
-                _ => Err(EvaluatorError::TypeError("sqrt() requires a number argument".to_string())),
+                _ => Err(EvaluatorError::TypeError(
+                    "sqrt() requires a number argument".to_string(),
+                )),
             },
-            "uppercase" => {
-                match arg {
-                    JValue::String(s) => Ok(JValue::string(s.to_uppercase())),
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("uppercase() requires a string argument".to_string())),
-                }
-            }
-            "lowercase" => {
-                match arg {
-                    JValue::String(s) => Ok(JValue::string(s.to_lowercase())),
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("lowercase() requires a string argument".to_string())),
-                }
-            }
-            "trim" => {
-                match arg {
-                    JValue::String(s) => Ok(JValue::string(s.trim().to_string())),
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("trim() requires a string argument".to_string())),
-                }
-            }
-            "length" => {
-                match arg {
-                    JValue::String(s) => Ok(JValue::Number(s.chars().count() as f64)),
-                    JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("length() requires a string or array argument".to_string())),
-                }
-            }
-            "sum" => {
-                match arg {
-                    JValue::Array(arr) => {
-                        let mut total = 0.0;
-                        for item in arr.iter() {
-                            match item {
-                                JValue::Number(n) => {
-                                    total += *n;
-                                }
-                                _ => {
-                                    return Err(EvaluatorError::TypeError(
-                                        "sum() requires all array elements to be numbers".to_string()
-                                    ));
-                                }
+            "uppercase" => match arg {
+                JValue::String(s) => Ok(JValue::string(s.to_uppercase())),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "uppercase() requires a string argument".to_string(),
+                )),
+            },
+            "lowercase" => match arg {
+                JValue::String(s) => Ok(JValue::string(s.to_lowercase())),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "lowercase() requires a string argument".to_string(),
+                )),
+            },
+            "trim" => match arg {
+                JValue::String(s) => Ok(JValue::string(s.trim().to_string())),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "trim() requires a string argument".to_string(),
+                )),
+            },
+            "length" => match arg {
+                JValue::String(s) => Ok(JValue::Number(s.chars().count() as f64)),
+                JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "length() requires a string or array argument".to_string(),
+                )),
+            },
+            "sum" => match arg {
+                JValue::Array(arr) => {
+                    let mut total = 0.0;
+                    for item in arr.iter() {
+                        match item {
+                            JValue::Number(n) => {
+                                total += *n;
+                            }
+                            _ => {
+                                return Err(EvaluatorError::TypeError(
+                                    "sum() requires all array elements to be numbers".to_string(),
+                                ));
                             }
                         }
-                        Ok(JValue::Number(total))
                     }
-                    JValue::Number(n) => Ok(JValue::Number(*n)),
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("sum() requires an array of numbers".to_string())),
+                    Ok(JValue::Number(total))
                 }
-            }
+                JValue::Number(n) => Ok(JValue::Number(*n)),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "sum() requires an array of numbers".to_string(),
+                )),
+            },
             "count" => {
                 match arg {
                     JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
@@ -5913,63 +6347,61 @@ impl Evaluator {
                     _ => Ok(JValue::Number(1 as f64)), // Single value counts as 1
                 }
             }
-            "max" => {
-                match arg {
-                    JValue::Array(arr) => {
-                        let mut max_val: Option<f64> = None;
-                        for item in arr.iter() {
-                            if let JValue::Number(n) = item {
-                                let f = Some(*n).unwrap_or(f64::NEG_INFINITY);
-                                max_val = Some(max_val.map_or(f, |m| m.max(f)));
-                            }
-                        }
-                        max_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m as f64)))
-                    }
-                    JValue::Number(n) => Ok(JValue::Number(*n)),
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("max() requires an array of numbers".to_string())),
-                }
-            }
-            "min" => {
-                match arg {
-                    JValue::Array(arr) => {
-                        let mut min_val: Option<f64> = None;
-                        for item in arr.iter() {
-                            if let JValue::Number(n) = item {
-                                let f = Some(*n).unwrap_or(f64::INFINITY);
-                                min_val = Some(min_val.map_or(f, |m| m.min(f)));
-                            }
-                        }
-                        min_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m as f64)))
-                    }
-                    JValue::Number(n) => Ok(JValue::Number(*n)),
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("min() requires an array of numbers".to_string())),
-                }
-            }
-            "average" => {
-                match arg {
-                    JValue::Array(arr) => {
-                        let nums: Vec<f64> = arr.iter()
-                            .filter_map(|v| v.as_f64())
-                            .collect();
-                        if nums.is_empty() {
-                            Ok(JValue::Null)
-                        } else {
-                            let avg = nums.iter().sum::<f64>() / nums.len() as f64;
-                            Ok(JValue::Number(avg))
+            "max" => match arg {
+                JValue::Array(arr) => {
+                    let mut max_val: Option<f64> = None;
+                    for item in arr.iter() {
+                        if let JValue::Number(n) = item {
+                            let f = Some(*n).unwrap_or(f64::NEG_INFINITY);
+                            max_val = Some(max_val.map_or(f, |m| m.max(f)));
                         }
                     }
-                    JValue::Number(n) => Ok(JValue::Number(*n)),
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("average() requires an array of numbers".to_string())),
+                    max_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m as f64)))
                 }
-            }
+                JValue::Number(n) => Ok(JValue::Number(*n)),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "max() requires an array of numbers".to_string(),
+                )),
+            },
+            "min" => match arg {
+                JValue::Array(arr) => {
+                    let mut min_val: Option<f64> = None;
+                    for item in arr.iter() {
+                        if let JValue::Number(n) = item {
+                            let f = Some(*n).unwrap_or(f64::INFINITY);
+                            min_val = Some(min_val.map_or(f, |m| m.min(f)));
+                        }
+                    }
+                    min_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m as f64)))
+                }
+                JValue::Number(n) => Ok(JValue::Number(*n)),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "min() requires an array of numbers".to_string(),
+                )),
+            },
+            "average" => match arg {
+                JValue::Array(arr) => {
+                    let nums: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
+                    if nums.is_empty() {
+                        Ok(JValue::Null)
+                    } else {
+                        let avg = nums.iter().sum::<f64>() / nums.len() as f64;
+                        Ok(JValue::Number(avg))
+                    }
+                }
+                JValue::Number(n) => Ok(JValue::Number(*n)),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "average() requires an array of numbers".to_string(),
+                )),
+            },
             "append" => {
                 // append(array1, array2) - append second array to first
                 if values.len() < 2 {
                     return Err(EvaluatorError::EvaluationError(
-                        "append() requires 2 arguments".to_string()
+                        "append() requires 2 arguments".to_string(),
                     ));
                 }
                 let first = &values[0];
@@ -5991,34 +6423,33 @@ impl Evaluator {
 
                 Ok(JValue::array(result))
             }
-            "reverse" => {
-                match arg {
-                    JValue::Array(arr) => {
-                        let mut reversed = arr.to_vec();
-                        reversed.reverse();
-                        Ok(JValue::array(reversed))
-                    }
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("reverse() requires an array".to_string())),
+            "reverse" => match arg {
+                JValue::Array(arr) => {
+                    let mut reversed = arr.to_vec();
+                    reversed.reverse();
+                    Ok(JValue::array(reversed))
                 }
-            }
-            "keys" => {
-                match arg {
-                    JValue::Object(obj) => {
-                        let keys: Vec<JValue> = obj.keys()
-                            .map(|k| JValue::string(k.clone()))
-                            .collect();
-                        Ok(JValue::array(keys))
-                    }
-                    JValue::Null => Ok(JValue::Null),
-                    _ => Err(EvaluatorError::TypeError("keys() requires an object".to_string())),
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "reverse() requires an array".to_string(),
+                )),
+            },
+            "keys" => match arg {
+                JValue::Object(obj) => {
+                    let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
+                    Ok(JValue::array(keys))
                 }
-            }
+                JValue::Null => Ok(JValue::Null),
+                _ => Err(EvaluatorError::TypeError(
+                    "keys() requires an object".to_string(),
+                )),
+            },
 
             // Add more functions as needed
-            _ => Err(EvaluatorError::ReferenceError(
-                format!("Built-in function {} cannot be called with values directly", name)
-            )),
+            _ => Err(EvaluatorError::ReferenceError(format!(
+                "Built-in function {} cannot be called with values directly",
+                name
+            ))),
         }
     }
 
@@ -6058,7 +6489,11 @@ impl Evaluator {
     }
 
     /// Evaluate a predicate (array filter or index)
-    fn evaluate_predicate(&mut self, current: &JValue, predicate: &AstNode) -> Result<JValue, EvaluatorError> {
+    fn evaluate_predicate(
+        &mut self,
+        current: &JValue,
+        predicate: &AstNode,
+    ) -> Result<JValue, EvaluatorError> {
         // Special case: empty brackets [] (represented as Boolean(true))
         // This forces the value to be wrapped in an array
         if matches!(predicate, AstNode::Boolean(true)) {
@@ -6091,7 +6526,8 @@ impl Evaluator {
                     Ok(JValue::Array(indices)) => {
                         // Multiple array selectors [[indices]]
                         // Check if array contains any non-numeric values
-                        let has_non_numeric = indices.iter().any(|v| !matches!(v, JValue::Number(_)));
+                        let has_non_numeric =
+                            indices.iter().any(|v| !matches!(v, JValue::Number(_)));
 
                         if has_non_numeric {
                             // If array contains non-numeric values, return entire array
@@ -6143,7 +6579,8 @@ impl Evaluator {
 
                 // Try specialized fast path for simple field comparisons
                 if let Some(spec) = try_specialize_predicate(predicate) {
-                    let filtered: Vec<JValue> = _arr.iter()
+                    let filtered: Vec<JValue> = _arr
+                        .iter()
                         .filter(|item| evaluate_specialized(item, &spec))
                         .cloned()
                         .collect();
@@ -6226,7 +6663,11 @@ impl Evaluator {
 
     /// Evaluate a sort term expression, distinguishing missing fields from explicit null
     /// Returns JValue::Undefined for missing fields, JValue::Null for explicit null
-    fn evaluate_sort_term(&mut self, term_expr: &AstNode, element: &JValue) -> Result<JValue, EvaluatorError> {
+    fn evaluate_sort_term(
+        &mut self,
+        term_expr: &AstNode,
+        element: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
         // For tuples (from index binding), extract the actual value from @ field
         let actual_element = if let JValue::Object(obj) = element {
             if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
@@ -6272,7 +6713,11 @@ impl Evaluator {
     }
 
     /// Evaluate sort operator
-    fn evaluate_sort(&mut self, data: &JValue, terms: &[(AstNode, bool)]) -> Result<JValue, EvaluatorError> {
+    fn evaluate_sort(
+        &mut self,
+        data: &JValue,
+        terms: &[(AstNode, bool)],
+    ) -> Result<JValue, EvaluatorError> {
         // If data is null, return null
         if matches!(data, JValue::Null) {
             return Ok(JValue::Null);
@@ -6340,8 +6785,8 @@ impl Evaluator {
                     JValue::String(_) => "string",
                     JValue::Bool(_) => "boolean",
                     JValue::Array(_) => "array",
-                    JValue::Object(_) => "object",  // This catches non-undefined objects
-                    JValue::Null => "null",         // Explicit null from data
+                    JValue::Object(_) => "object", // This catches non-undefined objects
+                    JValue::Null => "null",        // Explicit null from data
                     _ => "unknown",
                 };
 
@@ -6377,11 +6822,7 @@ impl Evaluator {
                 let cmp = self.compare_values(left, right);
 
                 if cmp != std::cmp::Ordering::Equal {
-                    return if *ascending {
-                        cmp
-                    } else {
-                        cmp.reverse()
-                    };
+                    return if *ascending { cmp } else { cmp.reverse() };
                 }
             }
 
@@ -6410,7 +6851,7 @@ impl Evaluator {
             return Ordering::Equal;
         }
         if left_undef {
-            return Ordering::Greater;  // Undefined sorts last
+            return Ordering::Greater; // Undefined sorts last
         }
         if right_undef {
             return Ordering::Less;
@@ -6537,7 +6978,8 @@ impl Evaluator {
                     // closures like the Y-combinator where returned lambdas
                     // capture other lambdas in their environment.
                     if let Some(stored) = self.context.lookup_lambda(&**lambda_id) {
-                        let env_values: Vec<JValue> = stored.captured_env.values().cloned().collect();
+                        let env_values: Vec<JValue> =
+                            stored.captured_env.values().cloned().collect();
                         for env_value in &env_values {
                             self.collect_lambda_ids(env_value, ids);
                         }
@@ -6566,30 +7008,44 @@ impl Evaluator {
     }
 
     /// Addition
-    fn add(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
+    fn add(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
         match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                Ok(JValue::Number(*a + *b))
-            }
+            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Number(*a + *b)),
             // Explicit null literal with number -> T2002 error
             (JValue::Null, JValue::Number(_)) if left_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The left side of the + operator must evaluate to a number".to_string()))
+                Err(EvaluatorError::TypeError(
+                    "T2002: The left side of the + operator must evaluate to a number".to_string(),
+                ))
             }
             (JValue::Number(_), JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The right side of the + operator must evaluate to a number".to_string()))
+                Err(EvaluatorError::TypeError(
+                    "T2002: The right side of the + operator must evaluate to a number".to_string(),
+                ))
             }
             (JValue::Null, JValue::Null) if left_is_explicit_null || right_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The left side of the + operator must evaluate to a number".to_string()))
+                Err(EvaluatorError::TypeError(
+                    "T2002: The left side of the + operator must evaluate to a number".to_string(),
+                ))
             }
             // Undefined variable (null) with number -> undefined result
-            (JValue::Null, JValue::Number(_)) | (JValue::Number(_), JValue::Null) => Ok(JValue::Null),
+            (JValue::Null, JValue::Number(_)) | (JValue::Number(_), JValue::Null) => {
+                Ok(JValue::Null)
+            }
             // Boolean with anything (including undefined) -> T2001 error
-            (JValue::Bool(_), _) => {
-                Err(EvaluatorError::TypeError("T2001: The left side of the '+' operator must evaluate to a number or a string".to_string()))
-            }
-            (_, JValue::Bool(_)) => {
-                Err(EvaluatorError::TypeError("T2001: The right side of the '+' operator must evaluate to a number or a string".to_string()))
-            }
+            (JValue::Bool(_), _) => Err(EvaluatorError::TypeError(
+                "T2001: The left side of the '+' operator must evaluate to a number or a string"
+                    .to_string(),
+            )),
+            (_, JValue::Bool(_)) => Err(EvaluatorError::TypeError(
+                "T2001: The right side of the '+' operator must evaluate to a number or a string"
+                    .to_string(),
+            )),
             // Undefined with undefined -> undefined
             (JValue::Null, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
@@ -6600,18 +7056,22 @@ impl Evaluator {
     }
 
     /// Subtraction
-    fn subtract(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
+    fn subtract(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
         match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                Ok(JValue::Number(*a - *b))
-            }
+            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Number(*a - *b)),
             // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The left side of the - operator must evaluate to a number".to_string()))
-            }
-            (_, JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The right side of the - operator must evaluate to a number".to_string()))
-            }
+            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
+                "T2002: The left side of the - operator must evaluate to a number".to_string(),
+            )),
+            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
+                "T2002: The right side of the - operator must evaluate to a number".to_string(),
+            )),
             // Undefined variables -> undefined result
             (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
@@ -6622,25 +7082,31 @@ impl Evaluator {
     }
 
     /// Multiplication
-    fn multiply(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
+    fn multiply(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
         match (left, right) {
             (JValue::Number(a), JValue::Number(b)) => {
                 let result = *a * *b;
                 // Check for overflow to Infinity
                 if result.is_infinite() {
                     return Err(EvaluatorError::EvaluationError(
-                        "D1001: Number out of range".to_string()
+                        "D1001: Number out of range".to_string(),
                     ));
                 }
                 Ok(JValue::Number(result))
             }
             // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The left side of the * operator must evaluate to a number".to_string()))
-            }
-            (_, JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The right side of the * operator must evaluate to a number".to_string()))
-            }
+            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
+                "T2002: The left side of the * operator must evaluate to a number".to_string(),
+            )),
+            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
+                "T2002: The right side of the * operator must evaluate to a number".to_string(),
+            )),
             // Undefined variables -> undefined result
             (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
@@ -6651,7 +7117,13 @@ impl Evaluator {
     }
 
     /// Division
-    fn divide(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
+    fn divide(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
         match (left, right) {
             (JValue::Number(a), JValue::Number(b)) => {
                 let denominator = *b;
@@ -6663,12 +7135,12 @@ impl Evaluator {
                 Ok(JValue::Number(*a / denominator))
             }
             // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The left side of the / operator must evaluate to a number".to_string()))
-            }
-            (_, JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The right side of the / operator must evaluate to a number".to_string()))
-            }
+            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
+                "T2002: The left side of the / operator must evaluate to a number".to_string(),
+            )),
+            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
+                "T2002: The right side of the / operator must evaluate to a number".to_string(),
+            )),
             // Undefined variables -> undefined result
             (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
@@ -6679,7 +7151,13 @@ impl Evaluator {
     }
 
     /// Modulo
-    fn modulo(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
+    fn modulo(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
         match (left, right) {
             (JValue::Number(a), JValue::Number(b)) => {
                 let denominator = *b;
@@ -6691,12 +7169,12 @@ impl Evaluator {
                 Ok(JValue::Number(*a % denominator))
             }
             // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The left side of the % operator must evaluate to a number".to_string()))
-            }
-            (_, JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::TypeError("T2002: The right side of the % operator must evaluate to a number".to_string()))
-            }
+            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
+                "T2002: The left side of the % operator must evaluate to a number".to_string(),
+            )),
+            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
+                "T2002: The right side of the % operator must evaluate to a number".to_string(),
+            )),
             // Undefined variables -> undefined result
             (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
             _ => Err(EvaluatorError::TypeError(format!(
@@ -6780,23 +7258,79 @@ impl Evaluator {
     }
 
     /// Less than comparison
-    fn less_than(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
-        self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, "<", |a, b| a < b, |a, b| a < b)
+    fn less_than(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
+        self.ordered_compare(
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+            "<",
+            |a, b| a < b,
+            |a, b| a < b,
+        )
     }
 
     /// Less than or equal comparison
-    fn less_than_or_equal(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
-        self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, "<=", |a, b| a <= b, |a, b| a <= b)
+    fn less_than_or_equal(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
+        self.ordered_compare(
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+            "<=",
+            |a, b| a <= b,
+            |a, b| a <= b,
+        )
     }
 
     /// Greater than comparison
-    fn greater_than(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
-        self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, ">", |a, b| a > b, |a, b| a > b)
+    fn greater_than(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
+        self.ordered_compare(
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+            ">",
+            |a, b| a > b,
+            |a, b| a > b,
+        )
     }
 
     /// Greater than or equal comparison
-    fn greater_than_or_equal(&self, left: &JValue, right: &JValue, left_is_explicit_null: bool, right_is_explicit_null: bool) -> Result<JValue, EvaluatorError> {
-        self.ordered_compare(left, right, left_is_explicit_null, right_is_explicit_null, ">=", |a, b| a >= b, |a, b| a >= b)
+    fn greater_than_or_equal(
+        &self,
+        left: &JValue,
+        right: &JValue,
+        left_is_explicit_null: bool,
+        right_is_explicit_null: bool,
+    ) -> Result<JValue, EvaluatorError> {
+        self.ordered_compare(
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+            ">=",
+            |a, b| a >= b,
+            |a, b| a >= b,
+        )
     }
 
     /// Convert a value to a string for concatenation
@@ -6905,11 +7439,7 @@ impl Evaluator {
                 let len = arr.len() as i64;
 
                 // Handle negative indexing (offset from end)
-                let actual_idx = if idx < 0 {
-                    len + idx
-                } else {
-                    idx
-                };
+                let actual_idx = if idx < 0 { len + idx } else { idx };
 
                 if actual_idx < 0 || actual_idx >= len {
                     Ok(JValue::Null)
@@ -6964,9 +7494,7 @@ impl Evaluator {
         }
 
         match right {
-            JValue::Array(arr) => {
-                Ok(JValue::Bool(arr.iter().any(|v| self.equals(left, v))))
-            }
+            JValue::Array(arr) => Ok(JValue::Bool(arr.iter().any(|v| self.equals(left, v)))),
             JValue::Object(obj) => {
                 if let JValue::String(key) = left {
                     Ok(JValue::Bool(obj.contains_key(&**key)))
@@ -6976,9 +7504,7 @@ impl Evaluator {
             }
             // If right side is not an array or object (e.g., string, number),
             // wrap it in an array for comparison
-            other => {
-                Ok(JValue::Bool(self.equals(left, other)))
-            }
+            other => Ok(JValue::Bool(self.equals(left, other))),
         }
     }
 
@@ -6993,22 +7519,25 @@ impl Evaluator {
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
         // First, look up the function to ensure it exists
-        let is_lambda = self.context.lookup_lambda(name).is_some() ||
-            (self.context.lookup(name).map(|v| {
-                matches!(v, JValue::Lambda { .. })
-            }).unwrap_or(false));
+        let is_lambda = self.context.lookup_lambda(name).is_some()
+            || (self
+                .context
+                .lookup(name)
+                .map(|v| matches!(v, JValue::Lambda { .. }))
+                .unwrap_or(false));
 
         // Built-in functions must be called with $ prefix for partial application
         // Without $, it's an error (T1007) suggesting the user forgot the $
         if !is_lambda && !is_builtin {
             // Check if it's a built-in function called without $
             if self.is_builtin_function(name) {
-                return Err(EvaluatorError::EvaluationError(
-                    format!("T1007: Attempted to partially apply a non-function. Did you mean ${}?", name)
-                ));
+                return Err(EvaluatorError::EvaluationError(format!(
+                    "T1007: Attempted to partially apply a non-function. Did you mean ${}?",
+                    name
+                )));
             }
             return Err(EvaluatorError::EvaluationError(
-                "T1008: Attempted to partially apply a non-function".to_string()
+                "T1008: Attempted to partially apply a non-function".to_string(),
             ));
         }
 
@@ -7065,13 +7594,13 @@ impl Evaluator {
                         placeholder_positions
                             .iter()
                             .map(|p| JValue::Number(*p as f64))
-                            .collect::<Vec<_>>()
-                    )
+                            .collect::<Vec<_>>(),
+                    ),
                 );
                 // Store total argument count
                 env.insert(
                     "__total_args".to_string(),
-                    JValue::Number(args.len() as f64)
+                    JValue::Number(args.len() as f64),
                 );
                 env
             },
@@ -7110,7 +7639,9 @@ mod tests {
         let data = JValue::Null;
 
         // String literal
-        let result = evaluator.evaluate(&AstNode::string("hello"), &data).unwrap();
+        let result = evaluator
+            .evaluate(&AstNode::string("hello"), &data)
+            .unwrap();
         assert_eq!(result, JValue::string("hello".to_string()));
 
         // Number literal
@@ -7132,14 +7663,18 @@ mod tests {
         let data = JValue::Null;
 
         // Bind a variable
-        evaluator.context.bind("x".to_string(), JValue::from(100i64));
+        evaluator
+            .context
+            .bind("x".to_string(), JValue::from(100i64));
 
         // Look up the variable
         let result = evaluator.evaluate(&AstNode::variable("x"), &data).unwrap();
         assert_eq!(result, JValue::from(100i64));
 
         // Undefined variable returns null (undefined in JSONata semantics)
-        let result = evaluator.evaluate(&AstNode::variable("undefined"), &data).unwrap();
+        let result = evaluator
+            .evaluate(&AstNode::variable("undefined"), &data)
+            .unwrap();
         assert_eq!(result, JValue::Null);
     }
 
@@ -7158,7 +7693,10 @@ mod tests {
             steps: vec![PathStep::new(AstNode::Name("foo".to_string()))],
         };
         let result = evaluator.evaluate(&path, &data).unwrap();
-        assert_eq!(result, JValue::from(serde_json::json!({"bar": {"baz": 42}})));
+        assert_eq!(
+            result,
+            JValue::from(serde_json::json!({"bar": {"baz": 42}}))
+        );
 
         // Nested path
         let path = AstNode::Path {
@@ -7255,7 +7793,10 @@ mod tests {
             lhs: Box::new(AstNode::number(5.0)),
             rhs: Box::new(AstNode::number(5.0)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            evaluator.evaluate(&expr, &data).unwrap(),
+            JValue::Bool(true)
+        );
 
         // Not equal
         let expr = AstNode::Binary {
@@ -7263,7 +7804,10 @@ mod tests {
             lhs: Box::new(AstNode::number(5.0)),
             rhs: Box::new(AstNode::number(3.0)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            evaluator.evaluate(&expr, &data).unwrap(),
+            JValue::Bool(true)
+        );
 
         // Less than
         let expr = AstNode::Binary {
@@ -7271,7 +7815,10 @@ mod tests {
             lhs: Box::new(AstNode::number(3.0)),
             rhs: Box::new(AstNode::number(5.0)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            evaluator.evaluate(&expr, &data).unwrap(),
+            JValue::Bool(true)
+        );
 
         // Greater than
         let expr = AstNode::Binary {
@@ -7279,7 +7826,10 @@ mod tests {
             lhs: Box::new(AstNode::number(5.0)),
             rhs: Box::new(AstNode::number(3.0)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            evaluator.evaluate(&expr, &data).unwrap(),
+            JValue::Bool(true)
+        );
     }
 
     #[test]
@@ -7293,7 +7843,10 @@ mod tests {
             lhs: Box::new(AstNode::boolean(true)),
             rhs: Box::new(AstNode::boolean(true)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            evaluator.evaluate(&expr, &data).unwrap(),
+            JValue::Bool(true)
+        );
 
         // And - first false
         let expr = AstNode::Binary {
@@ -7301,7 +7854,10 @@ mod tests {
             lhs: Box::new(AstNode::boolean(false)),
             rhs: Box::new(AstNode::boolean(true)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(false));
+        assert_eq!(
+            evaluator.evaluate(&expr, &data).unwrap(),
+            JValue::Bool(false)
+        );
 
         // Or - first true
         let expr = AstNode::Binary {
@@ -7309,7 +7865,10 @@ mod tests {
             lhs: Box::new(AstNode::boolean(true)),
             rhs: Box::new(AstNode::boolean(false)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            evaluator.evaluate(&expr, &data).unwrap(),
+            JValue::Bool(true)
+        );
 
         // Or - both false
         let expr = AstNode::Binary {
@@ -7317,7 +7876,10 @@ mod tests {
             lhs: Box::new(AstNode::boolean(false)),
             rhs: Box::new(AstNode::boolean(false)),
         };
-        assert_eq!(evaluator.evaluate(&expr, &data).unwrap(), JValue::Bool(false));
+        assert_eq!(
+            evaluator.evaluate(&expr, &data).unwrap(),
+            JValue::Bool(false)
+        );
     }
 
     #[test]
@@ -7348,7 +7910,13 @@ mod tests {
         let result = evaluator.evaluate(&expr, &data).unwrap();
         assert_eq!(
             result,
-            JValue::array(vec![JValue::Number(1.0), JValue::Number(2.0), JValue::Number(3.0), JValue::Number(4.0), JValue::Number(5.0)])
+            JValue::array(vec![
+                JValue::Number(1.0),
+                JValue::Number(2.0),
+                JValue::Number(3.0),
+                JValue::Number(4.0),
+                JValue::Number(5.0)
+            ])
         );
 
         // Backward range (start > end) returns empty array
@@ -7358,10 +7926,7 @@ mod tests {
             rhs: Box::new(AstNode::number(1.0)),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(
-            result,
-            JValue::array(vec![])
-        );
+        assert_eq!(result, JValue::array(vec![]));
     }
 
     #[test]
@@ -7686,23 +8251,41 @@ mod tests {
         use crate::parser::parse;
 
         let mut evaluator = Evaluator::new();
-        let data: JValue = serde_json::from_str(r#"{
+        let data: JValue = serde_json::from_str(
+            r#"{
             "products": [
                 {"id": 1, "name": "Laptop", "price": 999.99},
                 {"id": 2, "name": "Mouse", "price": 29.99},
                 {"id": 3, "name": "Keyboard", "price": 79.99}
             ]
-        }"#).map(|v: serde_json::Value| JValue::from(v)).unwrap();
+        }"#,
+        )
+        .map(|v: serde_json::Value| JValue::from(v))
+        .unwrap();
 
         // Test mapping over array to extract field
         let ast = parse("products.name").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, JValue::array(vec![JValue::string("Laptop"), JValue::string("Mouse"), JValue::string("Keyboard")]));
+        assert_eq!(
+            result,
+            JValue::array(vec![
+                JValue::string("Laptop"),
+                JValue::string("Mouse"),
+                JValue::string("Keyboard")
+            ])
+        );
 
         // Test mapping over array to extract prices
         let ast = parse("products.price").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, JValue::array(vec![JValue::Number(999.99), JValue::Number(29.99), JValue::Number(79.99)]));
+        assert_eq!(
+            result,
+            JValue::array(vec![
+                JValue::Number(999.99),
+                JValue::Number(29.99),
+                JValue::Number(79.99)
+            ])
+        );
 
         // Test with $sum function on mapped array
         let ast = parse("$sum(products.price)").unwrap();
@@ -7720,12 +8303,24 @@ mod tests {
         let data: JValue = JValue::from(serde_json::json!({"foo": "bar"}));
         let ast = parse("foo[]").unwrap();
         let result = evaluator.evaluate(&ast, &data).unwrap();
-        assert_eq!(result, JValue::array(vec![JValue::string("bar")]), "Empty brackets should wrap value in array");
+        assert_eq!(
+            result,
+            JValue::array(vec![JValue::string("bar")]),
+            "Empty brackets should wrap value in array"
+        );
 
         // Test empty brackets on array - should return array as-is
         let data2: JValue = JValue::from(serde_json::json!({"arr": [1, 2, 3]}));
         let ast2 = parse("arr[]").unwrap();
         let result2 = evaluator.evaluate(&ast2, &data2).unwrap();
-        assert_eq!(result2, JValue::array(vec![JValue::Number(1.0), JValue::Number(2.0), JValue::Number(3.0)]), "Empty brackets should preserve array");
+        assert_eq!(
+            result2,
+            JValue::array(vec![
+                JValue::Number(1.0),
+                JValue::Number(2.0),
+                JValue::Number(3.0)
+            ]),
+            "Empty brackets should preserve array"
+        );
     }
 }

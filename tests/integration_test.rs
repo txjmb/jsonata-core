@@ -3,7 +3,11 @@
 // These tests verify that the parser and evaluator work together correctly
 // to process complete JSONata expressions.
 
-use jsonatapy::{parser::parse, evaluator::{Evaluator, Context}, value::JValue};
+use jsonatapy::{
+    evaluator::{Context, Evaluator},
+    parser::parse,
+    value::JValue,
+};
 use serde_json::json;
 
 #[test]
@@ -11,7 +15,8 @@ fn test_simple_field_access() {
     let data: JValue = json!({
         "name": "Alice",
         "age": 30
-    }).into();
+    })
+    .into();
 
     let ast = parse("name").unwrap();
     let mut evaluator = Evaluator::new();
@@ -28,7 +33,8 @@ fn test_nested_field_access() {
                 "name": "Bob"
             }
         }
-    }).into();
+    })
+    .into();
 
     let ast = parse("user.profile.name").unwrap();
     let mut evaluator = Evaluator::new();
@@ -42,7 +48,8 @@ fn test_arithmetic_expression() {
     let data: JValue = json!({
         "price": 100,
         "quantity": 5
-    }).into();
+    })
+    .into();
 
     // Test basic multiplication - arithmetic produces f64 results
     let ast = parse("price * quantity").unwrap();
@@ -62,7 +69,8 @@ fn test_comparison_expression() {
     let data: JValue = json!({
         "age": 25,
         "threshold": 18
-    }).into();
+    })
+    .into();
 
     let ast = parse("age > threshold").unwrap();
     let mut evaluator = Evaluator::new();
@@ -76,7 +84,8 @@ fn test_logical_expression() {
     let data: JValue = json!({
         "age": 25,
         "has_license": true
-    }).into();
+    })
+    .into();
 
     let ast = parse("age >= 18 and has_license").unwrap();
     let mut evaluator = Evaluator::new();
@@ -90,7 +99,8 @@ fn test_string_concatenation() {
     let data: JValue = json!({
         "first": "Hello",
         "second": "World"
-    }).into();
+    })
+    .into();
 
     let ast = parse(r#"first & " " & second"#).unwrap();
     let mut evaluator = Evaluator::new();
@@ -103,7 +113,8 @@ fn test_string_concatenation() {
 fn test_function_call() {
     let data: JValue = json!({
         "name": "alice"
-    }).into();
+    })
+    .into();
 
     // Built-in functions require the $ prefix in JSONata
     let ast = parse("$uppercase(name)").unwrap();
@@ -117,7 +128,8 @@ fn test_function_call() {
 fn test_nested_function_calls() {
     let data: JValue = json!({
         "text": "HELLO"
-    }).into();
+    })
+    .into();
 
     // Built-in functions require the $ prefix in JSONata
     let ast = parse("$length($lowercase(text))").unwrap();
@@ -131,7 +143,8 @@ fn test_nested_function_calls() {
 fn test_conditional_expression() {
     let data: JValue = json!({
         "score": 85
-    }).into();
+    })
+    .into();
 
     let ast = parse(r#"score >= 80 ? "Pass" : "Fail""#).unwrap();
     let mut evaluator = Evaluator::new();
@@ -146,7 +159,8 @@ fn test_array_literal() {
         "a": 1,
         "b": 2,
         "c": 3
-    }).into();
+    })
+    .into();
 
     let ast = parse("[a, b, c]").unwrap();
     let mut evaluator = Evaluator::new();
@@ -160,7 +174,8 @@ fn test_object_literal() {
     let data: JValue = json!({
         "x": 10,
         "y": 20
-    }).into();
+    })
+    .into();
 
     let ast = parse(r#"{"sum": x + y, "product": x * y}"#).unwrap();
     let mut evaluator = Evaluator::new();
@@ -186,7 +201,8 @@ fn test_in_operator() {
     let data: JValue = json!({
         "value": 3,
         "list": [1, 2, 3, 4, 5]
-    }).into();
+    })
+    .into();
 
     let ast = parse("value in list").unwrap();
     let mut evaluator = Evaluator::new();
@@ -210,7 +226,8 @@ fn test_complex_real_world_example() {
             },
             "discount_rate": 0.1
         }
-    }).into();
+    })
+    .into();
 
     // Access nested fields
     let ast = parse("order.customer.name").unwrap();
@@ -229,7 +246,8 @@ fn test_complex_real_world_example() {
 fn test_missing_field_returns_null() {
     let data: JValue = json!({
         "name": "Alice"
-    }).into();
+    })
+    .into();
 
     let ast = parse("missing_field").unwrap();
     let mut evaluator = Evaluator::new();
@@ -250,7 +268,8 @@ fn test_deep_nesting() {
                 }
             }
         }
-    }).into();
+    })
+    .into();
 
     let ast = parse("a.b.c.d.e").unwrap();
     let mut evaluator = Evaluator::new();
@@ -265,7 +284,8 @@ fn test_multiple_operations() {
         "x": 10,
         "y": 20,
         "z": 30
-    }).into();
+    })
+    .into();
 
     let ast = parse("(x + y) * z / 2").unwrap();
     let mut evaluator = Evaluator::new();
@@ -278,7 +298,8 @@ fn test_multiple_operations() {
 fn test_sum_function() {
     let data: JValue = json!({
         "numbers": [1, 2, 3, 4, 5]
-    }).into();
+    })
+    .into();
 
     // Built-in functions require the $ prefix in JSONata
     let ast = parse("$sum(numbers)").unwrap();
@@ -292,7 +313,8 @@ fn test_sum_function() {
 fn test_count_function() {
     let data: JValue = json!({
         "items": [1, 2, 3, 4, 5]
-    }).into();
+    })
+    .into();
 
     // Built-in functions require the $ prefix in JSONata
     let ast = parse("$count(items)").unwrap();
@@ -306,9 +328,11 @@ fn test_count_function() {
 fn test_nested_conditionals() {
     let data: JValue = json!({
         "score": 75
-    }).into();
+    })
+    .into();
 
-    let ast = parse(r#"score >= 90 ? "A" : (score >= 80 ? "B" : (score >= 70 ? "C" : "F"))"#).unwrap();
+    let ast =
+        parse(r#"score >= 90 ? "A" : (score >= 80 ? "B" : (score >= 70 ? "C" : "F"))"#).unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
@@ -331,7 +355,8 @@ fn test_block_expression() {
 fn test_unary_negation() {
     let data: JValue = json!({
         "value": 42
-    }).into();
+    })
+    .into();
 
     let ast = parse("-value").unwrap();
     let mut evaluator = Evaluator::new();
@@ -345,7 +370,8 @@ fn test_modulo_operator() {
     let data: JValue = json!({
         "dividend": 17,
         "divisor": 5
-    }).into();
+    })
+    .into();
 
     let ast = parse("dividend % divisor").unwrap();
     let mut evaluator = Evaluator::new();
@@ -359,7 +385,8 @@ fn test_comparison_operators() {
     let data: JValue = json!({
         "a": 10,
         "b": 20
-    }).into();
+    })
+    .into();
 
     // Less than
     let ast = parse("a < b").unwrap();
@@ -397,7 +424,8 @@ fn test_string_comparison() {
     let data: JValue = json!({
         "name1": "Alice",
         "name2": "Bob"
-    }).into();
+    })
+    .into();
 
     let ast = parse("name1 < name2").unwrap();
     let mut evaluator = Evaluator::new();
@@ -445,7 +473,8 @@ fn test_error_type_mismatch() {
     let data: JValue = json!({
         "text": "hello",
         "number": 42
-    }).into();
+    })
+    .into();
 
     let ast = parse("text + number").unwrap();
     let mut evaluator = Evaluator::new();
@@ -458,7 +487,8 @@ fn test_error_type_mismatch() {
 fn test_error_division_by_zero() {
     let data: JValue = json!({
         "value": 10
-    }).into();
+    })
+    .into();
 
     let ast = parse("value / 0").unwrap();
     let mut evaluator = Evaluator::new();
@@ -471,7 +501,8 @@ fn test_error_division_by_zero() {
 fn test_with_variables() {
     let data: JValue = json!({
         "price": 100
-    }).into();
+    })
+    .into();
 
     let ast = parse("price * $discount").unwrap();
 
