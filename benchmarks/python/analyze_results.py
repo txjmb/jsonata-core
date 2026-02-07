@@ -8,14 +8,13 @@ Usage:
 If no file is provided, analyzes the most recent results file.
 """
 
+import glob
 import json
 import sys
 from pathlib import Path
-from typing import List, Dict
-import glob
 
 
-def load_results(filepath: str = None) -> Dict:
+def load_results(filepath: str | None = None) -> dict:
     """Load benchmark results from JSON file."""
     results_dir = Path(__file__).parent.parent / "results"
 
@@ -36,7 +35,7 @@ def load_results(filepath: str = None) -> Dict:
         return json.load(f)
 
 
-def print_summary(data: Dict):
+def print_summary(data: dict):
     """Print summary statistics."""
     results = data["results"]
     implementations = data["implementations"]
@@ -45,7 +44,7 @@ def print_summary(data: Dict):
     print("BENCHMARK RESULTS SUMMARY")
     print("="*80)
     print(f"Timestamp: {data['timestamp']}")
-    print(f"\nImplementations tested:")
+    print("\nImplementations tested:")
     for impl, available in implementations.items():
         status = "✓" if available else "✗"
         print(f"  {status} {impl}")
@@ -90,7 +89,7 @@ def print_summary(data: Dict):
             print(f"{cat:30} avg: {avg:6.2f}x  [min: {min_s:6.2f}x, max: {max_s:6.2f}x]")
 
 
-def print_top_performers(data: Dict, top_n: int = 5):
+def print_top_performers(data: dict, top_n: int = 5):
     """Print top and bottom performers."""
     results = data["results"]
 

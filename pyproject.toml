@@ -61,8 +61,8 @@ python-source = "python"
 module-name = "jsonatapy._jsonatapy"
 features = ["pyo3/extension-module"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-xdist>=3.0",

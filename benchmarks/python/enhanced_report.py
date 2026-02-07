@@ -13,14 +13,11 @@ Generates comprehensive reports with:
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
-from dataclasses import dataclass
 
 try:
+    from rich import box
     from rich.console import Console
     from rich.table import Table
-    from rich.panel import Panel
-    from rich import box
     RICH_AVAILABLE = True
 except ImportError:
     print("⚠ rich not available - install with: pip install rich")
@@ -198,7 +195,7 @@ class EnhancedReport:
 
         # Create comparison chart for each category
         for category, results in categories.items():
-            fig, ax = plt.subplots(figsize=(12, 6))
+            _fig, ax = plt.subplots(figsize=(12, 6))
 
             names = [r.get("name", "")[:30] for r in results]
             x = np.arange(len(names))
@@ -238,7 +235,7 @@ class EnhancedReport:
 
     def _create_speedup_chart(self, output_path: Path):
         """Create overall speedup comparison chart."""
-        fig, ax = plt.subplots(figsize=(14, 8))
+        _fig, ax = plt.subplots(figsize=(14, 8))
 
         names = [r.get("name", "")[:40] for r in self.results if r.get("jsonatapy_speedup")]
         speedups = [r.get("jsonatapy_speedup", 0) for r in self.results if r.get("jsonatapy_speedup")]

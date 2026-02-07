@@ -10,9 +10,9 @@ Example:
 """
 
 import json
+import subprocess
 import sys
 import time
-import subprocess
 from pathlib import Path
 
 try:
@@ -112,24 +112,24 @@ def main():
         jsonatapy_time, result = run_jsonatapy(expression, data, iterations)
 
         if jsonatapy_time > 0:
-            print(f"\n✓ jsonatapy")
+            print("\n✓ jsonatapy")
             print(f"  Total time:     {jsonatapy_time:8.2f} ms")
             print(f"  Per iteration:  {jsonatapy_time/iterations:8.6f} ms")
             print(f"  Result:         {json.dumps(result)}")
         else:
-            print(f"\n✗ jsonatapy FAILED")
+            print("\n✗ jsonatapy FAILED")
     else:
-        print(f"\n✗ jsonatapy NOT AVAILABLE")
+        print("\n✗ jsonatapy NOT AVAILABLE")
 
     # Run JavaScript
     js_time, _ = run_javascript(expression, data, iterations)
 
     if js_time > 0:
-        print(f"\n✓ JavaScript")
+        print("\n✓ JavaScript")
         print(f"  Total time:     {js_time:8.2f} ms")
         print(f"  Per iteration:  {js_time/iterations:8.6f} ms")
     else:
-        print(f"\n✗ JavaScript FAILED or NOT AVAILABLE")
+        print("\n✗ JavaScript FAILED or NOT AVAILABLE")
 
     # Compare
     if jsonatapy_time > 0 and js_time > 0:

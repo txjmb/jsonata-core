@@ -18,16 +18,15 @@ Includes test categories:
 - Realistic workload (e-commerce product catalog)
 """
 
-import json
-import time
-import subprocess
-import sys
-import tracemalloc
 import gc
-from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional
-from dataclasses import dataclass, asdict
+import json
+import subprocess
+import time
+import tracemalloc
+from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 # Try to import all available implementations
 try:
@@ -52,25 +51,25 @@ class BenchmarkResult:
     expression: str
     data_size: str
     iterations: int
-    jsonatapy_ms: Optional[float] = None
-    js_ms: Optional[float] = None
-    jsonata_python_ms: Optional[float] = None
-    jsonata_rs_ms: Optional[float] = None
-    jsonatapy_speedup: Optional[float] = None
-    jsonata_python_speedup: Optional[float] = None
-    jsonata_rs_speedup: Optional[float] = None
-    jsonatapy_memory_mb: Optional[float] = None
-    js_memory_mb: Optional[float] = None
-    jsonata_python_memory_mb: Optional[float] = None
-    jsonata_rs_memory_mb: Optional[float] = None
-    error: Optional[str] = None
+    jsonatapy_ms: float | None = None
+    js_ms: float | None = None
+    jsonata_python_ms: float | None = None
+    jsonata_rs_ms: float | None = None
+    jsonatapy_speedup: float | None = None
+    jsonata_python_speedup: float | None = None
+    jsonata_rs_speedup: float | None = None
+    jsonatapy_memory_mb: float | None = None
+    js_memory_mb: float | None = None
+    jsonata_python_memory_mb: float | None = None
+    jsonata_rs_memory_mb: float | None = None
+    error: str | None = None
 
 
 class BenchmarkSuite:
     """Run comprehensive performance benchmarks across multiple implementations."""
 
     def __init__(self, output_json: bool = True, output_graphs: bool = True):
-        self.results: List[BenchmarkResult] = []
+        self.results: list[BenchmarkResult] = []
         self.node_available = self._check_node()
         self.jsonata_rs_available = self._check_jsonata_rs()
         self.output_json = output_json
@@ -123,7 +122,7 @@ class BenchmarkSuite:
         binary_path = bench_dir / "target" / "release" / "jsonata-rs-bench"
 
         if binary_path.exists():
-            print(f"✓ jsonata-rs benchmark binary found")
+            print("✓ jsonata-rs benchmark binary found")
             return True
         else:
             print(f"⚠ jsonata-rs binary not found at {binary_path}")
@@ -274,17 +273,17 @@ class BenchmarkSuite:
         for _ in range(iterations):
             func()
 
-        current, peak = tracemalloc.get_traced_memory()
+        _current, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
         return peak / (1024 * 1024)  # Convert to MB
 
-    def _measure_memory_subprocess(self, cmd: List[str], input_data: str = None) -> float:
+    def _measure_memory_subprocess(self, cmd: list[str], input_data: str | None = None) -> float:
         """Measure peak memory usage of a subprocess (for JS and Rust)."""
         try:
             # Use /usr/bin/time if available (Linux)
             result = subprocess.run(
-                ["/usr/bin/time", "-v"] + cmd,
+                ["/usr/bin/time", "-v", *cmd],
                 input=input_data,
                 capture_output=True,
                 text=True,
@@ -339,10 +338,10 @@ class BenchmarkSuite:
                     print(f"jsonatapy:       {jsonatapy_time:8.2f} ms ({jsonatapy_time/iterations:8.4f} ms/iter)")
             else:
                 if verbose:
-                    print(f"jsonatapy:       FAILED")
+                    print("jsonatapy:       FAILED")
         else:
             if verbose:
-                print(f"jsonatapy:       NOT AVAILABLE")
+                print("jsonatapy:       NOT AVAILABLE")
 
         # Run JavaScript benchmark
         js_time = self._run_js_benchmark(expression, data, iterations)
@@ -361,7 +360,7 @@ class BenchmarkSuite:
                         print(f"  → jsonatapy is {1/result.jsonatapy_speedup:6.2f}x slower than JS")
         else:
             if verbose:
-                print(f"JavaScript:      SKIPPED")
+                print("JavaScript:      SKIPPED")
 
         # Run jsonata-python benchmark
         if JSONATA_PYTHON_AVAILABLE:
@@ -381,10 +380,10 @@ class BenchmarkSuite:
                             print(f"  → jsonata-python is {1/result.jsonata_python_speedup:6.2f}x slower than JS")
             else:
                 if verbose:
-                    print(f"jsonata-python:  FAILED")
+                    print("jsonata-python:  FAILED")
         else:
             if verbose:
-                print(f"jsonata-python:  NOT AVAILABLE")
+                print("jsonata-python:  NOT AVAILABLE")
 
         # Run jsonata-rs benchmark
         if self.jsonata_rs_available:
@@ -404,10 +403,10 @@ class BenchmarkSuite:
                             print(f"  → jsonata-rs is {1/result.jsonata_rs_speedup:6.2f}x slower than JS")
             else:
                 if verbose:
-                    print(f"jsonata-rs:      FAILED")
+                    print("jsonata-rs:      FAILED")
         else:
             if verbose:
-                print(f"jsonata-rs:      NOT AVAILABLE")
+                print("jsonata-rs:      NOT AVAILABLE")
 
         self.results.append(result)
 
@@ -448,8 +447,8 @@ class BenchmarkSuite:
         print("OVERALL STATISTICS")
         print("="*100)
 
-        jsonatapy_times = [r.jsonatapy_ms for r in self.results if r.jsonatapy_ms]
-        js_times = [r.js_ms for r in self.results if r.js_ms]
+        [r.jsonatapy_ms for r in self.results if r.jsonatapy_ms]
+        [r.js_ms for r in self.results if r.js_ms]
         speedups = [r.jsonatapy_speedup for r in self.results if r.jsonatapy_speedup]
 
         if speedups:
@@ -544,7 +543,7 @@ class BenchmarkSuite:
 
             console.print(stats_table)
 
-    def save_results(self, filename: Optional[str] = None):
+    def save_results(self, filename: str | None = None):
         """Save results to JSON file."""
         if not self.output_json:
             return
@@ -595,7 +594,7 @@ class BenchmarkSuite:
         output_dir.mkdir(exist_ok=True)
 
         # 1. Speedup comparison chart
-        fig, ax = plt.subplots(figsize=(14, 8))
+        _fig, ax = plt.subplots(figsize=(14, 8))
 
         test_names = []
         speedups = []
@@ -626,7 +625,7 @@ class BenchmarkSuite:
         print(f"✓ Speedup graph saved to {speedup_path}")
 
         # 2. Category-wise comparison
-        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        _fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         axes = axes.flatten()
 
         for idx, (category, results) in enumerate(list(categories.items())[:4]):
@@ -666,7 +665,7 @@ class BenchmarkSuite:
 
         # 3. Overall statistics pie chart
         if speedups:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+            _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
             # Pie chart: faster vs slower
             faster_count = sum(1 for s in speedups if s > 1)
@@ -796,7 +795,7 @@ def main():
     print("="*70)
     print("JSONata Comprehensive Benchmark Suite")
     print("="*70)
-    print(f"\nAvailable implementations:")
+    print("\nAvailable implementations:")
     suite_check = BenchmarkSuite(output_json=False, output_graphs=False)
     print(f"  - jsonatapy (Rust/PyO3): {'✓' if JSONATAPY_AVAILABLE else '✗'}")
     print(f"  - JavaScript (Node.js): {'✓' if suite_check.node_available else '✗'}")

@@ -15,6 +15,7 @@ Cargo.lock
 **/*.rs.bk
 target/criterion/
 benchmarks/rust/target/
+benchmarks/target/
 
 # Python
 __pycache__/
