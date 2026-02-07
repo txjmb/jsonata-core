@@ -169,7 +169,7 @@ jobs:
         if: always()
         run: |
           if [ -f pip-audit.json ]; then
-            VULN_COUNT=$(jq '. | length' pip-audit.json 2>/dev/null || echo "0")
+            VULN_COUNT=$(jq '[.dependencies[] | select((.vulns | length) > 0)] | length' pip-audit.json 2>/dev/null || echo "0")
             echo "Found $VULN_COUNT vulnerabilities"
 
             if [ "$VULN_COUNT" -gt "0" ]; then
