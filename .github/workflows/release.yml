@@ -223,6 +223,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Download wheels
         uses: actions/download-artifact@v4
         with:
@@ -233,11 +236,11 @@ jobs:
       - name: Install wheel
         shell: bash
         run: |
-          pip install --find-links dist jsonatapy
+          uv pip install --system --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install test dependencies
-        run: pip install pytest pytest-xdist
+        run: uv pip install --system pytest pytest-xdist
 
       - name: Run tests
         run: |

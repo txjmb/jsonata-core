@@ -102,8 +102,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Install Ruff
-        run: pip install ruff
+        run: uv pip install --system ruff
 
       - name: Check Python formatting
         run: |
@@ -163,9 +166,12 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Install dependencies
         run: |
-          pip install mypy
+          uv pip install --system mypy
 
       - name: Run mypy
         continue-on-error: true
@@ -254,8 +260,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Install codespell
-        run: pip install codespell
+        run: uv pip install --system codespell
 
       - name: Run spell check
         continue-on-error: true

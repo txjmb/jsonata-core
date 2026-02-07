@@ -154,12 +154,15 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Install pip-audit
-        run: pip install pip-audit
+        run: uv pip install --system pip-audit
 
       - name: Install dependencies
         run: |
-          pip install -e ".[dev]" || pip install pytest black ruff mypy
+          uv pip install --system -e ".[dev]" || uv pip install --system pytest ruff mypy
 
       - name: Run pip-audit
         id: pip_audit
