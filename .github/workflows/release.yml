@@ -285,39 +285,37 @@ jobs:
             COMMITS=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
           fi
 
-          CHANGELOG="## Release $VERSION
+          cat > changelog.md <<EOF
+          ## Release $VERSION
 
-**JSONata Version:** ${{ needs.validate-version.outputs.jsonata_version }}
-**Patch Version:** ${{ needs.validate-version.outputs.patch_version }}
+          **JSONata Version:** ${{ needs.validate-version.outputs.jsonata_version }}
+          **Patch Version:** ${{ needs.validate-version.outputs.patch_version }}
 
-### Changes
+          ### Changes
 
-$COMMITS
+          $COMMITS
 
-### Test Suite Compatibility
-- 1258/1258 reference tests passing (100%)
+          ### Test Suite Compatibility
+          - 1258/1258 reference tests passing (100%)
 
-### Installation
+          ### Installation
 
-\`\`\`bash
-pip install jsonatapy==${{ needs.validate-version.outputs.version }}
-\`\`\`
+          \`\`\`bash
+          pip install jsonatapy==${{ needs.validate-version.outputs.version }}
+          \`\`\`
 
-### Verification
+          ### Verification
 
-\`\`\`python
-import jsonatapy
-print(jsonatapy.__version__)  # Should print: ${{ needs.validate-version.outputs.version }}
-\`\`\`
-"
-
-          # Save to file for GitHub release
-          echo "$CHANGELOG" > changelog.md
+          \`\`\`python
+          import jsonatapy
+          print(jsonatapy.__version__)  # Should print: ${{ needs.validate-version.outputs.version }}
+          \`\`\`
+          EOF
 
           # Save to output (escaped)
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "changelog<<CHANGELOG_EOF" >> $GITHUB_OUTPUT
+          cat changelog.md >> $GITHUB_OUTPUT
+          echo "CHANGELOG_EOF" >> $GITHUB_OUTPUT
 
       - name: Upload changelog
         uses: actions/upload-artifact@v4
