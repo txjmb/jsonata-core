@@ -1617,13 +1617,13 @@ impl Parser {
                 let then_is_tail = Self::is_tail_call(then_branch);
                 let else_is_tail = else_branch
                     .as_ref()
-                    .map_or(false, |e| Self::is_tail_call(e));
+                    .is_some_and(|e| Self::is_tail_call(e));
                 // At least one branch should be a tail call for TCO to be useful
                 then_is_tail || else_is_tail
             }
 
             // Block: last expression is tail position
-            AstNode::Block(exprs) => exprs.last().map_or(false, |last| Self::is_tail_call(last)),
+            AstNode::Block(exprs) => exprs.last().is_some_and(Self::is_tail_call),
 
             // Variable binding with result: the result expression is tail position
             AstNode::Binary {

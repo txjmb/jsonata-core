@@ -1567,7 +1567,7 @@ pub mod numeric {
         let radix = radix.unwrap_or(10);
 
         // Validate radix is between 2 and 36
-        if radix < 2 || radix > 36 {
+        if !(2..=36).contains(&radix) {
             return Err(FunctionError::ArgumentError(format!(
                 "D3100: Radix must be between 2 and 36, got {}",
                 radix
@@ -1576,7 +1576,7 @@ pub mod numeric {
 
         // Handle negative numbers
         let is_negative = int_value < 0;
-        let abs_value = int_value.abs() as u64;
+        let abs_value = int_value.unsigned_abs();
 
         // Convert to string in specified base
         let digits = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -1700,7 +1700,7 @@ pub mod array {
             (JValue::Object(a), JValue::Object(b)) => {
                 a.len() == b.len()
                     && a.iter()
-                        .all(|(k, v)| b.get(k).map_or(false, |v2| values_equal(v, v2)))
+                        .all(|(k, v)| b.get(k).is_some_and(|v2| values_equal(v, v2)))
             }
             _ => false,
         }

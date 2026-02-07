@@ -1,4 +1,3 @@
-
 import jsonatapy
 
 print("=" * 70)

@@ -3,7 +3,6 @@ Integration tests for jsonatapy - testing the full Python → Rust → Python fl
 These tests will work once the extension is built with maturin.
 """
 
-
 import pytest
 
 # These tests require the compiled extension

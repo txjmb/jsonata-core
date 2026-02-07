@@ -535,7 +535,7 @@ impl Evaluator {
     /// with a valid lambda_id that references a stored lambda.
     fn lookup_lambda_from_value(&self, value: &JValue) -> Option<StoredLambda> {
         if let JValue::Lambda { lambda_id, .. } = value {
-            return self.context.lookup_lambda(&**lambda_id).cloned();
+            return self.context.lookup_lambda(lambda_id).cloned();
         }
         None
     }
@@ -1203,7 +1203,7 @@ impl Evaluator {
                     };
 
                     // Store with a generated unique name
-                    let lambda_name = format!("__transform_{:p}", &*location);
+                    let lambda_name = format!("__transform_{:p}", location);
                     self.context.bind_lambda(lambda_name, transform_lambda);
 
                     // Return lambda marker
@@ -1346,13 +1346,13 @@ impl Evaluator {
                             arr.iter().any(|item| matches!(item, JValue::Array(_)));
 
                         if !is_array_of_arrays {
-                            let pred_result = JValue::Number(n_val as f64);
+                            let pred_result = JValue::Number(n_val);
                             return self.array_index(current, &pred_result);
                         }
 
                         // Array of arrays: map index access
                         let mut result = Vec::new();
-                        let pred_result = JValue::Number(n_val as f64);
+                        let pred_result = JValue::Number(n_val);
                         for item in arr.iter() {
                             match item {
                                 JValue::Array(_) => {
@@ -1759,7 +1759,7 @@ impl Evaluator {
             // Check if current is a tuple array - if so, we need to bind tuple variables
             // to context so they're available in nested expressions (like predicates)
             let is_tuple_array = if let JValue::Array(arr) = &current {
-                arr.first().map_or(false, |first| {
+                arr.first().is_some_and(|first| {
                     if let JValue::Object(obj) = first {
                         obj.get("__tuple__") == Some(&JValue::Bool(true))
                     } else {
@@ -2299,7 +2299,7 @@ impl Evaluator {
             if matches!(step, AstNode::Variable(_)) {
                 if let JValue::Array(arr) = current {
                     // Check if this is a tuple array
-                    let is_tuple_array = arr.first().map_or(false, |first| {
+                    let is_tuple_array = arr.first().is_some_and(|first| {
                         if let JValue::Object(obj) = first {
                             obj.get("__tuple__") == Some(&JValue::Bool(true))
                         } else {
@@ -3168,11 +3168,10 @@ impl Evaluator {
                             }
                         }
 
-                        if failed_due_to_missing_field {
-                            if propagates_undefined(name) {
+                        if failed_due_to_missing_field
+                            && propagates_undefined(name) {
                                 return Ok(JValue::Null);
                             }
-                        }
                     }
                 }
             }
@@ -3210,12 +3209,11 @@ impl Evaluator {
 
         // Special handling for $string() with no explicit arguments
         // After context insertion, check if the argument is null (undefined context)
-        if name == "string" && args.is_empty() && !evaluated_args.is_empty() {
-            if matches!(evaluated_args[0], JValue::Null) {
+        if name == "string" && args.is_empty() && !evaluated_args.is_empty()
+            && matches!(evaluated_args[0], JValue::Null) {
                 // Context was null/undefined, so return undefined
                 return Ok(JValue::Null);
             }
-        }
 
         match name {
             "string" => {
@@ -3429,7 +3427,7 @@ impl Evaluator {
                     _ => Rc::from(" "),
                 };
 
-                let abs_width = width.abs() as usize;
+                let abs_width = width.unsigned_abs() as usize;
                 // Count Unicode characters (code points), not bytes
                 let char_count = string.chars().count();
 
@@ -3727,7 +3725,7 @@ impl Evaluator {
 
                 // Check if second argument is a custom matcher function (lambda)
                 let pattern_value = evaluated_args.get(1);
-                let is_custom_matcher = pattern_value.map_or(false, |val| {
+                let is_custom_matcher = pattern_value.is_some_and(|val| {
                     matches!(val, JValue::Lambda { .. } | JValue::Builtin { .. })
                 });
 
@@ -3921,7 +3919,7 @@ impl Evaluator {
                 }
             }
             "round" => {
-                if evaluated_args.len() < 1 || evaluated_args.len() > 2 {
+                if evaluated_args.is_empty() || evaluated_args.len() > 2 {
                     return Err(EvaluatorError::EvaluationError(
                         "round() requires 1 or 2 arguments".to_string(),
                     ));
@@ -4157,7 +4155,7 @@ impl Evaluator {
                     // $sift(function) - use current context data as object
                     match data {
                         JValue::Object(o) => {
-                            return sift_object(self, o, &args[0], data, param_count);
+                            sift_object(self, o, &args[0], data, param_count)
                         }
                         JValue::Array(arr) => {
                             // Map sift over each object in the array
@@ -4171,20 +4169,20 @@ impl Evaluator {
                                     }
                                 }
                             }
-                            return Ok(JValue::array(results));
+                            Ok(JValue::array(results))
                         }
-                        JValue::Null => return Ok(JValue::Null),
-                        _ => return Ok(JValue::Undefined),
+                        JValue::Null => Ok(JValue::Null),
+                        _ => Ok(JValue::Undefined),
                     }
                 } else {
                     // $sift(object, function)
                     match &evaluated_args[0] {
                         JValue::Object(o) => {
-                            return sift_object(self, o, &args[1], data, param_count);
+                            sift_object(self, o, &args[1], data, param_count)
                         }
-                        JValue::Null => return Ok(JValue::Null),
+                        JValue::Null => Ok(JValue::Null),
                         _ => {
-                            return Err(EvaluatorError::TypeError(
+                            Err(EvaluatorError::TypeError(
                                 "sift() first argument must be an object".to_string(),
                             ))
                         }
@@ -4925,13 +4923,13 @@ impl Evaluator {
 
                 match &evaluated_args[0] {
                     JValue::String(s) => {
-                        return Err(EvaluatorError::EvaluationError(format!("D3137: {}", s)));
+                        Err(EvaluatorError::EvaluationError(format!("D3137: {}", s)))
                     }
                     _ => {
-                        return Err(EvaluatorError::TypeError(
+                        Err(EvaluatorError::TypeError(
                             "T0410: Argument 1 of function error does not match function signature"
                                 .to_string(),
-                        ));
+                        ))
                     }
                 }
             }
@@ -5155,9 +5153,9 @@ impl Evaluator {
                     if let Some(stored) = self.lookup_lambda_from_value(&partial_lambda) {
                         return self.invoke_stored_lambda(&stored, values, data);
                     }
-                    return Err(EvaluatorError::EvaluationError(
+                    Err(EvaluatorError::EvaluationError(
                         "Failed to apply partial application".to_string(),
-                    ));
+                    ))
                 } else {
                     // Regular function call without placeholders
                     // Evaluate it and apply if it returns a function
@@ -5779,7 +5777,7 @@ impl Evaluator {
 
                 // Check if it's a lambda with TCO
                 if let JValue::Lambda { lambda_id, .. } = &callable {
-                    if let Some(stored_lambda) = self.context.lookup_lambda(&**lambda_id).cloned() {
+                    if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
                         if stored_lambda.thunk {
                             let mut evaluated_args = Vec::with_capacity(args.len());
                             for arg in args {
@@ -5996,7 +5994,7 @@ impl Evaluator {
 
             // Invoke lambda with match object
             let stored_lambda = self
-                .lookup_lambda_from_value(&lambda_value)
+                .lookup_lambda_from_value(lambda_value)
                 .ok_or_else(|| {
                     EvaluatorError::TypeError("Replacement must be a lambda function".to_string())
                 })?;
@@ -6344,7 +6342,7 @@ impl Evaluator {
                 match arg {
                     JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
                     JValue::Null => Ok(JValue::Number(0 as f64)),
-                    _ => Ok(JValue::Number(1 as f64)), // Single value counts as 1
+                    _ => Ok(JValue::Number(1_f64)), // Single value counts as 1
                 }
             }
             "max" => match arg {
@@ -6352,11 +6350,11 @@ impl Evaluator {
                     let mut max_val: Option<f64> = None;
                     for item in arr.iter() {
                         if let JValue::Number(n) = item {
-                            let f = Some(*n).unwrap_or(f64::NEG_INFINITY);
+                            let f = *n;
                             max_val = Some(max_val.map_or(f, |m| m.max(f)));
                         }
                     }
-                    max_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m as f64)))
+                    max_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m)))
                 }
                 JValue::Number(n) => Ok(JValue::Number(*n)),
                 JValue::Null => Ok(JValue::Null),
@@ -6369,11 +6367,11 @@ impl Evaluator {
                     let mut min_val: Option<f64> = None;
                     for item in arr.iter() {
                         if let JValue::Number(n) = item {
-                            let f = Some(*n).unwrap_or(f64::INFINITY);
+                            let f = *n;
                             min_val = Some(min_val.map_or(f, |m| m.min(f)));
                         }
                     }
-                    min_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m as f64)))
+                    min_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m)))
                 }
                 JValue::Number(n) => Ok(JValue::Number(*n)),
                 JValue::Null => Ok(JValue::Null),
@@ -6793,9 +6791,7 @@ impl Evaluator {
                 // Check that sort keys are only numbers or strings
                 // Null, boolean, array, and object types are not valid for sorting
                 if value_type != "number" && value_type != "string" {
-                    return Err(EvaluatorError::TypeError(format!(
-                        "T2008: The expressions within an order-by clause must evaluate to numeric or string values"
-                    )));
+                    return Err(EvaluatorError::TypeError("T2008: The expressions within an order-by clause must evaluate to numeric or string values".to_string()));
                 }
 
                 // Check if this matches the first valid type we saw
@@ -6977,7 +6973,7 @@ impl Evaluator {
                     // to find all referenced lambdas. This is critical for
                     // closures like the Y-combinator where returned lambdas
                     // capture other lambdas in their environment.
-                    if let Some(stored) = self.context.lookup_lambda(&**lambda_id) {
+                    if let Some(stored) = self.context.lookup_lambda(lambda_id) {
                         let env_values: Vec<JValue> =
                             stored.captured_env.values().cloned().collect();
                         for env_value in &env_values {
