@@ -82,7 +82,7 @@ jobs:
 
       - name: Install JavaScript dependencies
         run: |
-          cd benchmarks
+          cd benchmarks/javascript
           npm install
 
       - name: Build jsonatapy (optimized)
@@ -93,7 +93,7 @@ jobs:
       - name: Verify installation
         run: |
           python -c "import jsonatapy; print(f'jsonatapy version: {jsonatapy.__version__}')"
-          node -e "const jsonata = require('jsonata'); console.log('jsonata installed');"
+          cd benchmarks/javascript && node -e "const jsonata = require('jsonata'); console.log('jsonata installed');"
 
       - name: Run benchmark suite
         id: run_benchmark
