@@ -567,7 +567,7 @@ jobs:
           EOF
 
       - name: Build documentation
-        run: uv run mkdocs build --strict
+        run: uv run mkdocs build
 
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4

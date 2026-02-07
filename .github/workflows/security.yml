@@ -105,10 +105,12 @@ jobs:
         run: |
           cat > deny.toml << 'EOF'
           [advisories]
+          db-path = "~/.cargo/advisory-db"
+          db-urls = ["https://github.com/rustsec/advisory-db"]
           vulnerability = "deny"
-          unmaintained = "warn"
-          unsound = "warn"
-          notice = "warn"
+          unmaintained = "deny"
+          unsound = "deny"
+          yanked = "deny"
 
           [licenses]
           unlicensed = "deny"
@@ -124,9 +126,8 @@ jobs:
           confidence-threshold = 0.8
 
           [bans]
-          multiple-versions = "warn"
+          multiple-versions = "deny"
           wildcards = "allow"
-          highlight = "all"
 
           [sources]
           unknown-registry = "deny"
