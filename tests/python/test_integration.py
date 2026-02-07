@@ -3,8 +3,8 @@ Integration tests for jsonatapy - testing the full Python → Rust → Python fl
 These tests will work once the extension is built with maturin.
 """
 
+
 import pytest
-import sys
 
 # These tests require the compiled extension
 pytest_plugins = []
@@ -306,13 +306,6 @@ class TestComplexExpressions:
 
     def test_filter_and_transform(self):
         """Filter orders by price and extract product names"""
-        data = {
-            "orders": [
-                {"product": "A", "price": 150},
-                {"product": "B", "price": 50},
-                {"product": "C", "price": 200},
-            ]
-        }
         # This would require predicate support
         # result = jsonatapy.evaluate("orders[price > 100].product", data)
         # assert result == ["A", "C"]

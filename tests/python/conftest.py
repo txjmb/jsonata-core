@@ -5,14 +5,15 @@ This file configures pytest markers and hooks for the test suite,
 including the reference JSONata test suite integration.
 """
 
-import pytest
 import json
 from pathlib import Path
+
+import pytest
 
 
 def pytest_configure(config):
     """
-    Register custom markers for test organization.
+    Register custom markers and plugins for test organization.
 
     Markers:
         reference: Tests from the reference JSONata suite
@@ -20,12 +21,18 @@ def pytest_configure(config):
         slow: Performance and slow-running tests
         compatibility: JavaScript compatibility tests
     """
+    # Register custom markers
     config.addinivalue_line("markers", "reference: marks tests from the reference JSONata suite")
     config.addinivalue_line("markers", "group(name): marks tests from specific test group")
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
     config.addinivalue_line("markers", "compatibility: marks JavaScript compatibility tests")
+
+    # Register the reporter plugin
+    if not config.option.collectonly:
+        reporter = ReferenceSuiteReporter()
+        config.pluginmanager.register(reporter, "reference_suite_reporter")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -167,17 +174,6 @@ class ReferenceSuiteReporter:
         print(f"\n{'=' * 70}")
         print(f"Detailed report written to: {report_path}")
         print(f"{'=' * 70}")
-
-
-# Register the reporter plugin
-def pytest_configure(config):
-    """Register the reference suite reporter plugin."""
-    # Only register if we're running reference suite tests
-    if config.option.collectonly:
-        return
-
-    reporter = ReferenceSuiteReporter()
-    config.pluginmanager.register(reporter, "reference_suite_reporter")
 
 
 @pytest.fixture(scope="session")

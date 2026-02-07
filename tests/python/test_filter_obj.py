@@ -1,5 +1,6 @@
-import jsonatapy
 import json
+
+import jsonatapy
 
 data = {
     "items": [

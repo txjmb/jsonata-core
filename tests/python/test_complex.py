@@ -1,5 +1,6 @@
-import jsonatapy
 import json
+
+import jsonatapy
 
 # Test the complex expression from the benchmark
 data = {

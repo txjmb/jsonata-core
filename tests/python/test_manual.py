@@ -1,5 +1,6 @@
-import jsonatapy
 import json
+
+import jsonatapy
 
 data = {"items": [{"name": "Item 1", "price": 60, "stock": 100}]}
 

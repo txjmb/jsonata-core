@@ -1,5 +1,5 @@
+
 import jsonatapy
-import json
 
 print("=" * 70)
 print("Testing Higher-Order Functions: , , ")
@@ -13,7 +13,7 @@ data1 = {"items": [{"name": "A", "price": 10}, {"name": "B", "price": 20}]}
 expr1 = jsonatapy.compile("(items, price)")
 result1 = expr1.evaluate(data1)
 print(f"Result: {result1}")
-print(f"Expected: [10, 20]")
+print("Expected: [10, 20]")
 print(f"Pass: {result1 == [10, 20]}")
 
 # Test
@@ -24,7 +24,7 @@ data2 = {"numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
 expr2 = jsonatapy.compile("(numbers, $ > 5)")
 result2 = expr2.evaluate(data2)
 print(f"Result: {result2}")
-print(f"Expected: [6, 7, 8, 9, 10]")
+print("Expected: [6, 7, 8, 9, 10]")
 print(f"Pass: {result2 == [6, 7, 8, 9, 10]}")
 
 # Test chaining
@@ -42,7 +42,7 @@ data3 = {
 expr3 = jsonatapy.compile("((items, inStock), price)")
 result3 = expr3.evaluate(data3)
 print(f"Result: {result3}")
-print(f"Expected: [15, 35]")
+print("Expected: [15, 35]")
 print(f"Pass: {result3 == [15, 35]}")
 
 print("\n" + "=" * 70)

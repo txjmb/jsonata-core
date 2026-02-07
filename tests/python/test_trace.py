@@ -1,5 +1,6 @@
-import jsonatapy
 import json
+
+import jsonatapy
 
 # Simplest possible case to isolate the issue
 data = {"items": [{"name": "Item 1", "price": 100}]}

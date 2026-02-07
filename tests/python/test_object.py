@@ -1,5 +1,6 @@
-import jsonatapy
 import json
+
+import jsonatapy
 
 # Test simple object construction
 try:

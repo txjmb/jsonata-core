@@ -5,14 +5,15 @@ This module loads and runs all 1,273+ test cases from the reference
 JavaScript JSONata implementation to ensure 100% spec compliance.
 """
 
-import pytest
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any
+
+import pytest
 
 # Load all datasets once at module level
-DATASETS: Dict[str, Any] = {}
+DATASETS: dict[str, Any] = {}
 DATASET_DIR = Path(__file__).parent.parent / "jsonata-js/test/test-suite/datasets"
 
 if DATASET_DIR.exists():
@@ -25,7 +26,7 @@ if DATASET_DIR.exists():
             print(f"Warning: Could not load dataset {dataset_name}: {e}")
 
 
-def load_test_cases() -> List[Tuple[str, str, Dict[str, Any]]]:
+def load_test_cases() -> list[tuple[str, str, dict[str, Any]]]:
     """
     Load all test cases from jsonata-js test groups.
 
@@ -65,7 +66,7 @@ def load_test_cases() -> List[Tuple[str, str, Dict[str, Any]]]:
     return test_cases
 
 
-def extract_error_code(error_msg: str) -> Optional[str]:
+def extract_error_code(error_msg: str) -> str | None:
     """
     Extract JSONata error code from exception message.
 
@@ -86,7 +87,7 @@ def extract_error_code(error_msg: str) -> Optional[str]:
 test_cases = load_test_cases()
 
 print(f"\n{'=' * 70}")
-print(f"JSONata Reference Suite Test Loader")
+print("JSONata Reference Suite Test Loader")
 print(f"{'=' * 70}")
 print(f"Loaded {len(DATASETS)} datasets from {DATASET_DIR}")
 print(f"Loaded {len(test_cases)} test cases")
@@ -95,7 +96,7 @@ print(f"{'=' * 70}\n")
 
 @pytest.mark.reference
 @pytest.mark.parametrize("test_id,group_name,spec", test_cases, ids=[tc[0] for tc in test_cases])
-def test_reference_suite(test_id: str, group_name: str, spec: Dict[str, Any]):
+def test_reference_suite(test_id: str, group_name: str, spec: dict[str, Any]):
     """
     Run a single test case from the reference JSONata suite.
 
@@ -153,10 +154,7 @@ def test_reference_suite(test_id: str, group_name: str, spec: Dict[str, Any]):
         compiled = jsonatapy.compile(expr)
 
         # Evaluate with optional bindings
-        if bindings:
-            result = compiled.evaluate(data, bindings)
-        else:
-            result = compiled.evaluate(data)
+        result = compiled.evaluate(data, bindings) if bindings else compiled.evaluate(data)
 
         # Check for expected result
         if has_result:
@@ -243,12 +241,12 @@ if __name__ == "__main__":
     print(f"Datasets loaded: {len(DATASETS)}")
 
     if test_cases:
-        print(f"\nFirst test case:")
+        print("\nFirst test case:")
         test_id, group_name, spec = test_cases[0]
         print(f"  ID: {test_id}")
         print(f"  Group: {group_name}")
         print(f"  Expr: {spec.get('expr', 'N/A')}")
 
-    print(f"\nTo run tests:")
-    print(f"  pytest tests/python/test_reference_suite.py -v")
-    print(f"  pytest tests/python/test_reference_suite.py -v -k 'literals'")
+    print("\nTo run tests:")
+    print("  pytest tests/python/test_reference_suite.py -v")
+    print("  pytest tests/python/test_reference_suite.py -v -k 'literals'")

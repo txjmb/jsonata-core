@@ -2,8 +2,8 @@
 Basic tests for jsonatapy
 """
 
-import pytest
 import jsonatapy
+import pytest
 
 
 class TestCompile:

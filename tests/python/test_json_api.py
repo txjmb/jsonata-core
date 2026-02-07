@@ -1,6 +1,7 @@
-import jsonatapy
 import json
 import time
+
+import jsonatapy
 
 print("=" * 70)
 print("Benchmark: JSON String API vs Regular API")

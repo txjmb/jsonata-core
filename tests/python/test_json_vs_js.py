@@ -2,9 +2,10 @@
 """Quick comparison: JSON API vs JavaScript for array operations"""
 
 import json
-import time
 import subprocess
+import time
 from pathlib import Path
+
 import jsonatapy
 
 

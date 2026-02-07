@@ -1,6 +1,6 @@
-import jsonatapy
-import json
 import time
+
+import jsonatapy
 
 print("=" * 60)
 print("End-to-End Validation Tests")

@@ -1,5 +1,6 @@
-import jsonatapy
 import time
+
+import jsonatapy
 
 # Create varying sizes to see where the slowdown is
 sizes = [10, 100, 500, 1000]
