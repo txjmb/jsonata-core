@@ -1,6 +1,8 @@
 // Built-in function implementations
 // Mirrors functions.js from the reference implementation
 
+#![allow(clippy::explicit_counter_loop)]
+
 use crate::value::JValue;
 use indexmap::IndexMap;
 use thiserror::Error;

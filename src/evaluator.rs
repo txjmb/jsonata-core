@@ -1,6 +1,11 @@
 // Expression evaluator
 // Mirrors jsonata.js from the reference implementation
 
+#![allow(clippy::cloned_ref_to_slice_refs)]
+#![allow(clippy::explicit_counter_loop)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::manual_strip)]
+
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
@@ -323,8 +328,8 @@ enum LambdaResult {
     JValue(JValue),
     /// Tail call - need to continue with another lambda invocation
     TailCall {
-        /// The lambda to call
-        lambda: StoredLambda,
+        /// The lambda to call (boxed to reduce enum size)
+        lambda: Box<StoredLambda>,
         /// Arguments for the call
         args: Vec<JValue>,
         /// Data context for the call
@@ -5576,7 +5581,7 @@ impl Evaluator {
                 LambdaResult::JValue(v) => break v,
                 LambdaResult::TailCall { lambda, args, data } => {
                     // Continue with the tail call - no stack growth
-                    current_lambda = lambda;
+                    current_lambda = *lambda;
                     current_args = args;
                     current_data = data;
                 }
@@ -5759,7 +5764,7 @@ impl Evaluator {
                             evaluated_args.push(self.evaluate_internal(arg, data)?);
                         }
                         return Ok(LambdaResult::TailCall {
-                            lambda: stored_lambda,
+                            lambda: Box::new(stored_lambda),
                             args: evaluated_args,
                             data: data.clone(),
                         });
@@ -5784,7 +5789,7 @@ impl Evaluator {
                                 evaluated_args.push(self.evaluate_internal(arg, data)?);
                             }
                             return Ok(LambdaResult::TailCall {
-                                lambda: stored_lambda,
+                                lambda: Box::new(stored_lambda),
                                 args: evaluated_args,
                                 data: data.clone(),
                             });
