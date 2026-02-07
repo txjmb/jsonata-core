@@ -1615,9 +1615,7 @@ impl Parser {
                 ..
             } => {
                 let then_is_tail = Self::is_tail_call(then_branch);
-                let else_is_tail = else_branch
-                    .as_ref()
-                    .is_some_and(|e| Self::is_tail_call(e));
+                let else_is_tail = else_branch.as_ref().is_some_and(|e| Self::is_tail_call(e));
                 // At least one branch should be a tail call for TCO to be useful
                 then_is_tail || else_is_tail
             }

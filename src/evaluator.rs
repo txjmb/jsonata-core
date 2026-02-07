@@ -3173,10 +3173,9 @@ impl Evaluator {
                             }
                         }
 
-                        if failed_due_to_missing_field
-                            && propagates_undefined(name) {
-                                return Ok(JValue::Null);
-                            }
+                        if failed_due_to_missing_field && propagates_undefined(name) {
+                            return Ok(JValue::Null);
+                        }
                     }
                 }
             }
@@ -3214,11 +3213,14 @@ impl Evaluator {
 
         // Special handling for $string() with no explicit arguments
         // After context insertion, check if the argument is null (undefined context)
-        if name == "string" && args.is_empty() && !evaluated_args.is_empty()
-            && matches!(evaluated_args[0], JValue::Null) {
-                // Context was null/undefined, so return undefined
-                return Ok(JValue::Null);
-            }
+        if name == "string"
+            && args.is_empty()
+            && !evaluated_args.is_empty()
+            && matches!(evaluated_args[0], JValue::Null)
+        {
+            // Context was null/undefined, so return undefined
+            return Ok(JValue::Null);
+        }
 
         match name {
             "string" => {
@@ -4159,9 +4161,7 @@ impl Evaluator {
                 if evaluated_args.len() == 1 {
                     // $sift(function) - use current context data as object
                     match data {
-                        JValue::Object(o) => {
-                            sift_object(self, o, &args[0], data, param_count)
-                        }
+                        JValue::Object(o) => sift_object(self, o, &args[0], data, param_count),
                         JValue::Array(arr) => {
                             // Map sift over each object in the array
                             let mut results = Vec::new();
@@ -4182,15 +4182,11 @@ impl Evaluator {
                 } else {
                     // $sift(object, function)
                     match &evaluated_args[0] {
-                        JValue::Object(o) => {
-                            sift_object(self, o, &args[1], data, param_count)
-                        }
+                        JValue::Object(o) => sift_object(self, o, &args[1], data, param_count),
                         JValue::Null => Ok(JValue::Null),
-                        _ => {
-                            Err(EvaluatorError::TypeError(
-                                "sift() first argument must be an object".to_string(),
-                            ))
-                        }
+                        _ => Err(EvaluatorError::TypeError(
+                            "sift() first argument must be an object".to_string(),
+                        )),
                     }
                 }
             }
@@ -4930,12 +4926,10 @@ impl Evaluator {
                     JValue::String(s) => {
                         Err(EvaluatorError::EvaluationError(format!("D3137: {}", s)))
                     }
-                    _ => {
-                        Err(EvaluatorError::TypeError(
-                            "T0410: Argument 1 of function error does not match function signature"
-                                .to_string(),
-                        ))
-                    }
+                    _ => Err(EvaluatorError::TypeError(
+                        "T0410: Argument 1 of function error does not match function signature"
+                            .to_string(),
+                    )),
                 }
             }
             "assert" => {
@@ -5998,11 +5992,9 @@ impl Evaluator {
             let match_obj = JValue::object(match_map);
 
             // Invoke lambda with match object
-            let stored_lambda = self
-                .lookup_lambda_from_value(lambda_value)
-                .ok_or_else(|| {
-                    EvaluatorError::TypeError("Replacement must be a lambda function".to_string())
-                })?;
+            let stored_lambda = self.lookup_lambda_from_value(lambda_value).ok_or_else(|| {
+                EvaluatorError::TypeError("Replacement must be a lambda function".to_string())
+            })?;
             let lambda_result = self.invoke_stored_lambda(&stored_lambda, &[match_obj], data)?;
             let replacement_str = match lambda_result {
                 JValue::String(s) => s,
