@@ -44,18 +44,6 @@ theme:
 
 plugins:
   - search
-  - autorefs
-  - mkdocstrings:
-      handlers:
-        python:
-          paths: [python]
-          options:
-            docstring_style: google
-            show_source: true
-            show_root_heading: true
-            show_category_heading: true
-            members_order: source
-            group_by_category: true
 
 markdown_extensions:
   - admonition
