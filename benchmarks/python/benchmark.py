@@ -55,10 +55,12 @@ class BenchmarkResult:
     data_size: str
     iterations: int
     jsonatapy_ms: float | None = None
+    jsonatapy_json_ms: float | None = None
     js_ms: float | None = None
     jsonata_python_ms: float | None = None
     jsonata_rs_ms: float | None = None
     jsonatapy_speedup: float | None = None
+    jsonatapy_json_speedup: float | None = None
     jsonata_python_speedup: float | None = None
     jsonata_rs_speedup: float | None = None
     jsonatapy_memory_mb: float | None = None
@@ -188,6 +190,43 @@ class BenchmarkSuite:
         start = time.perf_counter()
         for _ in range(iterations):
             compiled.evaluate(data)
+        elapsed = time.perf_counter() - start
+
+        return elapsed * 1000  # Convert to milliseconds
+
+    def _run_jsonatapy_json_benchmark(
+        self, expression: str, data: Any, iterations: int
+    ) -> float:
+        """Run benchmark using jsonatapy's pure Rust path (JSON string I/O).
+
+        This bypasses Python↔Rust object conversion by using evaluate_json(),
+        giving a fair Rust-to-Rust comparison against jsonata-rs.
+        """
+        if not JSONATAPY_AVAILABLE:
+            return -1.0
+
+        try:
+            compiled = jsonatapy.compile(expression)
+        except Exception as e:
+            print(f"⚠ jsonatapy (json) compilation failed: {e}")
+            return -1.0
+
+        # Pre-serialize data to JSON string (not counted in benchmark time)
+        json_str = json.dumps(data)
+
+        # Warm up
+        warmup_iters = min(100, max(10, iterations // 10))
+        for _ in range(warmup_iters):
+            try:
+                compiled.evaluate_json(json_str)
+            except Exception as e:
+                print(f"⚠ jsonatapy (json) warmup failed: {e}")
+                return -1.0
+
+        # Measure
+        start = time.perf_counter()
+        for _ in range(iterations):
+            compiled.evaluate_json(json_str)
         elapsed = time.perf_counter() - start
 
         return elapsed * 1000  # Convert to milliseconds
@@ -340,6 +379,24 @@ class BenchmarkSuite:
             if verbose:
                 print("jsonatapy:       NOT AVAILABLE")
 
+        # Run jsonatapy (pure Rust JSON path) benchmark
+        if JSONATAPY_AVAILABLE:
+            jsonatapy_json_time = self._run_jsonatapy_json_benchmark(
+                expression, data, iterations
+            )
+            if jsonatapy_json_time > 0:
+                result.jsonatapy_json_ms = jsonatapy_json_time
+                if verbose:
+                    print(
+                        f"jsonatapy(rust): {jsonatapy_json_time:8.2f} ms ({jsonatapy_json_time / iterations:8.4f} ms/iter)"
+                    )
+            else:
+                if verbose:
+                    print("jsonatapy(rust): FAILED")
+        else:
+            if verbose:
+                print("jsonatapy(rust): NOT AVAILABLE")
+
         # Run JavaScript benchmark
         js_time = self._run_js_benchmark(expression, data, iterations)
         if js_time > 0:
@@ -347,7 +404,7 @@ class BenchmarkSuite:
             if verbose:
                 print(f"JavaScript:      {js_time:8.2f} ms ({js_time / iterations:8.4f} ms/iter)")
 
-            # Calculate speedup vs JS
+            # Calculate speedup vs JS for jsonatapy (Python path)
             if result.jsonatapy_ms and result.jsonatapy_ms > 0:
                 result.jsonatapy_speedup = js_time / result.jsonatapy_ms
                 if verbose:
@@ -356,6 +413,19 @@ class BenchmarkSuite:
                     else:
                         print(
                             f"  → jsonatapy is {1 / result.jsonatapy_speedup:6.2f}x slower than JS"
+                        )
+
+            # Calculate speedup vs JS for jsonatapy (pure Rust path)
+            if result.jsonatapy_json_ms and result.jsonatapy_json_ms > 0:
+                result.jsonatapy_json_speedup = js_time / result.jsonatapy_json_ms
+                if verbose:
+                    if result.jsonatapy_json_speedup > 1:
+                        print(
+                            f"  → jsonatapy(rust) is {result.jsonatapy_json_speedup:6.2f}x faster than JS"
+                        )
+                    else:
+                        print(
+                            f"  → jsonatapy(rust) is {1 / result.jsonatapy_json_speedup:6.2f}x slower than JS"
                         )
         else:
             if verbose:
@@ -506,20 +576,32 @@ class BenchmarkSuite:
             table = Table(
                 title=f"[bold]{category}[/bold]", show_header=True, header_style="bold magenta"
             )
-            table.add_column("Test Name", style="cyan", width=35)
+            table.add_column("Test Name", style="cyan", width=30)
             table.add_column("jsonatapy", justify="right", style="green")
+            table.add_column("rust-only", justify="right", style="bright_green")
             table.add_column("JavaScript", justify="right", style="yellow")
 
             if JSONATA_PYTHON_AVAILABLE:
-                table.add_column("jsonata-python", justify="right", style="blue")
+                table.add_column("jsonata-py", justify="right", style="blue")
+
+            if self.jsonata_rs_available:
+                table.add_column("jsonata-rs", justify="right", style="magenta")
 
             table.add_column("Speedup vs JS", justify="right", style="bold")
 
             for result in results:
                 jsonatapy_str = f"{result.jsonatapy_ms:.2f} ms" if result.jsonatapy_ms else "N/A"
+                jsonatapy_json_str = (
+                    f"{result.jsonatapy_json_ms:.2f} ms"
+                    if result.jsonatapy_json_ms
+                    else "N/A"
+                )
                 js_str = f"{result.js_ms:.2f} ms" if result.js_ms else "N/A"
                 python_str = (
                     f"{result.jsonata_python_ms:.2f} ms" if result.jsonata_python_ms else "N/A"
+                )
+                rs_str = (
+                    f"{result.jsonata_rs_ms:.2f} ms" if result.jsonata_rs_ms else "N/A"
                 )
 
                 if result.jsonatapy_speedup:
@@ -530,10 +612,13 @@ class BenchmarkSuite:
                 else:
                     speedup_str = "N/A"
 
+                row = [result.name, jsonatapy_str, jsonatapy_json_str, js_str]
                 if JSONATA_PYTHON_AVAILABLE:
-                    table.add_row(result.name, jsonatapy_str, js_str, python_str, speedup_str)
-                else:
-                    table.add_row(result.name, jsonatapy_str, js_str, speedup_str)
+                    row.append(python_str)
+                if self.jsonata_rs_available:
+                    row.append(rs_str)
+                row.append(speedup_str)
+                table.add_row(*row)
 
             console.print(table)
             console.print()
@@ -561,6 +646,20 @@ class BenchmarkSuite:
             stats_table.add_row(
                 "Tests where jsonatapy is faster", f"{faster_count}/{len(speedups)}"
             )
+
+            # jsonatapy (pure Rust) stats
+            json_speedups = [
+                r.jsonatapy_json_speedup for r in self.results if r.jsonatapy_json_speedup
+            ]
+            if json_speedups:
+                avg_json_speedup = sum(json_speedups) / len(json_speedups)
+                json_faster = sum(1 for s in json_speedups if s > 1)
+                stats_table.add_row(
+                    "Average speedup (rust-only vs JS)", f"{avg_json_speedup:.2f}x"
+                )
+                stats_table.add_row(
+                    "Tests where rust-only is faster", f"{json_faster}/{len(json_speedups)}"
+                )
 
             if JSONATA_PYTHON_AVAILABLE:
                 python_speedups = [

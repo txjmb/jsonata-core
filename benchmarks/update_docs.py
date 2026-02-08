@@ -110,17 +110,19 @@ def generate_markdown(data):
     # Detailed results by category
     for category, cat_results in grouped.items():
         md.append(f"#### {category}\n")
-        md.append("| Operation | Data Size | jsonatapy (ms) | JavaScript (ms) | Speedup |")
-        md.append("|-----------|-----------|----------------|-----------------|---------|")
+        md.append("| Operation | Data Size | jsonatapy (ms) | rust-only (ms) | JavaScript (ms) | jsonata-rs (ms) | Speedup |")
+        md.append("|-----------|-----------|----------------|----------------|-----------------|-----------------|---------|")
 
         for result in cat_results:
             name = result["name"]
             data_size = result.get("data_size", "N/A")
             jsonatapy_ms = format_time(result.get("jsonatapy_ms"))
+            jsonatapy_json_ms = format_time(result.get("jsonatapy_json_ms"))
             js_ms = format_time(result.get("js_ms"))
+            jsonata_rs_ms = format_time(result.get("jsonata_rs_ms"))
             speedup = format_speedup(result.get("jsonatapy_speedup"))
 
-            md.append(f"| {name} | {data_size} | {jsonatapy_ms} | {js_ms} | {speedup} |")
+            md.append(f"| {name} | {data_size} | {jsonatapy_ms} | {jsonatapy_json_ms} | {js_ms} | {jsonata_rs_ms} | {speedup} |")
 
         md.append("")
 
