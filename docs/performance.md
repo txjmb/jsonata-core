@@ -105,9 +105,13 @@ Latest benchmarks run on 2026-02-07.
 | Implementation | Language | Status |
 |----------------|----------|--------|
 | **jsonatapy** | Rust + Python | Baseline (this implementation) |
-| jsonata-js | JavaScript | Tested (reference implementation) |
-| jsonata-python | Python wrapper | Not tested |
-| jsonata-rs | Rust | Not tested |
+| jsonata-js | JavaScript | Included in benchmarks (reference implementation) |
+| jsonata-python | Python wrapper | Not included (requires separate installation) |
+| jsonata-rs | Rust | Not included (requires separate installation) |
+
+To run benchmarks against other implementations, install them first:
+- jsonata-python: `pip install jsonata`
+- jsonata-rs: Build the benchmark binary in `benchmarks/` directory
 
 ## Performance Characteristics
 

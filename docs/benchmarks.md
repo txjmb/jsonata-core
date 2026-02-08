@@ -17,12 +17,12 @@ uv run python benchmarks/benchmark.py
 
 ## Implementations Compared
 
-The benchmark suite compares four JSONata implementations:
+Current benchmark results compare:
 
 1. **jsonatapy** - Rust-based Python extension (this project)
 2. **JavaScript** - Official jsonata-js reference implementation (Node.js)
-3. **jsonata-rs** - Pure Rust implementation
-4. **jsonata-python** - Python wrapper around Node.js
+
+The benchmark suite also supports jsonata-rs and jsonata-python, but these require separate installation and are not included in the current results.
 
 ## Benchmark Categories
 
