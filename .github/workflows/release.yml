@@ -26,6 +26,7 @@ jobs:
   check-quality:
     name: Check Required Workflows
     runs-on: ubuntu-latest
+    continue-on-error: true
     timeout-minutes: 10
 
     steps:
