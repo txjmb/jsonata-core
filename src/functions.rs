@@ -22,6 +22,32 @@ pub enum FunctionError {
 }
 
 /// Built-in string functions
+/// Mimic JS Array.prototype.slice(start, end) semantics.
+/// - Negative start/end count from the end of the array.
+/// - Out-of-bounds values are clamped.
+fn js_slice<T: Clone>(arr: &[T], start: i64, end: Option<i64>) -> Vec<T> {
+    let len = arr.len() as i64;
+    let s = if start < 0 {
+        (len + start).max(0) as usize
+    } else {
+        (start.min(len)) as usize
+    };
+    let e = match end {
+        Some(end) => {
+            if end < 0 {
+                (len + end).max(0) as usize
+            } else {
+                (end.min(len)) as usize
+            }
+        }
+        None => arr.len(),
+    };
+    if s >= e {
+        return Vec::new();
+    }
+    arr[s..e].to_vec()
+}
+
 pub mod string {
     use super::*;
     use regex::Regex;
@@ -270,34 +296,41 @@ pub mod string {
         Ok(JValue::string(s.to_lowercase()))
     }
 
-    /// $substring(str, start, end) - Extract substring
-    /// Extracts a substring from a string using Unicode character positions
-    /// The third parameter is the END position (exclusive), not length
-    pub fn substring(s: &str, start: i64, end: Option<i64>) -> Result<JValue, FunctionError> {
+    /// $substring(str, start, length) - Extract substring
+    /// Extracts a substring from a string using Unicode character positions.
+    /// Follows the JSONata spec (which mirrors JS Array.prototype.slice):
+    /// - start: zero-based position; negative means count from end
+    /// - length: optional max number of characters to extract
+    pub fn substring(s: &str, start: i64, length: Option<i64>) -> Result<JValue, FunctionError> {
         let chars: Vec<char> = s.chars().collect();
-        let total_len = chars.len() as i64;
+        let str_len = chars.len() as i64;
 
-        // Handle negative start positions (count from end)
-        let start_pos = if start < 0 {
-            (total_len + start).max(0)
-        } else {
-            start.min(total_len)
-        } as usize;
+        // Clamp start if it goes past the beginning
+        // Matches JS: if (strLength + start < 0) { start = 0; }
+        let start = if str_len + start < 0 { 0 } else { start };
 
-        let end_pos = if let Some(e) = end {
-            // Handle negative end positions (count from end)
-            let end_idx = if e < 0 {
-                (total_len + e).max(0)
+        if let Some(len) = length {
+            // Negative or zero length → empty string (matches JS reference)
+            if len <= 0 {
+                return Ok(JValue::string(""));
+            }
+            // Compute end index: mirrors JS reference exactly
+            // JS: var end = start >= 0 ? start + length : strLength + start + length;
+            let end = if start >= 0 {
+                start + len
             } else {
-                e.min(total_len)
-            } as usize;
-            end_idx.max(start_pos).min(chars.len())
+                str_len + start + len
+            };
+            // JS: strArray.slice(start, end).join('')
+            // JS slice handles negative start natively (counts from end)
+            let slice = js_slice(&chars, start, Some(end));
+            Ok(JValue::string(slice.iter().collect::<String>()))
         } else {
-            chars.len()
-        };
-
-        let result: String = chars[start_pos..end_pos].iter().collect();
-        Ok(JValue::string(result))
+            // No length: take from start to end of string
+            // JS: strArray.slice(start).join('')
+            let slice = js_slice(&chars, start, None);
+            Ok(JValue::string(slice.iter().collect::<String>()))
+        }
     }
 
     /// $substringBefore(str, separator) - Get substring before separator
