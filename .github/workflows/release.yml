@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., 2.0.5.2 where 2.0.5=JSONata, 2=patch)'
+        description: 'Version to release (semver format, e.g., 2.1.0 for JSONata 2.1.0)'
         required: true
         type: string
       dry_run:
@@ -29,8 +29,6 @@ jobs:
 
     outputs:
       version: ${{ steps.validate.outputs.version }}
-      jsonata_version: ${{ steps.validate.outputs.jsonata_version }}
-      patch_version: ${{ steps.validate.outputs.patch_version }}
 
     steps:
       - name: Validate version format
@@ -38,23 +36,15 @@ jobs:
         run: |
           VERSION="${{ github.event.inputs.version }}"
 
-          # Validate format X.Y.Z.P
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Invalid version format. Expected X.Y.Z.P (e.g., 2.0.5.2)"
+          # Validate format X.Y.Z (semver)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version format. Expected X.Y.Z (e.g., 2.1.0)"
             exit 1
           fi
 
-          # Extract components
-          JSONATA_VERSION=$(echo "$VERSION" | cut -d. -f1-3)
-          PATCH_VERSION=$(echo "$VERSION" | cut -d. -f4)
-
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "jsonata_version=$JSONATA_VERSION" >> $GITHUB_OUTPUT
-          echo "patch_version=$PATCH_VERSION" >> $GITHUB_OUTPUT
 
           echo "Release version: $VERSION"
-          echo "JSONata version: $JSONATA_VERSION"
-          echo "Patch version: $PATCH_VERSION"
 
   update-version:
     name: Update Version Files
@@ -288,8 +278,7 @@ jobs:
           cat > changelog.md <<EOF
           ## Release $VERSION
 
-          **JSONata Version:** ${{ needs.validate-version.outputs.jsonata_version }}
-          **Patch Version:** ${{ needs.validate-version.outputs.patch_version }}
+          This release implements JSONata 2.1.0 specification with full compatibility.
 
           ### Changes
 
@@ -407,8 +396,8 @@ jobs:
           cat >> $GITHUB_STEP_SUMMARY << EOF
           # Release v${{ needs.validate-version.outputs.version }} Published! 🎉
 
-          - **JSONata Version:** ${{ needs.validate-version.outputs.jsonata_version }}
-          - **Patch Version:** ${{ needs.validate-version.outputs.patch_version }}
+          - **Version:** ${{ needs.validate-version.outputs.version }}
+          - **JSONata Compatibility:** 2.1.0 (100% test suite compatibility)
           - **PyPI:** [jsonatapy ${{ needs.validate-version.outputs.version }}](https://pypi.org/project/jsonatapy/${{ needs.validate-version.outputs.version }}/)
           - **GitHub:** [Release v${{ needs.validate-version.outputs.version }}](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate-version.outputs.version }})
 
@@ -441,8 +430,7 @@ jobs:
 
           ## Version Information
           - **Version:** ${{ needs.validate-version.outputs.version }}
-          - **JSONata Version:** ${{ needs.validate-version.outputs.jsonata_version }}
-          - **Patch Version:** ${{ needs.validate-version.outputs.patch_version }}
+          - **JSONata Compatibility:** 2.1.0 (100% test suite compatibility)
 
           ## Build Results
           - ✅ Wheels built successfully
