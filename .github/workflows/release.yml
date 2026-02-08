@@ -286,6 +286,7 @@ jobs:
         run: uv pip install --system pytest pytest-xdist
 
       - name: Run tests
+        shell: bash
         run: |
           pytest tests/python/ \
             --ignore=tests/python/test_reference_suite.py \
@@ -294,6 +295,7 @@ jobs:
             -n auto
 
       - name: Run reference suite (smoke test)
+        shell: bash
         run: |
           pytest tests/python/test_reference_suite.py \
             -v \
