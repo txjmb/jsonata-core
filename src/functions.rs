@@ -270,9 +270,10 @@ pub mod string {
         Ok(JValue::string(s.to_lowercase()))
     }
 
-    /// $substring(str, start, length) - Extract substring
+    /// $substring(str, start, end) - Extract substring
     /// Extracts a substring from a string using Unicode character positions
-    pub fn substring(s: &str, start: i64, length: Option<i64>) -> Result<JValue, FunctionError> {
+    /// The third parameter is the END position (exclusive), not length
+    pub fn substring(s: &str, start: i64, end: Option<i64>) -> Result<JValue, FunctionError> {
         let chars: Vec<char> = s.chars().collect();
         let total_len = chars.len() as i64;
 
@@ -283,12 +284,14 @@ pub mod string {
             start.min(total_len)
         } as usize;
 
-        let end_pos = if let Some(len) = length {
-            if len < 0 {
-                // Negative length returns empty string
-                return Ok(JValue::string(""));
-            }
-            (start_pos + len as usize).min(chars.len())
+        let end_pos = if let Some(e) = end {
+            // Handle negative end positions (count from end)
+            let end_idx = if e < 0 {
+                (total_len + e).max(0)
+            } else {
+                e.min(total_len)
+            } as usize;
+            end_idx.max(start_pos).min(chars.len())
         } else {
             chars.len()
         };
