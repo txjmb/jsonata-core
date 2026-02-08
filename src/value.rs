@@ -571,7 +571,19 @@ impl JValue {
     }
 
     /// Parse a JSON string into a JValue (single-pass, no intermediate serde_json::Value).
+    ///
+    /// When the `simd` feature is enabled, uses simd-json for 2-4x faster parsing
+    /// on CPUs with SIMD support (SSE4.2/AVX2/NEON). Falls back to serde_json otherwise.
     pub fn from_json_str(s: &str) -> Result<JValue, serde_json::Error> {
+        #[cfg(feature = "simd")]
+        {
+            // simd-json requires a mutable byte slice with padding
+            let mut bytes = s.as_bytes().to_vec();
+            if let Ok(value) = simd_json::serde::from_slice::<JValue>(&mut bytes) {
+                return Ok(value);
+            }
+            // Fall back to serde_json if simd-json fails (e.g., unsupported CPU)
+        }
         serde_json::from_str(s)
     }
 }

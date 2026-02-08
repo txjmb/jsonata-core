@@ -15,6 +15,7 @@ Example:
     >>> result = expr.evaluate(data)
 """
 
+import json as _json
 from typing import Any
 
 from ._jsonatapy import (
@@ -41,7 +42,33 @@ __all__ = [
     "__version__",
     "compile",
     "evaluate",
+    "json_dumps",
+    "json_loads",
 ]
+
+# Use orjson when available for faster JSON serialization (3x faster than stdlib).
+# These are exposed for users who want to use the evaluate_json() path with
+# optimal serialization performance.
+try:
+    import orjson as _orjson
+
+    def json_dumps(obj: Any) -> str:
+        """Serialize to JSON string, using orjson if available."""
+        return _orjson.dumps(obj).decode("utf-8")
+
+    def json_loads(s: str | bytes) -> Any:
+        """Deserialize JSON string, using orjson if available."""
+        return _orjson.loads(s)
+
+except ImportError:
+
+    def json_dumps(obj: Any) -> str:
+        """Serialize to JSON string, using stdlib json."""
+        return _json.dumps(obj)
+
+    def json_loads(s: str | bytes) -> Any:
+        """Deserialize JSON string, using stdlib json."""
+        return _json.loads(s)
 
 
 class JsonataData:

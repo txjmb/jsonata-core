@@ -26,7 +26,7 @@ use crate::value::JValue;
 use indexmap::IndexMap;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 
 pub mod ast;
 mod datetime;
@@ -290,106 +290,71 @@ fn evaluate(
 ///
 /// Handles conversion of Python types:
 /// - None -> Null
-/// - bool -> Bool
+/// - bool -> Bool (checked before int since bool is a subclass of int)
 /// - int, float -> Number
 /// - str -> String
 /// - list -> Array
 /// - dict -> Object
 fn python_to_json(py: Python, obj: &PyObject) -> PyResult<JValue> {
-    if obj.is_none(py) {
+    python_to_json_bound(&obj.bind(py))
+}
+
+/// Inner conversion using Bound API for zero-overhead type checks.
+///
+/// Uses is_instance_of::<T>() which compiles to C-level type pointer comparisons
+/// (PyBool_Check, PyLong_Check, etc.) — single pointer comparison vs qualname()
+/// which allocates a Python string and does string comparison.
+fn python_to_json_bound(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
+    if obj.is_none() {
         return Ok(JValue::Null);
     }
 
-    // Use type() to get the actual Python type for faster dispatch
-    let bound = obj.bind(py);
-    let obj_type = bound.get_type();
-
-    // Fast path: check type name first to avoid failed extract attempts
-    if let Ok(type_name) = obj_type.qualname() {
-        let name = type_name.to_str().unwrap_or("");
-        match name {
-            "bool" => {
-                if let Ok(b) = obj.extract::<bool>(py) {
-                    return Ok(JValue::Bool(b));
-                }
-            }
-            "int" => {
-                if let Ok(i) = obj.extract::<i64>(py) {
-                    return Ok(JValue::Number(i as f64));
-                }
-            }
-            "float" => {
-                if let Ok(f) = obj.extract::<f64>(py) {
-                    return Ok(JValue::Number(f));
-                }
-            }
-            "str" => {
-                if let Ok(s) = obj.extract::<String>(py) {
-                    return Ok(JValue::string(s));
-                }
-            }
-            "list" => {
-                if let Ok(list) = obj.downcast_bound::<PyList>(py) {
-                    let mut result = Vec::with_capacity(list.len());
-                    for item in list.iter() {
-                        let item_obj = item.unbind();
-                        result.push(python_to_json(py, &item_obj)?);
-                    }
-                    return Ok(JValue::array(result));
-                }
-            }
-            "dict" => {
-                if let Ok(dict) = obj.downcast_bound::<PyDict>(py) {
-                    let mut result = IndexMap::new();
-                    for (key, value) in dict.iter() {
-                        let key_str = key.extract::<String>()?;
-                        let value_obj = value.unbind();
-                        let value_json = python_to_json(py, &value_obj)?;
-                        result.insert(key_str, value_json);
-                    }
-                    return Ok(JValue::object(result));
-                }
-            }
-            _ => {}
-        }
+    // Check bool before int — Python bool is a subclass of int
+    if obj.is_instance_of::<PyBool>() {
+        return Ok(JValue::Bool(obj.extract::<bool>()?));
     }
-
-    // Fallback: try all conversions (for subclasses, numpy types, etc.)
-    if let Ok(b) = obj.extract::<bool>(py) {
-        return Ok(JValue::Bool(b));
+    if obj.is_instance_of::<PyInt>() {
+        return Ok(JValue::Number(obj.extract::<i64>()? as f64));
     }
-    if let Ok(i) = obj.extract::<i64>(py) {
-        return Ok(JValue::Number(i as f64));
+    if obj.is_instance_of::<PyFloat>() {
+        return Ok(JValue::Number(obj.extract::<f64>()?));
     }
-    if let Ok(f) = obj.extract::<f64>(py) {
-        return Ok(JValue::Number(f));
+    if obj.is_instance_of::<PyString>() {
+        return Ok(JValue::string(obj.extract::<String>()?));
     }
-    if let Ok(s) = obj.extract::<String>(py) {
-        return Ok(JValue::string(s));
-    }
-    if let Ok(list) = obj.downcast_bound::<PyList>(py) {
+    if let Ok(list) = obj.downcast::<PyList>() {
         let mut result = Vec::with_capacity(list.len());
         for item in list.iter() {
-            let item_obj = item.unbind();
-            result.push(python_to_json(py, &item_obj)?);
+            result.push(python_to_json_bound(&item)?);
         }
         return Ok(JValue::array(result));
     }
-    if let Ok(dict) = obj.downcast_bound::<PyDict>(py) {
-        let mut result = IndexMap::new();
+    if let Ok(dict) = obj.downcast::<PyDict>() {
+        let mut result = IndexMap::with_capacity(dict.len());
         for (key, value) in dict.iter() {
             let key_str = key.extract::<String>()?;
-            let value_obj = value.unbind();
-            let value_json = python_to_json(py, &value_obj)?;
-            result.insert(key_str, value_json);
+            result.insert(key_str, python_to_json_bound(&value)?);
         }
         return Ok(JValue::object(result));
     }
 
-    // Unsupported type
+    // Fallback for subclasses, numpy types, etc.
+    if let Ok(b) = obj.extract::<bool>() {
+        return Ok(JValue::Bool(b));
+    }
+    if let Ok(i) = obj.extract::<i64>() {
+        return Ok(JValue::Number(i as f64));
+    }
+    if let Ok(f) = obj.extract::<f64>() {
+        return Ok(JValue::Number(f));
+    }
+    if let Ok(s) = obj.extract::<String>() {
+        return Ok(JValue::string(s));
+    }
+
     Err(PyTypeError::new_err(format!(
         "Cannot convert Python object to JSON: {}",
-        obj.bind(py).get_type().name()?
+        obj.get_type().name()?
     )))
 }
 
@@ -400,25 +365,20 @@ fn python_to_json(py: Python, obj: &PyObject) -> PyResult<JValue> {
 /// - Bool -> bool
 /// - Number -> int (if whole number) or float
 /// - String -> str
-/// - Array -> list
+/// - Array -> list (batch-constructed via PyList::new for fewer C API calls)
 /// - Object -> dict
 /// - Lambda/Builtin/Regex -> None
 fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
     match value {
         JValue::Null | JValue::Undefined => Ok(py.None()),
 
-        JValue::Bool(b) => Ok((*b)
-            .into_pyobject(py)
-            .unwrap()
-            .to_owned()
-            .into_any()
-            .unbind()),
+        JValue::Bool(b) => Ok(b.into_pyobject(py).unwrap().to_owned().into_any().unbind()),
 
         JValue::Number(n) => {
             // If it's a whole number that fits in i64, return as Python int
-            if n.fract() == 0.0 && n.is_finite() && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 {
-                let i = *n as i64;
-                Ok(i.into_pyobject(py).unwrap().into_any().unbind())
+            if n.fract() == 0.0 && n.is_finite() && *n >= i64::MIN as f64 && *n <= i64::MAX as f64
+            {
+                Ok((*n as i64).into_pyobject(py).unwrap().into_any().unbind())
             } else {
                 Ok(n.into_pyobject(py).unwrap().into_any().unbind())
             }
@@ -427,11 +387,13 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
         JValue::String(s) => Ok((&**s).into_pyobject(py).unwrap().into_any().unbind()),
 
         JValue::Array(arr) => {
-            let list = PyList::empty(py);
-            for item in arr.iter() {
-                list.append(json_to_python(py, item)?)?;
-            }
-            Ok(list.unbind().into())
+            // Batch construction: build Vec<PyObject> first, then PyList::new()
+            // PyList::new uses PyList_New(len) + PyList_SET_ITEM (no capacity checks)
+            let items: Vec<PyObject> = arr
+                .iter()
+                .map(|item| json_to_python(py, item))
+                .collect::<PyResult<Vec<_>>>()?;
+            Ok(PyList::new(py, &items)?.unbind().into())
         }
 
         JValue::Object(obj) => {
