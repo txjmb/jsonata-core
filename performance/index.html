@@ -1621,7 +1621,8 @@
 <h1 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h1>
 <p>jsonatapy is a high-performance Rust implementation with Python bindings, designed to be significantly faster than JavaScript-based alternatives for typical use cases.</p>
 <h2 id="benchmark-results">Benchmark Results<a class="headerlink" href="#benchmark-results" title="Permanent link">&para;</a></h2>
-<p>Latest benchmarks run on 2026-02-07. Comparing jsonatapy against the reference JavaScript implementation.</p>
+<p>Latest benchmarks run on 2026-02-07.
+ Comparing jsonatapy against: JavaScript reference implementation.</p>
 <h3 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1633,28 +1634,36 @@
 <tbody>
 <tr>
 <td>Simple Paths</td>
-<td>6.2x faster</td>
+<td>5.2x</td>
 </tr>
 <tr>
-<td>Arithmetic Operations</td>
-<td>10.1x faster</td>
+<td>Array Operations</td>
+<td>0.4x</td>
+</tr>
+<tr>
+<td>Complex Transformations</td>
+<td>6.2x</td>
+</tr>
+<tr>
+<td>Deep Nesting</td>
+<td>1.1x</td>
 </tr>
 <tr>
 <td>String Operations</td>
-<td>8.0x faster</td>
+<td>5.3x</td>
 </tr>
 <tr>
-<td>Array Aggregations</td>
-<td>~1x (comparable)</td>
+<td>Higher-Order Functions</td>
+<td>0.3x</td>
 </tr>
 <tr>
-<td>Object Transformations</td>
-<td>3.5x faster</td>
+<td>Realistic Workload</td>
+<td>0.0x</td>
 </tr>
 </tbody>
 </table>
 <h3 id="detailed-results">Detailed Results<a class="headerlink" href="#detailed-results" title="Permanent link">&para;</a></h3>
-<h4 id="simple-path-access">Simple Path Access<a class="headerlink" href="#simple-path-access" title="Permanent link">&para;</a></h4>
+<h4 id="simple-paths">Simple Paths<a class="headerlink" href="#simple-paths" title="Permanent link">&para;</a></h4>
 <table>
 <thead>
 <tr>
@@ -1667,60 +1676,32 @@
 </thead>
 <tbody>
 <tr>
-<td>Simple path (<code>user.name</code>)</td>
+<td>Simple Path</td>
 <td>tiny</td>
-<td>0.005</td>
-<td>0.029</td>
+<td>4.620</td>
+<td>28.750</td>
 <td>6.2x</td>
 </tr>
 <tr>
-<td>Deep path (5 levels)</td>
+<td>Deep Path (5 levels)</td>
 <td>tiny</td>
-<td>0.007</td>
-<td>0.026</td>
+<td>7.139</td>
+<td>25.560</td>
 <td>3.6x</td>
 </tr>
 <tr>
-<td>Array index access</td>
+<td>Array Index Access</td>
 <td>100 elements</td>
-<td>0.016</td>
-<td>0.015</td>
+<td>15.680</td>
+<td>15.190</td>
 <td>1.0x</td>
 </tr>
-</tbody>
-</table>
-<h4 id="arithmetic-and-logic">Arithmetic and Logic<a class="headerlink" href="#arithmetic-and-logic" title="Permanent link">&para;</a></h4>
-<table>
-<thead>
 <tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy (ms)</th>
-<th>JavaScript (ms)</th>
-<th>Speedup</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Arithmetic (<code>price * quantity</code>)</td>
+<td>Arithmetic Expression</td>
 <td>tiny</td>
-<td>0.004</td>
-<td>0.037</td>
+<td>3.718</td>
+<td>37.410</td>
 <td>10.1x</td>
-</tr>
-<tr>
-<td>Comparison operators</td>
-<td>tiny</td>
-<td>0.005</td>
-<td>0.032</td>
-<td>6.4x</td>
-</tr>
-<tr>
-<td>Boolean logic</td>
-<td>tiny</td>
-<td>0.006</td>
-<td>0.030</td>
-<td>5.0x</td>
 </tr>
 </tbody>
 </table>
@@ -1737,39 +1718,137 @@
 </thead>
 <tbody>
 <tr>
-<td><code>$sum(values)</code></td>
+<td>Array Sum (100 elements)</td>
 <td>100 elements</td>
-<td>0.003</td>
-<td>0.003</td>
-<td>1.1x</td>
+<td>3.188</td>
+<td>2.860</td>
+<td>0.9x</td>
 </tr>
 <tr>
-<td><code>$max(values)</code></td>
+<td>Array Max (100 elements)</td>
 <td>100 elements</td>
-<td>0.003</td>
-<td>0.003</td>
-<td>1.1x</td>
+<td>3.152</td>
+<td>2.950</td>
+<td>0.9x</td>
 </tr>
 <tr>
-<td><code>$count(values)</code></td>
+<td>Array Count (100 elements)</td>
 <td>100 elements</td>
-<td>0.006</td>
-<td>0.006</td>
-<td>1.1x</td>
+<td>6.087</td>
+<td>5.580</td>
+<td>0.9x</td>
 </tr>
 <tr>
-<td>Array filter</td>
-<td>100 elements</td>
-<td>0.015</td>
-<td>0.012</td>
-<td>0.8x</td>
+<td>Array Sum (1000 elements)</td>
+<td>1000 elements</td>
+<td>5.794</td>
+<td>0.940</td>
+<td>0.2x</td>
 </tr>
 <tr>
-<td>Array map</td>
-<td>100 elements</td>
-<td>0.018</td>
-<td>0.014</td>
-<td>0.8x</td>
+<td>Array Max (1000 elements)</td>
+<td>1000 elements</td>
+<td>5.445</td>
+<td>1.050</td>
+<td>0.2x</td>
+</tr>
+<tr>
+<td>Array Sum (10000 elements)</td>
+<td>10000 elements</td>
+<td>14.342</td>
+<td>0.140</td>
+<td>0.0x</td>
+</tr>
+<tr>
+<td>Array Mapping (extract field)</td>
+<td>100 objects</td>
+<td>51.420</td>
+<td>8.050</td>
+<td>0.2x</td>
+</tr>
+<tr>
+<td>Array Mapping + Sum</td>
+<td>100 objects</td>
+<td>56.496</td>
+<td>2.840</td>
+<td>0.1x</td>
+</tr>
+<tr>
+<td>Array Filtering (predicate)</td>
+<td>100 objects</td>
+<td>33.548</td>
+<td>2.010</td>
+<td>0.1x</td>
+</tr>
+</tbody>
+</table>
+<h4 id="complex-transformations">Complex Transformations<a class="headerlink" href="#complex-transformations" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Data Size</th>
+<th>jsonatapy (ms)</th>
+<th>JavaScript (ms)</th>
+<th>Speedup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Object Construction (simple)</td>
+<td>tiny</td>
+<td>5.755</td>
+<td>17.020</td>
+<td>3.0x</td>
+</tr>
+<tr>
+<td>Object Construction (nested)</td>
+<td>tiny</td>
+<td>7.659</td>
+<td>16.960</td>
+<td>2.2x</td>
+</tr>
+<tr>
+<td>Conditional Expression</td>
+<td>tiny</td>
+<td>1.541</td>
+<td>20.240</td>
+<td>13.1x</td>
+</tr>
+<tr>
+<td>Multiple Nested Functions</td>
+<td>tiny</td>
+<td>2.010</td>
+<td>13.260</td>
+<td>6.6x</td>
+</tr>
+</tbody>
+</table>
+<h4 id="deep-nesting">Deep Nesting<a class="headerlink" href="#deep-nesting" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Data Size</th>
+<th>jsonatapy (ms)</th>
+<th>JavaScript (ms)</th>
+<th>Speedup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Deep Path (12 levels)</td>
+<td>12 levels</td>
+<td>8.726</td>
+<td>15.670</td>
+<td>1.8x</td>
+</tr>
+<tr>
+<td>Nested Array Access</td>
+<td>4-level nested arrays</td>
+<td>26.420</td>
+<td>9.130</td>
+<td>0.3x</td>
 </tr>
 </tbody>
 </table>
@@ -1786,18 +1865,186 @@
 </thead>
 <tbody>
 <tr>
-<td>String concatenation</td>
+<td>String Uppercase</td>
 <td>tiny</td>
-<td>0.004</td>
-<td>0.032</td>
-<td>8.0x</td>
+<td>3.543</td>
+<td>21.040</td>
+<td>5.9x</td>
 </tr>
 <tr>
-<td>String functions</td>
+<td>String Lowercase</td>
 <td>tiny</td>
-<td>0.006</td>
-<td>0.028</td>
-<td>4.7x</td>
+<td>3.714</td>
+<td>21.330</td>
+<td>5.7x</td>
+</tr>
+<tr>
+<td>String Length</td>
+<td>tiny</td>
+<td>3.455</td>
+<td>20.750</td>
+<td>6.0x</td>
+</tr>
+<tr>
+<td>String Concatenation</td>
+<td>tiny</td>
+<td>3.664</td>
+<td>9.110</td>
+<td>2.5x</td>
+</tr>
+<tr>
+<td>String Substring</td>
+<td>tiny</td>
+<td>2.437</td>
+<td>12.320</td>
+<td>5.1x</td>
+</tr>
+<tr>
+<td>String Contains</td>
+<td>tiny</td>
+<td>1.736</td>
+<td>11.850</td>
+<td>6.8x</td>
+</tr>
+</tbody>
+</table>
+<h4 id="higher-order-functions">Higher-Order Functions<a class="headerlink" href="#higher-order-functions" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Data Size</th>
+<th>jsonatapy (ms)</th>
+<th>JavaScript (ms)</th>
+<th>Speedup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$map with lambda</td>
+<td>100 elements</td>
+<td>3.279</td>
+<td>0.910</td>
+<td>0.3x</td>
+</tr>
+<tr>
+<td>$filter with lambda</td>
+<td>100 elements</td>
+<td>3.457</td>
+<td>1.420</td>
+<td>0.4x</td>
+</tr>
+<tr>
+<td>$reduce with lambda</td>
+<td>100 elements</td>
+<td>4.032</td>
+<td>1.060</td>
+<td>0.3x</td>
+</tr>
+</tbody>
+</table>
+<h4 id="realistic-workload">Realistic Workload<a class="headerlink" href="#realistic-workload" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Data Size</th>
+<th>jsonatapy (ms)</th>
+<th>JavaScript (ms)</th>
+<th>Speedup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Filter by category</td>
+<td>100 products</td>
+<td>91.551</td>
+<td>2.050</td>
+<td>0.0x</td>
+</tr>
+<tr>
+<td>Calculate total value</td>
+<td>100 products</td>
+<td>87.814</td>
+<td>4.630</td>
+<td>0.1x</td>
+</tr>
+<tr>
+<td>Complex transformation</td>
+<td>100 products</td>
+<td>46.740</td>
+<td>4.100</td>
+<td>0.1x</td>
+</tr>
+<tr>
+<td>Group by category (aggregate)</td>
+<td>100 products</td>
+<td>56.129</td>
+<td>1.400</td>
+<td>0.0x</td>
+</tr>
+<tr>
+<td>Top rated products</td>
+<td>100 products</td>
+<td>25.183</td>
+<td>0.210</td>
+<td>0.0x</td>
+</tr>
+</tbody>
+</table>
+<h4 id="path-comparison">Path Comparison<a class="headerlink" href="#path-comparison" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Data Size</th>
+<th>jsonatapy (ms)</th>
+<th>JavaScript (ms)</th>
+<th>Speedup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Filter by category (data handle)</td>
+<td>100 products</td>
+<td>13.670</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Filter by category (data→json)</td>
+<td>100 products</td>
+<td>8.725</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Complex transformation (data handle)</td>
+<td>100 products</td>
+<td>33.402</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Complex transformation (data→json)</td>
+<td>100 products</td>
+<td>30.125</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Aggregate (data handle)</td>
+<td>100 products</td>
+<td>8.814</td>
+<td>N/A</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Aggregate (data→json)</td>
+<td>100 products</td>
+<td>9.257</td>
+<td>N/A</td>
+<td>N/A</td>
 </tr>
 </tbody>
 </table>
@@ -1807,19 +2054,19 @@
 <tr>
 <th>Implementation</th>
 <th>Language</th>
-<th>Relative Performance</th>
+<th>Status</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>jsonatapy</strong></td>
 <td>Rust + Python</td>
-<td>Baseline (fastest)</td>
+<td>Baseline (this implementation)</td>
 </tr>
 <tr>
 <td>jsonata-js</td>
 <td>JavaScript</td>
-<td>0.2x - 10x slower (varies by operation)</td>
+<td>Tested (reference implementation)</td>
 </tr>
 <tr>
 <td>jsonata-python</td>
@@ -1835,19 +2082,17 @@
 </table>
 <h2 id="performance-characteristics">Performance Characteristics<a class="headerlink" href="#performance-characteristics" title="Permanent link">&para;</a></h2>
 <p>jsonatapy excels at:
-- Simple path queries
-- Arithmetic and logical operations
-- String manipulation
-- Object transformations</p>
+- Simple Paths
+- Complex Transformations
+- String Operations</p>
 <p>Comparable performance on:
-- Array aggregation functions
-- Large array operations</p>
+- Deep Nesting</p>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Benchmarks run on Ubuntu Linux with Python 3.12</li>
 <li>JavaScript benchmarks use Node.js v20+</li>
 <li>Times shown are per operation in milliseconds</li>
-<li>"Speedup" shows how many times faster jsonatapy is compared to JavaScript</li>
+<li>'Speedup' shows how many times faster jsonatapy is compared to JavaScript</li>
 <li>Values less than 1.0 indicate JavaScript is faster for that specific operation</li>
 </ul>
 
