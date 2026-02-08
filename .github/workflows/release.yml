@@ -296,6 +296,8 @@ jobs:
 
       - name: Run reference suite (smoke test)
         shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           pytest tests/python/test_reference_suite.py \
             -v \
