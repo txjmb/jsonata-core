@@ -3,6 +3,9 @@ site_description: High-performance Python implementation of JSONata - JSON query
 site_author: jsonatapy contributors
 site_url: https://txjmb.github.io/jsonatapy
 
+# Disable Jekyll processing on GitHub Pages
+use_directory_urls: true
+
 repo_name: jsonatapy
 repo_url: https://github.com/txjmb/jsonatapy
 edit_uri: edit/master/docs/
