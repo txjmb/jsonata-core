@@ -549,12 +549,35 @@ wheels = [
 ]
 
 [[package]]
+name = "jsonata"
+version = "0.2.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/24/fcc7c1e2562c214f09a1126291f26e30bf9f483433c7ad5fcaf4a7cde683/jsonata-0.2.5.tar.gz", hash = "sha256:71c85d307c619ce646303cd6a819aaac27c79a581ef64bd8b9e6bcb2f73f034d", size = 964272, upload-time = "2023-11-15T11:27:51.489Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5b/8c/3bfb2efb6ecb148b51f465176164c10aa2ad0bb4d7b376dd6e3652f97992/jsonata-0.2.5-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:81e29c3010e6bba0f74f339e865b781da23b647330947f50d69788c6b63f0d0d", size = 396576, upload-time = "2023-11-15T11:25:50.973Z" },
+    { url = "https://files.pythonhosted.org/packages/82/ea/8921697857c887fa2c0c20850b00a41eaef0d68340c781a496abf8184246/jsonata-0.2.5-cp310-cp310-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:40c445d03cb2bf05944a800192c76a7a4cdbccb2c20d07331975b9b3201311cb", size = 412517, upload-time = "2023-11-15T11:25:53.236Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/d6/f59e90c405fe33ca4a0c1a5f1fa894de65a8c4eb0af35540667f38c3beb2/jsonata-0.2.5-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:881f10790ae77f7ad622d6e070ec9ca4440a4767e7e9876bc73d73f124dbfe12", size = 381029, upload-time = "2023-11-15T11:25:55.642Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/27/f3c2bd1bac9c975b664d92e417b94afff75f1d17e7e613cc53ee3fa1eda0/jsonata-0.2.5-cp310-cp310-musllinux_1_1_i686.whl", hash = "sha256:76d2ee1031f7f827190a7ab0f8a470349857f1bf7cc18ed1c33a09b5290d294e", size = 984364, upload-time = "2023-11-15T11:25:58.407Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/0b/1c9ca72df40811482ed96c921da136e89c836e99ec9566302bd8d52b19a9/jsonata-0.2.5-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:725f15538ec1bb8137b0289b2d4873ad2ce01a25b76af0eec3804f502364693c", size = 900841, upload-time = "2023-11-15T11:26:01.468Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/72/b9f6943109601827d4e9bfc8118cb32d754bd83ba8fa36bc002acce49c29/jsonata-0.2.5-cp310-cp310-win32.whl", hash = "sha256:bc9b1dc835fc8d97680d12997f9b76fed7b427c7251e80da65e5a9addafd04de", size = 254266, upload-time = "2023-11-15T11:26:04.101Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/d6/2e30b1dbc6e683e633c0f63790adfb53ab0f90036eca6d2c56f7c46d3264/jsonata-0.2.5-cp310-cp310-win_amd64.whl", hash = "sha256:0550c0a794fea8e7fd3da19d730abff91c3c34d2ad6f60b7b86561a37bf62d9e", size = 297002, upload-time = "2023-11-15T11:26:06.317Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/4f/a9a3dbad6f3b12b46f7a4da0bb1814ece9712c669f0374e6b26c192b19b9/jsonata-0.2.5-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:48c2d84b30bf737b8ea6ae54be862b500f90cd76605beb04d7e4f2cd62eb7b90", size = 398354, upload-time = "2023-11-15T11:26:08.581Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/af/e6281ef3717b7eb77aa423bd7eac5c965f3ede4984715ea70a5b9827a2c5/jsonata-0.2.5-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:1e587eb1680041295f47eaef595c05c699f11c635323c643ef6e75ed9960edff", size = 413461, upload-time = "2023-11-15T11:26:10.381Z" },
+    { url = "https://files.pythonhosted.org/packages/89/eb/89aeae0a34a677613a7a661826c1f88a4ffd8fe3b5b6c052e9ce430424b0/jsonata-0.2.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c55a54921a753e09f646577c5e4c00e732f621c11509c2cc7fe0f32f238ba747", size = 382505, upload-time = "2023-11-15T11:26:12.787Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/23/4b15a7320a5407d024199f609a854447dd5ad1ed14e35ec6b6d769a9ef6f/jsonata-0.2.5-cp311-cp311-musllinux_1_1_i686.whl", hash = "sha256:b2119d3459e82dc56c7054990b776733b8020e56f873d7c0a22e93e9de712886", size = 985470, upload-time = "2023-11-15T11:26:15.034Z" },
+    { url = "https://files.pythonhosted.org/packages/80/7a/81662886c476d3413ba8c8f42151f1288a6665b17f0ac43f0bfa52bdac7d/jsonata-0.2.5-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:a0ccd12ecab0ddf7b5a415b1042db57aeb6a7f78299ab227ee94a0f89438d6af", size = 901805, upload-time = "2023-11-15T11:26:17.232Z" },
+    { url = "https://files.pythonhosted.org/packages/58/4e/d3e1cd0017a1aae02352bf72e2c0dce06ea310ea1faba521969053385ed7/jsonata-0.2.5-cp311-cp311-win32.whl", hash = "sha256:af48322afcdc1c93ff3a478fbf76e09a0d018fd90b30eac7d14773b5ac888c1b", size = 254981, upload-time = "2023-11-15T11:26:20.039Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/95/d4dea6b9023864c70a122e7e19e066df66619235f649fff846f8cf89950e/jsonata-0.2.5-cp311-cp311-win_amd64.whl", hash = "sha256:5966ec5218b6b1b53103175b8c662280a2ac112742c29989b535175eec0f9cca", size = 297763, upload-time = "2023-11-15T11:26:22.288Z" },
+]
+
+[[package]]
 name = "jsonatapy"
 version = "2.1.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
 bench = [
+    { name = "jsonata" },
     { name = "matplotlib" },
     { name = "rich" },
 ]
@@ -585,6 +608,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "jsonata", marker = "extra == 'bench'", specifier = ">=0.2.0" },
     { name = "matplotlib", marker = "extra == 'bench'", specifier = ">=3.5" },
     { name = "maturin", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5" },
@@ -598,7 +622,7 @@ requires-dist = [
     { name = "rich", marker = "extra == 'bench'", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
 ]
-provides-extras = ["dev", "docs", "bench"]
+provides-extras = ["dev", "bench", "docs"]
 
 [package.metadata.requires-dev]
 dev = [

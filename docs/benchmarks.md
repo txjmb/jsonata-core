@@ -8,21 +8,27 @@ jsonatapy includes a comprehensive benchmark suite comparing performance across 
 # Build jsonatapy
 maturin develop --release
 
-# Install dependencies
-uv pip install --system pytest
+# Install benchmark dependencies (includes jsonata-python for comparison)
+uv sync --extra bench
 
-# Run benchmark suite
-uv run python benchmarks/benchmark.py
+# Run full benchmark suite
+uv run python benchmarks/python/benchmark.py
 ```
 
 ## Implementations Compared
 
-Current benchmark results compare:
+Latest benchmark results (2026-02-08) compare:
 
 1. **jsonatapy** - Rust-based Python extension (this project)
-2. **JavaScript** - Official jsonata-js reference implementation (Node.js)
+2. **jsonata-js** - Official JavaScript reference implementation (Node.js)
+3. **jsonata-python** - Python wrapper around JavaScript implementation
+4. **jsonata-rs** - Pure Rust implementation (optional, requires building the binary)
 
-The benchmark suite also supports jsonata-rs and jsonata-python, but these require separate installation and are not included in the current results.
+To include jsonata-rs in benchmarks:
+```bash
+cd benchmarks/rust
+cargo build --release
+```
 
 ## Benchmark Categories
 

@@ -121,8 +121,8 @@ class BenchmarkSuite:
 
     def _check_jsonata_rs(self) -> bool:
         """Check if jsonata-rs benchmark binary is available."""
-        bench_dir = Path(__file__).parent
-        binary_path = bench_dir / "target" / "release" / "jsonata-rs-bench"
+        bench_dir = Path(__file__).parent.parent  # benchmarks/ directory
+        binary_path = bench_dir / "rust" / "target" / "release" / "jsonata-rs-bench"
 
         if binary_path.exists():
             print("✓ jsonata-rs benchmark binary found")
@@ -227,8 +227,8 @@ class BenchmarkSuite:
         if not self.jsonata_rs_available:
             return -1.0
 
-        bench_dir = Path(__file__).parent
-        binary_path = bench_dir / "target" / "release" / "jsonata-rs-bench"
+        bench_dir = Path(__file__).parent.parent  # benchmarks/ directory
+        binary_path = bench_dir / "rust" / "target" / "release" / "jsonata-rs-bench"
 
         # Prepare input JSON
         input_data = {
