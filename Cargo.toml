@@ -1,8 +1,8 @@
 [package]
 name = "jsonatapy"
-version = "0.1.0"
+version = "2.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["txjmb <txjmb@users.noreply.github.com>"]
 description = "High-performance Python implementation of JSONata query and transformation language"
 license = "MIT"
 repository = "https://github.com/yourusername/jsonatapy"
