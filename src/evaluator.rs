@@ -6,6 +6,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::manual_strip)]
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
@@ -188,15 +189,33 @@ fn evaluate_specialized(item: &JValue, spec: &SpecializedPredicate) -> bool {
 
 /// Specialized sort comparator for `$l.field op $r.field` patterns.
 /// Bypasses the full AST evaluator for simple field-based sort comparisons.
-enum SpecializedSortComparator {
-    /// function($l, $r) { $l.field > $r.field }
-    FieldGt(String),
-    /// function($l, $r) { $l.field < $r.field }
-    FieldLt(String),
-    /// function($l, $r) { $l.field >= $r.field }
-    FieldGte(String),
-    /// function($l, $r) { $l.field <= $r.field }
-    FieldLte(String),
+///
+/// In JSONata `$sort`, the comparator returns true when `$l` should come AFTER `$r`.
+/// `$l.field > $r.field` swaps when left > right, producing ascending order.
+/// `$l.field < $r.field` swaps when left < right, producing descending order.
+struct SpecializedSortComparator {
+    field: String,
+    descending: bool,
+}
+
+/// Pre-extracted sort key for the Schwartzian transform in specialized sorting.
+enum SortKey {
+    Num(f64),
+    Str(Rc<str>),
+    None,
+}
+
+fn compare_sort_keys(a: &SortKey, b: &SortKey, descending: bool) -> Ordering {
+    let ord = match (a, b) {
+        (SortKey::Num(x), SortKey::Num(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (SortKey::Str(x), SortKey::Str(y)) => (**x).cmp(&**y),
+        (SortKey::None, SortKey::None) => Ordering::Equal,
+        (SortKey::None, _) => Ordering::Greater,
+        (_, SortKey::None) => Ordering::Less,
+        // Mixed types: maintain original order
+        _ => Ordering::Equal,
+    };
+    if descending { ord.reverse() } else { ord }
 }
 
 /// Try to extract a specialized sort comparator from a lambda AST node.
@@ -206,109 +225,53 @@ fn try_specialize_sort_comparator(
     left_param: &str,
     right_param: &str,
 ) -> Option<SpecializedSortComparator> {
-    if let AstNode::Binary { op, lhs, rhs } = body {
-        // Check that lhs is `$left_param.field` and rhs is `$right_param.field`
-        // (or vice versa for flipped comparisons)
-        let extract_var_field = |node: &AstNode, param: &str| -> Option<String> {
-            if let AstNode::Path { steps } = node {
-                if steps.len() == 2 {
-                    if let AstNode::Variable(var) = &steps[0].node {
-                        if var == param {
-                            if let AstNode::Name(field) = &steps[1].node {
-                                if steps[0].stages.is_empty() && steps[1].stages.is_empty() {
-                                    return Some(field.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            None
-        };
+    let AstNode::Binary { op, lhs, rhs } = body else {
+        return None;
+    };
 
-        // Try $l.field op $r.field
-        if let (Some(left_field), Some(right_field)) = (
-            extract_var_field(lhs, left_param),
-            extract_var_field(rhs, right_param),
-        ) {
-            if left_field == right_field {
-                return match op {
-                    BinaryOp::GreaterThan => Some(SpecializedSortComparator::FieldGt(left_field)),
-                    BinaryOp::LessThan => Some(SpecializedSortComparator::FieldLt(left_field)),
-                    BinaryOp::GreaterThanOrEqual => {
-                        Some(SpecializedSortComparator::FieldGte(left_field))
-                    }
-                    BinaryOp::LessThanOrEqual => {
-                        Some(SpecializedSortComparator::FieldLte(left_field))
-                    }
-                    _ => None,
-                };
-            }
+    // Returns true if op means "swap when left > right" (ascending order).
+    let is_ascending = |op: &BinaryOp| -> Option<bool> {
+        match op {
+            BinaryOp::GreaterThan | BinaryOp::GreaterThanOrEqual => Some(true),
+            BinaryOp::LessThan | BinaryOp::LessThanOrEqual => Some(false),
+            _ => None,
         }
+    };
 
-        // Try $r.field op $l.field (flipped)
-        if let (Some(right_field), Some(left_field)) = (
-            extract_var_field(lhs, right_param),
-            extract_var_field(rhs, left_param),
+    // Extract field name from a `$param.field` path with no stages.
+    let extract_var_field = |node: &AstNode, param: &str| -> Option<String> {
+        let AstNode::Path { steps } = node else { return None };
+        if steps.len() != 2 { return None; }
+        let AstNode::Variable(var) = &steps[0].node else { return None };
+        if var != param { return None; }
+        let AstNode::Name(field) = &steps[1].node else { return None };
+        if !steps[0].stages.is_empty() || !steps[1].stages.is_empty() { return None; }
+        Some(field.clone())
+    };
+
+    // Try both orientations: $l.field op $r.field and $r.field op $l.field (flipped).
+    for flipped in [false, true] {
+        let (lhs_param, rhs_param) = if flipped {
+            (right_param, left_param)
+        } else {
+            (left_param, right_param)
+        };
+        if let (Some(lhs_field), Some(rhs_field)) = (
+            extract_var_field(lhs, lhs_param),
+            extract_var_field(rhs, rhs_param),
         ) {
-            if left_field == right_field {
-                return match op {
-                    // Flipped: $r.field > $l.field means $l.field < $r.field
-                    BinaryOp::GreaterThan => Some(SpecializedSortComparator::FieldLt(left_field)),
-                    BinaryOp::LessThan => Some(SpecializedSortComparator::FieldGt(left_field)),
-                    BinaryOp::GreaterThanOrEqual => {
-                        Some(SpecializedSortComparator::FieldLte(left_field))
-                    }
-                    BinaryOp::LessThanOrEqual => {
-                        Some(SpecializedSortComparator::FieldGte(left_field))
-                    }
-                    _ => None,
-                };
+            if lhs_field == rhs_field {
+                let ascending = is_ascending(op)?;
+                // When flipped ($r.field > $l.field), the direction inverts.
+                let descending = if flipped { ascending } else { !ascending };
+                return Some(SpecializedSortComparator {
+                    field: lhs_field,
+                    descending,
+                });
             }
         }
     }
     None
-}
-
-/// Compare two JValues for sorting using a specialized comparator.
-/// Returns true if `left` should come AFTER `right` (matching JSONata $sort semantics).
-fn compare_specialized(
-    left: &JValue,
-    right: &JValue,
-    spec: &SpecializedSortComparator,
-) -> bool {
-    let (left_val, right_val) = match spec {
-        SpecializedSortComparator::FieldGt(field)
-        | SpecializedSortComparator::FieldLt(field)
-        | SpecializedSortComparator::FieldGte(field)
-        | SpecializedSortComparator::FieldLte(field) => {
-            let l = match left {
-                JValue::Object(obj) => obj.get(field.as_str()),
-                _ => None,
-            };
-            let r = match right {
-                JValue::Object(obj) => obj.get(field.as_str()),
-                _ => None,
-            };
-            (l, r)
-        }
-    };
-
-    match (left_val, right_val) {
-        (Some(JValue::Number(l)), Some(JValue::Number(r))) => match spec {
-            SpecializedSortComparator::FieldGt(_) => *l > *r,
-            SpecializedSortComparator::FieldLt(_) => *l < *r,
-            SpecializedSortComparator::FieldGte(_) => *l >= *r,
-            SpecializedSortComparator::FieldLte(_) => *l <= *r,
-        },
-        (Some(JValue::String(l)), Some(JValue::String(r))) => match spec {
-            SpecializedSortComparator::FieldGt(_) => **l > **r,
-            SpecializedSortComparator::FieldLt(_) => **l < **r,
-            SpecializedSortComparator::FieldGte(_) => **l >= **r,
-            SpecializedSortComparator::FieldLte(_) => **l <= **r,
-        },
-        _ => false,
-    }
 }
 
 /// Functions that propagate undefined (return undefined when given an undefined argument).
@@ -706,40 +669,47 @@ impl Evaluator {
         }
     }
 
-    /// Specialized merge sort using direct field comparisons.
-    /// Used when the comparator is a simple `$l.field op $r.field` pattern.
-    fn merge_sort_specialized(
-        arr: &mut [JValue],
-        spec: &SpecializedSortComparator,
-    ) {
+    /// Specialized sort using pre-extracted keys (Schwartzian transform).
+    /// Extracts sort keys once (N lookups), then sorts by comparing keys directly,
+    /// avoiding O(N log N) hash lookups during comparisons.
+    fn merge_sort_specialized(arr: &mut [JValue], spec: &SpecializedSortComparator) {
         if arr.len() <= 1 {
             return;
         }
 
-        let mid = arr.len() / 2;
-        Self::merge_sort_specialized(&mut arr[..mid], spec);
-        Self::merge_sort_specialized(&mut arr[mid..], spec);
+        // Phase 1: Extract sort keys -- one IndexMap lookup per element
+        let keys: Vec<SortKey> = arr
+            .iter()
+            .map(|item| match item {
+                JValue::Object(obj) => match obj.get(&spec.field) {
+                    Some(JValue::Number(n)) => SortKey::Num(*n),
+                    Some(JValue::String(s)) => SortKey::Str(s.clone()),
+                    _ => SortKey::None,
+                },
+                _ => SortKey::None,
+            })
+            .collect();
 
-        let mut temp = Vec::with_capacity(arr.len());
-        let (left, right) = arr.split_at(mid);
-        let mut i = 0;
-        let mut j = 0;
+        // Phase 2: Build index permutation sorted by pre-extracted keys
+        let mut perm: Vec<usize> = (0..arr.len()).collect();
+        perm.sort_by(|&a, &b| compare_sort_keys(&keys[a], &keys[b], spec.descending));
 
-        while i < left.len() && j < right.len() {
-            if compare_specialized(&left[i], &right[j], spec) {
-                temp.push(right[j].clone());
-                j += 1;
-            } else {
-                temp.push(left[i].clone());
-                i += 1;
+        // Phase 3: Apply permutation in-place via cycle-following
+        let mut placed = vec![false; arr.len()];
+        for i in 0..arr.len() {
+            if placed[i] || perm[i] == i {
+                continue;
             }
-        }
-
-        temp.extend_from_slice(&left[i..]);
-        temp.extend_from_slice(&right[j..]);
-
-        for (idx, val) in temp.into_iter().enumerate() {
-            arr[idx] = val;
+            let mut j = i;
+            loop {
+                let target = perm[j];
+                placed[j] = true;
+                if target == i {
+                    break;
+                }
+                arr.swap(j, target);
+                j = target;
+            }
         }
     }
 
@@ -7177,8 +7147,7 @@ impl Evaluator {
     }
 
     /// Compare two values for sorting (JSONata semantics)
-    fn compare_values(&self, left: &JValue, right: &JValue) -> std::cmp::Ordering {
-        use std::cmp::Ordering;
+    fn compare_values(&self, left: &JValue, right: &JValue) -> Ordering {
 
         // Handle undefined markers first - they sort to the end
         let left_undef = left.is_undefined();
