@@ -1,10 +1,10 @@
 site_name: jsonatapy
 site_description: High-performance Python implementation of JSONata - JSON query and transformation language
 site_author: jsonatapy contributors
-site_url: https://github.com/jsonata-js/jsonatapy
+site_url: https://txjmb.github.io/jsonatapy
 
 repo_name: jsonatapy
-repo_url: https://github.com/jsonata-js/jsonatapy
+repo_url: https://github.com/txjmb/jsonatapy
 edit_uri: edit/master/docs/
 
 copyright: Copyright &copy; 2024-2026 jsonatapy contributors
@@ -119,7 +119,7 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/jsonata-js/jsonatapy
+      link: https://github.com/txjmb/jsonatapy
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/jsonatapy/
   version:
