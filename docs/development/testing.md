@@ -2,17 +2,6 @@
 
 Comprehensive guide to testing in jsonatapy.
 
-## Table of Contents
-
-- [Test Structure](#test-structure)
-- [Running Tests](#running-tests)
-- [Rust Unit Tests](#rust-unit-tests)
-- [Python Integration Tests](#python-integration-tests)
-- [Reference Test Suite](#reference-test-suite)
-- [Adding New Tests](#adding-new-tests)
-- [Coverage Requirements](#coverage-requirements)
-- [Test Best Practices](#test-best-practices)
-
 ## Test Structure
 
 jsonatapy has three layers of testing:
@@ -303,7 +292,7 @@ def test_with_fixture(sample_data):
 
 ### Overview
 
-The reference test suite contains **1258 tests** from the official jsonata-js repository. These tests ensure 100% compatibility with the JSONata specification.
+The reference test suite contains 1258 tests from the official jsonata-js repository. These tests ensure 100% compatibility with the JSONata specification.
 
 ### Location
 
@@ -468,7 +457,7 @@ test_error()
 
 ### Target Coverage
 
-**Required:** 100% coverage (matching upstream jsonata-js)
+Required: 100% coverage (matching upstream jsonata-js)
 
 ### Measuring Coverage
 
@@ -508,12 +497,12 @@ pytest tests/python/ --cov=jsonatapy --cov-report=xml
 ### 1. Test One Thing at a Time
 
 ```python
-# ✅ Good - focused test
+# Good - focused test
 def test_sum_returns_total():
     result = jsonatapy.evaluate("$sum([1, 2, 3])", {})
     assert result == 6
 
-# ❌ Bad - tests multiple things
+# Bad - tests multiple things
 def test_sum_and_count():
     sum_result = jsonatapy.evaluate("$sum([1, 2, 3])", {})
     count_result = jsonatapy.evaluate("$count([1, 2, 3])", {})
@@ -524,13 +513,13 @@ def test_sum_and_count():
 ### 2. Use Descriptive Assertions
 
 ```python
-# ✅ Good - clear assertion message
+# Good - clear assertion message
 assert result == expected, f"Expected {expected}, got {result}"
 
-# ✅ Good - pytest provides good messages
+# Good - pytest provides good messages
 assert result == expected
 
-# ❌ Bad - no context on failure
+# Bad - no context on failure
 assert result
 ```
 
@@ -613,7 +602,7 @@ def test_sum_ignores_null_values():
 
 All tests run on CI for:
 - **Platforms**: Linux, macOS, Windows
-- **Python versions**: 3.8, 3.9, 3.10, 3.11, 3.12
+- **Python versions**: 3.10, 3.11, 3.12, 3.13
 - **Architectures**: x86_64, aarch64
 
 ### CI Commands

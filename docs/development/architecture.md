@@ -2,19 +2,9 @@
 
 Technical overview of jsonatapy's architecture and design.
 
-## Table of Contents
-
-- [High-Level Overview](#high-level-overview)
-- [Module Structure](#module-structure)
-- [JValue Type System](#jvalue-type-system)
-- [Evaluation Pipeline](#evaluation-pipeline)
-- [Scope Stack and Lambda Storage](#scope-stack-and-lambda-storage)
-- [Performance Optimizations](#performance-optimizations)
-- [Key Design Patterns](#key-design-patterns)
-
 ## High-Level Overview
 
-jsonatapy is a Rust-based Python extension that implements the JSONata query and transformation language.
+jsonatapy is a Rust-based Python extension implementing the JSONata query and transformation language.
 
 ### Architecture Layers
 
@@ -75,8 +65,6 @@ jsonatapy is a Rust-based Python extension that implements the JSONata query and
 
 jsonatapy mirrors the structure of the JavaScript reference implementation for maintainability.
 
-### Core Modules
-
 ```
 src/
 ├── lib.rs          # PyO3 bindings, Python API entry point
@@ -93,7 +81,6 @@ src/
 
 **lib.rs** - Python Bindings
 ```rust
-/// Python module entry point
 #[pymodule]
 fn _jsonatapy(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compile, m)?)?;
@@ -114,8 +101,7 @@ fn _jsonatapy(_py: Python, m: &PyModule) -> PyResult<()> {
 - Main evaluation engine
 - Context and scope management
 - Lambda storage and execution
-- Path traversal
-- Predicate evaluation
+- Path traversal and predicate evaluation
 - Object construction
 
 **functions.rs** - Built-in Functions
@@ -168,7 +154,7 @@ pub enum JValue {
 ```rust
 // O(1) clone - just increments reference count
 let s1 = JValue::string("hello");
-let s2 = s1.clone();  // No data copy!
+let s2 = s1.clone();  // No data copy
 
 // Compare to String clone: O(n)
 let s1 = String::from("hello");
@@ -182,14 +168,13 @@ let s2 = s1.clone();  // Copies entire string
 Instead of wrapping in JSON objects:
 
 ```rust
-// ✅ First-class variant (fast)
+// First-class variant (fast)
 JValue::Lambda { lambda_id: 1, params: vec![], name: None, signature: None }
 
-// ❌ Tagged JSON object (slow)
+// Tagged JSON object (slow)
 JValue::Object(map! {
     "type" => "lambda",
     "id" => 1,
-    // ...
 })
 ```
 
@@ -304,14 +289,14 @@ pub struct StoredLambda {
 
 ### Scope Management
 
-**Push/Pop Pattern (not clone/restore):**
+Push/pop pattern (not clone/restore):
 ```rust
-// ✅ Efficient - push/pop
+// Efficient - push/pop
 ctx.push_scope();
 let result = evaluate_expression(ctx, expr)?;
 ctx.pop_scope();
 
-// ❌ Inefficient - clone/restore
+// Inefficient - clone/restore
 let old_ctx = ctx.clone();
 let result = evaluate_expression(ctx, expr)?;
 *ctx = old_ctx;
@@ -319,7 +304,7 @@ let result = evaluate_expression(ctx, expr)?;
 
 ### Lambda Storage
 
-**Lambdas stored separately from values:**
+Lambdas stored separately from values:
 
 ```rust
 // Create lambda
@@ -349,7 +334,7 @@ ctx.pop_scope();
 
 ### Selective Capture
 
-**Only capture free variables:**
+Only capture free variables:
 ```rust
 fn capture_free_vars(ctx: &Context, body: &AstNode) -> HashMap<String, JValue> {
     let free_vars = find_free_variables(body);
@@ -364,8 +349,6 @@ fn capture_free_vars(ctx: &Context, body: &AstNode) -> HashMap<String, JValue> {
     captured
 }
 ```
-
-**Impact:** Reduces closure size, improves performance.
 
 ## Performance Optimizations
 
@@ -387,17 +370,17 @@ fn capture_free_vars(ctx: &Context, body: &AstNode) -> HashMap<String, JValue> {
 Simple field comparisons are optimized:
 
 ```rust
-// ✅ Optimized path
+// Optimized path
 items[price > 100]      // Direct field comparison
 items[category = "A"]   // Direct field equality
 
-// ⚠️ General path (not optimized)
+// General path (not optimized)
 items[$contains(name, "widget")]  // Function call
 ```
 
 ### Memory Efficiency
 
-**Rc sharing prevents unnecessary copies:**
+Rc sharing prevents unnecessary copies:
 
 ```rust
 let data = JValue::array(vec![...]);  // Large array
@@ -406,8 +389,6 @@ let data = JValue::array(vec![...]);  // Large array
 let filtered = filter_array(&data, predicate)?;
 let mapped = map_array(&filtered, mapper)?;
 let sorted = sort_array(&mapped, comparator)?;
-
-// All operations share the same underlying data where possible
 ```
 
 ## Key Design Patterns
@@ -449,26 +430,11 @@ pub fn evaluate(ctx: &mut Context, node: &AstNode) -> Result<JValue, EvalError> 
 }
 ```
 
-### 4. Visitor Pattern for AST Traversal
-
-```rust
-fn evaluate(ctx: &mut Context, node: &AstNode) -> Result<JValue, EvalError> {
-    match node {
-        AstNode::Number(n) => visit_number(n),
-        AstNode::String(s) => visit_string(s),
-        AstNode::Path(p) => visit_path(ctx, p),
-        AstNode::Binary(op, l, r) => visit_binary(ctx, op, l, r),
-        // ...
-    }
-}
-```
-
-### 5. Context Threading
+### 4. Context Threading
 
 ```rust
 // Context passed through call chain
 fn evaluate(ctx: &mut Context, node: &AstNode) -> Result<JValue> {
-    // ...
     let result = evaluate_child(ctx, child_node)?;
     // ...
 }
@@ -478,7 +444,7 @@ fn evaluate_child(ctx: &mut Context, node: &AstNode) -> Result<JValue> {
 }
 ```
 
-### 6. Lazy Evaluation
+### 5. Lazy Evaluation
 
 ```rust
 // Only evaluate branches that are needed
@@ -513,27 +479,10 @@ fn evaluate_conditional(ctx: &mut Context, cond: &AstNode,
 
 ### Test Coverage
 
-**Target:** 100% coverage (matching upstream jsonata-js)
-
-## Future Improvements
-
-### Potential Optimizations
-
-- **Parallel evaluation** - Evaluate independent expressions concurrently
-- **JIT compilation** - Compile hot expressions to native code
-- **Constant folding** - Evaluate constant expressions at compile time
-- **Inline caching** - Cache field lookups
-- **SIMD operations** - Vectorize array operations
-
-### Planned Features
-
-- **Custom function registration** - Allow Python functions as JSONata functions
-- **Streaming evaluation** - Process large datasets incrementally
-- **Query optimization** - Reorder operations for better performance
+Target: 100% coverage (matching upstream jsonata-js)
 
 ## Next Steps
 
 - [Learn about testing](testing.md)
 - [Understand build process](building.md)
 - [Contribute to the project](contributing.md)
-- [Review performance benchmarks](../benchmarks.md)

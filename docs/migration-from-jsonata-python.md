@@ -37,11 +37,11 @@ jsonata-python uses PyExecJS to embed a JavaScript engine:
 
 ### jsonatapy Advantages
 
-- ✅ **Native Performance**: Pure Rust implementation, no JavaScript
-- ✅ **Zero Dependencies**: No Node.js, no JS engine required
-- ✅ **Pre-compilation**: Compile once, evaluate many times
-- ✅ **Optimized APIs**: JSON string API, pre-converted data handles
-- ✅ **100% Compatible**: Passes all 1258 reference test suite tests
+-**Native Performance**: Pure Rust implementation, no JavaScript
+-**Zero Dependencies**: No Node.js, no JS engine required
+-**Pre-compilation**: Compile once, evaluate many times
+-**Optimized APIs**: JSON string API, pre-converted data handles
+-**100% Compatible**: Passes all 1258 reference test suite tests
 
 ## API Differences
 
@@ -375,14 +375,14 @@ results = process_records(records, 'value * 2')  # ~0.2 seconds!
 
 jsonatapy implements 100% of the JSONata 2.1.0 specification:
 
-- ✅ All built-in functions (40+)
-- ✅ Lambda functions and closures
-- ✅ Higher-order functions ($map, $filter, $reduce, etc.)
-- ✅ Object construction and transformation
-- ✅ Array operations and predicates
-- ✅ String, numeric, and boolean operations
-- ✅ Aggregation functions
-- ✅ Date/time functions
+-All built-in functions (40+)
+-Lambda functions and closures
+-Higher-order functions ($map, $filter, $reduce, etc.)
+-Object construction and transformation
+-Array operations and predicates
+-String, numeric, and boolean operations
+-Aggregation functions
+-Date/time functions
 
 ### Test Suite Compatibility
 

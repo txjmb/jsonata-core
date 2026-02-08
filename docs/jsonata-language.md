@@ -200,10 +200,10 @@ JSONata has the following types:
 
 jsonatapy aims for 100% compatibility with the reference JavaScript implementation. Currently:
 
-- ✅ **1258/1258 tests passing** (100% compatibility)
-- ✅ All language features supported
-- ✅ All built-in functions implemented
-- ✅ Full lambda and higher-order function support
+- **1258/1258 tests passing** (100% compatibility)
+- All language features supported
+- All built-in functions implemented
+- Full lambda and higher-order function support
 
 See [Compatibility Status](compatibility.md) for detailed information.
 
@@ -218,7 +218,7 @@ See [Compatibility Status](compatibility.md) for detailed information.
 
 jsonatapy is implemented in Rust for performance, but maintains semantic compatibility with the JavaScript reference implementation:
 
-- **Performance**: Typically 2-5x faster than JavaScript for most operations
+- **Performance**: Typically faster than JavaScript for most operations
 - **Type handling**: Same type coercion rules as JavaScript
 - **Error messages**: Similar error messages and stack traces
 - **Async**: Currently synchronous only (async support planned)

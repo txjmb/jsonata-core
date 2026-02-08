@@ -1,10 +1,10 @@
 # JSONata Parser Implementation
 
-This document describes the complete implementation of the JSONata parser in Rust.
+Complete implementation of the JSONata parser in Rust.
 
 ## File Location
 
-`C:\Users\mboha\source\repos\jsonatapy\src\parser.rs` (1,242 lines)
+`src/parser.rs` (1,242 lines)
 
 ## Quick Start
 
@@ -13,8 +13,6 @@ use jsonatapy::parser::parse;
 
 // Parse an expression
 let ast = parse("orders[price > 100].product")?;
-
-// The AST can then be passed to the evaluator
 ```
 
 ## Features
@@ -40,7 +38,7 @@ let token3 = lexer.next_token()?; // Token::Number(2.0)
 
 ### Parser
 
-The parser uses **Pratt parsing** (Top-Down Operator Precedence) to build an AST.
+The parser uses Pratt parsing (Top-Down Operator Precedence) to build an AST.
 
 **Operator precedence:**
 1. Function call `()`, array access `[]` - 80
@@ -62,9 +60,3 @@ cargo test --lib parser
 ```
 
 The test suite includes 35+ tests covering all features.
-
-## See Also
-
-- Full documentation: `PARSER_IMPLEMENTATION.md`
-- Examples: `examples/parser_demo.rs`
-- Verification script: `verify_parser.bat` or `verify_parser.sh`

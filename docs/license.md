@@ -32,11 +32,11 @@ SOFTWARE.
 
 The MIT License is a permissive open-source license that allows you to:
 
-- ✅ **Use** the software commercially
-- ✅ **Modify** the software
-- ✅ **Distribute** the software
-- ✅ **Sublicense** the software
-- ✅ **Use privately** without restrictions
+- **Use** the software commercially
+- **Modify** the software
+- **Distribute** the software
+- **Sublicense** the software
+- **Use privately** without restrictions
 
 ### Requirements
 
@@ -75,5 +75,5 @@ For the complete license text, see [LICENSE](../LICENSE) in the repository root.
 
 If you have questions about licensing:
 - Review the [MIT License FAQ](https://opensource.org/licenses/MIT)
-- Open an issue on [GitHub](https://github.com/yourorg/jsonatapy/issues)
+- Open an issue on [GitHub](https://github.com/txjmb/jsonatapy/issues)
 - Check the [Open Source Initiative](https://opensource.org/) resources

@@ -15,11 +15,11 @@ Comprehensive documentation for jsonatapy - the high-performance Python implemen
 - **[performance.md](performance.md)** - Performance guide and benchmarks
 
 ### Development
-- **[building.md](building.md)** - Building from source and development guide
+- **[development/building.md](development/building.md)** - Building from source and development guide
+- **[development/contributing.md](development/contributing.md)** - Contribution guidelines
 
 ### Reference
 - **[JSONata Language Docs](https://docs.jsonata.org/)** - Official JSONata syntax reference
-- **[PARSER.md](PARSER.md)** - Internal parser documentation
 
 ## Quick Start
 
@@ -57,25 +57,24 @@ JSONata is a lightweight query and transformation language for JSON data. Think 
 
 ## Why jsonatapy?
 
-### ⚡ Performance
-- **4.5x faster than JavaScript** on average
-- **8-18x faster** on simple operations
+### Performance
 - Compiled Rust implementation
+- Native Python extension
 
-### 🐍 Pythonic
+### Pythonic
 - Simple API: `evaluate()` and `compile()`
 - Type hints and docstrings
 - Works with native Python types
 
-### ✅ Complete
+### Complete
 - Full JSONata 2.1.0 support
 - All built-in functions
 - Lambda functions and higher-order functions
 
-### 🔧 Production Ready
-- Comprehensive test suite
+### Production Ready
+- 1258/1258 test suite compatibility
 - Detailed error messages
-- Cross-platform support
+- Cross-platform support (Linux, macOS, Windows)
 
 ## Documentation Guide
 
@@ -95,7 +94,7 @@ JSONata is a lightweight query and transformation language for JSON data. Think 
 
 ### For Contributors
 
-1. Read [Building Guide](building.md)
+1. Read [Building Guide](development/building.md)
 2. Review [CLAUDE.md](../CLAUDE.md) for architecture
 3. Set up development environment
 4. Run test suite
@@ -178,19 +177,6 @@ else:
     result = transform.evaluate(data)
 ```
 
-## Performance Highlights
-
-| Operation Type | vs JavaScript | Notes |
-|----------------|---------------|-------|
-| Simple paths | **8-10x faster** | Direct Rust execution |
-| Arithmetic | **14x faster** | No type coercion |
-| Conditionals | **19x faster** | Fast boolean evaluation |
-| String ops | **8x faster** | Efficient handling |
-| Array mapping | 5-6x slower | Value cloning overhead |
-| **Average** | **4.5x faster** | Typical workloads |
-
-See [performance.md](performance.md) for detailed benchmarks.
-
 ## Getting Help
 
 ### Documentation Issues
@@ -204,6 +190,7 @@ See [performance.md](performance.md) for detailed benchmarks.
 - Check [usage.md](usage.md) for examples
 
 ### Bug Reports
+
 Include:
 - jsonatapy version: `jsonatapy.__version__`
 - Python version: `python --version`
@@ -213,7 +200,7 @@ Include:
 
 ## Contributing
 
-We welcome contributions! See [building.md](building.md) for:
+We welcome contributions! See [development/contributing.md](development/contributing.md) and [development/building.md](development/building.md) for:
 - Development environment setup
 - Building from source
 - Running tests
@@ -225,13 +212,7 @@ MIT License - Compatible with upstream JSONata project.
 
 ## Links
 
-- **GitHub**: https://github.com/yourusername/jsonatapy
+- **GitHub**: https://github.com/txjmb/jsonatapy
 - **PyPI**: https://pypi.org/project/jsonatapy/
 - **JSONata Spec**: https://docs.jsonata.org/
 - **Reference Implementation**: https://github.com/jsonata-js/jsonata
-
----
-
-**Version**: 0.1.0
-**JSONata Specification**: 2.1.0
-**Last Updated**: 2024-01-18

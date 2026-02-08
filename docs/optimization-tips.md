@@ -20,11 +20,11 @@ Best practices for maximizing jsonatapy performance.
 ```python
 import jsonatapy
 
-# ❌ Slow - compiles every time
+# Slow - compiles every time
 for record in records:
     result = jsonatapy.evaluate("items[price > 100]", record)
 
-# ✅ Fast - compile once
+# Fast - compile once
 expr = jsonatapy.compile("items[price > 100]")
 for record in records:
     result = expr.evaluate(record)
@@ -69,7 +69,7 @@ import jsonatapy
 
 expr = jsonatapy.compile("items[price > 100]")
 
-# ✅ Fast path - JSON string in/out
+#Fast path - JSON string in/out
 json_str = json.dumps(large_data)
 result_str = expr.evaluate_json(json_str)
 result = json.loads(result_str)
@@ -240,10 +240,10 @@ benchmark("evaluate_with_data()", lambda: expr.evaluate_with_data(data_handle))
 ```python
 import jsonatapy
 
-# ❌ Slower - higher-order function
+#Slower - higher-order function
 expr = jsonatapy.compile("$map(items, function($i) { $i.name })")
 
-# ✅ Faster - path expression
+#Faster - path expression
 expr = jsonatapy.compile("items.name")
 ```
 
@@ -252,12 +252,12 @@ expr = jsonatapy.compile("items.name")
 ```python
 import jsonatapy
 
-# ❌ Slower - multiple evaluations
+#Slower - multiple evaluations
 items = jsonatapy.evaluate("orders.items", data)
 filtered = jsonatapy.evaluate("items[price > 100]", {"items": items})
 names = jsonatapy.evaluate("items.name", {"items": filtered})
 
-# ✅ Faster - single expression
+#Faster - single expression
 names = jsonatapy.evaluate("orders.items[price > 100].name", data)
 ```
 
@@ -268,13 +268,13 @@ names = jsonatapy.evaluate("orders.items[price > 100].name", data)
 ```python
 import jsonatapy
 
-# ✅ Optimized - simple comparison
+#Optimized - simple comparison
 expr = jsonatapy.compile("items[price > 100]")
 
-# ✅ Optimized - field equality
+#Optimized - field equality
 expr = jsonatapy.compile("items[category = 'electronics']")
 
-# ⚠️ Not optimized - complex predicate
+#Not optimized - complex predicate
 expr = jsonatapy.compile("items[$contains(name, 'widget')]")
 ```
 
@@ -293,10 +293,10 @@ expr = jsonatapy.compile("items[$contains(name, 'widget')]")
 ```python
 import jsonatapy
 
-# ❌ Slower - deeply nested
+#Slower - deeply nested
 expr = jsonatapy.compile("$map($map($map(items, f1), f2), f3)")
 
-# ✅ Faster - flat structure
+#Faster - flat structure
 expr = jsonatapy.compile("items.{ ... }")
 ```
 
@@ -305,10 +305,10 @@ expr = jsonatapy.compile("items.{ ... }")
 ```python
 import jsonatapy
 
-# ❌ Slower - sorts all items first
+#Slower - sorts all items first
 expr = jsonatapy.compile("$sort(items, function($a, $b) { $a.price - $b.price })[0:10]")
 
-# ✅ Faster - filter then sort
+#Faster - filter then sort
 expr = jsonatapy.compile("$sort(items[price > 100], function($a, $b) { $a.price - $b.price })[0:10]")
 ```
 
@@ -319,10 +319,10 @@ expr = jsonatapy.compile("$sort(items[price > 100], function($a, $b) { $a.price 
 ```python
 import jsonatapy
 
-# ❌ Creates large intermediate array
+#Creates large intermediate array
 expr = jsonatapy.compile("$map(items, function($i) { $i.details }).$join(', ')")
 
-# ✅ More memory efficient
+#More memory efficient
 expr = jsonatapy.compile("$join(items.details, ', ')")
 ```
 

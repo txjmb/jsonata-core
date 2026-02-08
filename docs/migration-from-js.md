@@ -17,18 +17,18 @@ jsonatapy provides 100% JSONata language compatibility with the JavaScript refer
 
 ### What Stays the Same
 
-- ✅ JSONata expression syntax
-- ✅ All built-in functions
-- ✅ Lambda functions and closures
-- ✅ Higher-order functions
-- ✅ Expression semantics and behavior
+-JSONata expression syntax
+-All built-in functions
+-Lambda functions and closures
+-Higher-order functions
+-Expression semantics and behavior
 
 ### What Changes
 
-- ❌ API surface (JavaScript vs Python)
-- ❌ Async patterns (JavaScript async vs Python sync)
-- ❌ Custom function registration (different syntax)
-- ❌ Error handling (JavaScript vs Python exceptions)
+-API surface (JavaScript vs Python)
+-Async patterns (JavaScript async vs Python sync)
+-Custom function registration (different syntax)
+-Error handling (JavaScript vs Python exceptions)
 
 ## API Mapping
 
@@ -108,8 +108,7 @@ expr = jsonatapy.compile('$uppercase(value)')
 result = expr.evaluate(data)
 ```
 
-!!! note "Custom Functions"
-    Custom function registration is not yet implemented in jsonatapy. For simple cases, use variable bindings. For complex transformations, pre-process data in Python.
+**Note:** Custom function registration is not yet implemented in jsonatapy. For simple cases, use variable bindings. For complex transformations, pre-process data in Python.
 
 ### Error Handling
 
@@ -153,8 +152,7 @@ const result = await expr.evaluate(data);
 result = expr.evaluate(data)
 ```
 
-!!! tip "Performance Impact"
-    Python's synchronous API is actually faster for most use cases. Use threading/multiprocessing for concurrency if needed.
+**Performance Tip:** Python's synchronous API is actually faster for most use cases. Use threading/multiprocessing for concurrency if needed.
 
 ### 2. Type Conversions
 
@@ -431,7 +429,7 @@ jsonatapy is significantly faster than JavaScript jsonata:
 
 **1. Pre-compile expressions (both)**
 ```python
-# ✅ Good
+#Good
 expr = jsonatapy.compile('expression')
 for data in datasets:
     result = expr.evaluate(data)
@@ -439,7 +437,7 @@ for data in datasets:
 
 **2. Use JSON string API for large data (Python only)**
 ```python
-# ✅ Python advantage - 10-50x faster
+#Python advantage - 10-50x faster
 import json
 json_str = json.dumps(large_data)
 result_str = expr.evaluate_json(json_str)
@@ -448,7 +446,7 @@ result = json.loads(result_str)
 
 **3. Batch processing**
 ```python
-# ✅ Efficient in both
+#Efficient in both
 expr = jsonatapy.compile('items[price > 100]')
 results = [expr.evaluate(d) for d in batch]
 ```

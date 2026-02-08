@@ -2,14 +2,6 @@
 
 Comprehensive guide to error handling in jsonatapy.
 
-## Table of Contents
-
-- [Error Types](#error-types)
-- [Common Errors](#common-errors)
-- [Error Handling Patterns](#error-handling-patterns)
-- [Debugging Tips](#debugging-tips)
-- [Error Message Examples](#error-message-examples)
-
 ## Error Types
 
 All jsonatapy errors are raised as Python `ValueError` exceptions with descriptive messages.
@@ -80,33 +72,33 @@ except ValueError as e:
 #### Unmatched Brackets
 
 ```python
-# ❌ Error: Unmatched bracket
+# Error: Unmatched bracket
 jsonatapy.compile("items[price > 100")
 # ValueError: Expected ']' at end of expression
 
-# ✅ Correct
+# Correct
 jsonatapy.compile("items[price > 100]")
 ```
 
 #### Invalid Operators
 
 ```python
-# ❌ Error: Invalid operator
+# Error: Invalid operator
 jsonatapy.compile("items => price")
 # ValueError: Unexpected token '=>' at position 6
 
-# ✅ Correct
+# Correct
 jsonatapy.compile("items ~> $map(function($v) { $v.price })")
 ```
 
 #### Malformed Path Expressions
 
 ```python
-# ❌ Error: Invalid path
+# Error: Invalid path
 jsonatapy.compile("..items")
 # ValueError: Unexpected token '..' at position 0
 
-# ✅ Correct
+# Correct
 jsonatapy.compile("items")
 ```
 
@@ -115,33 +107,33 @@ jsonatapy.compile("items")
 #### Unknown Function
 
 ```python
-# ❌ Error: Function doesn't exist
+# Error: Function doesn't exist
 jsonatapy.evaluate("$myFunc()", {})
 # ValueError: Unknown function: myFunc
 
-# ✅ Use built-in functions
+# Use built-in functions
 jsonatapy.evaluate("$uppercase('hello')", {})
 ```
 
 #### Wrong Argument Count
 
 ```python
-# ❌ Error: Too few arguments
+# Error: Too few arguments
 jsonatapy.evaluate("$substring('hello')", {})
 # ValueError: The substring function requires at least 2 arguments
 
-# ✅ Provide required arguments
+# Provide required arguments
 jsonatapy.evaluate("$substring('hello', 0, 2)", {})
 ```
 
 #### Wrong Argument Type
 
 ```python
-# ❌ Error: Wrong type
+# Error: Wrong type
 jsonatapy.evaluate("$sum('not an array')", {})
 # ValueError: Argument 1 of function "sum" must be an array
 
-# ✅ Pass correct type
+# Pass correct type
 jsonatapy.evaluate("$sum([1, 2, 3])", {})
 ```
 
@@ -162,12 +154,12 @@ print(result)  # "default"
 #### Type Mismatch in Path
 
 ```python
-# ❌ Error: Cannot access property of non-object
+# Cannot access property of non-object
 data = {"value": 123}
 jsonatapy.evaluate("value.property", data)
 # Returns None (undefined behavior)
 
-# ✅ Check type first
+# Check type first
 jsonatapy.evaluate("$type(value) = 'number' ? value : value.property", data)
 ```
 
@@ -180,14 +172,14 @@ import jsonatapy
 
 expr = jsonatapy.compile("items[price > 100]")
 
-# ❌ Error: Invalid JSON
+# Error: Invalid JSON
 try:
     result = expr.evaluate_json("not valid json")
 except ValueError as e:
     print(f"JSON error: {e}")
     # JSON error: expected value at line 1 column 1
 
-# ✅ Valid JSON
+# Valid JSON
 import json
 json_str = json.dumps({"items": []})
 result = expr.evaluate_json(json_str)
