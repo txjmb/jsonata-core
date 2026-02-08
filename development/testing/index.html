@@ -1240,17 +1240,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#table-of-contents" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Table of Contents
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#test-structure" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2021,17 +2010,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#table-of-contents" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Table of Contents
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#test-structure" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2608,17 +2586,6 @@
 
 <h1 id="testing-guide">Testing Guide<a class="headerlink" href="#testing-guide" title="Permanent link">&para;</a></h1>
 <p>Comprehensive guide to testing in jsonatapy.</p>
-<h2 id="table-of-contents">Table of Contents<a class="headerlink" href="#table-of-contents" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="#test-structure">Test Structure</a></li>
-<li><a href="#running-tests">Running Tests</a></li>
-<li><a href="#rust-unit-tests">Rust Unit Tests</a></li>
-<li><a href="#python-integration-tests">Python Integration Tests</a></li>
-<li><a href="#reference-test-suite">Reference Test Suite</a></li>
-<li><a href="#adding-new-tests">Adding New Tests</a></li>
-<li><a href="#coverage-requirements">Coverage Requirements</a></li>
-<li><a href="#test-best-practices">Test Best Practices</a></li>
-</ul>
 <h2 id="test-structure">Test Structure<a class="headerlink" href="#test-structure" title="Permanent link">&para;</a></h2>
 <p>jsonatapy has three layers of testing:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>tests/
@@ -2864,7 +2831,7 @@
 </span></code></pre></div></p>
 <h2 id="reference-test-suite">Reference Test Suite<a class="headerlink" href="#reference-test-suite" title="Permanent link">&para;</a></h2>
 <h3 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h3>
-<p>The reference test suite contains <strong>1258 tests</strong> from the official jsonata-js repository. These tests ensure 100% compatibility with the JSONata specification.</p>
+<p>The reference test suite contains 1258 tests from the official jsonata-js repository. These tests ensure 100% compatibility with the JSONata specification.</p>
 <h3 id="location_2">Location<a class="headerlink" href="#location_2" title="Permanent link">&para;</a></h3>
 <p>Tests are in the <code>tests/jsonata-js</code> git submodule:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Initialize submodule</span>
@@ -3001,7 +2968,7 @@
 </span></code></pre></div></p>
 <h2 id="coverage-requirements">Coverage Requirements<a class="headerlink" href="#coverage-requirements" title="Permanent link">&para;</a></h2>
 <h3 id="target-coverage">Target Coverage<a class="headerlink" href="#target-coverage" title="Permanent link">&para;</a></h3>
-<p><strong>Required:</strong> 100% coverage (matching upstream jsonata-js)</p>
+<p>Required: 100% coverage (matching upstream jsonata-js)</p>
 <h3 id="measuring-coverage">Measuring Coverage<a class="headerlink" href="#measuring-coverage" title="Permanent link">&para;</a></h3>
 <p><strong>Rust:</strong>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1"># Install tarpaulin</span>
@@ -3029,12 +2996,12 @@
 </span></code></pre></div>
 <h2 id="test-best-practices">Test Best Practices<a class="headerlink" href="#test-best-practices" title="Permanent link">&para;</a></h2>
 <h3 id="1-test-one-thing-at-a-time">1. Test One Thing at a Time<a class="headerlink" href="#1-test-one-thing-at-a-time" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># ✅ Good - focused test</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># Good - focused test</span>
 </span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_sum_returns_total</span><span class="p">():</span>
 </span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$sum([1, 2, 3])&quot;</span><span class="p">,</span> <span class="p">{})</span>
 </span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>    <span class="k">assert</span> <span class="n">result</span> <span class="o">==</span> <span class="mi">6</span>
 </span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>
-</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="c1"># ❌ Bad - tests multiple things</span>
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="c1"># Bad - tests multiple things</span>
 </span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_sum_and_count</span><span class="p">():</span>
 </span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>    <span class="n">sum_result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$sum([1, 2, 3])&quot;</span><span class="p">,</span> <span class="p">{})</span>
 </span><span id="__span-26-9"><a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>    <span class="n">count_result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$count([1, 2, 3])&quot;</span><span class="p">,</span> <span class="p">{})</span>
@@ -3042,13 +3009,13 @@
 </span><span id="__span-26-11"><a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a>    <span class="k">assert</span> <span class="n">count_result</span> <span class="o">==</span> <span class="mi">3</span>
 </span></code></pre></div>
 <h3 id="2-use-descriptive-assertions">2. Use Descriptive Assertions<a class="headerlink" href="#2-use-descriptive-assertions" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># ✅ Good - clear assertion message</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># Good - clear assertion message</span>
 </span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="k">assert</span> <span class="n">result</span> <span class="o">==</span> <span class="n">expected</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;Expected </span><span class="si">{</span><span class="n">expected</span><span class="si">}</span><span class="s2">, got </span><span class="si">{</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span>
 </span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>
-</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="c1"># ✅ Good - pytest provides good messages</span>
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="c1"># Good - pytest provides good messages</span>
 </span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="k">assert</span> <span class="n">result</span> <span class="o">==</span> <span class="n">expected</span>
 </span><span id="__span-27-6"><a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>
-</span><span id="__span-27-7"><a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="c1"># ❌ Bad - no context on failure</span>
+</span><span id="__span-27-7"><a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="c1"># Bad - no context on failure</span>
 </span><span id="__span-27-8"><a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a><span class="k">assert</span> <span class="n">result</span>
 </span></code></pre></div>
 <h3 id="3-test-edge-cases">3. Test Edge Cases<a class="headerlink" href="#3-test-edge-cases" title="Permanent link">&para;</a></h3>
@@ -3113,7 +3080,7 @@
 <h3 id="ci-pipeline">CI Pipeline<a class="headerlink" href="#ci-pipeline" title="Permanent link">&para;</a></h3>
 <p>All tests run on CI for:
 - <strong>Platforms</strong>: Linux, macOS, Windows
-- <strong>Python versions</strong>: 3.8, 3.9, 3.10, 3.11, 3.12
+- <strong>Python versions</strong>: 3.10, 3.11, 3.12, 3.13
 - <strong>Architectures</strong>: x86_64, aarch64</p>
 <h3 id="ci-commands">CI Commands<a class="headerlink" href="#ci-commands" title="Permanent link">&para;</a></h3>
 <div class="language-yaml highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="c1"># .github/workflows/test.yml</span>

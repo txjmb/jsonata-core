@@ -2264,20 +2264,16 @@
 <h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
 <p>jsonatapy provides 100% JSONata language compatibility with the JavaScript reference implementation. The core JSONata expressions remain the same, but the Python API differs from the JavaScript API.</p>
 <h3 id="what-stays-the-same">What Stays the Same<a class="headerlink" href="#what-stays-the-same" title="Permanent link">&para;</a></h3>
-<ul>
-<li>✅ JSONata expression syntax</li>
-<li>✅ All built-in functions</li>
-<li>✅ Lambda functions and closures</li>
-<li>✅ Higher-order functions</li>
-<li>✅ Expression semantics and behavior</li>
-</ul>
+<p>-JSONata expression syntax
+-All built-in functions
+-Lambda functions and closures
+-Higher-order functions
+-Expression semantics and behavior</p>
 <h3 id="what-changes">What Changes<a class="headerlink" href="#what-changes" title="Permanent link">&para;</a></h3>
-<ul>
-<li>❌ API surface (JavaScript vs Python)</li>
-<li>❌ Async patterns (JavaScript async vs Python sync)</li>
-<li>❌ Custom function registration (different syntax)</li>
-<li>❌ Error handling (JavaScript vs Python exceptions)</li>
-</ul>
+<p>-API surface (JavaScript vs Python)
+-Async patterns (JavaScript async vs Python sync)
+-Custom function registration (different syntax)
+-Error handling (JavaScript vs Python exceptions)</p>
 <h2 id="api-mapping">API Mapping<a class="headerlink" href="#api-mapping" title="Permanent link">&para;</a></h2>
 <h3 id="basic-evaluation">Basic Evaluation<a class="headerlink" href="#basic-evaluation" title="Permanent link">&para;</a></h3>
 <p><strong>JavaScript (jsonata-js):</strong>
@@ -2340,10 +2336,7 @@
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s1">&#39;$uppercase(value)&#39;</span><span class="p">)</span>
 </span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
 </span></code></pre></div></p>
-<div class="admonition note">
-<p class="admonition-title">Custom Functions</p>
-<p>Custom function registration is not yet implemented in jsonatapy. For simple cases, use variable bindings. For complex transformations, pre-process data in Python.</p>
-</div>
+<p><strong>Note:</strong> Custom function registration is not yet implemented in jsonatapy. For simple cases, use variable bindings. For complex transformations, pre-process data in Python.</p>
 <h3 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h3>
 <p><strong>JavaScript:</strong>
 <div class="language-javascript highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">jsonata</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">require</span><span class="p">(</span><span class="s1">&#39;jsonata&#39;</span><span class="p">);</span>
@@ -2375,10 +2368,7 @@
 <p><strong>Python:</strong> Evaluation is synchronous
 <div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
 </span></code></pre></div></p>
-<div class="admonition tip">
-<p class="admonition-title">Performance Impact</p>
-<p>Python's synchronous API is actually faster for most use cases. Use threading/multiprocessing for concurrency if needed.</p>
-</div>
+<p><strong>Performance Tip:</strong> Python's synchronous API is actually faster for most use cases. Use threading/multiprocessing for concurrency if needed.</p>
 <h3 id="2-type-conversions">2. Type Conversions<a class="headerlink" href="#2-type-conversions" title="Permanent link">&para;</a></h3>
 <p><strong>JavaScript:</strong>
 <div class="language-javascript highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1">// JavaScript types</span>
@@ -2669,20 +2659,20 @@
 - Efficient memory usage</p>
 <h3 id="optimization-tips">Optimization Tips<a class="headerlink" href="#optimization-tips" title="Permanent link">&para;</a></h3>
 <p><strong>1. Pre-compile expressions (both)</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># ✅ Good</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1">#Good</span>
 </span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s1">&#39;expression&#39;</span><span class="p">)</span>
 </span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="k">for</span> <span class="n">data</span> <span class="ow">in</span> <span class="n">datasets</span><span class="p">:</span>
 </span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
 </span></code></pre></div></p>
 <p><strong>2. Use JSON string API for large data (Python only)</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1"># ✅ Python advantage - 10-50x faster</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="c1">#Python advantage - 10-50x faster</span>
 </span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 </span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">large_data</span><span class="p">)</span>
 </span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="n">result_str</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">json_str</span><span class="p">)</span>
 </span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="n">result</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result_str</span><span class="p">)</span>
 </span></code></pre></div></p>
 <p><strong>3. Batch processing</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="c1"># ✅ Efficient in both</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="c1">#Efficient in both</span>
 </span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s1">&#39;items[price &gt; 100]&#39;</span><span class="p">)</span>
 </span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="n">results</span> <span class="o">=</span> <span class="p">[</span><span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">batch</span><span class="p">]</span>
 </span></code></pre></div></p>

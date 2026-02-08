@@ -777,17 +777,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#table-of-contents" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Table of Contents
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#error-types" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1865,17 +1854,6 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#table-of-contents" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Table of Contents
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#error-types" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2296,14 +2274,6 @@
 
 <h1 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h1>
 <p>Comprehensive guide to error handling in jsonatapy.</p>
-<h2 id="table-of-contents">Table of Contents<a class="headerlink" href="#table-of-contents" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="#error-types">Error Types</a></li>
-<li><a href="#common-errors">Common Errors</a></li>
-<li><a href="#error-handling-patterns">Error Handling Patterns</a></li>
-<li><a href="#debugging-tips">Debugging Tips</a></li>
-<li><a href="#error-message-examples">Error Message Examples</a></li>
-</ul>
 <h2 id="error-types">Error Types<a class="headerlink" href="#error-types" title="Permanent link">&para;</a></h2>
 <p>All jsonatapy errors are raised as Python <code>ValueError</code> exceptions with descriptive messages.</p>
 <h3 id="parse-errors">Parse Errors<a class="headerlink" href="#parse-errors" title="Permanent link">&para;</a></h3>
@@ -2353,52 +2323,52 @@
 <h2 id="common-errors">Common Errors<a class="headerlink" href="#common-errors" title="Permanent link">&para;</a></h2>
 <h3 id="syntax-errors">Syntax Errors<a class="headerlink" href="#syntax-errors" title="Permanent link">&para;</a></h3>
 <h4 id="unmatched-brackets">Unmatched Brackets<a class="headerlink" href="#unmatched-brackets" title="Permanent link">&para;</a></h4>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># ❌ Error: Unmatched bracket</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Error: Unmatched bracket</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100&quot;</span><span class="p">)</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># ValueError: Expected &#39;]&#39; at end of expression</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># ✅ Correct</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># Correct</span>
 </span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h4 id="invalid-operators">Invalid Operators<a class="headerlink" href="#invalid-operators" title="Permanent link">&para;</a></h4>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># ❌ Error: Invalid operator</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Error: Invalid operator</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items =&gt; price&quot;</span><span class="p">)</span>
 </span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># ValueError: Unexpected token &#39;=&gt;&#39; at position 6</span>
 </span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># ✅ Correct</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># Correct</span>
 </span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items ~&gt; $map(function($v) { $v.price })&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h4 id="malformed-path-expressions">Malformed Path Expressions<a class="headerlink" href="#malformed-path-expressions" title="Permanent link">&para;</a></h4>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># ❌ Error: Invalid path</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Error: Invalid path</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;..items&quot;</span><span class="p">)</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># ValueError: Unexpected token &#39;..&#39; at position 0</span>
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># ✅ Correct</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># Correct</span>
 </span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="function-errors">Function Errors<a class="headerlink" href="#function-errors" title="Permanent link">&para;</a></h3>
 <h4 id="unknown-function">Unknown Function<a class="headerlink" href="#unknown-function" title="Permanent link">&para;</a></h4>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># ❌ Error: Function doesn&#39;t exist</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Error: Function doesn&#39;t exist</span>
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$myFunc()&quot;</span><span class="p">,</span> <span class="p">{})</span>
 </span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># ValueError: Unknown function: myFunc</span>
 </span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># ✅ Use built-in functions</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># Use built-in functions</span>
 </span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$uppercase(&#39;hello&#39;)&quot;</span><span class="p">,</span> <span class="p">{})</span>
 </span></code></pre></div>
 <h4 id="wrong-argument-count">Wrong Argument Count<a class="headerlink" href="#wrong-argument-count" title="Permanent link">&para;</a></h4>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># ❌ Error: Too few arguments</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Error: Too few arguments</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$substring(&#39;hello&#39;)&quot;</span><span class="p">,</span> <span class="p">{})</span>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># ValueError: The substring function requires at least 2 arguments</span>
 </span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># ✅ Provide required arguments</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># Provide required arguments</span>
 </span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$substring(&#39;hello&#39;, 0, 2)&quot;</span><span class="p">,</span> <span class="p">{})</span>
 </span></code></pre></div>
 <h4 id="wrong-argument-type">Wrong Argument Type<a class="headerlink" href="#wrong-argument-type" title="Permanent link">&para;</a></h4>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># ❌ Error: Wrong type</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Error: Wrong type</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$sum(&#39;not an array&#39;)&quot;</span><span class="p">,</span> <span class="p">{})</span>
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># ValueError: Argument 1 of function &quot;sum&quot; must be an array</span>
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># ✅ Pass correct type</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># Pass correct type</span>
 </span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$sum([1, 2, 3])&quot;</span><span class="p">,</span> <span class="p">{})</span>
 </span></code></pre></div>
 <h3 id="path-errors">Path Errors<a class="headerlink" href="#path-errors" title="Permanent link">&para;</a></h3>
@@ -2412,12 +2382,12 @@
 </span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>  <span class="c1"># &quot;default&quot;</span>
 </span></code></pre></div>
 <h4 id="type-mismatch-in-path">Type Mismatch in Path<a class="headerlink" href="#type-mismatch-in-path" title="Permanent link">&para;</a></h4>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># ❌ Error: Cannot access property of non-object</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Cannot access property of non-object</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;value&quot;</span><span class="p">:</span> <span class="mi">123</span><span class="p">}</span>
 </span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;value.property&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
 </span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Returns None (undefined behavior)</span>
 </span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="c1"># ✅ Check type first</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="c1"># Check type first</span>
 </span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$type(value) = &#39;number&#39; ? value : value.property&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="json-parsing-errors">JSON Parsing Errors<a class="headerlink" href="#json-parsing-errors" title="Permanent link">&para;</a></h3>
@@ -2426,14 +2396,14 @@
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
 </span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
 </span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># ❌ Error: Invalid JSON</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># Error: Invalid JSON</span>
 </span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="k">try</span><span class="p">:</span>
 </span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="s2">&quot;not valid json&quot;</span><span class="p">)</span>
 </span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
 </span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;JSON error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="c1"># JSON error: expected value at line 1 column 1</span>
 </span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>
-</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="c1"># ✅ Valid JSON</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="c1"># Valid JSON</span>
 </span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 </span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;items&quot;</span><span class="p">:</span> <span class="p">[]})</span>
 </span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">json_str</span><span class="p">)</span>

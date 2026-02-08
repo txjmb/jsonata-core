@@ -2244,11 +2244,11 @@
 <p><strong>Impact:</strong> 10-1000x faster for repeated evaluations</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># ❌ Slow - compiles every time</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># Slow - compiles every time</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">for</span> <span class="n">record</span> <span class="ow">in</span> <span class="n">records</span><span class="p">:</span>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">,</span> <span class="n">record</span><span class="p">)</span>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># ✅ Fast - compile once</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Fast - compile once</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="k">for</span> <span class="n">record</span> <span class="ow">in</span> <span class="n">records</span><span class="p">:</span>
 </span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
@@ -2283,7 +2283,7 @@
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># ✅ Fast path - JSON string in/out</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1">#Fast path - JSON string in/out</span>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">large_data</span><span class="p">)</span>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">result_str</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">json_str</span><span class="p">)</span>
 </span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">result</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result_str</span><span class="p">)</span>
@@ -2427,34 +2427,34 @@
 <h3 id="use-path-expressions-instead-of-higher-order-functions">Use Path Expressions Instead of Higher-Order Functions<a class="headerlink" href="#use-path-expressions-instead-of-higher-order-functions" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1"># ❌ Slower - higher-order function</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1">#Slower - higher-order function</span>
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$map(items, function($i) { $i.name })&quot;</span><span class="p">)</span>
 </span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># ✅ Faster - path expression</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1">#Faster - path expression</span>
 </span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items.name&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="combine-operations-in-single-expression">Combine Operations in Single Expression<a class="headerlink" href="#combine-operations-in-single-expression" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># ❌ Slower - multiple evaluations</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1">#Slower - multiple evaluations</span>
 </span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">items</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;orders.items&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
 </span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">filtered</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;items&quot;</span><span class="p">:</span> <span class="n">items</span><span class="p">})</span>
 </span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">names</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;items.name&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;items&quot;</span><span class="p">:</span> <span class="n">filtered</span><span class="p">})</span>
 </span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1"># ✅ Faster - single expression</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1">#Faster - single expression</span>
 </span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">names</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;orders.items[price &gt; 100].name&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="use-specialized-predicates">Use Specialized Predicates<a class="headerlink" href="#use-specialized-predicates" title="Permanent link">&para;</a></h3>
 <p><strong>Note:</strong> Simple field comparisons are optimized internally.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1"># ✅ Optimized - simple comparison</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1">#Optimized - simple comparison</span>
 </span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
 </span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1"># ✅ Optimized - field equality</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1">#Optimized - field equality</span>
 </span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[category = &#39;electronics&#39;]&quot;</span><span class="p">)</span>
 </span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="c1"># ⚠️ Not optimized - complex predicate</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="c1">#Not optimized - complex predicate</span>
 </span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[$contains(name, &#39;widget&#39;)]&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <p><strong>Predicate optimization applies to:</strong>
@@ -2468,29 +2468,29 @@
 <h3 id="avoid-deep-nesting">Avoid Deep Nesting<a class="headerlink" href="#avoid-deep-nesting" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="c1"># ❌ Slower - deeply nested</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="c1">#Slower - deeply nested</span>
 </span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$map($map($map(items, f1), f2), f3)&quot;</span><span class="p">)</span>
 </span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
-</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="c1"># ✅ Faster - flat structure</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="c1">#Faster - flat structure</span>
 </span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items.{ ... }&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="pre-filter-before-expensive-operations">Pre-filter Before Expensive Operations<a class="headerlink" href="#pre-filter-before-expensive-operations" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="c1"># ❌ Slower - sorts all items first</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="c1">#Slower - sorts all items first</span>
 </span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$sort(items, function($a, $b) { $a.price - $b.price })[0:10]&quot;</span><span class="p">)</span>
 </span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="c1"># ✅ Faster - filter then sort</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="c1">#Faster - filter then sort</span>
 </span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$sort(items[price &gt; 100], function($a, $b) { $a.price - $b.price })[0:10]&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="memory-management">Memory Management<a class="headerlink" href="#memory-management" title="Permanent link">&para;</a></h2>
 <h3 id="avoid-creating-large-intermediate-results">Avoid Creating Large Intermediate Results<a class="headerlink" href="#avoid-creating-large-intermediate-results" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
-</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1"># ❌ Creates large intermediate array</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1">#Creates large intermediate array</span>
 </span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$map(items, function($i) { $i.details }).$join(&#39;, &#39;)&quot;</span><span class="p">)</span>
 </span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>
-</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="c1"># ✅ More memory efficient</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="c1">#More memory efficient</span>
 </span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$join(items.details, &#39;, &#39;)&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="use-streaming-patterns-for-large-datasets">Use Streaming Patterns for Large Datasets<a class="headerlink" href="#use-streaming-patterns-for-large-datasets" title="Permanent link">&para;</a></h3>
