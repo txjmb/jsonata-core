@@ -111,7 +111,7 @@ jobs:
           - { os: 'Linux', runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: 'Linux', runner: ubuntu-latest, target: aarch64-unknown-linux-gnu }
           # macOS
-          - { os: 'macOS', runner: macos-13, target: x86_64-apple-darwin }
+          - { os: 'macOS', runner: macos-14, target: x86_64-apple-darwin }
           - { os: 'macOS', runner: macos-14, target: aarch64-apple-darwin }
           # Windows
           - { os: 'Windows', runner: windows-latest, target: x86_64-pc-windows-msvc }
@@ -148,7 +148,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13
           sccache: 'true'
           manylinux: auto
 
@@ -199,8 +199,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-13, windows-latest]
-        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        os: [ubuntu-latest, macos-14, windows-latest]
+        python: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
       - name: Checkout
