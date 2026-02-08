@@ -186,6 +186,131 @@ fn evaluate_specialized(item: &JValue, spec: &SpecializedPredicate) -> bool {
     }
 }
 
+/// Specialized sort comparator for `$l.field op $r.field` patterns.
+/// Bypasses the full AST evaluator for simple field-based sort comparisons.
+enum SpecializedSortComparator {
+    /// function($l, $r) { $l.field > $r.field }
+    FieldGt(String),
+    /// function($l, $r) { $l.field < $r.field }
+    FieldLt(String),
+    /// function($l, $r) { $l.field >= $r.field }
+    FieldGte(String),
+    /// function($l, $r) { $l.field <= $r.field }
+    FieldLte(String),
+}
+
+/// Try to extract a specialized sort comparator from a lambda AST node.
+/// Detects patterns like `function($l, $r) { $l.field > $r.field }`.
+fn try_specialize_sort_comparator(
+    body: &AstNode,
+    left_param: &str,
+    right_param: &str,
+) -> Option<SpecializedSortComparator> {
+    if let AstNode::Binary { op, lhs, rhs } = body {
+        // Check that lhs is `$left_param.field` and rhs is `$right_param.field`
+        // (or vice versa for flipped comparisons)
+        let extract_var_field = |node: &AstNode, param: &str| -> Option<String> {
+            if let AstNode::Path { steps } = node {
+                if steps.len() == 2 {
+                    if let AstNode::Variable(var) = &steps[0].node {
+                        if var == param {
+                            if let AstNode::Name(field) = &steps[1].node {
+                                if steps[0].stages.is_empty() && steps[1].stages.is_empty() {
+                                    return Some(field.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        };
+
+        // Try $l.field op $r.field
+        if let (Some(left_field), Some(right_field)) = (
+            extract_var_field(lhs, left_param),
+            extract_var_field(rhs, right_param),
+        ) {
+            if left_field == right_field {
+                return match op {
+                    BinaryOp::GreaterThan => Some(SpecializedSortComparator::FieldGt(left_field)),
+                    BinaryOp::LessThan => Some(SpecializedSortComparator::FieldLt(left_field)),
+                    BinaryOp::GreaterThanOrEqual => {
+                        Some(SpecializedSortComparator::FieldGte(left_field))
+                    }
+                    BinaryOp::LessThanOrEqual => {
+                        Some(SpecializedSortComparator::FieldLte(left_field))
+                    }
+                    _ => None,
+                };
+            }
+        }
+
+        // Try $r.field op $l.field (flipped)
+        if let (Some(right_field), Some(left_field)) = (
+            extract_var_field(lhs, right_param),
+            extract_var_field(rhs, left_param),
+        ) {
+            if left_field == right_field {
+                return match op {
+                    // Flipped: $r.field > $l.field means $l.field < $r.field
+                    BinaryOp::GreaterThan => Some(SpecializedSortComparator::FieldLt(left_field)),
+                    BinaryOp::LessThan => Some(SpecializedSortComparator::FieldGt(left_field)),
+                    BinaryOp::GreaterThanOrEqual => {
+                        Some(SpecializedSortComparator::FieldLte(left_field))
+                    }
+                    BinaryOp::LessThanOrEqual => {
+                        Some(SpecializedSortComparator::FieldGte(left_field))
+                    }
+                    _ => None,
+                };
+            }
+        }
+    }
+    None
+}
+
+/// Compare two JValues for sorting using a specialized comparator.
+/// Returns true if `left` should come AFTER `right` (matching JSONata $sort semantics).
+fn compare_specialized(
+    left: &JValue,
+    right: &JValue,
+    spec: &SpecializedSortComparator,
+) -> bool {
+    let (left_val, right_val) = match spec {
+        SpecializedSortComparator::FieldGt(field)
+        | SpecializedSortComparator::FieldLt(field)
+        | SpecializedSortComparator::FieldGte(field)
+        | SpecializedSortComparator::FieldLte(field) => {
+            let l = match left {
+                JValue::Object(obj) => obj.get(field.as_str()),
+                _ => None,
+            };
+            let r = match right {
+                JValue::Object(obj) => obj.get(field.as_str()),
+                _ => None,
+            };
+            (l, r)
+        }
+    };
+
+    match (left_val, right_val) {
+        (Some(JValue::Number(l)), Some(JValue::Number(r))) => match spec {
+            SpecializedSortComparator::FieldGt(_) => *l > *r,
+            SpecializedSortComparator::FieldLt(_) => *l < *r,
+            SpecializedSortComparator::FieldGte(_) => *l >= *r,
+            SpecializedSortComparator::FieldLte(_) => *l <= *r,
+        },
+        (Some(JValue::String(l)), Some(JValue::String(r))) => match spec {
+            SpecializedSortComparator::FieldGt(_) => **l > **r,
+            SpecializedSortComparator::FieldLt(_) => **l < **r,
+            SpecializedSortComparator::FieldGte(_) => **l >= **r,
+            SpecializedSortComparator::FieldLte(_) => **l <= **r,
+        },
+        _ => false,
+    }
+}
+
 /// Functions that propagate undefined (return undefined when given an undefined argument).
 /// These functions should return null/undefined when their input path doesn't exist,
 /// rather than throwing a type error.
@@ -412,6 +537,13 @@ impl Context {
         }
     }
 
+    /// Clear all bindings and lambdas in the top scope without deallocating
+    fn clear_current_scope(&mut self) {
+        let top = self.scope_stack.last_mut().unwrap();
+        top.bindings.clear();
+        top.lambdas.clear();
+    }
+
     pub fn bind(&mut self, name: String, value: JValue) {
         self.scope_stack
             .last_mut()
@@ -574,6 +706,43 @@ impl Evaluator {
         }
     }
 
+    /// Specialized merge sort using direct field comparisons.
+    /// Used when the comparator is a simple `$l.field op $r.field` pattern.
+    fn merge_sort_specialized(
+        arr: &mut [JValue],
+        spec: &SpecializedSortComparator,
+    ) {
+        if arr.len() <= 1 {
+            return;
+        }
+
+        let mid = arr.len() / 2;
+        Self::merge_sort_specialized(&mut arr[..mid], spec);
+        Self::merge_sort_specialized(&mut arr[mid..], spec);
+
+        let mut temp = Vec::with_capacity(arr.len());
+        let (left, right) = arr.split_at(mid);
+        let mut i = 0;
+        let mut j = 0;
+
+        while i < left.len() && j < right.len() {
+            if compare_specialized(&left[i], &right[j], spec) {
+                temp.push(right[j].clone());
+                j += 1;
+            } else {
+                temp.push(left[i].clone());
+                i += 1;
+            }
+        }
+
+        temp.extend_from_slice(&left[i..]);
+        temp.extend_from_slice(&right[j..]);
+
+        for (idx, val) in temp.into_iter().enumerate() {
+            arr[idx] = val;
+        }
+    }
+
     /// Merge sort implementation using a comparator function.
     /// This replaces the O(n²) bubble sort for better performance on large arrays.
     /// The comparator returns true if the first element should come AFTER the second.
@@ -585,6 +754,19 @@ impl Evaluator {
     ) -> Result<(), EvaluatorError> {
         if arr.len() <= 1 {
             return Ok(());
+        }
+
+        // Try specialized fast path for simple field comparisons like
+        // function($l, $r) { $l.price > $r.price }
+        if let AstNode::Lambda { params, body, .. } = comparator {
+            if params.len() >= 2 {
+                if let Some(spec) =
+                    try_specialize_sort_comparator(body, &params[0], &params[1])
+                {
+                    Self::merge_sort_specialized(arr, &spec);
+                    return Ok(());
+                }
+            }
         }
 
         let mid = arr.len() / 2;
@@ -602,19 +784,60 @@ impl Evaluator {
         let mut i = 0;
         let mut j = 0;
 
-        while i < left.len() && j < right.len() {
-            // Apply comparator: returns true if left[i] should come AFTER right[j]
-            let cmp_result =
-                self.apply_function(comparator, &[left[i].clone(), right[j].clone()], data)?;
+        // For lambda comparators, use a reusable scope to avoid
+        // push_scope/pop_scope per comparison (~n log n total comparisons)
+        if let AstNode::Lambda { params, body, .. } = comparator {
+            if params.len() >= 2 {
+                self.context.push_scope();
+                while i < left.len() && j < right.len() {
+                    // Reuse scope: clear and rebind instead of push/pop
+                    self.context.clear_current_scope();
+                    self.context.bind(params[0].clone(), left[i].clone());
+                    self.context.bind(params[1].clone(), right[j].clone());
 
-            if self.is_truthy(&cmp_result) {
-                // left[i] should come after right[j], so take right[j]
-                temp.push(right[j].clone());
-                j += 1;
+                    let cmp_result = self.evaluate_internal(body, data)?;
+
+                    if self.is_truthy(&cmp_result) {
+                        temp.push(right[j].clone());
+                        j += 1;
+                    } else {
+                        temp.push(left[i].clone());
+                        i += 1;
+                    }
+                }
+                self.context.pop_scope();
             } else {
-                // left[i] should come before or equal to right[j], so take left[i]
-                temp.push(left[i].clone());
-                i += 1;
+                // Unexpected param count - fall back to generic path
+                while i < left.len() && j < right.len() {
+                    let cmp_result = self.apply_function(
+                        comparator,
+                        &[left[i].clone(), right[j].clone()],
+                        data,
+                    )?;
+                    if self.is_truthy(&cmp_result) {
+                        temp.push(right[j].clone());
+                        j += 1;
+                    } else {
+                        temp.push(left[i].clone());
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            // Non-lambda comparator: use generic apply_function path
+            while i < left.len() && j < right.len() {
+                let cmp_result = self.apply_function(
+                    comparator,
+                    &[left[i].clone(), right[j].clone()],
+                    data,
+                )?;
+                if self.is_truthy(&cmp_result) {
+                    temp.push(right[j].clone());
+                    j += 1;
+                } else {
+                    temp.push(left[i].clone());
+                    i += 1;
+                }
             }
         }
 
@@ -1322,11 +1545,12 @@ impl Evaluator {
                 if Self::is_filter_predicate(predicate) {
                     // Try specialized fast path for simple field comparisons
                     if let Some(spec) = try_specialize_predicate(predicate) {
-                        let filtered: Vec<JValue> = arr
-                            .iter()
-                            .filter(|item| evaluate_specialized(item, &spec))
-                            .cloned()
-                            .collect();
+                        let mut filtered = Vec::with_capacity(arr.len());
+                        for item in arr.iter() {
+                            if evaluate_specialized(item, &spec) {
+                                filtered.push(item.clone());
+                            }
+                        }
                         return Ok(JValue::array(filtered));
                     }
                     // Fallback: full AST evaluation
@@ -1512,11 +1736,54 @@ impl Evaluator {
                     JValue::Array(arr) => {
                         // Array mapping: extract field from each element
                         // Optimized: use references to access fields without cloning entire objects
+                        // Check first element for tuple-ness (tuples are all-or-nothing)
+                        let has_tuples = arr.first().is_some_and(|item| {
+                            matches!(item, JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)))
+                        });
+
+                        if !has_tuples {
+                            // Fast path: no tuples, just direct field lookups
+                            let mut result = Vec::with_capacity(arr.len());
+                            for item in arr.iter() {
+                                if let JValue::Object(obj) = item {
+                                    if let Some(val) = obj.get(field_name) {
+                                        if !matches!(val, JValue::Null) {
+                                            match val {
+                                                JValue::Array(arr_val) => {
+                                                    result.extend(arr_val.iter().cloned());
+                                                }
+                                                other => result.push(other.clone()),
+                                            }
+                                        }
+                                    }
+                                } else if let JValue::Array(inner_arr) = item {
+                                    let nested_result = self.evaluate_path(
+                                        &[PathStep::new(AstNode::Name(field_name.clone()))],
+                                        &JValue::Array(inner_arr.clone()),
+                                    )?;
+                                    match nested_result {
+                                        JValue::Array(nested) => {
+                                            result.extend(nested.iter().cloned());
+                                        }
+                                        JValue::Null => {}
+                                        other => result.push(other),
+                                    }
+                                }
+                            }
+
+                            if result.is_empty() {
+                                Ok(JValue::Null)
+                            } else if result.len() == 1 {
+                                Ok(result.into_iter().next().unwrap())
+                            } else {
+                                Ok(JValue::array(result))
+                            }
+                        } else {
+                        // Tuple path: per-element tuple handling
                         let mut result = Vec::new();
                         for item in arr.iter() {
                             match item {
                                 JValue::Object(obj) => {
-                                    // Check if this is a tuple - extract '@' value and preserve bindings
                                     let is_tuple =
                                         obj.get("__tuple__") == Some(&JValue::Bool(true));
 
@@ -1600,6 +1867,7 @@ impl Evaluator {
                         } else {
                             Ok(JValue::array(result))
                         }
+                        } // end else (tuple path)
                     }
                     _ => Ok(JValue::Null),
                 };
@@ -1951,108 +2219,151 @@ impl Evaluator {
                         JValue::Array(arr) => {
                             // Array mapping: extract field from each element and apply stages
                             did_array_mapping = true; // Track that we did array mapping
-                            let mut result = Vec::new();
 
-                            for item in arr.iter() {
-                                match item {
-                                    JValue::Object(obj) => {
-                                        // Check if this is a tuple stream element
-                                        let (actual_obj, tuple_bindings) =
-                                            if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                                                // This is a tuple - extract '@' value and preserve bindings
-                                                if let Some(JValue::Object(inner)) = obj.get("@") {
-                                                    // Collect index bindings (variables starting with $)
-                                                    let bindings: Vec<(String, JValue)> = obj
-                                                        .iter()
-                                                        .filter(|(k, _)| k.starts_with('$'))
-                                                        .map(|(k, v)| (k.clone(), v.clone()))
-                                                        .collect();
-                                                    (inner.clone(), Some(bindings))
-                                                } else {
-                                                    continue; // Invalid tuple
-                                                }
-                                            } else {
-                                                (obj.clone(), None)
-                                            };
+                            // Fast path: if no elements are tuples and no stages,
+                            // skip all tuple checking overhead (common case for products.price etc.)
+                            // Tuples are all-or-nothing (created by index binding #$i),
+                            // so checking only the first element is sufficient.
+                            let has_tuples = arr.first().is_some_and(|item| {
+                                matches!(item, JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)))
+                            });
 
-                                        let val = actual_obj
-                                            .get(field_name)
-                                            .cloned()
-                                            .unwrap_or(JValue::Null);
-
-                                        if !matches!(val, JValue::Null) {
-                                            // Helper to wrap value in tuple if we have bindings
-                                            let wrap_in_tuple = |v: JValue, bindings: &Option<Vec<(String, JValue)>>| -> JValue {
-                                                if let Some(b) = bindings {
-                                                    let mut wrapper = IndexMap::new();
-                                                    wrapper.insert("@".to_string(), v);
-                                                    wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
-                                                    for (k, val) in b {
-                                                        wrapper.insert(k.clone(), val.clone());
-                                                    }
-                                                    JValue::object(wrapper)
-                                                } else {
-                                                    v
-                                                }
-                                            };
-
-                                            if !stages.is_empty() {
-                                                // Apply stages to the extracted value
-                                                let processed_val =
-                                                    self.apply_stages(val, stages)?;
-                                                // Stages always return an array (or null); extend results
-                                                match processed_val {
-                                                    JValue::Array(arr) => {
-                                                        for item in arr.iter() {
-                                                            result.push(wrap_in_tuple(
-                                                                item.clone(),
-                                                                &tuple_bindings,
-                                                            ));
+                            if !has_tuples && stages.is_empty() {
+                                let mut result = Vec::with_capacity(arr.len());
+                                for item in arr.iter() {
+                                    match item {
+                                        JValue::Object(obj) => {
+                                            if let Some(val) = obj.get(field_name) {
+                                                if !matches!(val, JValue::Null) {
+                                                    match val {
+                                                        JValue::Array(arr_val) => {
+                                                            result.extend(arr_val.iter().cloned())
                                                         }
+                                                        other => result.push(other.clone()),
                                                     }
-                                                    JValue::Null => {} // Skip nulls from stage application
-                                                    other => result.push(wrap_in_tuple(
-                                                        other,
-                                                        &tuple_bindings,
-                                                    )),
-                                                }
-                                            } else {
-                                                // No stages: flatten arrays, push scalars
-                                                // But preserve tuple bindings!
-                                                match val {
-                                                    JValue::Array(arr) => {
-                                                        for item in arr.iter() {
-                                                            result.push(wrap_in_tuple(
-                                                                item.clone(),
-                                                                &tuple_bindings,
-                                                            ));
-                                                        }
-                                                    }
-                                                    other => result.push(wrap_in_tuple(
-                                                        other,
-                                                        &tuple_bindings,
-                                                    )),
                                                 }
                                             }
                                         }
-                                    }
-                                    JValue::Array(_) => {
-                                        // Recursively map over nested array
-                                        let nested_result =
-                                            self.evaluate_path(&[step.clone()], item)?;
-                                        match nested_result {
-                                            JValue::Array(nested) => {
-                                                result.extend(nested.iter().cloned())
+                                        JValue::Array(_) => {
+                                            let nested_result =
+                                                self.evaluate_path(&[step.clone()], item)?;
+                                            match nested_result {
+                                                JValue::Array(nested) => {
+                                                    result.extend(nested.iter().cloned())
+                                                }
+                                                JValue::Null => {}
+                                                other => result.push(other),
                                             }
-                                            JValue::Null => {}
-                                            other => result.push(other),
                                         }
+                                        _ => {}
                                     }
-                                    _ => {}
                                 }
-                            }
+                                JValue::array(result)
+                            } else {
+                                // Full path with tuple support and stages
+                                let mut result = Vec::new();
 
-                            JValue::array(result)
+                                for item in arr.iter() {
+                                    match item {
+                                        JValue::Object(obj) => {
+                                            // Check if this is a tuple stream element
+                                            let (actual_obj, tuple_bindings) =
+                                                if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                                                    // This is a tuple - extract '@' value and preserve bindings
+                                                    if let Some(JValue::Object(inner)) = obj.get("@") {
+                                                        // Collect index bindings (variables starting with $)
+                                                        let bindings: Vec<(String, JValue)> = obj
+                                                            .iter()
+                                                            .filter(|(k, _)| k.starts_with('$'))
+                                                            .map(|(k, v)| (k.clone(), v.clone()))
+                                                            .collect();
+                                                        (inner.clone(), Some(bindings))
+                                                    } else {
+                                                        continue; // Invalid tuple
+                                                    }
+                                                } else {
+                                                    (obj.clone(), None)
+                                                };
+
+                                            let val = actual_obj
+                                                .get(field_name)
+                                                .cloned()
+                                                .unwrap_or(JValue::Null);
+
+                                            if !matches!(val, JValue::Null) {
+                                                // Helper to wrap value in tuple if we have bindings
+                                                let wrap_in_tuple = |v: JValue, bindings: &Option<Vec<(String, JValue)>>| -> JValue {
+                                                    if let Some(b) = bindings {
+                                                        let mut wrapper = IndexMap::new();
+                                                        wrapper.insert("@".to_string(), v);
+                                                        wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
+                                                        for (k, val) in b {
+                                                            wrapper.insert(k.clone(), val.clone());
+                                                        }
+                                                        JValue::object(wrapper)
+                                                    } else {
+                                                        v
+                                                    }
+                                                };
+
+                                                if !stages.is_empty() {
+                                                    // Apply stages to the extracted value
+                                                    let processed_val =
+                                                        self.apply_stages(val, stages)?;
+                                                    // Stages always return an array (or null); extend results
+                                                    match processed_val {
+                                                        JValue::Array(arr) => {
+                                                            for item in arr.iter() {
+                                                                result.push(wrap_in_tuple(
+                                                                    item.clone(),
+                                                                    &tuple_bindings,
+                                                                ));
+                                                            }
+                                                        }
+                                                        JValue::Null => {} // Skip nulls from stage application
+                                                        other => result.push(wrap_in_tuple(
+                                                            other,
+                                                            &tuple_bindings,
+                                                        )),
+                                                    }
+                                                } else {
+                                                    // No stages: flatten arrays, push scalars
+                                                    // But preserve tuple bindings!
+                                                    match val {
+                                                        JValue::Array(arr) => {
+                                                            for item in arr.iter() {
+                                                                result.push(wrap_in_tuple(
+                                                                    item.clone(),
+                                                                    &tuple_bindings,
+                                                                ));
+                                                            }
+                                                        }
+                                                        other => result.push(wrap_in_tuple(
+                                                            other,
+                                                            &tuple_bindings,
+                                                        )),
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        JValue::Array(_) => {
+                                            // Recursively map over nested array
+                                            let nested_result =
+                                                self.evaluate_path(&[step.clone()], item)?;
+                                            match nested_result {
+                                                JValue::Array(nested) => {
+                                                    result.extend(nested.iter().cloned())
+                                                }
+                                                JValue::Null => {}
+                                                other => result.push(other),
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+
+                                JValue::array(result)
+                            }
                         }
                         JValue::Null => JValue::Null,
                         // Accessing field on non-object returns undefined (not an error)
@@ -4531,9 +4842,11 @@ impl Evaluator {
 
                 // Coerce non-array values to single-element arrays
                 // Track if input was a single value to unwrap result appropriately
-                let (arr, was_single_value) = match array {
-                    JValue::Array(arr) => (arr.to_vec(), false),
-                    single_value => (vec![single_value], true),
+                // Use references to avoid upfront cloning of all elements
+                let single_holder;
+                let (items, was_single_value): (&[JValue], bool) = match &array {
+                    JValue::Array(arr) => (arr.as_slice(), false),
+                    _ => { single_holder = [array]; (&single_holder[..], true) }
                 };
 
                 // Detect how many parameters the callback expects
@@ -4541,14 +4854,14 @@ impl Evaluator {
 
                 // Only create the array value if callback uses 3 parameters
                 let arr_value = if param_count >= 3 {
-                    Some(JValue::array(arr.clone()))
+                    Some(JValue::array(items.to_vec()))
                 } else {
                     None
                 };
 
-                let mut result = Vec::with_capacity(arr.len() / 2);
+                let mut result = Vec::with_capacity(items.len() / 2);
 
-                for (index, item) in arr.into_iter().enumerate() {
+                for (index, item) in items.iter().enumerate() {
                     // Build argument list based on what callback expects
                     let call_args = match param_count {
                         1 => vec![item.clone()],
@@ -4562,7 +4875,7 @@ impl Evaluator {
 
                     let predicate_result = self.apply_function(&args[1], &call_args, data)?;
                     if self.is_truthy(&predicate_result) {
-                        result.push(item);
+                        result.push(item.clone());
                     }
                 }
 
@@ -4603,13 +4916,15 @@ impl Evaluator {
                 let array = self.evaluate_internal(&args[0], data)?;
 
                 // Convert single value to array (JSONata reduce accepts single values)
-                let arr = match array {
-                    JValue::Array(arr) => arr.to_vec(),
+                // Use references to avoid upfront cloning of all elements
+                let single_holder;
+                let items: &[JValue] = match &array {
+                    JValue::Array(arr) => arr.as_slice(),
                     JValue::Null => return Ok(JValue::Null),
-                    single => vec![single],
+                    _ => { single_holder = [array]; &single_holder[..] }
                 };
 
-                if arr.is_empty() {
+                if items.is_empty() {
                     // Return initial value if provided, otherwise null
                     return if args.len() == 3 {
                         self.evaluate_internal(&args[2], data)
@@ -4622,7 +4937,7 @@ impl Evaluator {
                 let mut accumulator = if args.len() == 3 {
                     self.evaluate_internal(&args[2], data)?
                 } else {
-                    arr[0].clone()
+                    items[0].clone()
                 };
 
                 let start_idx = if args.len() == 3 { 0 } else { 1 };
@@ -4632,13 +4947,13 @@ impl Evaluator {
 
                 // Only create the array value if callback uses 4 parameters
                 let arr_value = if param_count >= 4 {
-                    Some(JValue::array(arr.clone()))
+                    Some(JValue::array(items.to_vec()))
                 } else {
                     None
                 };
 
                 // Apply function to each element
-                for (idx, item) in arr[start_idx..].iter().enumerate() {
+                for (idx, item) in items[start_idx..].iter().enumerate() {
                     // For reduce, the function receives (accumulator, value, index, array)
                     // Callbacks may use any subset of these parameters
                     let actual_idx = start_idx + idx;
@@ -5376,19 +5691,28 @@ impl Evaluator {
         }
 
         // Validate signature if present, and get coerced arguments
-        let coerced_values = if let Some(sig_str) = signature {
-            match crate::signature::Signature::parse(sig_str) {
+        // Push a new scope for this lambda invocation
+        self.context.push_scope();
+
+        // First apply captured environment (for closures)
+        if let Some(env) = captured_env {
+            for (name, value) in env {
+                self.context.bind(name.clone(), value.clone());
+            }
+        }
+
+        if let Some(sig_str) = signature {
+            // Validate and coerce arguments with signature
+            let coerced_values = match crate::signature::Signature::parse(sig_str) {
                 Ok(sig) => {
-                    // Validate and coerce arguments
                     match sig.validate_and_coerce(values) {
                         Ok(coerced) => coerced,
                         Err(e) => {
+                            self.context.pop_scope();
                             match e {
-                                // Undefined argument - return undefined (silent failure)
                                 crate::signature::SignatureError::UndefinedArgument => {
                                     return Ok(JValue::Null);
                                 }
-                                // Explicit type mismatch - throw error
                                 crate::signature::SignatureError::ArgumentTypeMismatch {
                                     index,
                                     expected,
@@ -5397,7 +5721,6 @@ impl Evaluator {
                                         format!("T0410: Argument {} of function does not match function signature (expected {})", index, expected)
                                     ));
                                 }
-                                // Array element type mismatch - throw error
                                 crate::signature::SignatureError::ArrayTypeMismatch {
                                     index,
                                     expected,
@@ -5407,7 +5730,6 @@ impl Evaluator {
                                         index, expected
                                     )));
                                 }
-                                // Other errors - throw generic error
                                 _ => {
                                     return Err(EvaluatorError::TypeError(format!(
                                         "Signature validation failed: {}",
@@ -5419,35 +5741,24 @@ impl Evaluator {
                     }
                 }
                 Err(e) => {
+                    self.context.pop_scope();
                     return Err(EvaluatorError::EvaluationError(format!(
                         "Invalid signature: {}",
                         e
                     )));
                 }
+            };
+            // Bind coerced values to params
+            for (i, param) in params.iter().enumerate() {
+                let value = coerced_values.get(i).cloned().unwrap_or(JValue::Undefined);
+                self.context.bind(param.clone(), value);
             }
         } else {
-            // No signature - be lenient about argument count:
-            // - If more values than params: only use first N values (ignore extras)
-            // - If fewer values than params: remaining params get undefined (null)
-            // This matches JSONata's flexible function calling behavior
-            values.to_vec()
-        };
-
-        // Push a new scope for this lambda invocation
-        self.context.push_scope();
-
-        // First apply captured environment (for closures)
-        if let Some(env) = captured_env {
-            for (name, value) in env {
-                self.context.bind(name.clone(), value.clone());
+            // No signature - bind directly from values slice (no allocation)
+            for (i, param) in params.iter().enumerate() {
+                let value = values.get(i).cloned().unwrap_or(JValue::Undefined);
+                self.context.bind(param.clone(), value);
             }
-        }
-
-        // Then bind lambda parameters to provided values (these override captured env)
-        // If there are more params than values, extra params get undefined
-        for (i, param) in params.iter().enumerate() {
-            let value = coerced_values.get(i).cloned().unwrap_or(JValue::Undefined);
-            self.context.bind(param.clone(), value);
         }
 
         // Check if this is a partial application (body is a special marker string)
@@ -5493,7 +5804,7 @@ impl Evaluator {
                     // Fill in placeholder positions with provided values
                     for (i, &pos) in placeholder_positions.iter().enumerate() {
                         if pos < total_args {
-                            let value = coerced_values.get(i).cloned().unwrap_or(JValue::Null);
+                            let value = values.get(i).cloned().unwrap_or(JValue::Null);
                             full_args[pos] = value;
                         }
                     }
@@ -5528,8 +5839,16 @@ impl Evaluator {
         let result = self.evaluate_internal(body, body_data)?;
 
         // Pop lambda scope, preserving any lambdas referenced by the return value
-        let lambdas_to_keep = self.extract_lambda_ids(&result);
-        self.context.pop_scope_preserving_lambdas(&lambdas_to_keep);
+        // Fast path: scalar results can never contain lambda references
+        let is_scalar = matches!(&result,
+            JValue::Number(_) | JValue::Bool(_) | JValue::String(_)
+            | JValue::Null | JValue::Undefined);
+        if is_scalar {
+            self.context.pop_scope();
+        } else {
+            let lambdas_to_keep = self.extract_lambda_ids(&result);
+            self.context.pop_scope_preserving_lambdas(&lambdas_to_keep);
+        }
 
         Ok(result)
     }
@@ -6509,6 +6828,30 @@ impl Evaluator {
                     return self.array_index(current, &JValue::Number(*n));
                 }
 
+                // Fast path: if predicate is definitely a filter expression (comparison/logical),
+                // skip speculative numeric evaluation and go directly to filter logic
+                if Self::is_filter_predicate(predicate) {
+                    // Try specialized fast path for simple field comparisons
+                    if let Some(spec) = try_specialize_predicate(predicate) {
+                        let mut filtered = Vec::with_capacity(_arr.len());
+                        for item in _arr.iter() {
+                            if evaluate_specialized(item, &spec) {
+                                filtered.push(item.clone());
+                            }
+                        }
+                        return Ok(JValue::array(filtered));
+                    }
+                    // Fallback: full AST evaluation per element
+                    let mut filtered = Vec::new();
+                    for item in _arr.iter() {
+                        let item_result = self.evaluate_internal(predicate, item)?;
+                        if self.is_truthy(&item_result) {
+                            filtered.push(item.clone());
+                        }
+                    }
+                    return Ok(JValue::array(filtered));
+                }
+
                 // Try to evaluate the predicate to see if it's a numeric index
                 // If evaluation succeeds and yields a number, use it as an index
                 // If evaluation fails (e.g., comparison error), treat as filter
@@ -6574,11 +6917,12 @@ impl Evaluator {
 
                 // Try specialized fast path for simple field comparisons
                 if let Some(spec) = try_specialize_predicate(predicate) {
-                    let filtered: Vec<JValue> = _arr
-                        .iter()
-                        .filter(|item| evaluate_specialized(item, &spec))
-                        .cloned()
-                        .collect();
+                    let mut filtered = Vec::with_capacity(_arr.len());
+                    for item in _arr.iter() {
+                        if evaluate_specialized(item, &spec) {
+                            filtered.push(item.clone());
+                        }
+                    }
                     return Ok(JValue::array(filtered));
                 }
 
@@ -6955,6 +7299,13 @@ impl Evaluator {
     /// Finds any lambda_id references in the value so they can be preserved
     /// when exiting a block scope
     fn extract_lambda_ids(&self, value: &JValue) -> Vec<String> {
+        // Fast path: scalars can never contain lambda references
+        match value {
+            JValue::Number(_) | JValue::Bool(_) | JValue::String(_)
+            | JValue::Null | JValue::Undefined | JValue::Regex { .. }
+            | JValue::Builtin { .. } => return Vec::new(),
+            _ => {}
+        }
         let mut ids = Vec::new();
         self.collect_lambda_ids(value, &mut ids);
         ids
