@@ -299,7 +299,7 @@ jobs:
             -v \
             --tb=short \
             --maxfail=10 \
-            -k "test_group_1"
+            -k "array-constructor"
 
   generate-changelog:
     name: Generate Changelog
