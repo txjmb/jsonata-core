@@ -240,11 +240,18 @@ class BenchmarkSuite:
         if not JSONATA_PYTHON_AVAILABLE:
             return -1.0
 
+        # Compile expression once (new API: Jsonata class)
+        try:
+            expr = jsonata_python.Jsonata(expression)
+        except Exception as e:
+            print(f"⚠ jsonata-python compilation failed: {e}")
+            return -1.0
+
         # Warm up
         warmup_iters = min(100, max(10, iterations // 10))
         for _ in range(warmup_iters):
             try:
-                jsonata_python.transform(expression, data)
+                expr.evaluate(data)
             except Exception as e:
                 print(f"⚠ jsonata-python warmup failed: {e}")
                 return -1.0
@@ -253,7 +260,7 @@ class BenchmarkSuite:
         start = time.perf_counter()
         for _ in range(iterations):
             try:
-                jsonata_python.transform(expression, data)
+                expr.evaluate(data)
             except Exception as e:
                 print(f"⚠ jsonata-python evaluation failed: {e}")
                 return -1.0
