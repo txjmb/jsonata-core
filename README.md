@@ -1,6 +1,6 @@
 # jsonatapy
 
-High-performance Python implementation of [JSONata](https://jsonata.org/) - the JSON query and transformation language.
+High-performance Python/Rust implementation of [JSONata](https://jsonata.org/) - the JSON query and transformation language.
 
 [![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
 [![Python versions](https://img.shields.io/pypi/pyversions/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
