@@ -14,7 +14,7 @@ jsonatapy is a Rust-based Python extension implementing JSONata directly in Rust
 - **Native Python API** - Type hints, zero JavaScript dependencies
 - **Cross-Platform** - Linux, macOS (Intel & ARM), Windows
 - **Production Ready** - Comprehensive test suite and error handling
-- **Performant** - Faster than native javascript library on many operations (see documentation section on [![Performance](https://txjmb.github.io/jsonatapy/performance/) for benchmark results vs other libraries)
+- **Performant** - Faster than native javascript library on many operations (see documentation section on [Performance](https://txjmb.github.io/jsonatapy/performance/) for benchmark results vs other libraries)
 
 ## Installation
 
