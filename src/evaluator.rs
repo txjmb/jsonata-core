@@ -16,177 +16,6 @@ use indexmap::IndexMap;
 use std::rc::Rc;
 use thiserror::Error;
 
-/// Specialized predicate patterns for fast filter evaluation.
-/// When a predicate matches one of these patterns, we bypass the full
-/// AST evaluation machinery and use direct field lookups + comparisons.
-enum SpecializedPredicate {
-    /// arr[field] — truthy check on field value
-    TruthyField(String),
-    /// arr[field = literal] — field equality
-    FieldEq(String, JValue),
-    /// arr[field != literal] — field inequality
-    FieldNe(String, JValue),
-    /// arr[field > n] — numeric greater-than
-    FieldGt(String, f64),
-    /// arr[field >= n] — numeric greater-or-equal
-    FieldGte(String, f64),
-    /// arr[field < n] — numeric less-than
-    FieldLt(String, f64),
-    /// arr[field <= n] — numeric less-or-equal
-    FieldLte(String, f64),
-    /// p1 and p2 — compound AND
-    And(Box<SpecializedPredicate>, Box<SpecializedPredicate>),
-    /// p1 or p2 — compound OR
-    Or(Box<SpecializedPredicate>, Box<SpecializedPredicate>),
-}
-
-/// Try to decompose a predicate AST into a specialized fast-path pattern.
-/// Returns None if the predicate is too complex for specialization.
-fn try_specialize_predicate(predicate: &AstNode) -> Option<SpecializedPredicate> {
-    match predicate {
-        // arr[field] — truthy check
-        AstNode::Name(field) => Some(SpecializedPredicate::TruthyField(field.clone())),
-
-        // arr[field op literal] or arr[literal op field]
-        AstNode::Binary { op, lhs, rhs } => match op {
-            BinaryOp::Equal => {
-                try_field_literal_pair(lhs, rhs).map(|(f, v)| SpecializedPredicate::FieldEq(f, v))
-            }
-            BinaryOp::NotEqual => {
-                try_field_literal_pair(lhs, rhs).map(|(f, v)| SpecializedPredicate::FieldNe(f, v))
-            }
-            BinaryOp::GreaterThan => try_field_number_pair(lhs, rhs).map(|(f, n, flipped)| {
-                if flipped {
-                    SpecializedPredicate::FieldLt(f, n)
-                } else {
-                    SpecializedPredicate::FieldGt(f, n)
-                }
-            }),
-            BinaryOp::GreaterThanOrEqual => {
-                try_field_number_pair(lhs, rhs).map(|(f, n, flipped)| {
-                    if flipped {
-                        SpecializedPredicate::FieldLte(f, n)
-                    } else {
-                        SpecializedPredicate::FieldGte(f, n)
-                    }
-                })
-            }
-            BinaryOp::LessThan => try_field_number_pair(lhs, rhs).map(|(f, n, flipped)| {
-                if flipped {
-                    SpecializedPredicate::FieldGt(f, n)
-                } else {
-                    SpecializedPredicate::FieldLt(f, n)
-                }
-            }),
-            BinaryOp::LessThanOrEqual => try_field_number_pair(lhs, rhs).map(|(f, n, flipped)| {
-                if flipped {
-                    SpecializedPredicate::FieldGte(f, n)
-                } else {
-                    SpecializedPredicate::FieldLte(f, n)
-                }
-            }),
-            BinaryOp::And => {
-                let left = try_specialize_predicate(lhs)?;
-                let right = try_specialize_predicate(rhs)?;
-                Some(SpecializedPredicate::And(Box::new(left), Box::new(right)))
-            }
-            BinaryOp::Or => {
-                let left = try_specialize_predicate(lhs)?;
-                let right = try_specialize_predicate(rhs)?;
-                Some(SpecializedPredicate::Or(Box::new(left), Box::new(right)))
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// Try to convert an AST literal node to a JValue.
-fn ast_to_literal(node: &AstNode) -> Option<JValue> {
-    match node {
-        AstNode::String(s) => Some(JValue::string(s.clone())),
-        AstNode::Number(n) => Some(JValue::Number(*n)),
-        AstNode::Boolean(b) => Some(JValue::Bool(*b)),
-        AstNode::Null => Some(JValue::Null),
-        _ => None,
-    }
-}
-
-/// Extract (field_name, literal_value) from a Binary node's operands.
-/// Handles both `field = literal` and `literal = field` orderings.
-fn try_field_literal_pair(lhs: &AstNode, rhs: &AstNode) -> Option<(String, JValue)> {
-    if let AstNode::Name(field) = lhs {
-        if let Some(lit) = ast_to_literal(rhs) {
-            return Some((field.clone(), lit));
-        }
-    }
-    if let AstNode::Name(field) = rhs {
-        if let Some(lit) = ast_to_literal(lhs) {
-            return Some((field.clone(), lit));
-        }
-    }
-    None
-}
-
-/// Extract (field_name, number, flipped) for numeric comparisons.
-/// `flipped` is true when the literal is on the LHS (e.g., `10 > price` means `price < 10`).
-fn try_field_number_pair(lhs: &AstNode, rhs: &AstNode) -> Option<(String, f64, bool)> {
-    if let (AstNode::Name(field), AstNode::Number(n)) = (lhs, rhs) {
-        return Some((field.clone(), *n, false));
-    }
-    if let (AstNode::Number(n), AstNode::Name(field)) = (lhs, rhs) {
-        return Some((field.clone(), *n, true));
-    }
-    None
-}
-
-/// Evaluate a specialized predicate against a single item.
-/// Returns true if the item matches the predicate.
-fn evaluate_specialized(item: &JValue, spec: &SpecializedPredicate) -> bool {
-    let obj = match item {
-        JValue::Object(obj) => obj,
-        _ => return false,
-    };
-    match spec {
-        SpecializedPredicate::TruthyField(field) => match obj.get(field.as_str()) {
-            Some(v) => match v {
-                JValue::Null | JValue::Undefined => false,
-                JValue::Bool(b) => *b,
-                JValue::Number(n) => *n != 0.0,
-                JValue::String(s) => !s.is_empty(),
-                JValue::Array(a) => !a.is_empty(),
-                JValue::Object(o) => !o.is_empty(),
-                _ => false,
-            },
-            None => false,
-        },
-        SpecializedPredicate::FieldEq(field, literal) => obj.get(field.as_str()) == Some(literal),
-        SpecializedPredicate::FieldNe(field, literal) => obj.get(field.as_str()) != Some(literal),
-        SpecializedPredicate::FieldGt(field, n) => obj
-            .get(field.as_str())
-            .and_then(|v| v.as_f64())
-            .is_some_and(|v| v > *n),
-        SpecializedPredicate::FieldGte(field, n) => obj
-            .get(field.as_str())
-            .and_then(|v| v.as_f64())
-            .is_some_and(|v| v >= *n),
-        SpecializedPredicate::FieldLt(field, n) => obj
-            .get(field.as_str())
-            .and_then(|v| v.as_f64())
-            .is_some_and(|v| v < *n),
-        SpecializedPredicate::FieldLte(field, n) => obj
-            .get(field.as_str())
-            .and_then(|v| v.as_f64())
-            .is_some_and(|v| v <= *n),
-        SpecializedPredicate::And(left, right) => {
-            evaluate_specialized(item, left) && evaluate_specialized(item, right)
-        }
-        SpecializedPredicate::Or(left, right) => {
-            evaluate_specialized(item, left) || evaluate_specialized(item, right)
-        }
-    }
-}
-
 /// Specialized sort comparator for `$l.field op $r.field` patterns.
 /// Bypasses the full AST evaluator for simple field-based sort comparisons.
 ///
@@ -261,9 +90,16 @@ fn try_specialize_sort_comparator(
             extract_var_field(rhs, rhs_param),
         ) {
             if lhs_field == rhs_field {
-                let ascending = is_ascending(op)?;
-                // When flipped ($r.field > $l.field), the direction inverts.
-                let descending = if flipped { ascending } else { !ascending };
+                let descending = match op {
+                    // Subtraction: `$l.f - $r.f` → positive when l > r → ascending.
+                    // Flipped `$r.f - $l.f` → positive when r > l → descending.
+                    BinaryOp::Subtract => flipped,
+                    // Comparison: `$l.f > $r.f` → ascending, flipped inverts.
+                    _ => {
+                        let ascending = is_ascending(op)?;
+                        if flipped { ascending } else { !ascending }
+                    }
+                };
                 return Some(SpecializedSortComparator {
                     field: lhs_field,
                     descending,
@@ -273,6 +109,1642 @@ fn try_specialize_sort_comparator(
     }
     None
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CompiledExpr — unified compiled expression framework
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// Generalizes SpecializedPredicate and CompiledObjectMap into a single IR that
+// can represent arbitrary simple expressions without AST walking.  Evaluated in
+// a tight loop with no recursion tracking, no scope management, and no AstNode
+// pattern matching.
+
+/// Shape cache: maps field names to their positional index in an IndexMap.
+/// When all objects in an array share the same key ordering (extremely common
+/// in JSON data), field lookups become O(1) Vec index access via `get_index()`
+/// instead of O(1)-amortized hash lookups.
+type ShapeCache = HashMap<String, usize>;
+
+/// Build a shape cache from the first object in an array.
+/// Returns None if the data is not an object.
+fn build_shape_cache(first_element: &JValue) -> Option<ShapeCache> {
+    match first_element {
+        JValue::Object(obj) => {
+            let mut cache = HashMap::with_capacity(obj.len());
+            for (idx, (key, _)) in obj.iter().enumerate() {
+                cache.insert(key.clone(), idx);
+            }
+            Some(cache)
+        }
+        _ => None,
+    }
+}
+
+/// Comparison operator for compiled expressions.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CompiledCmp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+/// Arithmetic operator for compiled expressions.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CompiledArithOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
+
+/// Unified compiled expression — replaces SpecializedPredicate & CompiledObjectMap.
+///
+/// `try_compile_expr()` converts an AstNode subtree into a CompiledExpr at
+/// expression-compile time (once), then `eval_compiled()` evaluates it per
+/// element in O(expression-size) with no heap allocation in the hot path.
+#[derive(Clone, Debug)]
+pub(crate) enum CompiledExpr {
+    // ── Leaves ──────────────────────────────────────────────────────────
+    /// A literal value known at compile time.
+    Literal(JValue),
+    /// Explicit `null` literal from `AstNode::Null`.
+    /// Distinct from field-lookup-produced null: triggers T2010/T2002 errors
+    /// in comparisons/arithmetic, matching the tree-walker's `explicit_null` semantics.
+    ExplicitNull,
+    /// Single-level field lookup on the current object: `obj.get("field")`.
+    FieldLookup(String),
+    /// Two-level nested field lookup: `obj.get("a")?.get("b")`.
+    NestedFieldLookup(String, String),
+    /// Variable lookup from enclosing scope (e.g. `$var`).
+    /// Resolved at eval time via a provided variable map.
+    VariableLookup(String),
+
+    // ── Comparison ──────────────────────────────────────────────────────
+    Compare {
+        op: CompiledCmp,
+        lhs: Box<CompiledExpr>,
+        rhs: Box<CompiledExpr>,
+    },
+
+    // ── Arithmetic ──────────────────────────────────────────────────────
+    Arithmetic {
+        op: CompiledArithOp,
+        lhs: Box<CompiledExpr>,
+        rhs: Box<CompiledExpr>,
+    },
+
+    // ── String ──────────────────────────────────────────────────────────
+    Concat(Box<CompiledExpr>, Box<CompiledExpr>),
+
+    // ── Logical ─────────────────────────────────────────────────────────
+    And(Box<CompiledExpr>, Box<CompiledExpr>),
+    Or(Box<CompiledExpr>, Box<CompiledExpr>),
+    Not(Box<CompiledExpr>),
+    /// Negation of a numeric value.
+    Negate(Box<CompiledExpr>),
+
+    // ── Conditional ─────────────────────────────────────────────────────
+    Conditional {
+        condition: Box<CompiledExpr>,
+        then_expr: Box<CompiledExpr>,
+        else_expr: Option<Box<CompiledExpr>>,
+    },
+
+    // ── Compound ────────────────────────────────────────────────────────
+    /// Object construction: `{"key1": expr1, "key2": expr2, ...}`
+    ObjectConstruct(Vec<(String, CompiledExpr)>),
+    /// Array construction: `[expr1, expr2, ...]`
+    ///
+    /// Each element carries a `bool` flag: `true` means the element originated
+    /// from an explicit `AstNode::Array` constructor and must be kept nested even
+    /// if it evaluates to an array. `false` means the element's array value is
+    /// flattened one level into the outer result (JSONata `[a.b, ...]` semantics).
+    /// Undefined values are always skipped.
+    ArrayConstruct(Vec<(CompiledExpr, bool)>),
+
+    // ── Phase 2 extensions ──────────────────────────────────────────────
+    /// Named variable lookup from context scope (any `$name` not in lambda params).
+    /// Compiled when a named variable is encountered and no allowed_vars list is
+    /// provided (top-level compilation). At runtime, returns the value from the vars
+    /// map (lambda params or captured env), or Undefined if not present.
+    #[allow(dead_code)]
+    ContextVar(String),
+
+    /// Multi-step field path with optional per-step filters: `a.b[pred].c`
+    /// Applies implicit array-mapping semantics at each step.
+    FieldPath(Vec<CompiledStep>),
+
+    /// Call a pure, side-effect-free builtin with compiled arguments.
+    /// Only builtins in COMPILABLE_BUILTINS are allowed here.
+    BuiltinCall {
+        name: &'static str,
+        args: Vec<CompiledExpr>,
+    },
+
+    /// Sequential block: evaluate all expressions, return last value.
+    Block(Vec<CompiledExpr>),
+
+    /// Coalesce (`??`): return lhs if it is defined and non-null, else rhs.
+    Coalesce(Box<CompiledExpr>, Box<CompiledExpr>),
+}
+
+/// One step in a compiled `FieldPath`.
+#[derive(Clone, Debug)]
+pub(crate) struct CompiledStep {
+    /// Field name to look up at this step.
+    pub field: String,
+    /// Optional predicate filter compiled from a `Stage::Filter` stage.
+    pub filter: Option<CompiledExpr>,
+}
+
+/// Try to compile an AstNode subtree into a CompiledExpr.
+/// Returns None for anything that requires full AST evaluation (lambda calls,
+/// function calls with side effects, complex paths, etc.).
+pub(crate) fn try_compile_expr(node: &AstNode) -> Option<CompiledExpr> {
+    try_compile_expr_inner(node, None)
+}
+
+/// Like `try_compile_expr` but additionally allows the specified variable names
+/// to be compiled as `VariableLookup`. Used by HOF integration where lambda
+/// parameters are known and will be provided via the `vars` map at eval time.
+pub(crate) fn try_compile_expr_with_allowed_vars(
+    node: &AstNode,
+    allowed_vars: &[&str],
+) -> Option<CompiledExpr> {
+    try_compile_expr_inner(node, Some(allowed_vars))
+}
+
+fn try_compile_expr_inner(
+    node: &AstNode,
+    allowed_vars: Option<&[&str]>,
+) -> Option<CompiledExpr> {
+    match node {
+        // ── Literals ────────────────────────────────────────────────────
+        AstNode::String(s) => Some(CompiledExpr::Literal(JValue::string(s.clone()))),
+        AstNode::Number(n) => Some(CompiledExpr::Literal(JValue::Number(*n))),
+        AstNode::Boolean(b) => Some(CompiledExpr::Literal(JValue::Bool(*b))),
+        AstNode::Null => Some(CompiledExpr::ExplicitNull),
+
+        // ── Field access ────────────────────────────────────────────────
+        AstNode::Name(field) => Some(CompiledExpr::FieldLookup(field.clone())),
+
+        // ── Variable lookup ─────────────────────────────────────────────
+        // $ (empty name) always refers to the current element.
+        // Named variables: in HOF mode (allowed_vars=Some), only compile if the
+        // variable is in the allowed set (lambda params supplied via vars map).
+        // In top-level mode (allowed_vars=None), compile unknown variables as
+        // ContextVar — they return Undefined at runtime when no bindings are passed.
+        AstNode::Variable(var) if var.is_empty() => {
+            Some(CompiledExpr::VariableLookup(var.clone()))
+        }
+        AstNode::Variable(var) => {
+            if let Some(allowed) = allowed_vars {
+                // HOF mode: only compile if the variable is a known lambda param.
+                if allowed.contains(&var.as_str()) {
+                    return Some(CompiledExpr::VariableLookup(var.clone()));
+                }
+            }
+            // Named variables require Context for correct lookup (scope stack, builtins
+            // registry). The compiled fast path passes ctx=None, so fall back to the
+            // tree-walker for all non-empty variable references.
+            None
+        }
+
+        // ── Path expressions ────────────────────────────────────────────
+        AstNode::Path { steps } => try_compile_path(steps, allowed_vars),
+
+        // ── Binary operations ───────────────────────────────────────────
+        AstNode::Binary { op, lhs, rhs } => {
+            let compiled_lhs = try_compile_expr_inner(lhs, allowed_vars)?;
+            let compiled_rhs = try_compile_expr_inner(rhs, allowed_vars)?;
+            match op {
+                // Comparison
+                BinaryOp::Equal => Some(CompiledExpr::Compare {
+                    op: CompiledCmp::Eq,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::NotEqual => Some(CompiledExpr::Compare {
+                    op: CompiledCmp::Ne,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::LessThan => Some(CompiledExpr::Compare {
+                    op: CompiledCmp::Lt,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::LessThanOrEqual => Some(CompiledExpr::Compare {
+                    op: CompiledCmp::Le,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::GreaterThan => Some(CompiledExpr::Compare {
+                    op: CompiledCmp::Gt,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::GreaterThanOrEqual => Some(CompiledExpr::Compare {
+                    op: CompiledCmp::Ge,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                // Arithmetic
+                BinaryOp::Add => Some(CompiledExpr::Arithmetic {
+                    op: CompiledArithOp::Add,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::Subtract => Some(CompiledExpr::Arithmetic {
+                    op: CompiledArithOp::Sub,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::Multiply => Some(CompiledExpr::Arithmetic {
+                    op: CompiledArithOp::Mul,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::Divide => Some(CompiledExpr::Arithmetic {
+                    op: CompiledArithOp::Div,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                BinaryOp::Modulo => Some(CompiledExpr::Arithmetic {
+                    op: CompiledArithOp::Mod,
+                    lhs: Box::new(compiled_lhs),
+                    rhs: Box::new(compiled_rhs),
+                }),
+                // Logical
+                BinaryOp::And => Some(CompiledExpr::And(
+                    Box::new(compiled_lhs),
+                    Box::new(compiled_rhs),
+                )),
+                BinaryOp::Or => Some(CompiledExpr::Or(
+                    Box::new(compiled_lhs),
+                    Box::new(compiled_rhs),
+                )),
+                // String concat
+                BinaryOp::Concatenate => Some(CompiledExpr::Concat(
+                    Box::new(compiled_lhs),
+                    Box::new(compiled_rhs),
+                )),
+                // Coalesce: return lhs if defined/non-null, else rhs
+                BinaryOp::Coalesce => Some(CompiledExpr::Coalesce(
+                    Box::new(compiled_lhs),
+                    Box::new(compiled_rhs),
+                )),
+                // Anything else (Range, In, ColonEqual, ChainPipe, etc.) — not compilable
+                _ => None,
+            }
+        }
+
+        // ── Unary operations ────────────────────────────────────────────
+        AstNode::Unary { op, operand } => {
+            let compiled = try_compile_expr_inner(operand, allowed_vars)?;
+            match op {
+                crate::ast::UnaryOp::Not => Some(CompiledExpr::Not(Box::new(compiled))),
+                crate::ast::UnaryOp::Negate => Some(CompiledExpr::Negate(Box::new(compiled))),
+            }
+        }
+
+        // ── Conditional ─────────────────────────────────────────────────
+        AstNode::Conditional {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            let cond = try_compile_expr_inner(condition, allowed_vars)?;
+            let then_e = try_compile_expr_inner(then_branch, allowed_vars)?;
+            let else_e = match else_branch {
+                Some(e) => Some(Box::new(try_compile_expr_inner(e, allowed_vars)?)),
+                None => None,
+            };
+            Some(CompiledExpr::Conditional {
+                condition: Box::new(cond),
+                then_expr: Box::new(then_e),
+                else_expr: else_e,
+            })
+        }
+
+        // ── Object construction ─────────────────────────────────────────
+        AstNode::Object(pairs) => {
+            let mut fields = Vec::with_capacity(pairs.len());
+            for (key_node, val_node) in pairs {
+                // Key must be a string literal
+                let key = match key_node {
+                    AstNode::String(s) => s.clone(),
+                    _ => return None,
+                };
+                let val = try_compile_expr_inner(val_node, allowed_vars)?;
+                fields.push((key, val));
+            }
+            Some(CompiledExpr::ObjectConstruct(fields))
+        }
+
+        // ── Array construction ──────────────────────────────────────────
+        AstNode::Array(elems) => {
+            let mut compiled = Vec::with_capacity(elems.len());
+            for elem in elems {
+                // Tag whether the element itself is an array constructor: if so, its
+                // array value must be kept nested rather than flattened (tree-walker parity).
+                let is_nested = matches!(elem, AstNode::Array(_));
+                compiled.push((try_compile_expr_inner(elem, allowed_vars)?, is_nested));
+            }
+            Some(CompiledExpr::ArrayConstruct(compiled))
+        }
+
+        // ── Block (sequential evaluation) ───────────────────────────────
+        AstNode::Block(exprs) if !exprs.is_empty() => {
+            let compiled: Option<Vec<CompiledExpr>> = exprs
+                .iter()
+                .map(|e| try_compile_expr_inner(e, allowed_vars))
+                .collect();
+            compiled.map(CompiledExpr::Block)
+        }
+
+        // ── Pure builtin function calls ──────────────────────────────────
+        AstNode::Function {
+            name,
+            args,
+            is_builtin: true,
+        } => {
+            if is_compilable_builtin(name) {
+                // Arity guard: if the call site passes more args than the builtin accepts,
+                // fall back to the tree-walker so it can raise the correct T0410 error.
+                if let Some(max) = compilable_builtin_max_args(name) {
+                    if args.len() > max {
+                        return None;
+                    }
+                }
+                let compiled_args: Option<Vec<CompiledExpr>> = args
+                    .iter()
+                    .map(|a| try_compile_expr_inner(a, allowed_vars))
+                    .collect();
+                compiled_args.map(|cargs| CompiledExpr::BuiltinCall {
+                    name: static_builtin_name(name),
+                    args: cargs,
+                })
+            } else {
+                None
+            }
+        }
+
+        // Everything else: Lambda, non-pure builtins, Sort, Transform, etc.
+        _ => None,
+    }
+}
+
+/// Returns true if the named builtin is pure (no side effects, no context dependency)
+/// and can be safely compiled into a BuiltinCall.
+fn is_compilable_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "string"
+            | "length"
+            | "substring"
+            | "substringBefore"
+            | "substringAfter"
+            | "uppercase"
+            | "lowercase"
+            | "trim"
+            | "contains"
+            | "split"
+            | "join"
+            | "number"
+            | "floor"
+            | "ceil"
+            | "round"
+            | "abs"
+            | "sqrt"
+            | "sum"
+            | "max"
+            | "min"
+            | "average"
+            | "count"
+            | "boolean"
+            | "not"
+            | "keys"
+            | "append"
+            | "reverse"
+            | "distinct"
+            | "merge"
+    )
+}
+
+/// Maximum number of explicit arguments accepted by each compilable builtin.
+/// Returns `None` for variadic functions with no fixed upper bound.
+/// Used at compile time to fall back to the tree-walker for over-arity calls
+/// (which the tree-walker turns into the correct T0410/T0411 type errors).
+fn compilable_builtin_max_args(name: &str) -> Option<usize> {
+    match name {
+        "string" => Some(2),
+        "length" | "uppercase" | "lowercase" | "trim" => Some(1),
+        "substring" | "split" => Some(3),
+        "substringBefore" | "substringAfter" | "contains" | "join" | "append" | "round" => Some(2),
+        "number" | "floor" | "ceil" | "abs" | "sqrt" => Some(1),
+        "sum" | "max" | "min" | "average" | "count" => Some(1),
+        "boolean" | "not" | "keys" | "reverse" | "distinct" => Some(1),
+        "merge" => None, // variadic: $merge(obj1, obj2, …) or $merge([…])
+        _ => None,
+    }
+}
+
+/// Return the `&'static str` for a known compilable builtin name.
+/// SAFETY: only called after `is_compilable_builtin` returns true.
+fn static_builtin_name(name: &str) -> &'static str {
+    match name {
+        "string" => "string",
+        "length" => "length",
+        "substring" => "substring",
+        "substringBefore" => "substringBefore",
+        "substringAfter" => "substringAfter",
+        "uppercase" => "uppercase",
+        "lowercase" => "lowercase",
+        "trim" => "trim",
+        "contains" => "contains",
+        "split" => "split",
+        "join" => "join",
+        "number" => "number",
+        "floor" => "floor",
+        "ceil" => "ceil",
+        "round" => "round",
+        "abs" => "abs",
+        "sqrt" => "sqrt",
+        "sum" => "sum",
+        "max" => "max",
+        "min" => "min",
+        "average" => "average",
+        "count" => "count",
+        "boolean" => "boolean",
+        "not" => "not",
+        "keys" => "keys",
+        "append" => "append",
+        "reverse" => "reverse",
+        "distinct" => "distinct",
+        "merge" => "merge",
+        _ => unreachable!("Not a compilable builtin: {}", name),
+    }
+}
+
+/// Evaluate a compiled expression against a single element.
+///
+/// `data` is the current element (typically an object from an array).
+/// `vars` is an optional map of variable bindings (for HOF lambda parameters).
+///
+/// This is the tight inner loop — no recursion tracking, no scope push/pop,
+/// no AstNode pattern matching.
+#[inline(always)]
+pub(crate) fn eval_compiled(
+    expr: &CompiledExpr,
+    data: &JValue,
+    vars: Option<&HashMap<&str, &JValue>>,
+) -> Result<JValue, EvaluatorError> {
+    eval_compiled_inner(expr, data, vars, None, None)
+}
+
+
+/// Like `eval_compiled` but with an optional shape cache for O(1) positional
+/// field access. The shape cache maps field names to their index in the object's
+/// internal Vec, enabling `get_index()` instead of hash lookups.
+#[inline(always)]
+fn eval_compiled_shaped(
+    expr: &CompiledExpr,
+    data: &JValue,
+    vars: Option<&HashMap<&str, &JValue>>,
+    shape: &ShapeCache,
+) -> Result<JValue, EvaluatorError> {
+    eval_compiled_inner(expr, data, vars, None, Some(shape))
+}
+
+fn eval_compiled_inner(
+    expr: &CompiledExpr,
+    data: &JValue,
+    vars: Option<&HashMap<&str, &JValue>>,
+    ctx: Option<&Context>,
+    shape: Option<&ShapeCache>,
+) -> Result<JValue, EvaluatorError> {
+    match expr {
+        // ── Leaves ──────────────────────────────────────────────────────
+        CompiledExpr::Literal(v) => Ok(v.clone()),
+
+        // ExplicitNull evaluates to Null, but is flagged at compile-time for
+        // comparison/arithmetic arms to trigger the correct T2010/T2002 errors.
+        CompiledExpr::ExplicitNull => Ok(JValue::Null),
+
+        CompiledExpr::FieldLookup(field) => match data {
+            JValue::Object(obj) => {
+                // Shape-accelerated: use positional index if available
+                if let Some(shape) = shape {
+                    if let Some(&idx) = shape.get(field.as_str()) {
+                        return Ok(obj
+                            .get_index(idx)
+                            .map(|(_, v)| v.clone())
+                            .unwrap_or(JValue::Undefined));
+                    }
+                }
+                Ok(obj.get(field.as_str()).cloned().unwrap_or(JValue::Undefined))
+            }
+            _ => Ok(JValue::Undefined),
+        },
+
+        CompiledExpr::NestedFieldLookup(outer, inner) => match data {
+            JValue::Object(obj) => {
+                // Shape-accelerated outer lookup
+                let outer_val = if let Some(shape) = shape {
+                    if let Some(&idx) = shape.get(outer.as_str()) {
+                        obj.get_index(idx).map(|(_, v)| v)
+                    } else {
+                        obj.get(outer.as_str())
+                    }
+                } else {
+                    obj.get(outer.as_str())
+                };
+                Ok(outer_val
+                    .and_then(|v| match v {
+                        JValue::Object(nested) => nested.get(inner.as_str()).cloned(),
+                        _ => None,
+                    })
+                    .unwrap_or(JValue::Undefined))
+            }
+            _ => Ok(JValue::Undefined),
+        },
+
+        CompiledExpr::VariableLookup(var) => {
+            if let Some(vars) = vars {
+                if let Some(val) = vars.get(var.as_str()) {
+                    return Ok((*val).clone());
+                }
+            }
+            // $ (empty var name) refers to the current data
+            if var.is_empty() {
+                return Ok(data.clone());
+            }
+            Ok(JValue::Undefined)
+        }
+
+        // ── Comparison ──────────────────────────────────────────────────
+        CompiledExpr::Compare { op, lhs, rhs } => {
+            let lhs_explicit_null = is_compiled_explicit_null(lhs);
+            let rhs_explicit_null = is_compiled_explicit_null(rhs);
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            match op {
+                CompiledCmp::Eq => Ok(JValue::Bool(
+                    crate::functions::array::values_equal(&left, &right),
+                )),
+                CompiledCmp::Ne => Ok(JValue::Bool(
+                    !crate::functions::array::values_equal(&left, &right),
+                )),
+                CompiledCmp::Lt => compiled_ordered_cmp(
+                    &left, &right, lhs_explicit_null, rhs_explicit_null,
+                    |a, b| a < b, |a, b| a < b,
+                ),
+                CompiledCmp::Le => compiled_ordered_cmp(
+                    &left, &right, lhs_explicit_null, rhs_explicit_null,
+                    |a, b| a <= b, |a, b| a <= b,
+                ),
+                CompiledCmp::Gt => compiled_ordered_cmp(
+                    &left, &right, lhs_explicit_null, rhs_explicit_null,
+                    |a, b| a > b, |a, b| a > b,
+                ),
+                CompiledCmp::Ge => compiled_ordered_cmp(
+                    &left, &right, lhs_explicit_null, rhs_explicit_null,
+                    |a, b| a >= b, |a, b| a >= b,
+                ),
+            }
+        }
+
+        // ── Arithmetic ──────────────────────────────────────────────────
+        CompiledExpr::Arithmetic { op, lhs, rhs } => {
+            let lhs_explicit_null = is_compiled_explicit_null(lhs);
+            let rhs_explicit_null = is_compiled_explicit_null(rhs);
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            compiled_arithmetic(*op, &left, &right, lhs_explicit_null, rhs_explicit_null)
+        }
+
+        // ── String concat ───────────────────────────────────────────────
+        CompiledExpr::Concat(lhs, rhs) => {
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            let ls = compiled_to_concat_string(&left)?;
+            let rs = compiled_to_concat_string(&right)?;
+            Ok(JValue::string(format!("{}{}", ls, rs)))
+        }
+
+        // ── Logical ─────────────────────────────────────────────────────
+        CompiledExpr::And(lhs, rhs) => {
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            if !compiled_is_truthy(&left) {
+                return Ok(JValue::Bool(false));
+            }
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            Ok(JValue::Bool(compiled_is_truthy(&right)))
+        }
+        CompiledExpr::Or(lhs, rhs) => {
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            if compiled_is_truthy(&left) {
+                return Ok(JValue::Bool(true));
+            }
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            Ok(JValue::Bool(compiled_is_truthy(&right)))
+        }
+        CompiledExpr::Not(inner) => {
+            let val = eval_compiled_inner(inner, data, vars, ctx, shape)?;
+            Ok(JValue::Bool(!compiled_is_truthy(&val)))
+        }
+        CompiledExpr::Negate(inner) => {
+            let val = eval_compiled_inner(inner, data, vars, ctx, shape)?;
+            match val {
+                JValue::Number(n) => Ok(JValue::Number(-n)),
+                JValue::Null => Ok(JValue::Null),
+                // Undefined operand propagates through unary minus, matching the tree-walker.
+                v if v.is_undefined() => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "D1002: Cannot negate non-number value".to_string(),
+                )),
+            }
+        }
+
+        // ── Conditional ─────────────────────────────────────────────────
+        CompiledExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            let cond = eval_compiled_inner(condition, data, vars, ctx, shape)?;
+            if compiled_is_truthy(&cond) {
+                eval_compiled_inner(then_expr, data, vars, ctx, shape)
+            } else if let Some(else_e) = else_expr {
+                eval_compiled_inner(else_e, data, vars, ctx, shape)
+            } else {
+                Ok(JValue::Undefined)
+            }
+        }
+
+        // ── Object construction ─────────────────────────────────────────
+        CompiledExpr::ObjectConstruct(fields) => {
+            let mut result = IndexMap::with_capacity(fields.len());
+            for (key, expr) in fields {
+                let value = eval_compiled_inner(expr, data, vars, ctx, shape)?;
+                if !value.is_undefined() {
+                    result.insert(key.clone(), value);
+                }
+            }
+            Ok(JValue::object(result))
+        }
+
+        // ── Array construction ──────────────────────────────────────────
+        CompiledExpr::ArrayConstruct(elems) => {
+            let mut result = Vec::new();
+            for (elem_expr, is_nested) in elems {
+                let value = eval_compiled_inner(elem_expr, data, vars, ctx, shape)?;
+                // Undefined values are excluded from array constructors (tree-walker parity)
+                if value.is_undefined() {
+                    continue;
+                }
+                if *is_nested {
+                    // Explicit array constructor [...] — keep nested even if it's an array
+                    result.push(value);
+                } else if let JValue::Array(arr) = value {
+                    // Non-constructor that evaluated to an array — flatten one level
+                    result.extend(arr.iter().cloned());
+                } else {
+                    result.push(value);
+                }
+            }
+            Ok(JValue::array(result))
+        }
+
+        // ── Phase 2 new variants ─────────────────────────────────────────
+
+        // ContextVar: named variable lookup from context scope.
+        // In top-level mode (ctx=None, no bindings), returns Undefined.
+        // In HOF mode, ctx is None too (HOF call sites pass no ctx), so this
+        // is only ever populated for top-level calls — always Undefined there.
+        CompiledExpr::ContextVar(name) => {
+            // Check vars map first (for lambda params that might shadow context)
+            if let Some(vars) = vars {
+                if let Some(val) = vars.get(name.as_str()) {
+                    return Ok((*val).clone());
+                }
+            }
+            // Then check context scope
+            if let Some(ctx) = ctx {
+                if let Some(val) = ctx.lookup(name) {
+                    return Ok(val.clone());
+                }
+            }
+            Ok(JValue::Undefined)
+        }
+
+        // FieldPath: multi-step field access with implicit array mapping.
+        CompiledExpr::FieldPath(steps) => {
+            compiled_eval_field_path(steps, data, vars, ctx, shape)
+        }
+
+        // BuiltinCall: evaluate all args, dispatch to pure builtin.
+        CompiledExpr::BuiltinCall { name, args } => {
+            let mut evaled_args = Vec::with_capacity(args.len());
+            for arg in args.iter() {
+                evaled_args.push(eval_compiled_inner(arg, data, vars, ctx, shape)?);
+            }
+            call_pure_builtin(name, &evaled_args, data)
+        }
+
+        // Block: evaluate each expression in sequence, return the last value.
+        CompiledExpr::Block(exprs) => {
+            let mut result = JValue::Undefined;
+            for expr in exprs.iter() {
+                result = eval_compiled_inner(expr, data, vars, ctx, shape)?;
+            }
+            Ok(result)
+        }
+
+        // Coalesce (`??`): return lhs unless it is Undefined; null IS a valid value.
+        // JSONata spec: "returns the RHS operand if the LHS operand evaluates to undefined".
+        CompiledExpr::Coalesce(lhs, rhs) => {
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            if left.is_undefined() {
+                eval_compiled_inner(rhs, data, vars, ctx, shape)
+            } else {
+                Ok(left)
+            }
+        }
+    }
+}
+
+/// Truthiness check (matches JSONata semantics). Standalone function for compiled path.
+#[inline]
+pub(crate) fn compiled_is_truthy(value: &JValue) -> bool {
+    match value {
+        JValue::Null | JValue::Undefined => false,
+        JValue::Bool(b) => *b,
+        JValue::Number(n) => *n != 0.0,
+        JValue::String(s) => !s.is_empty(),
+        JValue::Array(a) => !a.is_empty(),
+        JValue::Object(o) => !o.is_empty(),
+        _ => false,
+    }
+}
+
+/// Returns true if the compiled expression is a literal `null` (from `AstNode::Null`).
+/// Used to replicate the tree-walker's `explicit_null` flag in comparisons/arithmetic.
+#[inline]
+fn is_compiled_explicit_null(expr: &CompiledExpr) -> bool {
+    matches!(expr, CompiledExpr::ExplicitNull)
+}
+
+/// Ordered comparison for compiled expressions.
+/// Mirrors the tree-walker's `ordered_compare` including explicit-null semantics.
+#[inline]
+pub(crate) fn compiled_ordered_cmp(
+    left: &JValue,
+    right: &JValue,
+    left_is_explicit_null: bool,
+    right_is_explicit_null: bool,
+    cmp_num: fn(f64, f64) -> bool,
+    cmp_str: fn(&str, &str) -> bool,
+) -> Result<JValue, EvaluatorError> {
+    match (left, right) {
+        (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Bool(cmp_num(*a, *b))),
+        (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(cmp_str(a, b))),
+        // Both null/undefined → undefined
+        (JValue::Null, JValue::Null) | (JValue::Undefined, JValue::Undefined) => Ok(JValue::Null),
+        (JValue::Undefined, JValue::Null) | (JValue::Null, JValue::Undefined) => Ok(JValue::Null),
+        // Explicit null literal with any non-null type → T2010 error
+        (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::EvaluationError(
+            "T2010: Type mismatch in comparison".to_string(),
+        )),
+        (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::EvaluationError(
+            "T2010: Type mismatch in comparison".to_string(),
+        )),
+        // Boolean with undefined → T2010 error
+        (JValue::Bool(_), JValue::Null | JValue::Undefined)
+        | (JValue::Null | JValue::Undefined, JValue::Bool(_)) => {
+            Err(EvaluatorError::EvaluationError(
+                "T2010: Type mismatch in comparison".to_string(),
+            ))
+        }
+        // Number or String with implicit undefined (missing field) → undefined result
+        (JValue::Number(_) | JValue::String(_), JValue::Null | JValue::Undefined)
+        | (JValue::Null | JValue::Undefined, JValue::Number(_) | JValue::String(_)) => {
+            Ok(JValue::Null)
+        }
+        // Type mismatch (string vs number)
+        (JValue::String(_), JValue::Number(_)) | (JValue::Number(_), JValue::String(_)) => {
+            Err(EvaluatorError::EvaluationError(
+                "T2009: The expressions on either side of operator must be of the same data type"
+                    .to_string(),
+            ))
+        }
+        _ => Err(EvaluatorError::EvaluationError(
+            "T2010: Type mismatch in comparison".to_string(),
+        )),
+    }
+}
+
+/// Arithmetic for compiled expressions.
+/// Mirrors the tree-walker's arithmetic functions including explicit-null semantics.
+#[inline]
+pub(crate) fn compiled_arithmetic(
+    op: CompiledArithOp,
+    left: &JValue,
+    right: &JValue,
+    left_is_explicit_null: bool,
+    right_is_explicit_null: bool,
+) -> Result<JValue, EvaluatorError> {
+    let op_sym = match op {
+        CompiledArithOp::Add => "+",
+        CompiledArithOp::Sub => "-",
+        CompiledArithOp::Mul => "*",
+        CompiledArithOp::Div => "/",
+        CompiledArithOp::Mod => "%",
+    };
+    match (left, right) {
+        (JValue::Number(a), JValue::Number(b)) => {
+            let result = match op {
+                CompiledArithOp::Add => *a + *b,
+                CompiledArithOp::Sub => *a - *b,
+                CompiledArithOp::Mul => {
+                    let r = *a * *b;
+                    if r.is_infinite() {
+                        return Err(EvaluatorError::EvaluationError(
+                            "D1001: Number out of range".to_string(),
+                        ));
+                    }
+                    r
+                }
+                CompiledArithOp::Div => {
+                    if *b == 0.0 {
+                        return Err(EvaluatorError::EvaluationError(
+                            "Division by zero".to_string(),
+                        ));
+                    }
+                    *a / *b
+                }
+                CompiledArithOp::Mod => {
+                    if *b == 0.0 {
+                        return Err(EvaluatorError::EvaluationError(
+                            "Division by zero".to_string(),
+                        ));
+                    }
+                    *a % *b
+                }
+            };
+            Ok(JValue::Number(result))
+        }
+        // Explicit null literal → T2002 error (matching tree-walker behavior)
+        (JValue::Null | JValue::Undefined, _) if left_is_explicit_null => {
+            Err(EvaluatorError::TypeError(format!(
+                "T2002: The left side of the {} operator must evaluate to a number",
+                op_sym
+            )))
+        }
+        (_, JValue::Null | JValue::Undefined) if right_is_explicit_null => {
+            Err(EvaluatorError::TypeError(format!(
+                "T2002: The right side of the {} operator must evaluate to a number",
+                op_sym
+            )))
+        }
+        // Implicit undefined propagation (from missing field) → undefined result
+        (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
+            Ok(JValue::Null)
+        }
+        _ => Err(EvaluatorError::TypeError(format!(
+            "Cannot apply {} to {:?} and {:?}",
+            op_sym, left, right
+        ))),
+    }
+}
+
+/// Convert a value to string for concatenation in compiled expressions.
+#[inline]
+pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
+    match value {
+        JValue::String(s) => Ok(s.to_string()),
+        JValue::Null | JValue::Undefined => Ok(String::new()),
+        JValue::Number(_) | JValue::Bool(_) | JValue::Array(_) | JValue::Object(_) => {
+            match crate::functions::string::string(value, None) {
+                Ok(JValue::String(s)) => Ok(s.to_string()),
+                Ok(JValue::Null) => Ok(String::new()),
+                _ => Err(EvaluatorError::TypeError(
+                    "Cannot concatenate complex types".to_string(),
+                )),
+            }
+        }
+        _ => Ok(String::new()),
+    }
+}
+
+/// Value equality for the bytecode VM.
+/// Mirrors `CompiledCmp::Eq` in `eval_compiled_inner`: uses `values_equal` from functions.
+#[inline]
+pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> JValue {
+    JValue::Bool(crate::functions::array::values_equal(lhs, rhs))
+}
+
+/// String concatenation for the bytecode VM.
+/// Converts both operands to strings and concatenates them.
+#[inline]
+pub(crate) fn compiled_concat(lhs: JValue, rhs: JValue) -> Result<JValue, EvaluatorError> {
+    let l = compiled_to_concat_string(&lhs)?;
+    let r = compiled_to_concat_string(&rhs)?;
+    Ok(JValue::string(l + &r))
+}
+
+/// Public entry point for the bytecode VM to call pure builtins by name.
+/// Thin wrapper around the private `call_pure_builtin` used internally.
+#[inline]
+pub(crate) fn call_pure_builtin_by_name(
+    name: &str,
+    args: &[JValue],
+    data: &JValue,
+) -> Result<JValue, EvaluatorError> {
+    call_pure_builtin(name, args, data)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 2: path compilation, builtin dispatch, and supporting helpers
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Compile a `Path { steps }` AstNode into a `CompiledExpr`.
+///
+/// Handles paths like `a.b.c`, `a[pred].b`, `$var.field`.
+/// Returns `None` if any step is not compilable (e.g. wildcards, function apps).
+fn try_compile_path(steps: &[crate::ast::PathStep], allowed_vars: Option<&[&str]>) -> Option<CompiledExpr> {
+    use crate::ast::{AstNode, Stage};
+
+    if steps.is_empty() {
+        return None;
+    }
+
+    // Determine the start of the path:
+    //   `$.field...`  → starts from current data (drop the leading `$` step)
+    //   `$var.field`  → variable-prefixed paths: not compiled yet, fall back to tree-walker
+    //   `field...`    → starts from current data
+    let field_steps: &[crate::ast::PathStep] = match &steps[0].node {
+        AstNode::Variable(var) if var.is_empty() && steps[0].stages.is_empty() => &steps[1..],
+        AstNode::Variable(_) => return None,
+        AstNode::Name(_) => steps,
+        _ => return None,
+    };
+
+    // Compile each field step (only Name nodes with at most one Filter stage each)
+    let mut compiled_steps = Vec::with_capacity(field_steps.len());
+    for step in field_steps {
+        let field = match &step.node {
+            AstNode::Name(name) => name.clone(),
+            _ => return None,
+        };
+
+        let filter = match step.stages.as_slice() {
+            [] => None,
+            [Stage::Filter(filter_node)] => {
+                // Numeric literal predicates (`[0]`, `[1]`, etc.) mean index access in JSONata,
+                // not boolean filtering. Fall back to tree-walker for these.
+                if matches!(**filter_node, AstNode::Number(_)) {
+                    return None;
+                }
+                Some(try_compile_expr_inner(filter_node, allowed_vars)?)
+            }
+            _ => return None,
+        };
+
+        compiled_steps.push(CompiledStep { field, filter });
+    }
+
+    if compiled_steps.is_empty() {
+        // Bare `$` with no further field steps — current-data reference
+        return Some(CompiledExpr::VariableLookup(String::new()));
+    }
+
+    // Shape-cache optimizations (FieldLookup / NestedFieldLookup) are only safe
+    // in HOF mode (allowed_vars=Some), where data is always a single Object element
+    // from an array. In top-level mode (allowed_vars=None), data can itself be an
+    // Array, so we must use FieldPath which applies implicit array-mapping semantics.
+    if allowed_vars.is_some() {
+        if compiled_steps.len() == 1 && compiled_steps[0].filter.is_none() {
+            return Some(CompiledExpr::FieldLookup(compiled_steps.remove(0).field));
+        }
+        if compiled_steps.len() == 2
+            && compiled_steps[0].filter.is_none()
+            && compiled_steps[1].filter.is_none()
+        {
+            let outer = compiled_steps.remove(0).field;
+            let inner = compiled_steps.remove(0).field;
+            return Some(CompiledExpr::NestedFieldLookup(outer, inner));
+        }
+    }
+
+    Some(CompiledExpr::FieldPath(compiled_steps))
+}
+
+/// Evaluate a compiled `FieldPath` against `data`.
+///
+/// Applies implicit array-mapping semantics at each step (matching the tree-walker).
+/// Filters are applied as predicates: truthy elements are kept.
+///
+/// Singleton unwrapping mirrors the tree-walker's `did_array_mapping` rule:
+/// - Extracting a field from an *array* sets the mapping flag (unwrap singletons at end).
+/// - Extracting a field from a *single object* resets the flag (preserve the raw value).
+fn compiled_eval_field_path(
+    steps: &[CompiledStep],
+    data: &JValue,
+    vars: Option<&HashMap<&str, &JValue>>,
+    ctx: Option<&Context>,
+    shape: Option<&ShapeCache>,
+) -> Result<JValue, EvaluatorError> {
+    let mut current = data.clone();
+    // Track whether the most recent field step mapped over an array (like the tree-walker's
+    // `did_array_mapping` flag). Filters also count as array operations.
+    let mut did_array_mapping = false;
+    for step in steps {
+        // Determine if this step will do array mapping before we overwrite `current`
+        let is_array = matches!(current, JValue::Array(_));
+        // Field access with implicit array mapping
+        current = compiled_field_step(&step.field, &current);
+        if is_array {
+            did_array_mapping = true;
+        } else {
+            // Extracting from a single object resets the flag (tree-walker parity)
+            did_array_mapping = false;
+        }
+        // Apply filter if present (filter is an array operation — keep the flag set)
+        if let Some(filter) = &step.filter {
+            current = compiled_apply_filter(filter, &current, vars, ctx, shape)?;
+            // Filter always implies we operated on an array
+            did_array_mapping = true;
+        }
+    }
+    // Singleton unwrapping: only when array-mapping occurred, matching tree-walker.
+    if did_array_mapping {
+        Ok(match current {
+            JValue::Array(ref arr) if arr.len() == 1 => arr[0].clone(),
+            other => other,
+        })
+    } else {
+        Ok(current)
+    }
+}
+
+/// Perform a single-field access with implicit array-mapping semantics.
+///
+/// - Object: look up `field`, return its value or Undefined
+/// - Array: map field extraction over each element, flatten nested arrays, skip Undefined
+/// - Tuple objects (`__tuple__: true`): look up in the `@` inner object
+/// - Other: Undefined
+fn compiled_field_step(field: &str, value: &JValue) -> JValue {
+    match value {
+        JValue::Object(obj) => {
+            // Check for tuple: extract from "@" inner object
+            if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                if let Some(JValue::Object(inner)) = obj.get("@") {
+                    return inner.get(field).cloned().unwrap_or(JValue::Undefined);
+                }
+                return JValue::Undefined;
+            }
+            obj.get(field).cloned().unwrap_or(JValue::Undefined)
+        }
+        JValue::Array(arr) => {
+            let mut result = Vec::new();
+            for item in arr.iter() {
+                let extracted = compiled_field_step(field, item);
+                match extracted {
+                    JValue::Undefined => {}
+                    JValue::Array(inner) => result.extend(inner.iter().cloned()),
+                    other => result.push(other),
+                }
+            }
+            if result.is_empty() {
+                JValue::Undefined
+            } else {
+                JValue::array(result)
+            }
+        }
+        _ => JValue::Undefined,
+    }
+}
+
+/// Apply a compiled filter predicate to a value.
+///
+/// - Array: return elements for which the predicate is truthy
+/// - Single value: return it if predicate is truthy, else Undefined
+/// - Numeric predicates (index access) are NOT supported here — fall back via None compilation
+fn compiled_apply_filter(
+    filter: &CompiledExpr,
+    value: &JValue,
+    vars: Option<&HashMap<&str, &JValue>>,
+    ctx: Option<&Context>,
+    shape: Option<&ShapeCache>,
+) -> Result<JValue, EvaluatorError> {
+    match value {
+        JValue::Array(arr) => {
+            let mut result = Vec::new();
+            for item in arr.iter() {
+                let pred = eval_compiled_inner(filter, item, vars, ctx, shape)?;
+                if compiled_is_truthy(&pred) {
+                    result.push(item.clone());
+                }
+            }
+            if result.is_empty() {
+                Ok(JValue::Undefined)
+            } else if result.len() == 1 {
+                Ok(result.remove(0))
+            } else {
+                Ok(JValue::array(result))
+            }
+        }
+        JValue::Undefined => Ok(JValue::Undefined),
+        _ => {
+            let pred = eval_compiled_inner(filter, value, vars, ctx, shape)?;
+            if compiled_is_truthy(&pred) {
+                Ok(value.clone())
+            } else {
+                Ok(JValue::Undefined)
+            }
+        }
+    }
+}
+
+/// Dispatch a pure builtin function call.
+///
+/// Replicates the tree-walker's evaluation for the subset of builtins in
+/// `COMPILABLE_BUILTINS`: no side effects, no lambdas, no context mutations.
+/// `data` is the current context value for implicit-argument insertion.
+fn call_pure_builtin(
+    name: &str,
+    args: &[JValue],
+    data: &JValue,
+) -> Result<JValue, EvaluatorError> {
+    use crate::functions;
+
+    // Apply implicit context insertion matching the tree-walker
+    let args_storage: Vec<JValue>;
+    let effective_args: &[JValue] = if args.is_empty() {
+        match name {
+            "string" => {
+                // $string() with a null/undefined context returns undefined, not "null".
+                // This mirrors the tree-walker's special case at the function-call site.
+                if data.is_undefined() || matches!(data, JValue::Null) {
+                    return Ok(JValue::Undefined);
+                }
+                args_storage = vec![data.clone()];
+                &args_storage
+            }
+            "number" | "boolean" | "uppercase" | "lowercase" => {
+                args_storage = vec![data.clone()];
+                &args_storage
+            }
+            _ => args,
+        }
+    } else if args.len() == 1 {
+        match name {
+            "substringBefore" | "substringAfter" | "contains" | "split" => {
+                if matches!(data, JValue::String(_)) {
+                    args_storage = std::iter::once(data.clone())
+                        .chain(args.iter().cloned())
+                        .collect();
+                    &args_storage
+                } else {
+                    args
+                }
+            }
+            _ => args,
+        }
+    } else {
+        args
+    };
+
+    // Apply undefined propagation: if the first effective argument is Undefined
+    // and the function propagates undefined, return Undefined immediately.
+    // This matches the tree-walker's `propagates_undefined` check.
+    if effective_args.first().map_or(false, JValue::is_undefined)
+        && propagates_undefined(name)
+    {
+        return Ok(JValue::Undefined);
+    }
+
+    match name {
+        // ── String functions ────────────────────────────────────────────
+        "string" => {
+            // Validate the optional prettify argument: must be a boolean.
+            let prettify = match effective_args.get(1) {
+                None => None,
+                Some(JValue::Bool(b)) => Some(*b),
+                Some(_) => {
+                    return Err(EvaluatorError::TypeError(
+                        "string() prettify parameter must be a boolean".to_string(),
+                    ))
+                }
+            };
+            let arg = effective_args.first().unwrap_or(&JValue::Null);
+            Ok(functions::string::string(arg, prettify)?)
+        }
+        "length" => match effective_args.first() {
+            Some(JValue::String(s)) => Ok(functions::string::length(s)?),
+            // Undefined input propagates (caught above by the undefined-propagation guard).
+            Some(JValue::Undefined) => Ok(JValue::Undefined),
+            // No argument: mirrors tree-walker "requires exactly 1 argument" (no error code,
+            // so the test framework accepts it against any expected T-code).
+            None => Err(EvaluatorError::EvaluationError(
+                "length() requires exactly 1 argument".to_string(),
+            )),
+            // null and any other non-string type → T0410
+            _ => Err(EvaluatorError::TypeError(
+                "T0410: Argument 1 of function length does not match function signature"
+                    .to_string(),
+            )),
+        },
+        "uppercase" => match effective_args.first() {
+            Some(JValue::String(s)) => Ok(functions::string::uppercase(s)?),
+            Some(JValue::Undefined) | None => Ok(JValue::Undefined),
+            _ => Err(EvaluatorError::TypeError(
+                "T0410: Argument 1 of function uppercase does not match function signature"
+                    .to_string(),
+            )),
+        },
+        "lowercase" => match effective_args.first() {
+            Some(JValue::String(s)) => Ok(functions::string::lowercase(s)?),
+            Some(JValue::Undefined) | None => Ok(JValue::Undefined),
+            _ => Err(EvaluatorError::TypeError(
+                "T0410: Argument 1 of function lowercase does not match function signature"
+                    .to_string(),
+            )),
+        },
+        "trim" => match effective_args.first() {
+            None | Some(JValue::Null | JValue::Undefined) => Ok(JValue::Null),
+            Some(JValue::String(s)) => Ok(functions::string::trim(s)?),
+            _ => Err(EvaluatorError::TypeError(
+                "trim() requires a string argument".to_string(),
+            )),
+        },
+        "substring" => {
+            if effective_args.len() < 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "substring() requires at least 2 arguments".to_string(),
+                ));
+            }
+            match (&effective_args[0], &effective_args[1]) {
+                (JValue::String(s), JValue::Number(start)) => {
+                    // Optional 3rd arg (length) must be a number if provided.
+                    let length = match effective_args.get(2) {
+                        None => None,
+                        Some(JValue::Number(l)) => Some(*l as i64),
+                        Some(_) => {
+                            return Err(EvaluatorError::TypeError(
+                                "T0410: Argument 3 of function substring does not match function signature"
+                                    .to_string(),
+                            ))
+                        }
+                    };
+                    Ok(functions::string::substring(s, *start as i64, length)?)
+                }
+                _ => Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function substring does not match function signature"
+                        .to_string(),
+                )),
+            }
+        }
+        "substringBefore" => {
+            if effective_args.len() != 2 {
+                return Err(EvaluatorError::TypeError(
+                    "T0411: Context value is not a compatible type with argument 2 of function substringBefore".to_string(),
+                ));
+            }
+            match (&effective_args[0], &effective_args[1]) {
+                (JValue::String(s), JValue::String(sep)) => {
+                    Ok(functions::string::substring_before(s, sep)?)
+                }
+                // Undefined propagates; null is a type error.
+                (JValue::Undefined, _) => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function substringBefore does not match function signature".to_string(),
+                )),
+            }
+        }
+        "substringAfter" => {
+            if effective_args.len() != 2 {
+                return Err(EvaluatorError::TypeError(
+                    "T0411: Context value is not a compatible type with argument 2 of function substringAfter".to_string(),
+                ));
+            }
+            match (&effective_args[0], &effective_args[1]) {
+                (JValue::String(s), JValue::String(sep)) => {
+                    Ok(functions::string::substring_after(s, sep)?)
+                }
+                // Undefined propagates; null is a type error.
+                (JValue::Undefined, _) => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function substringAfter does not match function signature".to_string(),
+                )),
+            }
+        }
+        "contains" => {
+            if effective_args.len() != 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "contains() requires exactly 2 arguments".to_string(),
+                ));
+            }
+            match &effective_args[0] {
+                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                JValue::String(s) => Ok(functions::string::contains(s, &effective_args[1])?),
+                _ => Err(EvaluatorError::TypeError(
+                    "contains() requires a string as the first argument".to_string(),
+                )),
+            }
+        }
+        "split" => {
+            if effective_args.len() < 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "split() requires at least 2 arguments".to_string(),
+                ));
+            }
+            match &effective_args[0] {
+                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                JValue::String(s) => {
+                    // Validate the optional limit argument — must be a positive number.
+                    let limit = match effective_args.get(2) {
+                        None => None,
+                        Some(JValue::Number(n)) => {
+                            if *n < 0.0 {
+                                return Err(EvaluatorError::EvaluationError(
+                                    "D3020: Third argument of split function must be a positive number"
+                                        .to_string(),
+                                ));
+                            }
+                            Some(n.floor() as usize)
+                        }
+                        Some(_) => {
+                            return Err(EvaluatorError::TypeError(
+                                "split() limit must be a number".to_string(),
+                            ))
+                        }
+                    };
+                    Ok(functions::string::split(s, &effective_args[1], limit)?)
+                }
+                _ => Err(EvaluatorError::TypeError(
+                    "split() requires a string as the first argument".to_string(),
+                )),
+            }
+        }
+        "join" => {
+            if effective_args.is_empty() {
+                return Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function $join does not match function signature"
+                        .to_string(),
+                ));
+            }
+            match &effective_args[0] {
+                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                // Signature: <a<s>s?:s> — first arg must be an array of strings.
+                JValue::Bool(_) | JValue::Number(_) | JValue::Object(_) => {
+                    Err(EvaluatorError::TypeError(
+                        "T0412: Argument 1 of function $join must be an array of String"
+                            .to_string(),
+                    ))
+                }
+                JValue::Array(arr) => {
+                    // All elements must be strings.
+                    for item in arr.iter() {
+                        if !matches!(item, JValue::String(_)) {
+                            return Err(EvaluatorError::TypeError(
+                                "T0412: Argument 1 of function $join must be an array of String"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                    // Validate separator: must be a string if provided.
+                    let separator = match effective_args.get(1) {
+                        None | Some(JValue::Undefined) => None,
+                        Some(JValue::String(s)) => Some(&**s),
+                        Some(_) => {
+                            return Err(EvaluatorError::TypeError(
+                                "T0410: Argument 2 of function $join does not match function signature (expected String)"
+                                    .to_string(),
+                            ))
+                        }
+                    };
+                    Ok(functions::string::join(arr, separator)?)
+                }
+                JValue::String(s) => Ok(JValue::String(s.clone())),
+                _ => Err(EvaluatorError::TypeError(
+                    "T0412: Argument 1 of function $join must be an array of String"
+                        .to_string(),
+                )),
+            }
+        }
+
+        // ── Numeric functions ───────────────────────────────────────────
+        "number" => match effective_args.first() {
+            Some(v) => Ok(functions::numeric::number(v)?),
+            None => Err(EvaluatorError::EvaluationError(
+                "number() requires at least 1 argument".to_string(),
+            )),
+        },
+        "floor" => match effective_args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => Ok(functions::numeric::floor(*n)?),
+            _ => Err(EvaluatorError::TypeError(
+                "floor() requires a number argument".to_string(),
+            )),
+        },
+        "ceil" => match effective_args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => Ok(functions::numeric::ceil(*n)?),
+            _ => Err(EvaluatorError::TypeError(
+                "ceil() requires a number argument".to_string(),
+            )),
+        },
+        "round" => match effective_args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => {
+                let precision = effective_args.get(1).and_then(|v| {
+                    if let JValue::Number(p) = v { Some(*p as i32) } else { None }
+                });
+                Ok(functions::numeric::round(*n, precision)?)
+            }
+            _ => Err(EvaluatorError::TypeError(
+                "round() requires a number argument".to_string(),
+            )),
+        },
+        "abs" => match effective_args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => Ok(functions::numeric::abs(*n)?),
+            _ => Err(EvaluatorError::TypeError(
+                "abs() requires a number argument".to_string(),
+            )),
+        },
+        "sqrt" => match effective_args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => Ok(functions::numeric::sqrt(*n)?),
+            _ => Err(EvaluatorError::TypeError(
+                "sqrt() requires a number argument".to_string(),
+            )),
+        },
+
+        // ── Aggregation functions ───────────────────────────────────────
+        "sum" => match effective_args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::Undefined),
+            None => Err(EvaluatorError::EvaluationError(
+                "sum() requires exactly 1 argument".to_string(),
+            )),
+            Some(JValue::Null) => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(aggregation::sum(arr)?),
+            Some(JValue::Number(n)) => Ok(JValue::Number(*n)),
+            Some(other) => Ok(functions::numeric::sum(&[other.clone()])?),
+        },
+        "max" => match effective_args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::Undefined),
+            Some(JValue::Null) | None => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(aggregation::max(arr)?),
+            Some(v @ JValue::Number(_)) => Ok(v.clone()),
+            _ => Err(EvaluatorError::TypeError(
+                "max() requires an array or number argument".to_string(),
+            )),
+        },
+        "min" => match effective_args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::Undefined),
+            Some(JValue::Null) | None => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(aggregation::min(arr)?),
+            Some(v @ JValue::Number(_)) => Ok(v.clone()),
+            _ => Err(EvaluatorError::TypeError(
+                "min() requires an array or number argument".to_string(),
+            )),
+        },
+        "average" => match effective_args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::Undefined),
+            Some(JValue::Null) | None => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(aggregation::average(arr)?),
+            Some(v @ JValue::Number(_)) => Ok(v.clone()),
+            _ => Err(EvaluatorError::TypeError(
+                "average() requires an array or number argument".to_string(),
+            )),
+        },
+        "count" => match effective_args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::from(0i64)),
+            Some(JValue::Null) | None => Ok(JValue::from(0i64)),
+            Some(JValue::Array(arr)) => Ok(functions::array::count(arr)?),
+            _ => Ok(JValue::from(1i64)),
+        },
+
+        // ── Boolean / logic ─────────────────────────────────────────────
+        "boolean" => match effective_args.first() {
+            Some(v) => Ok(functions::boolean::boolean(v)?),
+            None => Err(EvaluatorError::EvaluationError(
+                "boolean() requires 1 argument".to_string(),
+            )),
+        },
+        "not" => match effective_args.first() {
+            Some(v) => Ok(JValue::Bool(!compiled_is_truthy(v))),
+            None => Err(EvaluatorError::EvaluationError(
+                "not() requires 1 argument".to_string(),
+            )),
+        },
+
+        // ── Array functions ─────────────────────────────────────────────
+        "append" => {
+            if effective_args.len() != 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "append() requires exactly 2 arguments".to_string(),
+                ));
+            }
+            let first = &effective_args[0];
+            let second = &effective_args[1];
+            if matches!(second, JValue::Null | JValue::Undefined) {
+                return Ok(first.clone());
+            }
+            if matches!(first, JValue::Null | JValue::Undefined) {
+                return Ok(second.clone());
+            }
+            let arr = match first {
+                JValue::Array(a) => a.to_vec(),
+                other => vec![other.clone()],
+            };
+            Ok(functions::array::append(&arr, second)?)
+        }
+        "reverse" => match effective_args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(functions::array::reverse(arr)?),
+            _ => Err(EvaluatorError::TypeError(
+                "reverse() requires an array argument".to_string(),
+            )),
+        },
+        "distinct" => match effective_args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(functions::array::distinct(arr)?),
+            _ => Err(EvaluatorError::TypeError(
+                "distinct() requires an array argument".to_string(),
+            )),
+        },
+
+        // ── Object functions ────────────────────────────────────────────
+        "keys" => match effective_args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(JValue::Null),
+            Some(JValue::Object(obj)) => {
+                if obj.is_empty() {
+                    Ok(JValue::Null)
+                } else {
+                    let keys: Vec<JValue> =
+                        obj.keys().map(|k| JValue::string(k.clone())).collect();
+                    if keys.len() == 1 {
+                        Ok(keys.into_iter().next().unwrap())
+                    } else {
+                        Ok(JValue::array(keys))
+                    }
+                }
+            }
+            Some(JValue::Array(arr)) => {
+                let mut all_keys: Vec<JValue> = Vec::new();
+                for item in arr.iter() {
+                    if let JValue::Object(obj) = item {
+                        for key in obj.keys() {
+                            let k = JValue::string(key.clone());
+                            if !all_keys.contains(&k) {
+                                all_keys.push(k);
+                            }
+                        }
+                    }
+                }
+                if all_keys.is_empty() {
+                    Ok(JValue::Null)
+                } else if all_keys.len() == 1 {
+                    Ok(all_keys.into_iter().next().unwrap())
+                } else {
+                    Ok(JValue::array(all_keys))
+                }
+            }
+            _ => Ok(JValue::Null),
+        },
+        "merge" => match effective_args.len() {
+            0 => Err(EvaluatorError::EvaluationError(
+                "merge() requires at least 1 argument".to_string(),
+            )),
+            1 => match &effective_args[0] {
+                JValue::Array(arr) => Ok(functions::object::merge(arr)?),
+                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                JValue::Object(_) => Ok(effective_args[0].clone()),
+                _ => Err(EvaluatorError::TypeError(
+                    "merge() requires objects or an array of objects".to_string(),
+                )),
+            },
+            _ => Ok(functions::object::merge(effective_args)?),
+        },
+
+        _ => unreachable!("call_pure_builtin called with non-compilable builtin: {}", name),
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// End of CompiledExpr framework
+// ──────────────────────────────────────────────────────────────────────────────
 
 /// Functions that propagate undefined (return undefined when given an undefined argument).
 /// These functions should return null/undefined when their input path doesn't exist,
@@ -432,6 +1904,9 @@ enum LambdaResult {
 pub struct StoredLambda {
     pub params: Vec<String>,
     pub body: AstNode,
+    /// Pre-compiled body for use in tight inner loops (HOF fast path).
+    /// `None` if the body is not compilable (transform, partial-app, thunk, etc.).
+    pub(crate) compiled_body: Option<CompiledExpr>,
     pub signature: Option<String>,
     /// Captured environment bindings for closures
     pub captured_env: HashMap<String, JValue>,
@@ -612,6 +2087,29 @@ impl Evaluator {
         args: &[JValue],
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        // Compiled fast path: skip scope push/pop and tree-walking for simple lambdas.
+        // Conditions: has compiled body, no signature (can't skip validation), no thunk,
+        // and no captured lambda/builtin values (those require Context for runtime lookup).
+        if let Some(ref ce) = stored.compiled_body {
+            if stored.signature.is_none()
+                && !stored.thunk
+                && !stored
+                    .captured_env
+                    .values()
+                    .any(|v| matches!(v, JValue::Lambda { .. } | JValue::Builtin { .. }))
+            {
+                let call_data = stored.captured_data.as_ref().unwrap_or(data);
+                let vars: HashMap<&str, &JValue> = stored
+                    .params
+                    .iter()
+                    .zip(args.iter())
+                    .map(|(p, v)| (p.as_str(), v))
+                    .chain(stored.captured_env.iter().map(|(k, v)| (k.as_str(), v)))
+                    .collect();
+                return eval_compiled(ce, call_data, Some(&vars));
+            }
+        }
+
         let captured_env = if stored.captured_env.is_empty() {
             None
         } else {
@@ -758,12 +2256,15 @@ impl Evaluator {
         // push_scope/pop_scope per comparison (~n log n total comparisons)
         if let AstNode::Lambda { params, body, .. } = comparator {
             if params.len() >= 2 {
+                // Pre-clone param names once outside the loop
+                let param0 = params[0].clone();
+                let param1 = params[1].clone();
                 self.context.push_scope();
                 while i < left.len() && j < right.len() {
                     // Reuse scope: clear and rebind instead of push/pop
                     self.context.clear_current_scope();
-                    self.context.bind(params[0].clone(), left[i].clone());
-                    self.context.bind(params[1].clone(), right[j].clone());
+                    self.context.bind(param0.clone(), left[i].clone());
+                    self.context.bind(param1.clone(), right[j].clone());
 
                     let cmp_result = self.evaluate_internal(body, data)?;
 
@@ -836,12 +2337,56 @@ impl Evaluator {
         self.evaluate_internal(node, data)
     }
 
+    /// Fast evaluation for leaf nodes that don't need recursion tracking.
+    /// Returns Some for literals, simple field access on objects, and simple variable lookups.
+    /// Returns None for anything requiring the full evaluator.
+    #[inline(always)]
+    fn evaluate_leaf(&mut self, node: &AstNode, data: &JValue) -> Option<Result<JValue, EvaluatorError>> {
+        match node {
+            AstNode::String(s) => Some(Ok(JValue::string(s.clone()))),
+            AstNode::Number(n) => {
+                if n.fract() == 0.0 && n.is_finite() && n.abs() < (1i64 << 53) as f64 {
+                    Some(Ok(JValue::from(*n as i64)))
+                } else {
+                    Some(Ok(JValue::Number(*n)))
+                }
+            }
+            AstNode::Boolean(b) => Some(Ok(JValue::Bool(*b))),
+            AstNode::Null => Some(Ok(JValue::Null)),
+            AstNode::Undefined => Some(Ok(JValue::Undefined)),
+            AstNode::Name(field_name) => match data {
+                // Array mapping and other cases need full evaluator
+                JValue::Object(obj) => Some(Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null))),
+                _ => None,
+            },
+            AstNode::Variable(name) if !name.is_empty() => {
+                // Simple variable lookup — only fast-path when no tuple data
+                if let JValue::Object(obj) = data {
+                    if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                        return None; // Tuple data needs full evaluator
+                    }
+                }
+                if let Some(value) = self.context.lookup(name) {
+                    Some(Ok(value.clone()))
+                } else {
+                    None // May be a lambda/builtin — needs full evaluator
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Internal evaluation method
     fn evaluate_internal(
         &mut self,
         node: &AstNode,
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        // Fast path for leaf nodes — skip recursion tracking overhead
+        if let Some(result) = self.evaluate_leaf(node, data) {
+            return result;
+        }
+
         // Check recursion depth to prevent stack overflow
         self.recursion_depth += 1;
         if self.recursion_depth > self.max_recursion_depth {
@@ -1016,7 +2561,7 @@ impl Evaluator {
                 // - If element is itself an array constructor [...], keep it nested
                 // - Otherwise, if element evaluates to an array, flatten it
                 // - Undefined values are excluded
-                let mut result = Vec::new();
+                let mut result = Vec::with_capacity(elements.len());
                 for element in elements {
                     // Check if this element is itself an explicit array constructor
                     let is_array_constructor = matches!(element, AstNode::Array(_));
@@ -1044,45 +2589,59 @@ impl Evaluator {
             }
 
             AstNode::Object(pairs) => {
-                let mut result = IndexMap::new();
-                // Track which pair index produced each key (for D1009 checking)
-                let mut key_sources: HashMap<String, usize> = HashMap::new();
+                let mut result = IndexMap::with_capacity(pairs.len());
 
-                for (pair_index, (key_node, value_node)) in pairs.iter().enumerate() {
-                    // Evaluate key (must be a string)
-                    let key = match self.evaluate_internal(key_node, data)? {
-                        JValue::String(s) => s,
-                        JValue::Null => continue, // Skip null keys
-                        other => {
-                            // Skip undefined keys
-                            if other.is_undefined() {
-                                continue;
+                // Check if all keys are string literals — can skip D1009 HashMap
+                let all_literal_keys = pairs
+                    .iter()
+                    .all(|(k, _)| matches!(k, AstNode::String(_)));
+
+                if all_literal_keys {
+                    // Fast path: literal keys, no need for D1009 tracking
+                    for (key_node, value_node) in pairs.iter() {
+                        let key = match key_node {
+                            AstNode::String(s) => s,
+                            _ => unreachable!(),
+                        };
+                        let value = self.evaluate_internal(value_node, data)?;
+                        if value.is_undefined() {
+                            continue;
+                        }
+                        result.insert(key.clone(), value);
+                    }
+                } else {
+                    let mut key_sources: HashMap<String, usize> = HashMap::new();
+                    for (pair_index, (key_node, value_node)) in pairs.iter().enumerate() {
+                        let key = match self.evaluate_internal(key_node, data)? {
+                            JValue::String(s) => s,
+                            JValue::Null => continue,
+                            other => {
+                                if other.is_undefined() {
+                                    continue;
+                                }
+                                return Err(EvaluatorError::TypeError(format!(
+                                    "Object key must be a string, got: {:?}",
+                                    other
+                                )));
                             }
-                            return Err(EvaluatorError::TypeError(format!(
-                                "Object key must be a string, got: {:?}",
-                                other
-                            )));
-                        }
-                    };
+                        };
 
-                    // Check for D1009: multiple key expressions evaluate to same key
-                    if let Some(&existing_idx) = key_sources.get(&*key) {
-                        if existing_idx != pair_index {
-                            return Err(EvaluatorError::EvaluationError(format!(
-                                "D1009: Multiple key expressions evaluate to same key: {}",
-                                key
-                            )));
+                        if let Some(&existing_idx) = key_sources.get(&*key) {
+                            if existing_idx != pair_index {
+                                return Err(EvaluatorError::EvaluationError(format!(
+                                    "D1009: Multiple key expressions evaluate to same key: {}",
+                                    key
+                                )));
+                            }
                         }
-                    }
-                    key_sources.insert(key.to_string(), pair_index);
+                        key_sources.insert(key.to_string(), pair_index);
 
-                    // Evaluate value - skip undefined values, include null
-                    let value = self.evaluate_internal(value_node, data)?;
-                    // Skip key-value pairs where the value is undefined
-                    if value.is_undefined() {
-                        continue;
+                        let value = self.evaluate_internal(value_node, data)?;
+                        if value.is_undefined() {
+                            continue;
+                        }
+                        result.insert(key.to_string(), value);
                     }
-                    result.insert(key.to_string(), value);
                 }
                 Ok(JValue::object(result))
             }
@@ -1268,9 +2827,16 @@ impl Evaluator {
             } => {
                 let lambda_id = format!("__lambda_{}_{:p}", params.len(), body.as_ref());
 
+                let compiled_body = if !thunk {
+                    let var_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+                    try_compile_expr_with_allowed_vars(body, &var_refs)
+                } else {
+                    None
+                };
                 let stored_lambda = StoredLambda {
                     params: params.clone(),
                     body: (**body).clone(),
+                    compiled_body,
                     signature: signature.clone(),
                     captured_env: self.capture_environment_for(body, params),
                     captured_data: Some(data.clone()),
@@ -1394,6 +2960,7 @@ impl Evaluator {
                             update: update.clone(),
                             delete: delete.clone(),
                         },
+                        compiled_body: None, // Transform is not a pure compilable expr
                         signature: None,
                         captured_env: HashMap::new(),
                         captured_data: None, // Transform takes $ as parameter
@@ -1513,11 +3080,17 @@ impl Evaluator {
                 // Short-circuit: if predicate is definitely a comparison/logical expression,
                 // skip speculative numeric evaluation and go directly to filter logic
                 if Self::is_filter_predicate(predicate) {
-                    // Try specialized fast path for simple field comparisons
-                    if let Some(spec) = try_specialize_predicate(predicate) {
+                    // Try CompiledExpr fast path (handles compound predicates, arithmetic, etc.)
+                    if let Some(compiled) = try_compile_expr(predicate) {
+                        let shape = arr.first().and_then(|e| build_shape_cache(e));
                         let mut filtered = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
-                            if evaluate_specialized(item, &spec) {
+                            let result = if let Some(ref s) = shape {
+                                eval_compiled_shaped(&compiled, item, None, s)?
+                            } else {
+                                eval_compiled(&compiled, item, None)?
+                            };
+                            if compiled_is_truthy(&result) {
                                 filtered.push(item.clone());
                             }
                         }
@@ -1841,6 +3414,51 @@ impl Evaluator {
                     }
                     _ => Ok(JValue::Null),
                 };
+            }
+        }
+
+        // Fast path: 2-step $variable.field with no stages
+        // Handles common patterns like $l.rating, $item.price in sort/HOF bodies
+        if steps.len() == 2
+            && steps[0].stages.is_empty()
+            && steps[1].stages.is_empty()
+        {
+            if let (AstNode::Variable(var_name), AstNode::Name(field_name)) =
+                (&steps[0].node, &steps[1].node)
+            {
+                if !var_name.is_empty() {
+                    if let Some(value) = self.context.lookup(var_name) {
+                        match value {
+                            JValue::Object(obj) => {
+                                return Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null));
+                            }
+                            JValue::Array(arr) => {
+                                // Map field extraction over array (same as single-step Name on Array)
+                                let mut result = Vec::with_capacity(arr.len());
+                                for item in arr.iter() {
+                                    if let JValue::Object(obj) = item {
+                                        if let Some(val) = obj.get(field_name) {
+                                            if !matches!(val, JValue::Null) {
+                                                match val {
+                                                    JValue::Array(inner) => {
+                                                        result.extend(inner.iter().cloned());
+                                                    }
+                                                    other => result.push(other.clone()),
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                return match result.len() {
+                                    0 => Ok(JValue::Null),
+                                    1 => Ok(result.pop().unwrap()),
+                                    _ => Ok(JValue::array(result)),
+                                };
+                            }
+                            _ => {} // Fall through to general path evaluation
+                        }
+                    }
+                }
             }
         }
 
@@ -2415,32 +4033,53 @@ impl Evaluator {
                     // Null/undefined results are filtered out
                     match &current {
                         JValue::Array(arr) => {
-                            let mut result = Vec::new();
-                            for item in arr.iter() {
-                                // Save the current $ binding
-                                let saved_dollar = self.context.lookup("$").cloned();
-
-                                // Bind $ to the current item
-                                self.context.bind("$".to_string(), item.clone());
-
-                                // Evaluate the expression in the context of this item
-                                let value = self.evaluate_internal(expr, item)?;
-
-                                // Restore the previous $ binding
-                                if let Some(saved) = saved_dollar {
-                                    self.context.bind("$".to_string(), saved);
+                            // Produce the mapped result (compiled fast path or tree-walker fallback).
+                            // Do NOT return early — singleton unwrapping is applied by the outer
+                            // path evaluation code after all steps are processed.
+                            let mapped: Vec<JValue> =
+                                if let Some(compiled) = try_compile_expr(expr) {
+                                    let shape = arr.first().and_then(|e| build_shape_cache(e));
+                                    let mut result = Vec::with_capacity(arr.len());
+                                    for item in arr.iter() {
+                                        let value = if let Some(ref s) = shape {
+                                            eval_compiled_shaped(&compiled, item, None, s)?
+                                        } else {
+                                            eval_compiled(&compiled, item, None)?
+                                        };
+                                        if !matches!(value, JValue::Null) && !value.is_undefined() {
+                                            result.push(value);
+                                        }
+                                    }
+                                    result
                                 } else {
-                                    self.context.unbind("$");
-                                }
+                                    let mut result = Vec::new();
+                                    for item in arr.iter() {
+                                        // Save the current $ binding
+                                        let saved_dollar = self.context.lookup("$").cloned();
 
-                                // Only include non-null/undefined values
-                                if !matches!(value, JValue::Null) && !value.is_undefined() {
-                                    result.push(value);
-                                }
-                            }
+                                        // Bind $ to the current item
+                                        self.context.bind("$".to_string(), item.clone());
+
+                                        // Evaluate the expression in the context of this item
+                                        let value = self.evaluate_internal(expr, item)?;
+
+                                        // Restore the previous $ binding
+                                        if let Some(saved) = saved_dollar {
+                                            self.context.bind("$".to_string(), saved);
+                                        } else {
+                                            self.context.unbind("$");
+                                        }
+
+                                        // Only include non-null/undefined values
+                                        if !matches!(value, JValue::Null) && !value.is_undefined() {
+                                            result.push(value);
+                                        }
+                                    }
+                                    result
+                                };
                             // Don't do singleton unwrapping here - let the path result
                             // handling deal with it, which respects has_explicit_array_keep
-                            JValue::array(result)
+                            JValue::array(mapped)
                         }
                         _ => {
                             // For non-arrays, bind $ and evaluate
@@ -2549,15 +4188,28 @@ impl Evaluator {
         // Special case: array mapping with object construction
         // e.g., items.{"name": name, "price": price}
         if matches!(current, JValue::Array(_)) && matches!(step, AstNode::Object(_)) {
-            // Map over array, evaluating the object constructor for each item
-            match current {
-                JValue::Array(arr) => {
+            match (current, step) {
+                (JValue::Array(arr), AstNode::Object(pairs)) => {
+                    // Try CompiledExpr for object construction (handles arithmetic, conditionals, etc.)
+                    if let Some(compiled) = try_compile_expr(&AstNode::Object(pairs.clone())) {
+                        let shape = arr.first().and_then(|e| build_shape_cache(e));
+                        let mut mapped = Vec::with_capacity(arr.len());
+                        for item in arr.iter() {
+                            let result = if let Some(ref s) = shape {
+                                eval_compiled_shaped(&compiled, item, None, s)?
+                            } else {
+                                eval_compiled(&compiled, item, None)?
+                            };
+                            if !result.is_undefined() {
+                                mapped.push(result);
+                            }
+                        }
+                        return Ok(JValue::array(mapped));
+                    }
+                    // Fallback: full AST evaluation per element
                     let mapped: Result<Vec<JValue>, EvaluatorError> = arr
                         .iter()
-                        .map(|item| {
-                            // Evaluate the object constructor in the context of this array item
-                            self.evaluate_internal(step, item)
-                        })
+                        .map(|item| self.evaluate_internal(step, item))
                         .collect();
                     Ok(JValue::array(mapped?))
                 }
@@ -3016,9 +4668,16 @@ impl Evaluator {
                 // Store the lambda AST for later invocation
                 // Capture only the free variables referenced by the lambda body
                 let captured_env = self.capture_environment_for(body, params);
+                let compiled_body = if !thunk {
+                    let var_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+                    try_compile_expr_with_allowed_vars(body, &var_refs)
+                } else {
+                    None
+                };
                 let stored_lambda = StoredLambda {
                     params: params.clone(),
                     body: (**body).clone(),
+                    compiled_body,
                     signature: signature.clone(),
                     captured_env,
                     captured_data: Some(data.clone()),
@@ -3098,6 +4757,7 @@ impl Evaluator {
                     let stored_lambda = StoredLambda {
                         params: vec![param_name],
                         body: composed_body,
+                        compiled_body: None, // ChainPipe body is not compilable
                         signature: None,
                         captured_env: self.capture_current_environment(),
                         captured_data: Some(data.clone()),
@@ -3252,6 +4912,127 @@ impl Evaluator {
             },
             UnaryOp::Not => Ok(JValue::Bool(!self.is_truthy(&value))),
         }
+    }
+
+    /// Try to fuse an aggregate function call with its Path argument.
+    /// Handles patterns like:
+    /// - $sum(arr.field) → iterate arr, extract field, accumulate
+    /// - $sum(arr[pred].field) → iterate arr, filter, extract, accumulate
+    /// Returns None if the pattern doesn't match (falls back to normal evaluation).
+    fn try_fused_aggregate(
+        &mut self,
+        name: &str,
+        arg: &AstNode,
+        data: &JValue,
+    ) -> Result<Option<JValue>, EvaluatorError> {
+        // Only applies to numeric aggregates
+        if !matches!(name, "sum" | "max" | "min" | "average") {
+            return Ok(None);
+        }
+
+        // Argument must be a Path
+        let AstNode::Path { steps } = arg else {
+            return Ok(None);
+        };
+
+        // Pattern: Name(arr).Name(field) — extract field from array, aggregate
+        // Pattern: Name(arr)[filter].Name(field) — filter, extract, aggregate
+        if steps.len() != 2 {
+            return Ok(None);
+        }
+
+        // Last step must be a simple Name (the field to extract)
+        let field_step = &steps[1];
+        if !field_step.stages.is_empty() {
+            return Ok(None);
+        }
+        let AstNode::Name(extract_field) = &field_step.node else {
+            return Ok(None);
+        };
+
+        // First step: Name with optional filter stage
+        let arr_step = &steps[0];
+        let AstNode::Name(arr_name) = &arr_step.node else {
+            return Ok(None);
+        };
+
+        // Get the source array from data
+        let arr = match data {
+            JValue::Object(obj) => match obj.get(arr_name) {
+                Some(JValue::Array(arr)) => arr,
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+
+        // Check for filter stage — try CompiledExpr for the predicate
+        let filter_compiled = match arr_step.stages.as_slice() {
+            [] => None,
+            [Stage::Filter(pred)] => try_compile_expr(pred),
+            _ => return Ok(None),
+        };
+        // If filter stage exists but wasn't compilable, bail out
+        if !arr_step.stages.is_empty() && filter_compiled.is_none() {
+            return Ok(None);
+        }
+
+        // Build shape cache for the array
+        let shape = arr.first().and_then(|e| build_shape_cache(e));
+
+        // Fused iteration: filter (optional) + extract + aggregate
+        let mut total = 0.0f64;
+        let mut count = 0usize;
+        let mut max_val = f64::NEG_INFINITY;
+        let mut min_val = f64::INFINITY;
+        let mut has_any = false;
+
+        for item in arr.iter() {
+            // Apply compiled filter if present
+            if let Some(ref compiled) = filter_compiled {
+                let result = if let Some(ref s) = shape {
+                    eval_compiled_shaped(compiled, item, None, s)?
+                } else {
+                    eval_compiled(compiled, item, None)?
+                };
+                if !compiled_is_truthy(&result) {
+                    continue;
+                }
+            }
+
+            // Extract field value
+            let val = match item {
+                JValue::Object(obj) => match obj.get(extract_field) {
+                    Some(JValue::Number(n)) => *n,
+                    Some(_) | None => continue, // Skip non-numeric / missing
+                },
+                _ => continue,
+            };
+
+            has_any = true;
+            match name {
+                "sum" => total += val,
+                "max" => max_val = max_val.max(val),
+                "min" => min_val = min_val.min(val),
+                "average" => { total += val; count += 1; }
+                _ => unreachable!(),
+            }
+        }
+
+        if !has_any {
+            return Ok(Some(match name {
+                "sum" => JValue::from(0i64),
+                "average" | "max" | "min" => JValue::Null,
+                _ => unreachable!(),
+            }));
+        }
+
+        Ok(Some(match name {
+            "sum" => JValue::Number(total),
+            "max" => JValue::Number(max_val),
+            "min" => JValue::Number(min_val),
+            "average" => JValue::Number(total / count as f64),
+            _ => unreachable!(),
+        }))
     }
 
     /// Evaluate a function call
@@ -3459,6 +5240,14 @@ impl Evaluator {
                         }
                     }
                 }
+            }
+        }
+
+        // Fused aggregate pipeline: for $sum/$max/$min/$average with a single Path argument,
+        // try to fuse filter+extract+aggregate into a single pass.
+        if args.len() == 1 {
+            if let Some(result) = self.try_fused_aggregate(name, &args[0], data)? {
+                return Ok(result);
             }
         }
 
@@ -4523,13 +6312,14 @@ impl Evaluator {
             }
 
             "sort" => {
-                if args.is_empty() || args.len() > 2 {
+                if evaluated_args.is_empty() || evaluated_args.len() > 2 {
                     return Err(EvaluatorError::EvaluationError(
                         "sort() requires 1 or 2 arguments".to_string(),
                     ));
                 }
 
-                let array_value = self.evaluate_internal(&args[0], data)?;
+                // Use pre-evaluated first argument (avoid double evaluation)
+                let array_value = &evaluated_args[0];
 
                 // Handle undefined input
                 if matches!(array_value, JValue::Null) {
@@ -4538,11 +6328,11 @@ impl Evaluator {
 
                 let mut arr = match array_value {
                     JValue::Array(arr) => arr.to_vec(),
-                    other => vec![other],
+                    other => vec![other.clone()],
                 };
 
                 if args.len() == 2 {
-                    // Sort using the comparator: function($a, $b) returns true if $a should come AFTER $b
+                    // Sort using the comparator from raw args (need unevaluated lambda AST)
                     // Use merge sort for O(n log n) performance instead of O(n²) bubble sort
                     self.merge_sort_with_comparator(&mut arr, &args[1], data)?;
                     Ok(JValue::array(arr))
@@ -4754,6 +6544,68 @@ impl Evaluator {
                         // Detect how many parameters the callback expects
                         let param_count = self.get_callback_param_count(&args[1]);
 
+                        // CompiledExpr fast path: direct lambda with 1 param, compilable body
+                        if param_count == 1 {
+                            if let AstNode::Lambda {
+                                params, body, signature: None, thunk: false,
+                            } = &args[1]
+                            {
+                                let var_refs: Vec<&str> =
+                                    params.iter().map(|s| s.as_str()).collect();
+                                if let Some(compiled) =
+                                    try_compile_expr_with_allowed_vars(body, &var_refs)
+                                {
+                                    let param_name = params[0].as_str();
+                                    let mut result = Vec::with_capacity(arr.len());
+                                    let mut vars = HashMap::new();
+                                    for item in arr.iter() {
+                                        vars.insert(param_name, item);
+                                        let mapped = eval_compiled(&compiled, data, Some(&vars))?;
+                                        if !mapped.is_undefined() {
+                                            result.push(mapped);
+                                        }
+                                    }
+                                    return Ok(JValue::array(result));
+                                }
+                            }
+                            // Stored lambda variable fast path: $var with pre-compiled body
+                            if let AstNode::Variable(var_name) = &args[1] {
+                                if let Some(stored) = self.context.lookup_lambda(var_name) {
+                                    if let Some(ref ce) = stored.compiled_body.clone() {
+                                        let param_name = stored.params[0].clone();
+                                        let captured_data = stored.captured_data.clone();
+                                        let captured_env_clone = stored.captured_env.clone();
+                                        let ce_clone = ce.clone();
+                                        if !captured_env_clone
+                                            .values()
+                                            .any(|v| matches!(v, JValue::Lambda { .. } | JValue::Builtin { .. }))
+                                        {
+                                            let call_data =
+                                                captured_data.as_ref().unwrap_or(data);
+                                            let mut result = Vec::with_capacity(arr.len());
+                                            let mut vars: HashMap<&str, &JValue> =
+                                                captured_env_clone
+                                                    .iter()
+                                                    .map(|(k, v)| (k.as_str(), v))
+                                                    .collect();
+                                            for item in arr.iter() {
+                                                vars.insert(param_name.as_str(), item);
+                                                let mapped = eval_compiled(
+                                                    &ce_clone,
+                                                    call_data,
+                                                    Some(&vars),
+                                                )?;
+                                                if !mapped.is_undefined() {
+                                                    result.push(mapped);
+                                                }
+                                            }
+                                            return Ok(JValue::array(result));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Only create the array value if callback uses 3 parameters
                         let arr_value = if param_count >= 3 {
                             Some(JValue::Array(arr.clone()))
@@ -4821,6 +6673,77 @@ impl Evaluator {
 
                 // Detect how many parameters the callback expects
                 let param_count = self.get_callback_param_count(&args[1]);
+
+                // CompiledExpr fast path: direct lambda with 1 param, compilable body
+                if param_count == 1 {
+                    if let AstNode::Lambda {
+                        params, body, signature: None, thunk: false,
+                    } = &args[1]
+                    {
+                        let var_refs: Vec<&str> =
+                            params.iter().map(|s| s.as_str()).collect();
+                        if let Some(compiled) =
+                            try_compile_expr_with_allowed_vars(body, &var_refs)
+                        {
+                            let param_name = params[0].as_str();
+                            let mut result = Vec::with_capacity(items.len() / 2);
+                            let mut vars = HashMap::new();
+                            for item in items.iter() {
+                                vars.insert(param_name, item);
+                                let pred_result = eval_compiled(&compiled, data, Some(&vars))?;
+                                if compiled_is_truthy(&pred_result) {
+                                    result.push(item.clone());
+                                }
+                            }
+                            if was_single_value {
+                                if result.len() == 1 {
+                                    return Ok(result.remove(0));
+                                } else if result.is_empty() {
+                                    return Ok(JValue::Undefined);
+                                }
+                            }
+                            return Ok(JValue::array(result));
+                        }
+                    }
+                    // Stored lambda variable fast path: $var with pre-compiled body
+                    if let AstNode::Variable(var_name) = &args[1] {
+                        if let Some(stored) = self.context.lookup_lambda(var_name) {
+                            if let Some(ref ce) = stored.compiled_body.clone() {
+                                let param_name = stored.params[0].clone();
+                                let captured_data = stored.captured_data.clone();
+                                let captured_env_clone = stored.captured_env.clone();
+                                let ce_clone = ce.clone();
+                                if !captured_env_clone
+                                    .values()
+                                    .any(|v| matches!(v, JValue::Lambda { .. } | JValue::Builtin { .. }))
+                                {
+                                    let call_data = captured_data.as_ref().unwrap_or(data);
+                                    let mut result = Vec::with_capacity(items.len() / 2);
+                                    let mut vars: HashMap<&str, &JValue> = captured_env_clone
+                                        .iter()
+                                        .map(|(k, v)| (k.as_str(), v))
+                                        .collect();
+                                    for item in items.iter() {
+                                        vars.insert(param_name.as_str(), item);
+                                        let pred_result =
+                                            eval_compiled(&ce_clone, call_data, Some(&vars))?;
+                                        if compiled_is_truthy(&pred_result) {
+                                            result.push(item.clone());
+                                        }
+                                    }
+                                    if was_single_value {
+                                        if result.len() == 1 {
+                                            return Ok(result.remove(0));
+                                        } else if result.is_empty() {
+                                            return Ok(JValue::Undefined);
+                                        }
+                                    }
+                                    return Ok(JValue::array(result));
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Only create the array value if callback uses 3 parameters
                 let arr_value = if param_count >= 3 {
@@ -4914,6 +6837,67 @@ impl Evaluator {
 
                 // Detect how many parameters the callback expects
                 let param_count = self.get_callback_param_count(&args[1]);
+
+                // CompiledExpr fast path: direct lambda with 2 params, compilable body
+                if param_count == 2 {
+                    if let AstNode::Lambda {
+                        params, body, signature: None, thunk: false,
+                    } = &args[1]
+                    {
+                        let var_refs: Vec<&str> =
+                            params.iter().map(|s| s.as_str()).collect();
+                        if let Some(compiled) =
+                            try_compile_expr_with_allowed_vars(body, &var_refs)
+                        {
+                            let acc_name = params[0].as_str();
+                            let item_name = params[1].as_str();
+                            for item in items[start_idx..].iter() {
+                                let vars: HashMap<&str, &JValue> = HashMap::from([
+                                    (acc_name, &accumulator),
+                                    (item_name, item),
+                                ]);
+                                accumulator = eval_compiled(&compiled, data, Some(&vars))?;
+                            }
+                            return Ok(accumulator);
+                        }
+                    }
+                    // Stored lambda variable fast path: $var with pre-compiled body
+                    if let AstNode::Variable(var_name) = &args[1] {
+                        if let Some(stored) = self.context.lookup_lambda(var_name) {
+                            if stored.params.len() == 2 {
+                                if let Some(ref ce) = stored.compiled_body.clone() {
+                                    let acc_param = stored.params[0].clone();
+                                    let item_param = stored.params[1].clone();
+                                    let captured_data = stored.captured_data.clone();
+                                    let captured_env_clone = stored.captured_env.clone();
+                                    let ce_clone = ce.clone();
+                                    if !captured_env_clone.values().any(|v| {
+                                        matches!(v, JValue::Lambda { .. } | JValue::Builtin { .. })
+                                    }) {
+                                        let call_data =
+                                            captured_data.as_ref().unwrap_or(data);
+                                        for item in items[start_idx..].iter() {
+                                            let mut vars: HashMap<&str, &JValue> =
+                                                captured_env_clone
+                                                    .iter()
+                                                    .map(|(k, v)| (k.as_str(), v))
+                                                    .collect();
+                                            vars.insert(acc_param.as_str(), &accumulator);
+                                            vars.insert(item_param.as_str(), item);
+                                            // Evaluate and drop vars before assigning accumulator
+                                            // to satisfy borrow checker (vars borrows accumulator)
+                                            let new_acc =
+                                                eval_compiled(&ce_clone, call_data, Some(&vars))?;
+                                            drop(vars);
+                                            accumulator = new_acc;
+                                        }
+                                        return Ok(accumulator);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Only create the array value if callback uses 4 parameters
                 let arr_value = if param_count >= 4 {
@@ -5652,6 +7636,7 @@ impl Evaluator {
             let stored = StoredLambda {
                 params: params.to_vec(),
                 body: body.clone(),
+                compiled_body: None, // Thunks use TCO, not the compiled fast path
                 signature: signature.cloned(),
                 captured_env: captured_env.cloned().unwrap_or_default(),
                 captured_data: captured_data.cloned(),
@@ -6017,9 +8002,16 @@ impl Evaluator {
                 } = rhs.as_ref()
                 {
                     let captured_env = self.capture_environment_for(body, params);
+                    let compiled_body = if !thunk {
+                        let var_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+                        try_compile_expr_with_allowed_vars(body, &var_refs)
+                    } else {
+                        None
+                    };
                     let stored_lambda = StoredLambda {
                         params: params.clone(),
                         body: (**body).clone(),
+                        compiled_body,
                         signature: signature.clone(),
                         captured_env,
                         captured_data: Some(data.clone()),
@@ -6801,11 +8793,17 @@ impl Evaluator {
                 // Fast path: if predicate is definitely a filter expression (comparison/logical),
                 // skip speculative numeric evaluation and go directly to filter logic
                 if Self::is_filter_predicate(predicate) {
-                    // Try specialized fast path for simple field comparisons
-                    if let Some(spec) = try_specialize_predicate(predicate) {
+                    // Try CompiledExpr fast path
+                    if let Some(compiled) = try_compile_expr(predicate) {
+                        let shape = _arr.first().and_then(|e| build_shape_cache(e));
                         let mut filtered = Vec::with_capacity(_arr.len());
                         for item in _arr.iter() {
-                            if evaluate_specialized(item, &spec) {
+                            let result = if let Some(ref s) = shape {
+                                eval_compiled_shaped(&compiled, item, None, s)?
+                            } else {
+                                eval_compiled(&compiled, item, None)?
+                            };
+                            if compiled_is_truthy(&result) {
                                 filtered.push(item.clone());
                             }
                         }
@@ -6885,11 +8883,17 @@ impl Evaluator {
                     }
                 }
 
-                // Try specialized fast path for simple field comparisons
-                if let Some(spec) = try_specialize_predicate(predicate) {
+                // Try CompiledExpr fast path for filter expressions
+                if let Some(compiled) = try_compile_expr(predicate) {
+                    let shape = _arr.first().and_then(|e| build_shape_cache(e));
                     let mut filtered = Vec::with_capacity(_arr.len());
                     for item in _arr.iter() {
-                        if evaluate_specialized(item, &spec) {
+                        let result = if let Some(ref s) = shape {
+                            eval_compiled_shaped(&compiled, item, None, s)?
+                        } else {
+                            eval_compiled(&compiled, item, None)?
+                        };
+                        if compiled_is_truthy(&result) {
                             filtered.push(item.clone());
                         }
                     }
@@ -7893,6 +9897,7 @@ impl Evaluator {
                 is_builtin,
                 args.len()
             )),
+            compiled_body: None, // Partial application uses a special body marker
             signature: None,
             captured_env: {
                 let mut env = self.capture_current_environment();

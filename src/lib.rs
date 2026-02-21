@@ -29,12 +29,14 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 
 pub mod ast;
+mod compiler;
 mod datetime;
 pub mod evaluator;
 pub mod functions;
 pub mod parser;
 mod signature;
 pub mod value;
+mod vm;
 
 /// Pre-converted data handle for efficient repeated evaluation.
 ///
@@ -93,10 +95,14 @@ impl JsonataData {
 /// data2 = {"orders": [{"product": "B", "price": 50}]}
 /// result2 = expr.evaluate(data2)
 /// ```
-#[pyclass]
+#[pyclass(unsendable)]
 struct JsonataExpression {
     /// The parsed Abstract Syntax Tree
     ast: ast::AstNode,
+    /// Lazily compiled bytecode — populated on first evaluate() call.
+    /// `Some(bc)` = compiled to bytecode; `None` = must use tree-walker.
+    /// `OnceCell` ensures compilation happens at most once per expression instance.
+    bytecode: std::cell::OnceCell<Option<vm::BytecodeProgram>>,
 }
 
 #[pymethods]
@@ -123,10 +129,23 @@ impl JsonataExpression {
         bindings: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let json_data = python_to_json(py, &data)?;
-        let mut evaluator = create_evaluator(py, bindings)?;
-        let result = evaluator
-            .evaluate(&self.ast, &json_data)
-            .map_err(evaluator_error_to_py)?;
+        let result = if bindings.is_none() {
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc).run(&json_data, None).map_err(evaluator_error_to_py)?
+            } else {
+                let mut ev = evaluator::Evaluator::new();
+                ev.evaluate(&self.ast, &json_data)
+                    .map_err(evaluator_error_to_py)?
+            }
+        } else {
+            let mut ev = create_evaluator(py, bindings)?;
+            ev.evaluate(&self.ast, &json_data)
+                .map_err(evaluator_error_to_py)?
+        };
         json_to_python(py, &result)
     }
 
@@ -147,10 +166,23 @@ impl JsonataExpression {
         data: &JsonataData,
         bindings: Option<PyObject>,
     ) -> PyResult<PyObject> {
-        let mut evaluator = create_evaluator(py, bindings)?;
-        let result = evaluator
-            .evaluate(&self.ast, &data.data)
-            .map_err(evaluator_error_to_py)?;
+        let result = if bindings.is_none() {
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc).run(&data.data, None).map_err(evaluator_error_to_py)?
+            } else {
+                let mut ev = evaluator::Evaluator::new();
+                ev.evaluate(&self.ast, &data.data)
+                    .map_err(evaluator_error_to_py)?
+            }
+        } else {
+            let mut ev = create_evaluator(py, bindings)?;
+            ev.evaluate(&self.ast, &data.data)
+                .map_err(evaluator_error_to_py)?
+        };
         json_to_python(py, &result)
     }
 
@@ -171,10 +203,23 @@ impl JsonataExpression {
         data: &JsonataData,
         bindings: Option<PyObject>,
     ) -> PyResult<String> {
-        let mut evaluator = create_evaluator(py, bindings)?;
-        let result = evaluator
-            .evaluate(&self.ast, &data.data)
-            .map_err(evaluator_error_to_py)?;
+        let result = if bindings.is_none() {
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc).run(&data.data, None).map_err(evaluator_error_to_py)?
+            } else {
+                let mut ev = evaluator::Evaluator::new();
+                ev.evaluate(&self.ast, &data.data)
+                    .map_err(evaluator_error_to_py)?
+            }
+        } else {
+            let mut ev = create_evaluator(py, bindings)?;
+            ev.evaluate(&self.ast, &data.data)
+                .map_err(evaluator_error_to_py)?
+        };
         result
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
@@ -206,10 +251,23 @@ impl JsonataExpression {
     ) -> PyResult<String> {
         let json_data = JValue::from_json_str(json_str)
             .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
-        let mut evaluator = create_evaluator(py, bindings)?;
-        let result = evaluator
-            .evaluate(&self.ast, &json_data)
-            .map_err(evaluator_error_to_py)?;
+        let result = if bindings.is_none() {
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc).run(&json_data, None).map_err(evaluator_error_to_py)?
+            } else {
+                let mut ev = evaluator::Evaluator::new();
+                ev.evaluate(&self.ast, &json_data)
+                    .map_err(evaluator_error_to_py)?
+            }
+        } else {
+            let mut ev = create_evaluator(py, bindings)?;
+            ev.evaluate(&self.ast, &json_data)
+                .map_err(evaluator_error_to_py)?
+        };
         result
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
@@ -244,7 +302,10 @@ fn compile(expression: &str) -> PyResult<JsonataExpression> {
     let ast = parser::parse(expression)
         .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
 
-    Ok(JsonataExpression { ast })
+    Ok(JsonataExpression {
+        ast,
+        bytecode: std::cell::OnceCell::new(),
+    })
 }
 
 /// Evaluate a JSONata expression against data in one step.
@@ -296,7 +357,7 @@ fn evaluate(
 /// - list -> Array
 /// - dict -> Object
 fn python_to_json(py: Python, obj: &PyObject) -> PyResult<JValue> {
-    python_to_json_bound(&obj.bind(py))
+    python_to_json_bound(obj.bind(py))
 }
 
 /// Inner conversion using Bound API for zero-overhead type checks.
@@ -387,8 +448,50 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
         JValue::String(s) => Ok((&**s).into_pyobject(py).unwrap().into_any().unbind()),
 
         JValue::Array(arr) => {
-            // Batch construction: build Vec<PyObject> first, then PyList::new()
-            // PyList::new uses PyList_New(len) + PyList_SET_ITEM (no capacity checks)
+            // Array of objects with shared keys: intern first object's keys as
+            // Python strings to avoid repeated UTF-8 -> PyString conversion.
+            let all_objects = arr.len() >= 2
+                && arr.iter().all(|item| matches!(item, JValue::Object(_)));
+            if all_objects {
+                let first_obj = match arr.first() {
+                    Some(JValue::Object(obj)) => obj,
+                    _ => unreachable!("all_objects guard ensures first element is an object"),
+                };
+
+                // Intern keys: store (&str, Py<PyString>) — no String clone needed
+                // since first_obj borrows from arr which outlives this block
+                let interned_keys: Vec<(&str, Py<PyString>)> = first_obj
+                    .keys()
+                    .map(|k| (k.as_str(), PyString::new(py, k).unbind()))
+                    .collect();
+
+                let items: Vec<PyObject> = arr
+                    .iter()
+                    .map(|item| {
+                        // Safe to unwrap: all_objects guarantees every element is Object
+                        let obj = match item {
+                            JValue::Object(obj) => obj,
+                            _ => unreachable!(),
+                        };
+                        let dict = PyDict::new(py);
+                        for (key_str, py_key) in &interned_keys {
+                            if let Some(value) = obj.get(*key_str) {
+                                dict.set_item(py_key.bind(py), json_to_python(py, value)?)?;
+                            }
+                        }
+                        // Handle any extra keys not in first object
+                        for (key, value) in obj.iter() {
+                            if !first_obj.contains_key(key) {
+                                dict.set_item(key, json_to_python(py, value)?)?;
+                            }
+                        }
+                        Ok(dict.unbind().into())
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                return Ok(PyList::new(py, &items)?.unbind().into());
+            }
+
+            // General array: batch construction
             let items: Vec<PyObject> = arr
                 .iter()
                 .map(|item| json_to_python(py, item))
