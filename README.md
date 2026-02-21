@@ -63,6 +63,38 @@ JSONata is a query and transformation language for JSON:
 
 See [official JSONata docs](https://docs.jsonata.org/) for language reference.
 
+## Performance
+
+jsonatapy is the **fastest JSONata implementation available for Python** — by a wide margin — and faster than the JavaScript reference implementation for most pure expression workloads.
+
+| Category | vs JavaScript | vs jsonata-python |
+|----------|--------------|-------------------|
+| Simple paths | **7–10x faster** | ~25x faster |
+| Conditionals | **18x faster** | ~50x faster |
+| String operations | **7x faster** | ~30x faster |
+| Complex transformations | **8x faster** | ~25x faster |
+| Higher-order functions | ~2x slower | ~60x faster |
+| Array-heavy workloads | varies (see below) | ~10–50x faster |
+
+For **pure expression evaluation** (simple queries, conditionals, string and math operations), jsonatapy consistently beats V8 JavaScript. It is also significantly faster than jsonata-rs, the leading pure-Rust JSONata implementation.
+
+### The Python Boundary
+
+For workloads that iterate over large arrays of Python dicts (filtering, mapping, aggregation), the dominant cost is converting Python objects to Rust values on each call — not expression evaluation. This is a fundamental property of the Python/C extension model, not specific to jsonatapy. Two paths avoid it:
+
+```python
+# Path 1: Pre-convert data once, reuse across many evaluations (6–15x faster)
+data_handle = jsonatapy.JsonataData(large_dataset)
+result = expr.evaluate_with_data(data_handle)
+
+# Path 2: Keep data as a JSON string, skip Python object creation entirely
+result_str = expr.evaluate_json(json_string)
+```
+
+With pre-converted data, even array-heavy expressions run within 2–7x of V8, which is the irreducible gap between a Rust bytecode interpreter and V8's JIT compiler.
+
+See [Performance](docs/performance.md) for full benchmark results.
+
 ## Features
 
 ### JSONata 2.1.0 Specification

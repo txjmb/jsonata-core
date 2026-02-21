@@ -59,26 +59,24 @@ result2 = expr2.evaluate_with_data(data)
 - Dashboard queries with shared data
 - Interactive data exploration
 
-### 3. Use JSON String API for Large Data
+### 3. Use JSON String API When Data is Already JSON
 
-**Impact:** 10-50x faster for datasets with 1000+ items
+**Impact:** Avoids Python object creation cost; best when data comes from a file, HTTP response, or database as a raw JSON string
 
 ```python
-import json
 import jsonatapy
 
 expr = jsonatapy.compile("items[price > 100]")
 
-#Fast path - JSON string in/out
-json_str = json.dumps(large_data)
-result_str = expr.evaluate_json(json_str)
-result = json.loads(result_str)
+# Skip json.loads() entirely — pass the raw string directly
+result_str = expr.evaluate_json(raw_json_string)
 ```
 
 **When to use:**
-- Large datasets (1000+ items)
-- High-frequency evaluation (millions of calls)
-- Data already in JSON format (API responses, files)
+- Data arrives as a JSON string (HTTP response body, file contents) and you haven't deserialized it yet
+- Result can be consumed as a JSON string downstream
+
+**Note:** If you've already called `json.loads()` on your data, `evaluate_json()` offers no advantage over `evaluate()` — both pay a similar conversion cost. Use `JsonataData` instead.
 
 ### 4. Fastest Path: Pre-converted Data + JSON Output
 
@@ -191,21 +189,21 @@ result = registry.evaluate("filter", data)
 import json
 import jsonatapy
 
-expr = jsonatapy.compile("large_array[field > 100]")
+expr = jsonatapy.compile("products[price > 100]")
 
-# Benchmark results (1000 items):
-# evaluate():           ~50ms  (Python object conversion)
-# evaluate_json():      ~5ms   (JSON string, 10x faster)
-# evaluate_with_data(): ~45ms  (pre-converted, amortized)
+# Benchmark results (100 products, 5 fields each):
+# evaluate(dict):              ~150µs  (Python→Rust conversion dominates)
+# evaluate_json(json_str):     ~145µs  (similar — JSON parse ≈ dict walk cost)
+# evaluate_with_data(handle):   ~25µs  (no input conversion)
+# evaluate_data_to_json(handle): ~14µs (no conversion either direction)
 
-# For one-time use with large data
-json_str = json.dumps(data)
-result = expr.evaluate_json(json_str)  # Fastest
+# For data arriving as a raw JSON string (not yet parsed)
+result_str = expr.evaluate_json(raw_json_str)   # Skips Python object creation
 
-# For repeated queries on same data
+# For repeated queries on same data — the real win
 data_handle = jsonatapy.JsonataData(data)
-result1 = expr.evaluate_with_data(data_handle)  # Fast
-result2 = expr.evaluate_with_data(data_handle)  # No re-conversion
+result1 = expr.evaluate_with_data(data_handle)  # ~6x faster than evaluate(dict)
+result2 = expr.evaluate_with_data(data_handle)  # Same speed — no re-conversion
 ```
 
 ### Benchmark Your Use Case
@@ -486,14 +484,15 @@ profile_expression("items[price > 50].name", data)
 
 ## Performance Comparison Summary
 
-| Scenario | Method | Relative Speed | Best For |
-|----------|--------|----------------|----------|
-| Small data, one-time | `evaluate()` | 1x | Quick queries |
-| Large data, one-time | `evaluate_json()` | 10-50x | API responses |
-| Small data, repeated | `compile()` + `evaluate()` | 10-100x | Multiple queries |
-| Large data, repeated | `compile()` + `evaluate_json()` | 100-1000x | High throughput |
-| Multiple exprs, same data | `JsonataData` + `evaluate_with_data()` | 50-200x | Dashboards |
-| Maximum performance | `JsonataData.from_json()` + `evaluate_data_to_json()` | 100-1000x | Critical paths |
+The dominant cost for array-heavy workloads is Python→Rust data conversion (~1µs per field). Expression evaluation itself is typically 2–15µs regardless of data size.
+
+| Scenario | Method | vs `evaluate(dict)` | Notes |
+|----------|--------|---------------------|-------|
+| Any query | `evaluate(dict)` | 1x baseline | Pays conversion every call |
+| Data already as JSON string | `evaluate_json(str)` | ~1x | Avoids Python objects; similar total cost |
+| Same data, multiple queries | `JsonataData` + `evaluate_with_data()` | **6–15x faster** | Conversion paid once |
+| Same data, JSON output needed | `JsonataData.from_json()` + `evaluate_data_to_json()` | **10–20x faster** | Zero conversion overhead both ways |
+| Simple expressions (paths, math, strings) | any of the above | already fast | jsonatapy beats V8 regardless of path |
 
 ## Next Steps
 
