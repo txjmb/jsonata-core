@@ -1,15 +1,15 @@
-/// Bytecode VM for JSONata compiled expressions.
-///
-/// A `BytecodeProgram` is produced by `crate::compiler::BytecodeCompiler` from a
-/// `CompiledExpr` tree.  Running a program involves the `Vm` struct which walks
-/// the flat `instrs` vector sequentially, using a small operand stack.
-///
-/// Why a flat bytecode vs the tree-based `CompiledExpr`?
-/// - `Vec<Instr>` is one contiguous allocation; pointer-based trees cause cache misses
-///   every time we recurse into a `Box<CompiledExpr>`.
-/// - An iterative `match instrs[ip]` loop is branch-predictor-friendly.
-/// - Inline shape caches (per-`GetField` `Cell`) amortise IndexMap hash lookups to O(1)
-///   positional access on subsequent hits.
+//! Bytecode VM for JSONata compiled expressions.
+//!
+//! A `BytecodeProgram` is produced by `crate::compiler::BytecodeCompiler` from a
+//! `CompiledExpr` tree.  Running a program involves the `Vm` struct which walks
+//! the flat `instrs` vector sequentially, using a small operand stack.
+//!
+//! Why a flat bytecode vs the tree-based `CompiledExpr`?
+//! - `Vec<Instr>` is one contiguous allocation; pointer-based trees cause cache misses
+//!   every time we recurse into a `Box<CompiledExpr>`.
+//! - An iterative `match instrs[ip]` loop is branch-predictor-friendly.
+//! - Inline shape caches (per-`GetField` `Cell`) amortise IndexMap hash lookups to O(1)
+//!   positional access on subsequent hits.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -179,22 +179,6 @@ impl<'prog> Vm<'prog> {
         vars: Option<&HashMap<&str, &JValue>>,
     ) -> Result<JValue, EvaluatorError> {
         run_inner(self.prog, data, vars, &mut self.stack)
-    }
-
-    /// Run a program with a caller-supplied stack (reuse across calls to avoid
-    /// per-call Vec allocation). The stack is cleared before use.
-    ///
-    /// Used by HOF fast paths ($map/$filter/$reduce) to avoid allocating a new
-    /// Vec<JValue> for every element in the array.
-    #[inline]
-    pub(crate) fn run_reusing(
-        prog: &BytecodeProgram,
-        data: &JValue,
-        vars: Option<&HashMap<&str, &JValue>>,
-        stack: &mut Vec<JValue>,
-    ) -> Result<JValue, EvaluatorError> {
-        stack.clear();
-        run_inner(prog, data, vars, stack)
     }
 }
 
@@ -475,11 +459,9 @@ fn run_inner(
                 let pairs: Vec<JValue> = stack.drain(start..).collect();
                 let mut obj = indexmap::IndexMap::new();
                 for chunk in pairs.chunks(2) {
-                    if let [key, val] = chunk {
-                        if let JValue::String(k) = key {
-                            if !val.is_undefined() {
-                                obj.insert(k.to_string(), val.clone());
-                            }
+                    if let [JValue::String(k), val] = chunk {
+                        if !val.is_undefined() {
+                            obj.insert(k.to_string(), val.clone());
                         }
                     }
                 }
@@ -525,7 +507,7 @@ fn run_inner(
                         }
                         match kept.len() {
                             0 => JValue::Undefined,
-                            1 => kept.into_iter().next().unwrap(),
+                            1 => kept.pop().unwrap(),
                             _ => JValue::array(kept),
                         }
                     }
@@ -603,11 +585,10 @@ fn get_field_cached(val: &JValue, field: &str, cache: &Cell<Option<usize>>) -> J
             }
             match results.len() {
                 0 => JValue::Undefined,
-                1 => results.into_iter().next().unwrap(),
+                1 => results.pop().unwrap(),
                 _ => JValue::array(results),
             }
         }
-        JValue::Undefined => JValue::Undefined,
         _ => JValue::Undefined,
     }
 }
