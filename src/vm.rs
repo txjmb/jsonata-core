@@ -102,6 +102,14 @@ pub(crate) enum Instr {
     /// Pops args (first pushed = first arg), pushes result.
     CallBuiltin { name_idx: u16, arg_count: u8 },
 
+    // ── Array filtering ──────────────────────────────────────────────────
+    /// Pop TOS (must be Array or Undefined), evaluate `fallback_exprs[idx]` for each
+    /// element with the element as `data`, keep elements where result is truthy.
+    /// Pushes the filtered array (or Undefined if empty).
+    /// Used to compile `arr[predicate]` patterns without going through EvalFallback
+    /// for the entire FieldPath expression.
+    FilterByExpr(u16),
+
     // ── Fallback ─────────────────────────────────────────────────────────
     /// Evaluate `fallback_exprs[idx]` via `eval_compiled` (tree-IR fallback).
     /// Used for `CompiledExpr` variants too complex to lower to flat bytecode.
@@ -468,6 +476,36 @@ impl<'prog> Vm<'prog> {
                     ip += 1;
                 }
 
+                // ── Array filtering ─────────────────────────────────────
+                Instr::FilterByExpr(idx) => {
+                    let predicate = &fallback_exprs[*idx as usize];
+                    let src = stack.pop().unwrap_or(JValue::Undefined);
+                    let result = match src {
+                        JValue::Array(arr) => {
+                            let mut kept: Vec<JValue> = Vec::with_capacity(arr.len());
+                            for item in arr.iter() {
+                                let test = eval_compiled(predicate, item, vars)?;
+                                if compiled_is_truthy(&test) {
+                                    kept.push(item.clone());
+                                }
+                            }
+                            match kept.len() {
+                                0 => JValue::Undefined,
+                                1 => kept.into_iter().next().unwrap(),
+                                _ => JValue::array(kept),
+                            }
+                        }
+                        JValue::Undefined => JValue::Undefined,
+                        other => {
+                            // Single value: apply predicate directly
+                            let test = eval_compiled(predicate, &other, vars)?;
+                            if compiled_is_truthy(&test) { other } else { JValue::Undefined }
+                        }
+                    };
+                    stack.push(result);
+                    ip += 1;
+                }
+
                 // ── Fallback ─────────────────────────────────────────────
                 Instr::EvalFallback(idx) => {
                     let expr = &fallback_exprs[*idx as usize];
@@ -521,7 +559,7 @@ fn get_field_cached(val: &JValue, field: &str, cache: &Cell<Option<usize>>) -> J
         JValue::Array(arr) => {
             // Array: map field access over elements (implicit array mapping).
             // Mirrors `compiled_field_step`: flatten nested arrays one level.
-            let mut results: Vec<JValue> = Vec::new();
+            let mut results: Vec<JValue> = Vec::with_capacity(arr.len());
             for item in arr.iter() {
                 let v = get_field_cached(item, field, cache);
                 match v {

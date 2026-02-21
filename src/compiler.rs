@@ -152,9 +152,21 @@ impl BytecodeCompiler {
                         let fidx = self.intern_str(&step.field);
                         self.emit(Instr::GetField(fidx));
                     }
+                } else if steps.len() == 1 {
+                    // Single step with filter: `field[predicate]`
+                    // Emit: GetDataField("field") + FilterByExpr(predicate)
+                    // This avoids EvalFallback for the whole FieldPath, running the
+                    // predicate directly in the VM loop per element.
+                    let step = &steps[0];
+                    let fidx = self.intern_str(&step.field);
+                    self.emit(Instr::GetDataField(fidx));
+                    if let Some(filter) = &step.filter {
+                        let pidx = self.add_fallback(filter.clone());
+                        self.emit(Instr::FilterByExpr(pidx));
+                    }
                 } else {
-                    // Filtered path: delegate to eval_compiled (handles array-mapping
-                    // and filter application with full CompiledExpr semantics).
+                    // Multi-step filtered path: delegate to eval_compiled (handles
+                    // intermediate array-mapping and nested filter application).
                     let idx = self.add_fallback(expr.clone());
                     self.emit(Instr::EvalFallback(idx));
                 }
