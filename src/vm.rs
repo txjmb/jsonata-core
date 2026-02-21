@@ -103,12 +103,11 @@ pub(crate) enum Instr {
     CallBuiltin { name_idx: u16, arg_count: u8 },
 
     // ── Array filtering ──────────────────────────────────────────────────
-    /// Pop TOS (must be Array or Undefined), evaluate `fallback_exprs[idx]` for each
-    /// element with the element as `data`, keep elements where result is truthy.
+    /// Pop TOS (must be Array or Undefined), run `sub_programs[idx]` for each element
+    /// with the element as `data`, keep elements where result is truthy.
     /// Pushes the filtered array (or Undefined if empty).
-    /// Used to compile `arr[predicate]` patterns without going through EvalFallback
-    /// for the entire FieldPath expression.
-    FilterByExpr(u16),
+    /// The sub-program runs with a reusable stack (no per-element allocation).
+    FilterByBytecode(u16),
 
     // ── Fallback ─────────────────────────────────────────────────────────
     /// Evaluate `fallback_exprs[idx]` via `eval_compiled` (tree-IR fallback).
@@ -141,6 +140,9 @@ pub(crate) struct BytecodeProgram {
     /// Fallback `CompiledExpr` pool for `EvalFallback` instructions.
     /// Contains expressions too complex to lower to flat bytecode.
     pub fallback_exprs: Vec<CompiledExpr>,
+    /// Sub-programs for `FilterByBytecode` instructions.
+    /// Each sub-program is a compiled predicate to be run per array element.
+    pub sub_programs: Vec<BytecodeProgram>,
 }
 
 impl BytecodeProgram {
@@ -176,351 +178,382 @@ impl<'prog> Vm<'prog> {
         data: &JValue,
         vars: Option<&HashMap<&str, &JValue>>,
     ) -> Result<JValue, EvaluatorError> {
-        use crate::evaluator::{
-            call_pure_builtin_by_name, compiled_arithmetic, compiled_concat, compiled_equal,
-            compiled_is_truthy, compiled_ordered_cmp, CompiledArithOp,
-        };
+        run_inner(self.prog, data, vars, &mut self.stack)
+    }
 
-        let instrs = &self.prog.instrs;
-        let const_pool = &self.prog.const_pool;
-        let string_pool = &self.prog.string_pool;
-        let shape_cache = &self.prog.shape_cache;
-        let fallback_exprs = &self.prog.fallback_exprs;
-        let stack = &mut self.stack;
+    /// Run a program with a caller-supplied stack (reuse across calls to avoid
+    /// per-call Vec allocation). The stack is cleared before use.
+    ///
+    /// Used by HOF fast paths ($map/$filter/$reduce) to avoid allocating a new
+    /// Vec<JValue> for every element in the array.
+    #[inline]
+    pub(crate) fn run_reusing(
+        prog: &BytecodeProgram,
+        data: &JValue,
+        vars: Option<&HashMap<&str, &JValue>>,
+        stack: &mut Vec<JValue>,
+    ) -> Result<JValue, EvaluatorError> {
+        stack.clear();
+        run_inner(prog, data, vars, stack)
+    }
+}
 
-        let mut ip: usize = 0;
+// ---------------------------------------------------------------------------
+// Core interpreter loop (free function so FilterByBytecode can recurse into it)
+// ---------------------------------------------------------------------------
 
-        loop {
-            // SAFETY: BytecodeCompiler guarantees well-formed programs
-            // (each jump lands on a valid instruction, last instr is Return).
-            match &instrs[ip] {
-                Instr::PushConst(idx) => {
-                    stack.push(const_pool[*idx as usize].clone());
-                    ip += 1;
+fn run_inner(
+    prog: &BytecodeProgram,
+    data: &JValue,
+    vars: Option<&HashMap<&str, &JValue>>,
+    stack: &mut Vec<JValue>,
+) -> Result<JValue, EvaluatorError> {
+    use crate::evaluator::{
+        call_pure_builtin_by_name, compiled_arithmetic, compiled_concat, compiled_equal,
+        compiled_is_truthy, compiled_ordered_cmp, CompiledArithOp,
+    };
+
+    let instrs = &prog.instrs;
+    let const_pool = &prog.const_pool;
+    let string_pool = &prog.string_pool;
+    let shape_cache = &prog.shape_cache;
+    let fallback_exprs = &prog.fallback_exprs;
+    let sub_programs = &prog.sub_programs;
+
+    let mut ip: usize = 0;
+
+    loop {
+        // SAFETY: BytecodeCompiler guarantees well-formed programs
+        // (each jump lands on a valid instruction, last instr is Return).
+        match &instrs[ip] {
+            Instr::PushConst(idx) => {
+                stack.push(const_pool[*idx as usize].clone());
+                ip += 1;
+            }
+            Instr::PushExplicitNull => {
+                // Use Null — explicit-null semantics handled at compare/arithmetic sites
+                stack.push(JValue::Null);
+                ip += 1;
+            }
+            Instr::PushUndefined => {
+                stack.push(JValue::Undefined);
+                ip += 1;
+            }
+            Instr::PushData => {
+                stack.push(data.clone());
+                ip += 1;
+            }
+            Instr::GetField(idx) => {
+                let val = stack.pop().unwrap_or(JValue::Undefined);
+                let field = &string_pool[*idx as usize];
+                stack.push(get_field_cached(&val, field, &shape_cache[ip]));
+                ip += 1;
+            }
+            Instr::GetDataField(idx) => {
+                let field = &string_pool[*idx as usize];
+                stack.push(get_field_cached(data, field, &shape_cache[ip]));
+                ip += 1;
+            }
+            Instr::GetVar(idx) => {
+                let name = &string_pool[*idx as usize];
+                let v = match vars {
+                    Some(m) => m.get(name.as_str()).copied().cloned(),
+                    None => None,
                 }
-                Instr::PushExplicitNull => {
-                    // Use Null — explicit-null semantics handled at compare/arithmetic sites
-                    stack.push(JValue::Null);
-                    ip += 1;
+                .unwrap_or(JValue::Undefined);
+                stack.push(v);
+                ip += 1;
+            }
+            Instr::GetVarField { var_idx, field_idx } => {
+                let var_name = &string_pool[*var_idx as usize];
+                let obj = match vars {
+                    Some(m) => m.get(var_name.as_str()).copied().cloned(),
+                    None => None,
                 }
-                Instr::PushUndefined => {
-                    stack.push(JValue::Undefined);
-                    ip += 1;
+                .unwrap_or(JValue::Undefined);
+                let field = &string_pool[*field_idx as usize];
+                stack.push(get_field_cached(&obj, field, &shape_cache[ip]));
+                ip += 1;
+            }
+
+            // ── Arithmetic ───────────────────────────────────────────
+            Instr::Add(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_arithmetic(CompiledArithOp::Add, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                ip += 1;
+            }
+            Instr::Sub(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_arithmetic(CompiledArithOp::Sub, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                ip += 1;
+            }
+            Instr::Mul(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_arithmetic(CompiledArithOp::Mul, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                ip += 1;
+            }
+            Instr::Div(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_arithmetic(CompiledArithOp::Div, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                ip += 1;
+            }
+            Instr::Mod(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_arithmetic(CompiledArithOp::Mod, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                ip += 1;
+            }
+
+            // ── Comparison ───────────────────────────────────────────
+            Instr::CmpEq => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_equal(&lhs, &rhs));
+                ip += 1;
+            }
+            Instr::CmpNe => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                let eq = compiled_equal(&lhs, &rhs);
+                let ne = match eq {
+                    JValue::Bool(b) => JValue::Bool(!b),
+                    other => other,
+                };
+                stack.push(ne);
+                ip += 1;
+            }
+            Instr::CmpLt(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_ordered_cmp(
+                    &lhs, &rhs, *lhs_en, *rhs_en,
+                    |a, b| a < b,
+                    |a, b| a < b,
+                )?);
+                ip += 1;
+            }
+            Instr::CmpLe(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_ordered_cmp(
+                    &lhs, &rhs, *lhs_en, *rhs_en,
+                    |a, b| a <= b,
+                    |a, b| a <= b,
+                )?);
+                ip += 1;
+            }
+            Instr::CmpGt(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_ordered_cmp(
+                    &lhs, &rhs, *lhs_en, *rhs_en,
+                    |a, b| a > b,
+                    |a, b| a > b,
+                )?);
+                ip += 1;
+            }
+            Instr::CmpGe(lhs_en, rhs_en) => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_ordered_cmp(
+                    &lhs, &rhs, *lhs_en, *rhs_en,
+                    |a, b| a >= b,
+                    |a, b| a >= b,
+                )?);
+                ip += 1;
+            }
+
+            // ── Logical / string ─────────────────────────────────────
+            Instr::And => {
+                // Mirrors eval_compiled_inner: if lhs is falsy → Bool(false),
+                // else Bool(is_truthy(rhs)). Always returns Bool, never Undefined.
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                if !compiled_is_truthy(&lhs) {
+                    stack.push(JValue::Bool(false));
+                } else {
+                    stack.push(JValue::Bool(compiled_is_truthy(&rhs)));
                 }
-                Instr::PushData => {
-                    stack.push(data.clone());
-                    ip += 1;
+                ip += 1;
+            }
+            Instr::Or => {
+                // Mirrors eval_compiled_inner: if lhs is truthy → Bool(true),
+                // else Bool(is_truthy(rhs)). Always returns Bool, never Undefined.
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                if compiled_is_truthy(&lhs) {
+                    stack.push(JValue::Bool(true));
+                } else {
+                    stack.push(JValue::Bool(compiled_is_truthy(&rhs)));
                 }
-                Instr::GetField(idx) => {
-                    let val = stack.pop().unwrap_or(JValue::Undefined);
-                    let field = &string_pool[*idx as usize];
-                    stack.push(get_field_cached(&val, field, &shape_cache[ip]));
-                    ip += 1;
-                }
-                Instr::GetDataField(idx) => {
-                    let field = &string_pool[*idx as usize];
-                    stack.push(get_field_cached(data, field, &shape_cache[ip]));
-                    ip += 1;
-                }
-                Instr::GetVar(idx) => {
-                    let name = &string_pool[*idx as usize];
-                    let v = match vars {
-                        Some(m) => m.get(name.as_str()).copied().cloned(),
-                        None => None,
+                ip += 1;
+            }
+            Instr::Not => {
+                let val = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(JValue::Bool(!compiled_is_truthy(&val)));
+                ip += 1;
+            }
+            Instr::Negate => {
+                let val = stack.pop().unwrap_or(JValue::Undefined);
+                match val {
+                    JValue::Number(n) => stack.push(JValue::Number(-n)),
+                    JValue::Undefined => stack.push(JValue::Undefined),
+                    _ => {
+                        return Err(EvaluatorError::TypeError(
+                            "D1002: Cannot negate non-number value".to_string(),
+                        ))
                     }
-                    .unwrap_or(JValue::Undefined);
-                    stack.push(v);
-                    ip += 1;
                 }
-                Instr::GetVarField { var_idx, field_idx } => {
-                    let var_name = &string_pool[*var_idx as usize];
-                    let obj = match vars {
-                        Some(m) => m.get(var_name.as_str()).copied().cloned(),
-                        None => None,
-                    }
-                    .unwrap_or(JValue::Undefined);
-                    let field = &string_pool[*field_idx as usize];
-                    stack.push(get_field_cached(&obj, field, &shape_cache[ip]));
-                    ip += 1;
-                }
+                ip += 1;
+            }
+            Instr::Concat => {
+                let rhs = stack.pop().unwrap_or(JValue::Undefined);
+                let lhs = stack.pop().unwrap_or(JValue::Undefined);
+                stack.push(compiled_concat(lhs, rhs)?);
+                ip += 1;
+            }
 
-                // ── Arithmetic ───────────────────────────────────────────
-                Instr::Add(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_arithmetic(CompiledArithOp::Add, &lhs, &rhs, *lhs_en, *rhs_en)?);
-                    ip += 1;
-                }
-                Instr::Sub(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_arithmetic(CompiledArithOp::Sub, &lhs, &rhs, *lhs_en, *rhs_en)?);
-                    ip += 1;
-                }
-                Instr::Mul(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_arithmetic(CompiledArithOp::Mul, &lhs, &rhs, *lhs_en, *rhs_en)?);
-                    ip += 1;
-                }
-                Instr::Div(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_arithmetic(CompiledArithOp::Div, &lhs, &rhs, *lhs_en, *rhs_en)?);
-                    ip += 1;
-                }
-                Instr::Mod(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_arithmetic(CompiledArithOp::Mod, &lhs, &rhs, *lhs_en, *rhs_en)?);
-                    ip += 1;
-                }
-
-                // ── Comparison ───────────────────────────────────────────
-                Instr::CmpEq => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_equal(&lhs, &rhs));
-                    ip += 1;
-                }
-                Instr::CmpNe => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let eq = compiled_equal(&lhs, &rhs);
-                    let ne = match eq {
-                        JValue::Bool(b) => JValue::Bool(!b),
-                        other => other,
-                    };
-                    stack.push(ne);
-                    ip += 1;
-                }
-                Instr::CmpLt(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_ordered_cmp(
-                        &lhs, &rhs, *lhs_en, *rhs_en,
-                        |a, b| a < b,
-                        |a, b| a < b,
-                    )?);
-                    ip += 1;
-                }
-                Instr::CmpLe(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_ordered_cmp(
-                        &lhs, &rhs, *lhs_en, *rhs_en,
-                        |a, b| a <= b,
-                        |a, b| a <= b,
-                    )?);
-                    ip += 1;
-                }
-                Instr::CmpGt(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_ordered_cmp(
-                        &lhs, &rhs, *lhs_en, *rhs_en,
-                        |a, b| a > b,
-                        |a, b| a > b,
-                    )?);
-                    ip += 1;
-                }
-                Instr::CmpGe(lhs_en, rhs_en) => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_ordered_cmp(
-                        &lhs, &rhs, *lhs_en, *rhs_en,
-                        |a, b| a >= b,
-                        |a, b| a >= b,
-                    )?);
-                    ip += 1;
-                }
-
-                // ── Logical / string ─────────────────────────────────────
-                Instr::And => {
-                    // Mirrors eval_compiled_inner: if lhs is falsy → Bool(false),
-                    // else Bool(is_truthy(rhs)). Always returns Bool, never Undefined.
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    if !compiled_is_truthy(&lhs) {
-                        stack.push(JValue::Bool(false));
-                    } else {
-                        stack.push(JValue::Bool(compiled_is_truthy(&rhs)));
-                    }
-                    ip += 1;
-                }
-                Instr::Or => {
-                    // Mirrors eval_compiled_inner: if lhs is truthy → Bool(true),
-                    // else Bool(is_truthy(rhs)). Always returns Bool, never Undefined.
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    if compiled_is_truthy(&lhs) {
-                        stack.push(JValue::Bool(true));
-                    } else {
-                        stack.push(JValue::Bool(compiled_is_truthy(&rhs)));
-                    }
-                    ip += 1;
-                }
-                Instr::Not => {
-                    let val = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(JValue::Bool(!compiled_is_truthy(&val)));
-                    ip += 1;
-                }
-                Instr::Negate => {
-                    let val = stack.pop().unwrap_or(JValue::Undefined);
-                    match val {
-                        JValue::Number(n) => stack.push(JValue::Number(-n)),
-                        JValue::Undefined => stack.push(JValue::Undefined),
-                        _ => {
-                            return Err(EvaluatorError::TypeError(
-                                "D1002: Cannot negate non-number value".to_string(),
-                            ))
-                        }
-                    }
-                    ip += 1;
-                }
-                Instr::Concat => {
-                    let rhs = stack.pop().unwrap_or(JValue::Undefined);
-                    let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                    stack.push(compiled_concat(lhs, rhs)?);
-                    ip += 1;
-                }
-
-                // ── Control flow ─────────────────────────────────────────
-                Instr::Jump(offset) => {
+            // ── Control flow ─────────────────────────────────────────
+            Instr::Jump(offset) => {
+                ip = (ip as isize + 1 + *offset as isize) as usize;
+            }
+            Instr::JumpIfFalsy(offset) => {
+                let val = stack.pop().unwrap_or(JValue::Undefined);
+                if !compiled_is_truthy(&val) {
                     ip = (ip as isize + 1 + *offset as isize) as usize;
-                }
-                Instr::JumpIfFalsy(offset) => {
-                    let val = stack.pop().unwrap_or(JValue::Undefined);
-                    if !compiled_is_truthy(&val) {
-                        ip = (ip as isize + 1 + *offset as isize) as usize;
-                    } else {
-                        ip += 1;
-                    }
-                }
-                Instr::JumpIfTruthy(offset) => {
-                    let val = stack.pop().unwrap_or(JValue::Undefined);
-                    if compiled_is_truthy(&val) {
-                        ip = (ip as isize + 1 + *offset as isize) as usize;
-                    } else {
-                        ip += 1;
-                    }
-                }
-                Instr::JumpIfUndef(offset) => {
-                    // Peek (do not pop): jump if TOS is Undefined, keep TOS otherwise
-                    let is_undef = stack.last().map_or(true, |v| v.is_undefined());
-                    if is_undef {
-                        ip = (ip as isize + 1 + *offset as isize) as usize;
-                    } else {
-                        ip += 1;
-                    }
-                }
-                Instr::Pop => {
-                    stack.pop();
+                } else {
                     ip += 1;
-                }
-
-                // ── Construction ─────────────────────────────────────────
-                Instr::MakeArray(n) => {
-                    let n = *n as usize;
-                    let start = stack.len().saturating_sub(n);
-                    let raw: Vec<JValue> = stack.drain(start..).collect();
-                    // Implements JSONata array constructor semantics (is_nested=false):
-                    // skip undefined elements; flatten nested arrays one level.
-                    let mut elems: Vec<JValue> = Vec::with_capacity(raw.len());
-                    for v in raw {
-                        match v {
-                            JValue::Undefined => {}
-                            JValue::Array(arr) => elems.extend(arr.iter().cloned()),
-                            other => elems.push(other),
-                        }
-                    }
-                    stack.push(JValue::array(elems));
-                    ip += 1;
-                }
-                Instr::MakeObject(n) => {
-                    let n = *n as usize;
-                    let start = stack.len().saturating_sub(n * 2);
-                    let pairs: Vec<JValue> = stack.drain(start..).collect();
-                    let mut obj = indexmap::IndexMap::new();
-                    for chunk in pairs.chunks(2) {
-                        if let [key, val] = chunk {
-                            if let JValue::String(k) = key {
-                                if !val.is_undefined() {
-                                    obj.insert(k.to_string(), val.clone());
-                                }
-                            }
-                        }
-                    }
-                    stack.push(JValue::Object(std::rc::Rc::new(obj)));
-                    ip += 1;
-                }
-                Instr::BlockEnd(n) => {
-                    // Keep only the last element of a block (sequential evaluation)
-                    let n = *n as usize;
-                    if n > 1 && stack.len() >= n {
-                        let last = stack.pop().unwrap();
-                        let start = stack.len().saturating_sub(n - 1);
-                        stack.drain(start..);
-                        stack.push(last);
-                    }
-                    ip += 1;
-                }
-
-                // ── Builtins ─────────────────────────────────────────────
-                Instr::CallBuiltin { name_idx, arg_count } => {
-                    let name = &string_pool[*name_idx as usize];
-                    let n = *arg_count as usize;
-                    let start = stack.len().saturating_sub(n);
-                    let args: Vec<JValue> = stack.drain(start..).collect();
-                    stack.push(call_pure_builtin_by_name(name, &args, data)?);
-                    ip += 1;
-                }
-
-                // ── Array filtering ─────────────────────────────────────
-                Instr::FilterByExpr(idx) => {
-                    let predicate = &fallback_exprs[*idx as usize];
-                    let src = stack.pop().unwrap_or(JValue::Undefined);
-                    let result = match src {
-                        JValue::Array(arr) => {
-                            let mut kept: Vec<JValue> = Vec::with_capacity(arr.len());
-                            for item in arr.iter() {
-                                let test = eval_compiled(predicate, item, vars)?;
-                                if compiled_is_truthy(&test) {
-                                    kept.push(item.clone());
-                                }
-                            }
-                            match kept.len() {
-                                0 => JValue::Undefined,
-                                1 => kept.into_iter().next().unwrap(),
-                                _ => JValue::array(kept),
-                            }
-                        }
-                        JValue::Undefined => JValue::Undefined,
-                        other => {
-                            // Single value: apply predicate directly
-                            let test = eval_compiled(predicate, &other, vars)?;
-                            if compiled_is_truthy(&test) { other } else { JValue::Undefined }
-                        }
-                    };
-                    stack.push(result);
-                    ip += 1;
-                }
-
-                // ── Fallback ─────────────────────────────────────────────
-                Instr::EvalFallback(idx) => {
-                    let expr = &fallback_exprs[*idx as usize];
-                    stack.push(eval_compiled(expr, data, vars)?);
-                    ip += 1;
-                }
-
-                Instr::Return => {
-                    break;
                 }
             }
-        }
+            Instr::JumpIfTruthy(offset) => {
+                let val = stack.pop().unwrap_or(JValue::Undefined);
+                if compiled_is_truthy(&val) {
+                    ip = (ip as isize + 1 + *offset as isize) as usize;
+                } else {
+                    ip += 1;
+                }
+            }
+            Instr::JumpIfUndef(offset) => {
+                // Peek (do not pop): jump if TOS is Undefined, keep TOS otherwise
+                let is_undef = stack.last().map_or(true, |v| v.is_undefined());
+                if is_undef {
+                    ip = (ip as isize + 1 + *offset as isize) as usize;
+                } else {
+                    ip += 1;
+                }
+            }
+            Instr::Pop => {
+                stack.pop();
+                ip += 1;
+            }
 
-        Ok(stack.pop().unwrap_or(JValue::Undefined))
+            // ── Construction ─────────────────────────────────────────
+            Instr::MakeArray(n) => {
+                let n = *n as usize;
+                let start = stack.len().saturating_sub(n);
+                let raw: Vec<JValue> = stack.drain(start..).collect();
+                // Implements JSONata array constructor semantics (is_nested=false):
+                // skip undefined elements; flatten nested arrays one level.
+                let mut elems: Vec<JValue> = Vec::with_capacity(raw.len());
+                for v in raw {
+                    match v {
+                        JValue::Undefined => {}
+                        JValue::Array(arr) => elems.extend(arr.iter().cloned()),
+                        other => elems.push(other),
+                    }
+                }
+                stack.push(JValue::array(elems));
+                ip += 1;
+            }
+            Instr::MakeObject(n) => {
+                let n = *n as usize;
+                let start = stack.len().saturating_sub(n * 2);
+                let pairs: Vec<JValue> = stack.drain(start..).collect();
+                let mut obj = indexmap::IndexMap::new();
+                for chunk in pairs.chunks(2) {
+                    if let [key, val] = chunk {
+                        if let JValue::String(k) = key {
+                            if !val.is_undefined() {
+                                obj.insert(k.to_string(), val.clone());
+                            }
+                        }
+                    }
+                }
+                stack.push(JValue::Object(std::rc::Rc::new(obj)));
+                ip += 1;
+            }
+            Instr::BlockEnd(n) => {
+                // Keep only the last element of a block (sequential evaluation)
+                let n = *n as usize;
+                if n > 1 && stack.len() >= n {
+                    let last = stack.pop().unwrap();
+                    let start = stack.len().saturating_sub(n - 1);
+                    stack.drain(start..);
+                    stack.push(last);
+                }
+                ip += 1;
+            }
+
+            // ── Builtins ─────────────────────────────────────────────
+            Instr::CallBuiltin { name_idx, arg_count } => {
+                let name = &string_pool[*name_idx as usize];
+                let n = *arg_count as usize;
+                let start = stack.len().saturating_sub(n);
+                let args: Vec<JValue> = stack.drain(start..).collect();
+                stack.push(call_pure_builtin_by_name(name, &args, data)?);
+                ip += 1;
+            }
+
+            // ── Array filtering ─────────────────────────────────────
+            Instr::FilterByBytecode(idx) => {
+                let sub_prog = &sub_programs[*idx as usize];
+                let src = stack.pop().unwrap_or(JValue::Undefined);
+                // Allocate one reusable sub-stack for all element evaluations.
+                let mut sub_stack: Vec<JValue> = Vec::with_capacity(8);
+                let result = match src {
+                    JValue::Array(arr) => {
+                        let mut kept: Vec<JValue> = Vec::with_capacity(arr.len());
+                        for item in arr.iter() {
+                            let test = run_inner(sub_prog, item, vars, &mut sub_stack)?;
+                            if compiled_is_truthy(&test) {
+                                kept.push(item.clone());
+                            }
+                        }
+                        match kept.len() {
+                            0 => JValue::Undefined,
+                            1 => kept.into_iter().next().unwrap(),
+                            _ => JValue::array(kept),
+                        }
+                    }
+                    JValue::Undefined => JValue::Undefined,
+                    other => {
+                        // Single value: apply predicate directly
+                        let test = run_inner(sub_prog, &other, vars, &mut sub_stack)?;
+                        if compiled_is_truthy(&test) { other } else { JValue::Undefined }
+                    }
+                };
+                stack.push(result);
+                ip += 1;
+            }
+
+            // ── Fallback ─────────────────────────────────────────────
+            Instr::EvalFallback(idx) => {
+                let expr = &fallback_exprs[*idx as usize];
+                stack.push(eval_compiled(expr, data, vars)?);
+                ip += 1;
+            }
+
+            Instr::Return => {
+                break;
+            }
+        }
     }
+
+    Ok(stack.pop().unwrap_or(JValue::Undefined))
 }
 
 // ---------------------------------------------------------------------------

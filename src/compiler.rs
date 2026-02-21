@@ -21,6 +21,9 @@ pub(crate) struct BytecodeCompiler {
     /// Fallback expressions for `EvalFallback` instructions.
     /// Contains `CompiledExpr` variants too complex to lower to flat bytecode.
     fallback_exprs: Vec<CompiledExpr>,
+    /// Sub-programs for `FilterByBytecode` instructions.
+    /// Each is a fully compiled predicate `BytecodeProgram` run per array element.
+    sub_programs: Vec<BytecodeProgram>,
 }
 
 impl BytecodeCompiler {
@@ -31,6 +34,7 @@ impl BytecodeCompiler {
             string_pool: Vec::new(),
             string_intern: std::collections::HashMap::new(),
             fallback_exprs: Vec::new(),
+            sub_programs: Vec::new(),
         }
     }
 
@@ -154,15 +158,17 @@ impl BytecodeCompiler {
                     }
                 } else if steps.len() == 1 {
                     // Single step with filter: `field[predicate]`
-                    // Emit: GetDataField("field") + FilterByExpr(predicate)
-                    // This avoids EvalFallback for the whole FieldPath, running the
-                    // predicate directly in the VM loop per element.
+                    // Emit: GetDataField("field") + FilterByBytecode(predicate_prog)
+                    // The predicate is compiled to its own BytecodeProgram and run per
+                    // element with a reusable stack — no per-element Vec allocation.
                     let step = &steps[0];
                     let fidx = self.intern_str(&step.field);
                     self.emit(Instr::GetDataField(fidx));
                     if let Some(filter) = &step.filter {
-                        let pidx = self.add_fallback(filter.clone());
-                        self.emit(Instr::FilterByExpr(pidx));
+                        let sub_bc = BytecodeCompiler::compile(filter);
+                        let sidx = self.sub_programs.len() as u16;
+                        self.sub_programs.push(sub_bc);
+                        self.emit(Instr::FilterByBytecode(sidx));
                     }
                 } else {
                     // Multi-step filtered path: delegate to eval_compiled (handles
@@ -378,6 +384,7 @@ impl BytecodeCompiler {
             const_pool: c.const_pool,
             string_pool: c.string_pool,
             fallback_exprs: c.fallback_exprs,
+            sub_programs: c.sub_programs,
         };
         peephole(prog)
     }
@@ -400,6 +407,7 @@ pub(crate) fn peephole(prog: BytecodeProgram) -> BytecodeProgram {
         const_pool,
         string_pool,
         fallback_exprs,
+        sub_programs,
         ..
     } = prog;
 
@@ -523,6 +531,7 @@ pub(crate) fn peephole(prog: BytecodeProgram) -> BytecodeProgram {
         string_pool,
         shape_cache,
         fallback_exprs,
+        sub_programs,
     }
 }
 
