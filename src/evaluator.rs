@@ -250,6 +250,31 @@ pub(crate) enum CompiledExpr {
 
     /// Coalesce (`??`): return lhs if it is defined and non-null, else rhs.
     Coalesce(Box<CompiledExpr>, Box<CompiledExpr>),
+
+    // ── Higher-order functions with inline lambdas ───────────────────────
+    /// `$map(array, function($v [, $i]) { body })` — compiled when the second
+    /// argument is an inline lambda literal (not a stored variable).
+    /// `params` holds the lambda parameter names (without `$`), 1 or 2 elements.
+    MapCall {
+        array: Box<CompiledExpr>,
+        params: Vec<String>,
+        body: Box<CompiledExpr>,
+    },
+    /// `$filter(array, function($v [, $i]) { body })` — compiled when the second
+    /// argument is an inline lambda literal.
+    FilterCall {
+        array: Box<CompiledExpr>,
+        params: Vec<String>,
+        body: Box<CompiledExpr>,
+    },
+    /// `$reduce(array, function($acc, $v) { body } [, initial])` — compiled when the
+    /// second argument is an inline lambda literal with exactly 2 parameters.
+    ReduceCall {
+        array: Box<CompiledExpr>,
+        params: Vec<String>,
+        body: Box<CompiledExpr>,
+        initial: Option<Box<CompiledExpr>>,
+    },
 }
 
 /// One step in a compiled `FieldPath`.
@@ -490,11 +515,96 @@ fn try_compile_expr_inner(
                     args: cargs,
                 })
             } else {
-                None
+                try_compile_hof_expr(name, args, allowed_vars)
             }
         }
 
         // Everything else: Lambda, non-pure builtins, Sort, Transform, etc.
+        _ => None,
+    }
+}
+
+/// Try to compile a higher-order function call (`$map`, `$filter`, `$reduce`) when the
+/// callback argument is an inline lambda literal with a compilable body.
+///
+/// Returns `None` when:
+/// - The callback is not an inline lambda (e.g. a stored variable `$f`) — fall back so
+///   the tree-walker can look up the lambda at runtime.
+/// - The lambda has a signature or is a TCO thunk — semantics require the full evaluator.
+/// - The lambda body is not fully compilable — fall back transparently.
+/// - Param count is outside the supported range (see per-function constraints below).
+fn try_compile_hof_expr(
+    name: &str,
+    args: &[AstNode],
+    allowed_vars: Option<&[&str]>,
+) -> Option<CompiledExpr> {
+    match name {
+        "map" | "filter" => {
+            if args.len() != 2 {
+                return None;
+            }
+            let AstNode::Lambda {
+                params,
+                body,
+                signature: None,
+                thunk: false,
+            } = &args[1]
+            else {
+                return None;
+            };
+            // Support 1-param (element only) and 2-param (element + index) lambdas.
+            if params.is_empty() || params.len() > 2 {
+                return None;
+            }
+            let array = try_compile_expr_inner(&args[0], allowed_vars)?;
+            let param_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+            let compiled_body = try_compile_expr_inner(body, Some(&param_refs))?;
+            if name == "map" {
+                Some(CompiledExpr::MapCall {
+                    array: Box::new(array),
+                    params: params.clone(),
+                    body: Box::new(compiled_body),
+                })
+            } else {
+                Some(CompiledExpr::FilterCall {
+                    array: Box::new(array),
+                    params: params.clone(),
+                    body: Box::new(compiled_body),
+                })
+            }
+        }
+        "reduce" => {
+            if args.len() < 2 || args.len() > 3 {
+                return None;
+            }
+            let AstNode::Lambda {
+                params,
+                body,
+                signature: None,
+                thunk: false,
+            } = &args[1]
+            else {
+                return None;
+            };
+            // $reduce requires exactly 2 params: accumulator and current element.
+            if params.len() != 2 {
+                return None;
+            }
+            let array = try_compile_expr_inner(&args[0], allowed_vars)?;
+            let param_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+            let compiled_body = try_compile_expr_inner(body, Some(&param_refs))?;
+            let initial = if args.len() == 3 {
+                Some(Box::new(try_compile_expr_inner(&args[2], allowed_vars)?))
+            } else {
+                None
+            };
+            Some(CompiledExpr::ReduceCall {
+                array: Box::new(array),
+                params: params.clone(),
+                body: Box::new(compiled_body),
+                initial,
+            })
+        }
         _ => None,
     }
 }
@@ -875,6 +985,163 @@ fn eval_compiled_inner(
                 Ok(left)
             }
         }
+
+        // ── Higher-order functions ─────────────────────────────────────────────
+        //
+        // These variants are emitted by try_compile_hof_expr when the HOF argument
+        // is an inline lambda literal with a compilable body. Outer vars are merged
+        // with the lambda params so that nested HOF can access variables from
+        // enclosing lambda scopes (e.g. `$map(a, function($x) { $map(b, function($y) { $x + $y }) })`).
+
+        CompiledExpr::MapCall { array, params, body } => {
+            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
+            // Borrow a slice directly from arr_val — avoid cloning the whole array.
+            let single_holder;
+            let items: &[JValue] = match &arr_val {
+                JValue::Array(a) => a.as_slice(),
+                JValue::Undefined => return Ok(JValue::Undefined),
+                other => {
+                    single_holder = [other.clone()];
+                    &single_holder[..]
+                }
+            };
+            let mut result = Vec::with_capacity(items.len());
+            let p0 = params.first().map(|s| s.as_str());
+
+            if let Some(p1) = params.get(1).map(|s| s.as_str()) {
+                // 2-param lambda (element + index): index is loop-local, so we can't hold
+                // a reference to it across iterations in a shared HashMap. Build per-iteration.
+                // (2-param lambdas are rare; the common 1-param case is below.)
+                for (idx, item) in items.iter().enumerate() {
+                    let idx_val = JValue::Number(idx as f64);
+                    let mut call_vars: HashMap<&str, &JValue> = vars
+                        .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
+                        .unwrap_or_else(|| HashMap::with_capacity(2));
+                    if let Some(p) = p0 {
+                        call_vars.insert(p, item);
+                    }
+                    call_vars.insert(p1, &idx_val);
+                    let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                    if !mapped.is_undefined() {
+                        result.push(mapped);
+                    }
+                }
+            } else if let Some(p0) = p0 {
+                // 1-param lambda (most common): build HashMap once, update the element
+                // reference in-place each iteration — mirrors the tree-walker fast path.
+                let mut call_vars: HashMap<&str, &JValue> = vars
+                    .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
+                    .unwrap_or_else(|| HashMap::with_capacity(1));
+                for item in items.iter() {
+                    call_vars.insert(p0, item);
+                    let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                    if !mapped.is_undefined() {
+                        result.push(mapped);
+                    }
+                }
+            }
+            Ok(if result.is_empty() {
+                JValue::Undefined
+            } else {
+                JValue::array(result)
+            })
+        }
+
+        CompiledExpr::FilterCall { array, params, body } => {
+            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
+            if arr_val.is_undefined() || arr_val.is_null() {
+                return Ok(JValue::Undefined);
+            }
+            let single_holder;
+            let (items, was_single): (&[JValue], bool) = match &arr_val {
+                JValue::Array(a) => (a.as_slice(), false),
+                other => {
+                    single_holder = [other.clone()];
+                    (&single_holder[..], true)
+                }
+            };
+            let mut result = Vec::with_capacity(items.len() / 2);
+            let p0 = params.first().map(|s| s.as_str());
+
+            if let Some(p1) = params.get(1).map(|s| s.as_str()) {
+                for (idx, item) in items.iter().enumerate() {
+                    let idx_val = JValue::Number(idx as f64);
+                    let mut call_vars: HashMap<&str, &JValue> = vars
+                        .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
+                        .unwrap_or_else(|| HashMap::with_capacity(2));
+                    if let Some(p) = p0 {
+                        call_vars.insert(p, item);
+                    }
+                    call_vars.insert(p1, &idx_val);
+                    let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                    if compiled_is_truthy(&pred) {
+                        result.push(item.clone());
+                    }
+                }
+            } else if let Some(p0) = p0 {
+                let mut call_vars: HashMap<&str, &JValue> = vars
+                    .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
+                    .unwrap_or_else(|| HashMap::with_capacity(1));
+                for item in items.iter() {
+                    call_vars.insert(p0, item);
+                    let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                    if compiled_is_truthy(&pred) {
+                        result.push(item.clone());
+                    }
+                }
+            }
+            if was_single {
+                Ok(match result.len() {
+                    0 => JValue::Undefined,
+                    1 => result.remove(0),
+                    _ => JValue::array(result),
+                })
+            } else {
+                Ok(JValue::array(result))
+            }
+        }
+
+        CompiledExpr::ReduceCall { array, params, body, initial } => {
+            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
+            let single_holder;
+            let items: &[JValue] = match &arr_val {
+                JValue::Array(a) => a.as_slice(),
+                JValue::Null => return Ok(JValue::Null),
+                JValue::Undefined => return Ok(JValue::Undefined),
+                other => {
+                    single_holder = [other.clone()];
+                    &single_holder[..]
+                }
+            };
+            let (start_idx, mut accumulator) = if let Some(init_expr) = initial {
+                let init_val = eval_compiled_inner(init_expr, data, vars, ctx, shape)?;
+                if items.is_empty() {
+                    return Ok(init_val);
+                }
+                (0usize, init_val)
+            } else {
+                if items.is_empty() {
+                    return Ok(JValue::Null);
+                }
+                (1, items[0].clone())
+            };
+            let acc_param = params[0].as_str();
+            let item_param = params[1].as_str();
+            for item in items[start_idx..].iter() {
+                // Build per-iteration: &accumulator borrow must be released before we can
+                // update `accumulator`, and the borrow checker can't see through HashMap
+                // removal. `drop(call_vars)` is the only way to release it cleanly.
+                let mut call_vars: HashMap<&str, &JValue> = vars
+                    .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
+                    .unwrap_or_else(|| HashMap::with_capacity(2));
+                call_vars.insert(acc_param, &accumulator);
+                call_vars.insert(item_param, item);
+                let new_acc = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                drop(call_vars);
+                accumulator = new_acc;
+            }
+            Ok(accumulator)
+        }
     }
 }
 
@@ -1091,28 +1358,47 @@ fn try_compile_path(steps: &[crate::ast::PathStep], allowed_vars: Option<&[&str]
         _ => return None,
     };
 
-    // Compile each field step (only Name nodes with at most one Filter stage each)
+    // Compile each field step.
+    // Handles:
+    //   - Name nodes with at most one Stage::Filter attached (from `a.b[pred]` dot-path parsing)
+    //   - Predicate nodes (from `products[pred]` standalone predicate parsing) — folded into the
+    //     previous step's filter slot, since both encodings have identical runtime semantics.
     let mut compiled_steps = Vec::with_capacity(field_steps.len());
     for step in field_steps {
-        let field = match &step.node {
-            AstNode::Name(name) => name.clone(),
-            _ => return None,
-        };
-
-        let filter = match step.stages.as_slice() {
-            [] => None,
-            [Stage::Filter(filter_node)] => {
-                // Numeric literal predicates (`[0]`, `[1]`, etc.) mean index access in JSONata,
-                // not boolean filtering. Fall back to tree-walker for these.
+        match &step.node {
+            AstNode::Name(name) => {
+                let filter = match step.stages.as_slice() {
+                    [] => None,
+                    [Stage::Filter(filter_node)] => {
+                        // Numeric literal predicates (`[0]`, `[1]`, etc.) mean index access in JSONata,
+                        // not boolean filtering. Fall back to tree-walker for these.
+                        if matches!(**filter_node, AstNode::Number(_)) {
+                            return None;
+                        }
+                        Some(try_compile_expr_inner(filter_node, allowed_vars)?)
+                    }
+                    _ => return None,
+                };
+                compiled_steps.push(CompiledStep { field: name.clone(), filter });
+            }
+            AstNode::Predicate(filter_node) => {
+                // Standalone predicate step — `products[price > 100]` parses as
+                //   Name("products") step  +  Predicate(price > 100) step.
+                // Fold the predicate into the previous Name step's filter slot.
                 if matches!(**filter_node, AstNode::Number(_)) {
-                    return None;
+                    return None; // numeric = index access, not a boolean filter
                 }
-                Some(try_compile_expr_inner(filter_node, allowed_vars)?)
+                if !step.stages.is_empty() {
+                    return None; // unexpected stages on a Predicate step — fall back
+                }
+                let last = compiled_steps.last_mut()?; // no previous Name step — fall back
+                if last.filter.is_some() {
+                    return None; // previous step already has a filter — multiple predicates, fall back
+                }
+                last.filter = Some(try_compile_expr_inner(filter_node, allowed_vars)?);
             }
             _ => return None,
-        };
-
-        compiled_steps.push(CompiledStep { field, filter });
+        }
     }
 
     if compiled_steps.is_empty() {

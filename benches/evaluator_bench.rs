@@ -464,11 +464,12 @@ fn bench_vm_vs_tree_walker(c: &mut Criterion) {
         group.finish();
     }
 
-    // ── Higher-order functions (top level doesn't compile; lambda body does) ──
+    // ── Higher-order functions — inline lambda compiled path ─────────────────
     //
-    // These show tree_walker-only timing. The speedup from Phase 3 compiled
-    // lambda bodies is already baked in — compare against the same expressions
-    // in the `higher_order_functions` group from a pre-Phase-3 baseline.
+    // $map/$filter/$reduce with inline lambda literals compile to MapCall/FilterCall/
+    // ReduceCall CompiledExpr variants. The vm variant runs eval_compiled_inner
+    // directly (via EvalFallback), bypassing the tree-walker's Context overhead
+    // and StoredLambda allocation per call.
 
     let numbers: Vec<JValue> = (1..=100).map(|i| JValue::from(i as f64)).collect();
     let mut hof_root = IndexMap::new();
@@ -481,7 +482,6 @@ fn bench_vm_vs_tree_walker(c: &mut Criterion) {
         ("hof_reduce", "$reduce(numbers, function($acc, $v) { $acc + $v }, 0)"),
     ] {
         let ast = parser::parse(expr).unwrap();
-        // compile() returns None for HOF top-level — only tree_walker shown
         let bc = _bench::compile(&ast);
 
         let mut group = c.benchmark_group(format!("vm_vs/{name}"));

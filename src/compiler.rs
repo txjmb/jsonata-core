@@ -367,6 +367,18 @@ impl BytecodeCompiler {
                     arg_count: args.len() as u8,
                 });
             }
+
+            // ── Higher-order functions ────────────────────────────────
+            // MapCall / FilterCall / ReduceCall contain compiled lambda bodies that
+            // are evaluated by eval_compiled_inner — the bytecode VM delegates to it
+            // via EvalFallback. This keeps the VM instruction set simple while still
+            // benefiting from compile-once lambda body compilation.
+            CompiledExpr::MapCall { .. }
+            | CompiledExpr::FilterCall { .. }
+            | CompiledExpr::ReduceCall { .. } => {
+                let idx = self.add_fallback(expr.clone());
+                self.emit(Instr::EvalFallback(idx));
+            }
         }
     }
 
