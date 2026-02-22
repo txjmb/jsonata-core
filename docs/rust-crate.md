@@ -8,19 +8,19 @@ use in Rust projects that don't need Python bindings.
 
 ```toml
 [dependencies]
-jsonata-core = "2.1.0"
+jsonata-core = "2.1.1"
 ```
 
 By default this enables SIMD-accelerated JSON parsing. To disable:
 
 ```toml
-jsonata-core = { version = "2.1.0", default-features = false }
+jsonata-core = { version = "2.1.1", default-features = false }
 ```
 
 To enable Python bindings (used internally by `jsonatapy`):
 
 ```toml
-jsonata-core = { version = "2.1.0", features = ["python"] }
+jsonata-core = { version = "2.1.1", features = ["python"] }
 ```
 
 ## Quick start
