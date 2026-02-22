@@ -1,87 +1,91 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/api/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/api/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/benchmarks/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/benchmarks/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/changelog/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/changelog/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/compatibility/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/compatibility/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/credits/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/credits/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/error-handling/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/error-handling/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/examples/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/examples/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/installation/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/installation/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/jsonata-language/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/jsonata-language/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/license/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/license/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/migration-from-js/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/migration-from-js/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/migration-from-jsonata-python/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/migration-from-jsonata-python/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/optimization-tips/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/optimization-tips/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/performance/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/performance/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/usage/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/rust-crate/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/development/architecture/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/usage/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/development/building/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/development/architecture/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/development/contributing/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/development/building/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/development/parser/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/development/contributing/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
     <url>
-         <loc>https://txjmb.github.io/jsonatapy/development/testing/</loc>
+         <loc>https://txjmb.github.io/jsonata-core/development/parser/</loc>
+         <lastmod>2026-02-22</lastmod>
+    </url>
+    <url>
+         <loc>https://txjmb.github.io/jsonata-core/development/testing/</loc>
          <lastmod>2026-02-22</lastmod>
     </url>
 </urlset>

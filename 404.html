@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="High-performance Python implementation of JSONata - JSON query and transformation language">
+        <meta name="description" content="High-performance JSONata implementation in Rust, with Python bindings">
       
       
         <meta name="author" content="jsonatapy contributors">
@@ -18,19 +18,19 @@
         
       
       
-      <link rel="icon" href="/jsonatapy/assets/images/favicon.png">
+      <link rel="icon" href="/jsonata-core/assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
-        <title>jsonatapy</title>
+        <title>jsonata-core + jsonatapy</title>
       
     
     
-      <link rel="stylesheet" href="/jsonatapy/assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="/jsonata-core/assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="/jsonatapy/assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="/jsonata-core/assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -49,9 +49,9 @@
       
     
     
-      <link rel="stylesheet" href="/jsonatapy/stylesheets/extra.css">
+      <link rel="stylesheet" href="/jsonata-core/stylesheets/extra.css">
     
-    <script>__md_scope=new URL("/jsonatapy/",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("/jsonata-core/",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
   
@@ -99,7 +99,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="/jsonatapy/." title="jsonatapy" class="md-header__button md-logo" aria-label="jsonatapy" data-md-component="logo">
+    <a href="/jsonata-core/." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -113,7 +113,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            jsonatapy
+            jsonata-core + jsonatapy
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -207,7 +207,7 @@
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
   </div>
   <div class="md-source__repository">
-    jsonatapy
+    jsonata-core
   </div>
 </a>
       </div>
@@ -232,7 +232,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="/jsonatapy/." class="md-tabs__link">
+      <a href="/jsonata-core/." class="md-tabs__link">
         
   
   
@@ -253,7 +253,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="/jsonatapy/installation/" class="md-tabs__link">
+        <a href="/jsonata-core/installation/" class="md-tabs__link">
           
   
   
@@ -273,11 +273,11 @@
     
     
       <li class="md-tabs__item">
-        <a href="/jsonatapy/api/" class="md-tabs__link">
+        <a href="/jsonata-core/rust-crate/" class="md-tabs__link">
           
   
   
-  User Guide
+  Rust Crate (jsonata-core)
 
         </a>
       </li>
@@ -293,7 +293,27 @@
     
     
       <li class="md-tabs__item">
-        <a href="/jsonatapy/performance/" class="md-tabs__link">
+        <a href="/jsonata-core/api/" class="md-tabs__link">
+          
+  
+  
+  Python Package (jsonatapy)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="/jsonata-core/performance/" class="md-tabs__link">
           
   
   
@@ -313,7 +333,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="/jsonatapy/compatibility/" class="md-tabs__link">
+        <a href="/jsonata-core/compatibility/" class="md-tabs__link">
           
   
   
@@ -333,7 +353,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="/jsonatapy/development/building/" class="md-tabs__link">
+        <a href="/jsonata-core/development/building/" class="md-tabs__link">
           
   
   
@@ -353,7 +373,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="/jsonatapy/changelog/" class="md-tabs__link">
+        <a href="/jsonata-core/changelog/" class="md-tabs__link">
           
   
   
@@ -387,13 +407,13 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="/jsonatapy/." title="jsonatapy" class="md-nav__button md-logo" aria-label="jsonatapy" data-md-component="logo">
+    <a href="/jsonata-core/." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    jsonatapy
+    jsonata-core + jsonatapy
   </label>
   
     <div class="md-nav__source">
@@ -403,7 +423,7 @@
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
   </div>
   <div class="md-source__repository">
-    jsonatapy
+    jsonata-core
   </div>
 </a>
     </div>
@@ -417,7 +437,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/." class="md-nav__link">
+      <a href="/jsonata-core/." class="md-nav__link">
         
   
   
@@ -498,7 +518,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/installation/" class="md-nav__link">
+      <a href="/jsonata-core/installation/" class="md-nav__link">
         
   
   
@@ -526,7 +546,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/usage/" class="md-nav__link">
+      <a href="/jsonata-core/usage/" class="md-nav__link">
         
   
   
@@ -554,7 +574,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/examples/" class="md-nav__link">
+      <a href="/jsonata-core/examples/" class="md-nav__link">
         
   
   
@@ -614,7 +634,7 @@
   <span class="md-ellipsis">
     
   
-    User Guide
+    Rust Crate (jsonata-core)
   
 
     
@@ -630,7 +650,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    User Guide
+    Rust Crate (jsonata-core)
   
 
           </label>
@@ -643,70 +663,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/api/" class="md-nav__link">
+      <a href="/jsonata-core/rust-crate/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    API Reference
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="/jsonatapy/jsonata-language/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    JSONata Language
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="/jsonatapy/error-handling/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Error Handling
+    Overview
   
 
     
@@ -759,7 +723,7 @@
   <span class="md-ellipsis">
     
   
-    Performance
+    Python Package (jsonatapy)
   
 
     
@@ -775,7 +739,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Performance
+    Python Package (jsonatapy)
   
 
           </label>
@@ -788,14 +752,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/performance/" class="md-nav__link">
+      <a href="/jsonata-core/api/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Performance Overview
+    API Reference
   
 
     
@@ -816,14 +780,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/benchmarks/" class="md-nav__link">
+      <a href="/jsonata-core/jsonata-language/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Benchmarks
+    JSONata Language
   
 
     
@@ -844,14 +808,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/optimization-tips/" class="md-nav__link">
+      <a href="/jsonata-core/error-handling/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Optimization Tips
+    Error Handling
   
 
     
@@ -904,7 +868,7 @@
   <span class="md-ellipsis">
     
   
-    Compatibility
+    Performance
   
 
     
@@ -920,7 +884,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Compatibility
+    Performance
   
 
           </label>
@@ -933,14 +897,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/compatibility/" class="md-nav__link">
+      <a href="/jsonata-core/performance/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Compatibility Status
+    Performance Overview
   
 
     
@@ -961,14 +925,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/migration-from-js/" class="md-nav__link">
+      <a href="/jsonata-core/benchmarks/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Migration from JS
+    Benchmarks
   
 
     
@@ -989,14 +953,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/migration-from-jsonata-python/" class="md-nav__link">
+      <a href="/jsonata-core/optimization-tips/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Migration from jsonata-python
+    Optimization Tips
   
 
     
@@ -1049,7 +1013,7 @@
   <span class="md-ellipsis">
     
   
-    Development
+    Compatibility
   
 
     
@@ -1065,7 +1029,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Development
+    Compatibility
   
 
           </label>
@@ -1078,14 +1042,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/development/building/" class="md-nav__link">
+      <a href="/jsonata-core/compatibility/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Building from Source
+    Compatibility Status
   
 
     
@@ -1106,14 +1070,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/development/parser/" class="md-nav__link">
+      <a href="/jsonata-core/migration-from-js/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Parser Details
+    Migration from JS
   
 
     
@@ -1134,70 +1098,14 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/development/contributing/" class="md-nav__link">
+      <a href="/jsonata-core/migration-from-jsonata-python/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Contributing
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="/jsonatapy/development/testing/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Testing
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="/jsonatapy/development/architecture/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Architecture
+    Migration from jsonata-python
   
 
     
@@ -1250,7 +1158,7 @@
   <span class="md-ellipsis">
     
   
-    About
+    Development
   
 
     
@@ -1263,6 +1171,207 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="/jsonata-core/development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="/jsonata-core/development/parser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parser Details
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="/jsonata-core/development/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="/jsonata-core/development/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="/jsonata-core/development/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1279,7 +1388,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/changelog/" class="md-nav__link">
+      <a href="/jsonata-core/changelog/" class="md-nav__link">
         
   
   
@@ -1307,7 +1416,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/license/" class="md-nav__link">
+      <a href="/jsonata-core/license/" class="md-nav__link">
         
   
   
@@ -1335,7 +1444,7 @@
   
   
     <li class="md-nav__item">
-      <a href="/jsonatapy/credits/" class="md-nav__link">
+      <a href="/jsonata-core/credits/" class="md-nav__link">
         
   
   
@@ -1467,10 +1576,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "/jsonatapy/", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "/jsonatapy/assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "/jsonata-core/", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "/jsonata-core/assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="/jsonatapy/assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="/jsonata-core/assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

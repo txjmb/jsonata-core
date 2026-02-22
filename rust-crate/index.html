@@ -12,13 +12,13 @@
         <meta name="author" content="jsonatapy contributors">
       
       
-        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/compatibility/">
+        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/rust-crate/">
       
       
-        <link rel="prev" href="../optimization-tips/">
+        <link rel="prev" href="../examples/">
       
       
-        <link rel="next" href="../migration-from-js/">
+        <link rel="next" href="../api/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Compatibility Status - jsonata-core + jsonatapy</title>
+        <title>Overview - jsonata-core + jsonatapy</title>
       
     
     
@@ -92,7 +92,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#jsonata-compatibility" class="md-skip">
+        <a href="#jsonata-core-rust-crate" class="md-skip">
           Skip to content
         </a>
       
@@ -130,7 +130,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Compatibility Status
+              Overview
             
           </span>
         </div>
@@ -280,11 +280,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../rust-crate/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
           
   
   
@@ -340,13 +342,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../compatibility/" class="md-tabs__link">
           
   
   
@@ -619,28 +619,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -658,7 +661,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -673,10 +676,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../rust-crate/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -692,6 +722,142 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Public API">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#parserparse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        parser::parse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#evaluator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#jvalue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JValue
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -998,31 +1164,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1040,7 +1203,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1055,37 +1218,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Compatibility Status
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../compatibility/" class="md-nav__link">
         
   
   
@@ -1101,231 +1237,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#test-suite-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Test Suite Overview
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Test Suite Overview">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#reference-test-suite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Reference Test Suite
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#current-compatibility-status" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Current Compatibility Status
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#test-groups" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Test Groups
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Test Groups">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#core-functionality" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Core Functionality
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#operators" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operators
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#arrays" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Arrays
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#functions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Functions
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#advanced-features" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Advanced Features
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#error-handling" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Error Handling
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#running-compatibility-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running Compatibility Tests
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Running Compatibility Tests">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#run-all-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run All Tests
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#run-specific-group" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run Specific Group
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#run-with-detailed-output" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run with Detailed Output
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#test-suite-structure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Test Suite Structure
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#improving-compatibility" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Improving Compatibility
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#resources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Resources
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1767,22 +1678,77 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#test-suite-overview" class="md-nav__link">
+  <a href="#installation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Test Suite Overview
+        Installation
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Test Suite Overview">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public API
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Public API">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#reference-test-suite" class="md-nav__link">
+  <a href="#parserparse" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reference Test Suite
+        parser::parse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#evaluator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#jvalue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JValue
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context
       
     </span>
   </a>
@@ -1795,10 +1761,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#current-compatibility-status" class="md-nav__link">
+  <a href="#performance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Current Compatibility Status
+        Performance
       
     </span>
   </a>
@@ -1806,143 +1772,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#test-groups" class="md-nav__link">
+  <a href="#features" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Test Groups
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Test Groups">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#core-functionality" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Core Functionality
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#operators" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operators
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#arrays" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Arrays
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#functions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Functions
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#advanced-features" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Advanced Features
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#error-handling" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Error Handling
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#running-compatibility-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running Compatibility Tests
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Running Compatibility Tests">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#run-all-tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run All Tests
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#run-specific-group" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run Specific Group
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#run-with-detailed-output" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run with Detailed Output
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#test-suite-structure" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Test Suite Structure
+        Features
       
     </span>
   </a>
@@ -1950,21 +1783,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#improving-compatibility" class="md-nav__link">
+  <a href="#compatibility" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Improving Compatibility
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#resources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Resources
+        Compatibility
       
     </span>
   </a>
@@ -1991,181 +1813,175 @@
   
 
 
-<h1 id="jsonata-compatibility">JSONata Compatibility<a class="headerlink" href="#jsonata-compatibility" title="Permanent link">&para;</a></h1>
-<p>jsonatapy aims for 100% compatibility with the <a href="https://docs.jsonata.org/">JSONata 2.1.0 specification</a>.</p>
-<h2 id="test-suite-overview">Test Suite Overview<a class="headerlink" href="#test-suite-overview" title="Permanent link">&para;</a></h2>
-<p>jsonatapy includes a comprehensive test adapter that runs the complete reference JSONata test suite from the official JavaScript implementation.</p>
-<h3 id="reference-test-suite">Reference Test Suite<a class="headerlink" href="#reference-test-suite" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Total Tests</strong>: 1258</li>
-<li><strong>Passing</strong>: 1258 (100%)</li>
-<li><strong>Source</strong>: Official jsonata-js repository (v2.1.0) at <code>tests/jsonata-js/</code></li>
-</ul>
-<h2 id="current-compatibility-status">Current Compatibility Status<a class="headerlink" href="#current-compatibility-status" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run full test suite</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/python/test_reference_suite.py
+<h1 id="jsonata-core-rust-crate">jsonata-core (Rust crate)<a class="headerlink" href="#jsonata-core-rust-crate" title="Permanent link">&para;</a></h1>
+<p><code>jsonata-core</code> is the pure Rust implementation of JSONata that powers <code>jsonatapy</code>.
+It is published separately on <a href="https://crates.io/crates/jsonata-core">crates.io</a> for
+use in Rust projects that don't need Python bindings.</p>
+<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[dependencies]</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">jsonata-core</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;2.1.0&quot;</span>
 </span></code></pre></div>
-<p>Results show 100% compatibility with the JSONata 2.1.0 specification.</p>
-<h2 id="test-groups">Test Groups<a class="headerlink" href="#test-groups" title="Permanent link">&para;</a></h2>
-<p>The reference suite is organized into 102 test groups covering all aspects of JSONata:</p>
-<h3 id="core-functionality">Core Functionality<a class="headerlink" href="#core-functionality" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>literals</code> - Literal values (numbers, strings, booleans, null)</li>
-<li><code>fields</code> - Field access and navigation</li>
-<li><code>context</code> - Context variable ($)</li>
-<li><code>variables</code> - Variable bindings</li>
-<li><code>wildcards</code> - Wildcard selectors</li>
-</ul>
-<h3 id="operators">Operators<a class="headerlink" href="#operators" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>comparison-operators</code> - Equality, inequality, less than, greater than</li>
-<li><code>numeric-operators</code> - Addition, subtraction, multiplication, division, modulo</li>
-<li><code>boolean-expressions</code> - AND, OR, NOT operations</li>
-<li><code>string-concat</code> - String concatenation</li>
-<li><code>conditionals</code> - Ternary operator and if-then-else</li>
-</ul>
-<h3 id="arrays">Arrays<a class="headerlink" href="#arrays" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>array-constructor</code> - Array construction syntax</li>
-<li><code>simple-array-selectors</code> - Basic array indexing and slicing</li>
-<li><code>multiple-array-selectors</code> - Complex array selections</li>
-<li><code>predicates</code> - Array filtering with predicates</li>
-<li><code>transforms</code> - Array transformation operations</li>
-</ul>
-<h3 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h3>
-<p><strong>String Functions:</strong>
-- <code>function-string</code> - $string()
-- <code>function-substring</code> - $substring()
-- <code>function-uppercase</code> - $uppercase()
-- <code>function-lowercase</code> - $lowercase()
-- <code>function-trim</code> - $trim()
-- <code>function-length</code> - $length()
-- <code>function-split</code> - $split()
-- <code>function-join</code> - $join()
-- And more...</p>
-<p><strong>Numeric Functions:</strong>
-- <code>function-number</code> - $number()
-- <code>function-abs</code> - $abs()
-- <code>function-floor</code> - $floor()
-- <code>function-ceil</code> - $ceil()
-- <code>function-round</code> - $round()
-- <code>function-sqrt</code> - $sqrt()
-- <code>function-power</code> - $power()
-- And more...</p>
-<p><strong>Array Functions:</strong>
-- <code>function-count</code> - $count()
-- <code>function-sum</code> - $sum()
-- <code>function-max</code> - $max()
-- <code>function-min</code> - $min()
-- <code>function-average</code> - $average()
-- <code>function-append</code> - $append()
-- <code>function-reverse</code> - $reverse()
-- <code>function-sort</code> - $sort()
-- <code>function-distinct</code> - $distinct()
-- And more...</p>
-<p><strong>Object Functions:</strong>
-- <code>function-keys</code> - $keys()
-- <code>function-lookup</code> - $lookup()
-- <code>function-spread</code> - $spread()
-- <code>function-merge</code> - $merge()
-- <code>function-exists</code> - $exists()
-- And more...</p>
-<p><strong>Higher-Order Functions:</strong>
-- <code>function-map</code> - $map()
-- <code>function-filter</code> - $filter()
-- <code>function-reduce</code> - $reduce()
-- <code>function-single</code> - $single()
-- <code>function-sift</code> - $sift()</p>
-<h3 id="advanced-features">Advanced Features<a class="headerlink" href="#advanced-features" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>lambdas</code> - Lambda function syntax</li>
-<li><code>closures</code> - Closure semantics</li>
-<li><code>higher-order-functions</code> - Passing functions as arguments</li>
-<li><code>partial-function-application</code> - Partial application</li>
-<li><code>tail-recursion</code> - Tail-recursive functions</li>
-<li><code>regex</code> - Regular expression support</li>
-<li><code>encoding</code> - Character encoding functions</li>
-</ul>
-<h3 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>errors</code> - Error conditions and messages</li>
-<li><code>missing-paths</code> - Handling undefined paths</li>
-<li><code>null</code> - Null value handling</li>
-<li><code>parser-recovery</code> - Parser error recovery</li>
-</ul>
-<h2 id="running-compatibility-tests">Running Compatibility Tests<a class="headerlink" href="#running-compatibility-tests" title="Permanent link">&para;</a></h2>
-<h3 id="run-all-tests">Run All Tests<a class="headerlink" href="#run-all-tests" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/python/test_reference_suite.py<span class="w"> </span>-v
+<p>By default this enables SIMD-accelerated JSON parsing. To disable:</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">jsonata-core</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;2.1.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">default-features</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="kc">false</span><span class="w"> </span><span class="p">}</span>
 </span></code></pre></div>
-<h3 id="run-specific-group">Run Specific Group<a class="headerlink" href="#run-specific-group" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Run only literal tests</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>pytest<span class="w"> </span>tests/python/test_reference_suite.py<span class="w"> </span>-v<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;literals&quot;</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Run only string function tests</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>pytest<span class="w"> </span>tests/python/test_reference_suite.py<span class="w"> </span>-v<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;function-string&quot;</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Run only lambda tests</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>pytest<span class="w"> </span>tests/python/test_reference_suite.py<span class="w"> </span>-v<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;lambdas&quot;</span>
+<p>To enable Python bindings (used internally by <code>jsonatapy</code>):</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">jsonata-core</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;2.1.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">features</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;python&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
 </span></code></pre></div>
-<h3 id="run-with-detailed-output">Run with Detailed Output<a class="headerlink" href="#run-with-detailed-output" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Short traceback format</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>pytest<span class="w"> </span>tests/python/test_reference_suite.py<span class="w"> </span>-v<span class="w"> </span>--tb<span class="o">=</span>short
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Show only first 10 failures</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>pytest<span class="w"> </span>tests/python/test_reference_suite.py<span class="w"> </span>-v<span class="w"> </span>--maxfail<span class="o">=</span><span class="m">10</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Show full diff for failures</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>pytest<span class="w"> </span>tests/python/test_reference_suite.py<span class="w"> </span>-v<span class="w"> </span>--tb<span class="o">=</span>long
+<h2 id="quick-start">Quick start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">use</span><span class="w"> </span><span class="n">jsonata_core</span><span class="p">::</span><span class="n">evaluator</span><span class="p">::</span><span class="n">Evaluator</span><span class="p">;</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">use</span><span class="w"> </span><span class="n">jsonata_core</span><span class="p">::</span><span class="n">parser</span><span class="p">;</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">use</span><span class="w"> </span><span class="n">jsonata_core</span><span class="p">::</span><span class="n">value</span><span class="p">::</span><span class="n">JValue</span><span class="p">;</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">fn</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="p">(),</span><span class="w"> </span><span class="nb">Box</span><span class="o">&lt;</span><span class="k">dyn</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">error</span><span class="p">::</span><span class="n">Error</span><span class="o">&gt;&gt;</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="c1">// Parse expression once</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">ast</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parser</span><span class="p">::</span><span class="n">parse</span><span class="p">(</span><span class="s">&quot;products[price &gt; 100].name&quot;</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="c1">// Build data directly or parse from JSON</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JValue</span><span class="p">::</span><span class="n">from_json_str</span><span class="p">(</span><span class="s">r#&quot;{</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="s">        &quot;products&quot;: [</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="s">            {&quot;name&quot;: &quot;Laptop&quot;, &quot;price&quot;: 1200},</span>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="s">            {&quot;name&quot;: &quot;Mouse&quot;,  &quot;price&quot;: 25},</span>
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="s">            {&quot;name&quot;: &quot;Monitor&quot;,&quot;price&quot;: 450}</span>
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="s">        ]</span>
+</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="s">    }&quot;#</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>
+</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="w">    </span><span class="c1">// Evaluate</span>
+</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Evaluator</span><span class="p">::</span><span class="n">new</span><span class="p">().</span><span class="n">evaluate</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ast</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&quot;{}&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="n">to_json_string</span><span class="p">()</span><span class="o">?</span><span class="p">);</span>
+</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="w">    </span><span class="c1">// [&quot;Laptop&quot;,&quot;Monitor&quot;]</span>
+</span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>
+</span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="w">    </span><span class="nb">Ok</span><span class="p">(())</span>
+</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="p">}</span>
 </span></code></pre></div>
-<h2 id="test-suite-structure">Test Suite Structure<a class="headerlink" href="#test-suite-structure" title="Permanent link">&para;</a></h2>
-<p>The reference test suite uses JSON-based test specifications:</p>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">&quot;expr&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;JSONata expression&quot;</span><span class="p">,</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">&quot;dataset&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dataset0&quot;</span><span class="p">,</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">&quot;bindings&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;var&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;value&quot;</span><span class="p">},</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">&quot;result&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;expec</span><span class="kc">te</span><span class="err">d</span><span class="w"> </span><span class="err">resul</span><span class="kc">t</span><span class="err">&gt;</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="p">}</span>
+<h2 id="public-api">Public API<a class="headerlink" href="#public-api" title="Permanent link">&para;</a></h2>
+<h3 id="parserparse"><code>parser::parse</code><a class="headerlink" href="#parserparse" title="Permanent link">&para;</a></h3>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">parse</span><span class="p">(</span><span class="n">expression</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">AstNode</span><span class="p">,</span><span class="w"> </span><span class="n">ParserError</span><span class="o">&gt;</span>
 </span></code></pre></div>
-<p>Each test can specify:
-- <code>result</code>: Expected successful result
-- <code>undefinedResult</code>: Result should be undefined
-- <code>code</code>: Expected error code (e.g., "T2001")
-- <code>error</code>: Expected error object
-- <code>timelimit</code>: Timeout in milliseconds
-- <code>depth</code>: Maximum recursion depth</p>
-<h2 id="improving-compatibility">Improving Compatibility<a class="headerlink" href="#improving-compatibility" title="Permanent link">&para;</a></h2>
-<p>If you find a compatibility issue:</p>
-<ol>
-<li>
-<p><strong>Run the specific test group</strong> to isolate the problem:
-   <div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pytest<span class="w"> </span>tests/python/test_reference_suite.py<span class="w"> </span>-v<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;group_name&quot;</span>
-</span></code></pre></div></p>
-</li>
-<li>
-<p><strong>Check the test case</strong> in <code>tests/jsonata-js/test/test-suite/groups/group_name/</code></p>
-</li>
-<li>
-<p><strong>File an issue</strong> on GitHub with:</p>
-</li>
-<li>Test group and case number</li>
-<li>Expression that fails</li>
-<li>Expected vs actual result</li>
-<li>
-<p>Error message (if any)</p>
-</li>
-<li>
-<p><strong>Submit a PR</strong> with the fix:</p>
-</li>
-<li>Update Rust implementation</li>
-<li>Verify test passes</li>
-<li>Run full suite to check for regressions</li>
-</ol>
-<h2 id="resources">Resources<a class="headerlink" href="#resources" title="Permanent link">&para;</a></h2>
+<p>Parses a JSONata expression string into an AST. Parsing is the expensive step —
+do it once and reuse the <code>AstNode</code> across many evaluations.</p>
+<h3 id="evaluator"><code>Evaluator</code><a class="headerlink" href="#evaluator" title="Permanent link">&para;</a></h3>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">Evaluator</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">..</span><span class="p">.</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">impl</span><span class="w"> </span><span class="n">Evaluator</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">new</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">Self</span><span class="p">;</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">with_context</span><span class="p">(</span><span class="n">context</span><span class="p">:</span><span class="w"> </span><span class="nc">Context</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">Self</span><span class="p">;</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">evaluate</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">node</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">AstNode</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">JValue</span><span class="p">)</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">        </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">JValue</span><span class="p">,</span><span class="w"> </span><span class="n">EvaluatorError</span><span class="o">&gt;</span><span class="p">;</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="p">}</span>
+</span></code></pre></div>
+<p><code>Evaluator</code> is stateful (holds the scope stack). Construct a fresh one per
+top-level <code>evaluate()</code> call, or reuse one if you're managing scope manually.</p>
+<h3 id="jvalue"><code>JValue</code><a class="headerlink" href="#jvalue" title="Permanent link">&para;</a></h3>
+<p>The runtime value type. All JSONata values are represented as <code>JValue</code>.</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1">// Constructors</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">JValue</span><span class="p">::</span><span class="n">from_json_str</span><span class="p">(</span><span class="n">s</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">JValue</span><span class="p">,</span><span class="w"> </span><span class="o">..</span><span class="p">.</span><span class="o">&gt;</span><span class="w">  </span><span class="c1">// parse JSON string</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">JValue</span><span class="p">::</span><span class="n">object</span><span class="p">(</span><span class="n">map</span><span class="p">:</span><span class="w"> </span><span class="nc">IndexMap</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="n">JValue</span><span class="o">&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">JValue</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">JValue</span><span class="p">::</span><span class="n">array</span><span class="p">(</span><span class="n">vec</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">JValue</span><span class="o">&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">JValue</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">JValue</span><span class="p">::</span><span class="n">string</span><span class="p">(</span><span class="n">s</span><span class="p">:</span><span class="w"> </span><span class="nc">impl</span><span class="w"> </span><span class="nb">Into</span><span class="o">&lt;</span><span class="n">Rc</span><span class="o">&lt;</span><span class="kt">str</span><span class="o">&gt;&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">JValue</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">JValue</span><span class="p">::</span><span class="n">from</span><span class="p">(</span><span class="n">n</span><span class="p">:</span><span class="w"> </span><span class="kt">f64</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">JValue</span><span class="w">                          </span><span class="c1">// Number</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">JValue</span><span class="p">::</span><span class="n">Bool</span><span class="p">(</span><span class="n">b</span><span class="p">:</span><span class="w"> </span><span class="kt">bool</span><span class="p">)</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">JValue</span><span class="p">::</span><span class="n">Null</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">JValue</span><span class="p">::</span><span class="n">Undefined</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="c1">// Serialisation</span>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="n">value</span><span class="p">.</span><span class="n">to_json_string</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="o">..</span><span class="p">.</span><span class="o">&gt;</span>
+</span></code></pre></div>
+<p><code>JValue</code> clones are O(1) — heap variants (<code>String</code>, <code>Array</code>, <code>Object</code>) use
+<code>Rc</code> reference counting, so cloning shares the allocation.</p>
+<h3 id="context"><code>Context</code><a class="headerlink" href="#context" title="Permanent link">&para;</a></h3>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">Context</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="o">..</span><span class="p">.</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">impl</span><span class="w"> </span><span class="n">Context</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">new</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">Self</span><span class="p">;</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">bind</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">name</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">:</span><span class="w"> </span><span class="nc">JValue</span><span class="p">);</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>Used to inject variable bindings before evaluation:</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">ctx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Context</span><span class="p">::</span><span class="n">new</span><span class="p">();</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">ctx</span><span class="p">.</span><span class="n">bind</span><span class="p">(</span><span class="s">&quot;threshold&quot;</span><span class="p">.</span><span class="n">to_string</span><span class="p">(),</span><span class="w"> </span><span class="n">JValue</span><span class="p">::</span><span class="n">from</span><span class="p">(</span><span class="mf">100.0</span><span class="p">));</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">ev</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Evaluator</span><span class="p">::</span><span class="n">with_context</span><span class="p">(</span><span class="n">ctx</span><span class="p">);</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="kd">let</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ev</span><span class="p">.</span><span class="n">evaluate</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ast</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">)</span><span class="o">?</span><span class="p">;</span><span class="w">  </span><span class="c1">// $threshold available in expression</span>
+</span></code></pre></div>
+<h2 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h2>
+<p>Criterion benchmark results (pure Rust, no Python, release build):</p>
+<table>
+<thead>
+<tr>
+<th>Expression</th>
+<th>Time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Simple field lookup</td>
+<td>81 ns</td>
+</tr>
+<tr>
+<td>Arithmetic</td>
+<td>140 ns</td>
+</tr>
+<tr>
+<td>Conditional</td>
+<td>106 ns</td>
+</tr>
+<tr>
+<td>String operations</td>
+<td>126–284 ns</td>
+</tr>
+<tr>
+<td><code>$sum</code> (100 elements)</td>
+<td>287 ns</td>
+</tr>
+<tr>
+<td><code>$sum</code> (1000 elements)</td>
+<td>1.88 µs</td>
+</tr>
+<tr>
+<td>Filter predicate (100 objects)</td>
+<td>7.9 µs</td>
+</tr>
+<tr>
+<td>Realistic workload (100 products)</td>
+<td>9–79 µs</td>
+</tr>
+</tbody>
+</table>
+<p>Compared to <code>jsonata-rs</code> (the next fastest Rust implementation): <strong>~40x faster</strong>
+across typical workloads.</p>
+<p>Run benchmarks:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/txjmb/jsonata-core.git
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nb">cd</span><span class="w"> </span>jsonata-core
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>cargo<span class="w"> </span>bench<span class="w"> </span>--no-default-features<span class="w"> </span>--features<span class="w"> </span>simd
+</span></code></pre></div>
+<h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>simd</code></td>
+<td>yes</td>
+<td>SIMD-accelerated JSON parsing via <code>simd-json</code></td>
+</tr>
+<tr>
+<td><code>python</code></td>
+<td>no</td>
+<td>PyO3 Python bindings (used by <code>jsonatapy</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="compatibility">Compatibility<a class="headerlink" href="#compatibility" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Reference Implementation</strong>: https://github.com/jsonata-js/jsonata</li>
-<li><strong>JSONata Specification</strong>: https://docs.jsonata.org/</li>
-<li><strong>Test Suite Source</strong>: <code>tests/jsonata-js/test/test-suite/</code></li>
-<li><strong>JSONata Exerciser</strong>: https://try.jsonata.org/ (for testing expressions)</li>
+<li>Rust stable 1.70+</li>
+<li>Passes all 1258 JSONata 2.1.0 reference tests</li>
+<li><code>!Send</code> — uses <code>Rc</code> internally; not safe to send across threads.
+  For parallel workloads, create one <code>Evaluator</code> per thread.</li>
 </ul>
 
 
