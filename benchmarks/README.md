@@ -268,46 +268,57 @@ suite.benchmark(
 )
 ```
 
-## Expected Performance
+## Performance
 
-Based on initial benchmarks, typical performance characteristics:
+Current results (2026-02-22, full benchmark run against jsonata-js 2.1.0 on Node.js v24):
 
 | Category | jsonatapy vs JS | Notes |
 |----------|----------------|-------|
-| Simple Paths | 2-8x faster | String operations particularly fast |
-| Array Operations (small) | 0.5-1x | Similar performance |
-| Array Operations (large) | 0.02-0.1x | JS V8 optimizes array ops heavily |
-| Complex Transformations | 2-12x faster | Conditionals and functions excel |
-| Deep Nesting | 0.5-2x | Path traversal competitive |
-| String Operations | 3-6x faster | Native Rust string handling |
-| Higher-Order Functions | 0.04-0.06x | Lambda performance needs optimization |
-| Realistic Workload | 0.01-0.1x | Complex queries need work |
+| Simple Paths | **2–14x faster** | Arithmetic 13.7x, simple path 10.7x, deep path 3.8x |
+| Array Operations (100 elements) | **1–2x faster** | $sum/$max/$count all competitive |
+| Array Operations (1000+ elements) | 3–98x slower | V8 JIT dominates for large numeric arrays |
+| Array Mapping / Filtering | 13–19x slower | Python dict conversion cost dominates |
+| Complex Transformations | **3–17x faster** | Conditional 16.8x, object construction 3–4x |
+| Deep Nesting | 1.7x faster – 4x slower | Deep field path faster; nested arrays slower |
+| String Operations | **4–9x faster** | Native Rust string handling |
+| Higher-Order Functions | ~1–2x (roughly equal) | $reduce 2x faster; $map/$filter 1.7–2.3x slower |
+| Realistic Workload (dict input) | 26–94x slower | Python↔Rust dict conversion is the bottleneck |
+| Realistic Workload (JsonataData) | 2–7x slower | Pre-converted data eliminates conversion cost |
 
 **Key Insights:**
-- jsonatapy excels at simple operations and string manipulation
-- V8 JavaScript engine has highly optimized array operations
-- Higher-order functions (lambdas) need performance optimization
-- Complex realistic queries show room for improvement
+- jsonatapy is the fastest Python JSONata implementation by a wide margin (~10–65x faster than jsonata-python)
+- For pure expression evaluation (paths, arithmetic, conditionals, strings), jsonatapy consistently beats V8
+- The dominant cost for large array workloads is Python dict → Rust value conversion (~1 µs/field)
+- Use `jsonatapy.JsonataData` to pre-convert data once and amortize that cost across repeated queries
 
 ## Performance Analysis
 
-### Areas Where jsonatapy Excels
-- Simple path navigation and field access
-- String operations (uppercase, lowercase, substring)
-- Basic arithmetic and conditionals
-- Shallow object transformations
+### Where jsonatapy excels
+- Simple path navigation and field access (2–14x faster than JS)
+- String operations — uppercase, lowercase, substring, contains (4–9x faster)
+- Arithmetic and conditionals (up to 17x faster)
+- Complex object transformations (3–17x faster)
+- Small array aggregates: $sum/$max/$count on 100-element arrays (1–2x faster)
 
-### Areas Needing Optimization
-- Large array aggregations (1000+ elements)
-- Higher-order functions with lambdas
-- Complex filtering and mapping operations
-- Nested array/object traversals
+### Where JavaScript is faster
+- Large array aggregations (1000+ elements) — V8's JIT eliminates loop overhead
+- Array mapping and filtering over Python dict arrays — conversion cost is irreducible
+- Realistic workloads on the `evaluate(dict)` path — mitigated by `JsonataData`
 
-### Future Optimizations
-- Implement lazy evaluation for large arrays
-- Optimize lambda function execution
-- Add SIMD operations for numeric arrays
-- Improve memory allocation patterns
+### The Python boundary
+For large array workloads the irreducible cost is converting Python objects to Rust values.
+Two API paths avoid this:
+
+```python
+# Pre-convert once, reuse many times (6–15x faster than evaluate(dict))
+data = jsonatapy.JsonataData(large_dataset)
+result = expr.evaluate_with_data(data)
+
+# Or pass raw JSON string directly
+result = expr.evaluate_json(raw_json_string)
+```
+
+See [docs/performance.md](../docs/performance.md) for the full table of results.
 
 ## Troubleshooting
 
