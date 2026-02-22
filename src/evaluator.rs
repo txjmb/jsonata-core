@@ -524,6 +524,30 @@ fn try_compile_expr_inner(
     }
 }
 
+/// Extract an inline lambda's params and body from an AST node, returning `None` if the
+/// node is not a simple lambda (i.e. has a signature or is a TCO thunk).
+fn extract_inline_lambda(node: &AstNode) -> Option<(&Vec<String>, &AstNode)> {
+    match node {
+        AstNode::Lambda { params, body, signature: None, thunk: false } => Some((params, body)),
+        _ => None,
+    }
+}
+
+/// Compile the array argument + lambda body for a HOF call, returning `None` if either
+/// fails to compile. The lambda params are added to the allowed-vars set so the body
+/// can reference them.
+fn compile_hof_array_and_body(
+    array_node: &AstNode,
+    params: &[String],
+    body: &AstNode,
+    allowed_vars: Option<&[&str]>,
+) -> Option<(Box<CompiledExpr>, Box<CompiledExpr>)> {
+    let array = try_compile_expr_inner(array_node, allowed_vars)?;
+    let param_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+    let compiled_body = try_compile_expr_inner(body, Some(&param_refs))?;
+    Some((Box::new(array), Box::new(compiled_body)))
+}
+
 /// Try to compile a higher-order function call (`$map`, `$filter`, `$reduce`) when the
 /// callback argument is an inline lambda literal with a compilable body.
 ///
@@ -543,65 +567,37 @@ fn try_compile_hof_expr(
             if args.len() != 2 {
                 return None;
             }
-            let AstNode::Lambda {
-                params,
-                body,
-                signature: None,
-                thunk: false,
-            } = &args[1]
-            else {
-                return None;
-            };
-            // Support 1-param (element only) and 2-param (element + index) lambdas.
+            let (params, body) = extract_inline_lambda(&args[1])?;
             if params.is_empty() || params.len() > 2 {
                 return None;
             }
-            let array = try_compile_expr_inner(&args[0], allowed_vars)?;
-            let param_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
-            let compiled_body = try_compile_expr_inner(body, Some(&param_refs))?;
+            let (array, compiled_body) =
+                compile_hof_array_and_body(&args[0], params, body, allowed_vars)?;
             if name == "map" {
-                Some(CompiledExpr::MapCall {
-                    array: Box::new(array),
-                    params: params.clone(),
-                    body: Box::new(compiled_body),
-                })
+                Some(CompiledExpr::MapCall { array, params: params.clone(), body: compiled_body })
             } else {
-                Some(CompiledExpr::FilterCall {
-                    array: Box::new(array),
-                    params: params.clone(),
-                    body: Box::new(compiled_body),
-                })
+                Some(CompiledExpr::FilterCall { array, params: params.clone(), body: compiled_body })
             }
         }
         "reduce" => {
             if args.len() < 2 || args.len() > 3 {
                 return None;
             }
-            let AstNode::Lambda {
-                params,
-                body,
-                signature: None,
-                thunk: false,
-            } = &args[1]
-            else {
-                return None;
-            };
-            // $reduce requires exactly 2 params: accumulator and current element.
+            let (params, body) = extract_inline_lambda(&args[1])?;
             if params.len() != 2 {
                 return None;
             }
-            let array = try_compile_expr_inner(&args[0], allowed_vars)?;
-            let param_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
-            let compiled_body = try_compile_expr_inner(body, Some(&param_refs))?;
+            let (array, compiled_body) =
+                compile_hof_array_and_body(&args[0], params, body, allowed_vars)?;
             let initial = if args.len() == 3 {
                 Some(Box::new(try_compile_expr_inner(&args[2], allowed_vars)?))
             } else {
                 None
             };
             Some(CompiledExpr::ReduceCall {
-                array: Box::new(array),
+                array,
                 params: params.clone(),
-                body: Box::new(compiled_body),
+                body: compiled_body,
                 initial,
             })
         }
@@ -728,6 +724,18 @@ fn eval_compiled_shaped(
     shape: &ShapeCache,
 ) -> Result<JValue, EvaluatorError> {
     eval_compiled_inner(expr, data, vars, None, Some(shape))
+}
+
+/// Clone the outer variable bindings into a new HashMap with the given capacity hint.
+/// Used by HOF eval arms to create per-iteration variable scopes that merge outer vars
+/// with lambda parameters.
+#[inline]
+fn clone_outer_vars<'a>(
+    vars: Option<&HashMap<&'a str, &'a JValue>>,
+    capacity: usize,
+) -> HashMap<&'a str, &'a JValue> {
+    vars.map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
+        .unwrap_or_else(|| HashMap::with_capacity(capacity))
 }
 
 fn eval_compiled_inner(
@@ -995,7 +1003,6 @@ fn eval_compiled_inner(
 
         CompiledExpr::MapCall { array, params, body } => {
             let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
-            // Borrow a slice directly from arr_val — avoid cloning the whole array.
             let single_holder;
             let items: &[JValue] = match &arr_val {
                 JValue::Array(a) => a.as_slice(),
@@ -1009,42 +1016,26 @@ fn eval_compiled_inner(
             let p0 = params.first().map(|s| s.as_str());
 
             if let Some(p1) = params.get(1).map(|s| s.as_str()) {
-                // 2-param lambda (element + index): index is loop-local, so we can't hold
-                // a reference to it across iterations in a shared HashMap. Build per-iteration.
-                // (2-param lambdas are rare; the common 1-param case is below.)
+                // 2-param lambda (element + index): build per-iteration because idx_val
+                // is loop-local and cannot outlive the iteration.
                 for (idx, item) in items.iter().enumerate() {
                     let idx_val = JValue::Number(idx as f64);
-                    let mut call_vars: HashMap<&str, &JValue> = vars
-                        .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
-                        .unwrap_or_else(|| HashMap::with_capacity(2));
-                    if let Some(p) = p0 {
-                        call_vars.insert(p, item);
-                    }
+                    let mut call_vars = clone_outer_vars(vars, 2);
+                    if let Some(p) = p0 { call_vars.insert(p, item); }
                     call_vars.insert(p1, &idx_val);
                     let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
-                    if !mapped.is_undefined() {
-                        result.push(mapped);
-                    }
+                    if !mapped.is_undefined() { result.push(mapped); }
                 }
             } else if let Some(p0) = p0 {
-                // 1-param lambda (most common): build HashMap once, update the element
-                // reference in-place each iteration — mirrors the tree-walker fast path.
-                let mut call_vars: HashMap<&str, &JValue> = vars
-                    .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
-                    .unwrap_or_else(|| HashMap::with_capacity(1));
+                // 1-param lambda (most common): build HashMap once, update element ref each iteration.
+                let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
                     call_vars.insert(p0, item);
                     let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
-                    if !mapped.is_undefined() {
-                        result.push(mapped);
-                    }
+                    if !mapped.is_undefined() { result.push(mapped); }
                 }
             }
-            Ok(if result.is_empty() {
-                JValue::Undefined
-            } else {
-                JValue::array(result)
-            })
+            Ok(if result.is_empty() { JValue::Undefined } else { JValue::array(result) })
         }
 
         CompiledExpr::FilterCall { array, params, body } => {
@@ -1053,7 +1044,7 @@ fn eval_compiled_inner(
                 return Ok(JValue::Undefined);
             }
             let single_holder;
-            let (items, was_single): (&[JValue], bool) = match &arr_val {
+            let (items, was_single) = match &arr_val {
                 JValue::Array(a) => (a.as_slice(), false),
                 other => {
                     single_holder = [other.clone()];
@@ -1066,28 +1057,18 @@ fn eval_compiled_inner(
             if let Some(p1) = params.get(1).map(|s| s.as_str()) {
                 for (idx, item) in items.iter().enumerate() {
                     let idx_val = JValue::Number(idx as f64);
-                    let mut call_vars: HashMap<&str, &JValue> = vars
-                        .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
-                        .unwrap_or_else(|| HashMap::with_capacity(2));
-                    if let Some(p) = p0 {
-                        call_vars.insert(p, item);
-                    }
+                    let mut call_vars = clone_outer_vars(vars, 2);
+                    if let Some(p) = p0 { call_vars.insert(p, item); }
                     call_vars.insert(p1, &idx_val);
                     let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
-                    if compiled_is_truthy(&pred) {
-                        result.push(item.clone());
-                    }
+                    if compiled_is_truthy(&pred) { result.push(item.clone()); }
                 }
             } else if let Some(p0) = p0 {
-                let mut call_vars: HashMap<&str, &JValue> = vars
-                    .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
-                    .unwrap_or_else(|| HashMap::with_capacity(1));
+                let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
                     call_vars.insert(p0, item);
                     let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
-                    if compiled_is_truthy(&pred) {
-                        result.push(item.clone());
-                    }
+                    if compiled_is_truthy(&pred) { result.push(item.clone()); }
                 }
             }
             if was_single {
@@ -1115,25 +1096,18 @@ fn eval_compiled_inner(
             };
             let (start_idx, mut accumulator) = if let Some(init_expr) = initial {
                 let init_val = eval_compiled_inner(init_expr, data, vars, ctx, shape)?;
-                if items.is_empty() {
-                    return Ok(init_val);
-                }
+                if items.is_empty() { return Ok(init_val); }
                 (0usize, init_val)
             } else {
-                if items.is_empty() {
-                    return Ok(JValue::Null);
-                }
+                if items.is_empty() { return Ok(JValue::Null); }
                 (1, items[0].clone())
             };
             let acc_param = params[0].as_str();
             let item_param = params[1].as_str();
             for item in items[start_idx..].iter() {
-                // Build per-iteration: &accumulator borrow must be released before we can
-                // update `accumulator`, and the borrow checker can't see through HashMap
-                // removal. `drop(call_vars)` is the only way to release it cleanly.
-                let mut call_vars: HashMap<&str, &JValue> = vars
-                    .map(|v| v.iter().map(|(&k, v)| (k, *v)).collect())
-                    .unwrap_or_else(|| HashMap::with_capacity(2));
+                // Per-iteration HashMap: &accumulator borrow must be released before we
+                // can reassign `accumulator`. `drop(call_vars)` ends the borrow.
+                let mut call_vars = clone_outer_vars(vars, 2);
                 call_vars.insert(acc_param, &accumulator);
                 call_vars.insert(item_param, item);
                 let new_acc = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
@@ -1358,6 +1332,13 @@ fn try_compile_path(steps: &[crate::ast::PathStep], allowed_vars: Option<&[&str]
         _ => return None,
     };
 
+    // Compile a boolean filter predicate, rejecting numeric predicates (`[0]`, `[1]`)
+    // which represent index access in JSONata, not boolean filtering.
+    let compile_filter = |node: &AstNode| -> Option<CompiledExpr> {
+        if matches!(node, AstNode::Number(_)) { return None; }
+        try_compile_expr_inner(node, allowed_vars)
+    };
+
     // Compile each field step.
     // Handles:
     //   - Name nodes with at most one Stage::Filter attached (from `a.b[pred]` dot-path parsing)
@@ -1369,33 +1350,17 @@ fn try_compile_path(steps: &[crate::ast::PathStep], allowed_vars: Option<&[&str]
             AstNode::Name(name) => {
                 let filter = match step.stages.as_slice() {
                     [] => None,
-                    [Stage::Filter(filter_node)] => {
-                        // Numeric literal predicates (`[0]`, `[1]`, etc.) mean index access in JSONata,
-                        // not boolean filtering. Fall back to tree-walker for these.
-                        if matches!(**filter_node, AstNode::Number(_)) {
-                            return None;
-                        }
-                        Some(try_compile_expr_inner(filter_node, allowed_vars)?)
-                    }
+                    [Stage::Filter(filter_node)] => Some(compile_filter(filter_node)?),
                     _ => return None,
                 };
                 compiled_steps.push(CompiledStep { field: name.clone(), filter });
             }
             AstNode::Predicate(filter_node) => {
-                // Standalone predicate step — `products[price > 100]` parses as
-                //   Name("products") step  +  Predicate(price > 100) step.
-                // Fold the predicate into the previous Name step's filter slot.
-                if matches!(**filter_node, AstNode::Number(_)) {
-                    return None; // numeric = index access, not a boolean filter
-                }
-                if !step.stages.is_empty() {
-                    return None; // unexpected stages on a Predicate step — fall back
-                }
-                let last = compiled_steps.last_mut()?; // no previous Name step — fall back
-                if last.filter.is_some() {
-                    return None; // previous step already has a filter — multiple predicates, fall back
-                }
-                last.filter = Some(try_compile_expr_inner(filter_node, allowed_vars)?);
+                // Standalone predicate step — fold into the previous Name step's filter slot.
+                if !step.stages.is_empty() { return None; }
+                let last = compiled_steps.last_mut()?;
+                if last.filter.is_some() { return None; }
+                last.filter = Some(compile_filter(filter_node)?);
             }
             _ => return None,
         }
@@ -1494,9 +1459,37 @@ fn compiled_field_step(field: &str, value: &JValue) -> JValue {
             obj.get(field).cloned().unwrap_or(JValue::Undefined)
         }
         JValue::Array(arr) => {
+            // Build shape cache from first plain (non-tuple) object for O(1) positional access.
+            let shape: Option<ShapeCache> = arr.iter().find_map(|v| {
+                if let JValue::Object(obj) = v {
+                    if obj.get("__tuple__") != Some(&JValue::Bool(true)) {
+                        return build_shape_cache(v);
+                    }
+                }
+                None
+            });
             let mut result = Vec::new();
             for item in arr.iter() {
-                let extracted = compiled_field_step(field, item);
+                let extracted = if let (Some(ref sh), JValue::Object(obj)) = (&shape, item) {
+                    // Tuple objects need the recursive path for "@" inner lookup.
+                    if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                        compiled_field_step(field, item)
+                    } else if let Some(&pos) = sh.get(field) {
+                        // Positional access with key verification: guards against heterogeneous
+                        // schemas (objects where the same field is at a different index).
+                        // On a mismatch, fall back to a regular hash lookup.
+                        match obj.get_index(pos) {
+                            Some((k, v)) if k.as_str() == field => v.clone(),
+                            _ => obj.get(field).cloned().unwrap_or(JValue::Undefined),
+                        }
+                    } else {
+                        // Field not in the first object's schema — fall back to hash lookup
+                        // so that heterogeneous arrays (e.g. [{a:1},{b:2}]) are handled correctly.
+                        obj.get(field).cloned().unwrap_or(JValue::Undefined)
+                    }
+                } else {
+                    compiled_field_step(field, item)
+                };
                 match extracted {
                     JValue::Undefined => {}
                     JValue::Array(inner) => result.extend(inner.iter().cloned()),
@@ -1528,8 +1521,16 @@ fn compiled_apply_filter(
     match value {
         JValue::Array(arr) => {
             let mut result = Vec::new();
+            // Auto-build shape cache from first element when not provided.
+            // Avoids per-element hash lookups in the filter predicate for homogeneous arrays.
+            let local_shape: Option<ShapeCache> = if shape.is_none() {
+                arr.first().and_then(build_shape_cache)
+            } else {
+                None
+            };
+            let effective_shape = shape.or_else(|| local_shape.as_ref());
             for item in arr.iter() {
-                let pred = eval_compiled_inner(filter, item, vars, ctx, shape)?;
+                let pred = eval_compiled_inner(filter, item, vars, ctx, effective_shape)?;
                 if compiled_is_truthy(&pred) {
                     result.push(item.clone());
                 }

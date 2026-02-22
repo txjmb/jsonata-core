@@ -101,6 +101,28 @@ fn ecommerce_100() -> JValue {
     JValue::object(root)
 }
 
+/// 100 order objects used for the multi-step filtered path benchmark.
+///
+/// Each order: {customer, total, items}.  ~half have total > 100 so the filter
+/// is selective (exercises both matching and non-matching elements).
+fn orders_100() -> JValue {
+    let orders: Vec<JValue> = (0..100_usize)
+        .map(|i| {
+            let mut m = IndexMap::new();
+            m.insert(
+                "customer".to_string(),
+                JValue::string(format!("Customer {i}")),
+            );
+            m.insert("total".to_string(), JValue::from(i as f64 * 2.0 + 1.0));
+            m.insert("items".to_string(), JValue::from(i as f64 % 5.0 + 1.0));
+            JValue::object(m)
+        })
+        .collect();
+    let mut root = IndexMap::new();
+    root.insert("orders".to_string(), JValue::array(orders));
+    JValue::object(root)
+}
+
 // ── Helper: evaluate expression on data ───────────────────────────────────────
 
 #[inline]
@@ -459,6 +481,28 @@ fn bench_vm_vs_tree_walker(c: &mut Criterion) {
         if let Some(bc) = &bc {
             group.bench_function("vm", |b| {
                 b.iter(|| black_box(_bench::run(bc, black_box(&products)).unwrap()))
+            });
+        }
+        group.finish();
+    }
+
+    // ── Multi-step filtered path: filter + field-step on 100 order objects ───
+    //
+    // orders[total > 100].customer exercises the EvalFallback → compiled_eval_field_path
+    // path. Shape caches are auto-built in compiled_apply_filter (filter step) and
+    // compiled_field_step (field-step array mapping), making this measurably faster.
+    {
+        let orders = orders_100();
+        let ast = parser::parse("orders[total > 100].customer").unwrap();
+        let bc  = _bench::compile(&ast);
+
+        let mut group = c.benchmark_group("vm_vs/filter_nested_100");
+        group.bench_function("tree_walker", |b| {
+            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&orders)).unwrap()))
+        });
+        if let Some(bc) = &bc {
+            group.bench_function("vm", |b| {
+                b.iter(|| black_box(_bench::run(bc, black_box(&orders)).unwrap()))
             });
         }
         group.finish();
