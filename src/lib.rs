@@ -30,12 +30,14 @@
 //! - `value` - JValue type (the runtime value representation)
 
 pub mod ast;
+mod compiler;
 mod datetime;
 pub mod evaluator;
 pub mod functions;
 pub mod parser;
 mod signature;
 pub mod value;
+mod vm;
 
 // ── Python bindings (only when the "python" feature is enabled) ───────────────
 
@@ -114,10 +116,10 @@ impl JsonataData {
 struct JsonataExpression {
     /// The parsed Abstract Syntax Tree
     ast: ast::AstNode,
-    /// Lazily compiled expression — populated on first evaluate() call.
-    /// `Some(ce)` = fast compiled path; `None` = must use tree-walker.
+    /// Lazily compiled bytecode — populated on first evaluate() call.
+    /// `Some(bc)` = fast VM path; `None` = must use tree-walker.
     /// `OnceCell` ensures compilation happens at most once per expression instance.
-    compiled: std::cell::OnceCell<Option<evaluator::CompiledExpr>>,
+    bytecode: std::cell::OnceCell<Option<vm::BytecodeProgram>>,
 }
 
 #[cfg(feature = "python")]
@@ -146,9 +148,12 @@ impl JsonataExpression {
     ) -> PyResult<PyObject> {
         let json_data = python_to_json(py, &data)?;
         let result = if bindings.is_none() {
-            let compiled = self.compiled.get_or_init(|| evaluator::try_compile_expr(&self.ast));
-            if let Some(ce) = compiled {
-                evaluator::eval_compiled(ce, &json_data, None).map_err(evaluator_error_to_py)?
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc).run(&json_data, None).map_err(evaluator_error_to_py)?
             } else {
                 let mut ev = evaluator::Evaluator::new();
                 ev.evaluate(&self.ast, &json_data)
@@ -180,9 +185,12 @@ impl JsonataExpression {
         bindings: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let result = if bindings.is_none() {
-            let compiled = self.compiled.get_or_init(|| evaluator::try_compile_expr(&self.ast));
-            if let Some(ce) = compiled {
-                evaluator::eval_compiled(ce, &data.data, None).map_err(evaluator_error_to_py)?
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc).run(&data.data, None).map_err(evaluator_error_to_py)?
             } else {
                 let mut ev = evaluator::Evaluator::new();
                 ev.evaluate(&self.ast, &data.data)
@@ -214,9 +222,12 @@ impl JsonataExpression {
         bindings: Option<PyObject>,
     ) -> PyResult<String> {
         let result = if bindings.is_none() {
-            let compiled = self.compiled.get_or_init(|| evaluator::try_compile_expr(&self.ast));
-            if let Some(ce) = compiled {
-                evaluator::eval_compiled(ce, &data.data, None).map_err(evaluator_error_to_py)?
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc).run(&data.data, None).map_err(evaluator_error_to_py)?
             } else {
                 let mut ev = evaluator::Evaluator::new();
                 ev.evaluate(&self.ast, &data.data)
@@ -259,9 +270,12 @@ impl JsonataExpression {
         let json_data = JValue::from_json_str(json_str)
             .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
         let result = if bindings.is_none() {
-            let compiled = self.compiled.get_or_init(|| evaluator::try_compile_expr(&self.ast));
-            if let Some(ce) = compiled {
-                evaluator::eval_compiled(ce, &json_data, None).map_err(evaluator_error_to_py)?
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc).run(&json_data, None).map_err(evaluator_error_to_py)?
             } else {
                 let mut ev = evaluator::Evaluator::new();
                 ev.evaluate(&self.ast, &json_data)
@@ -309,7 +323,7 @@ fn compile(expression: &str) -> PyResult<JsonataExpression> {
 
     Ok(JsonataExpression {
         ast,
-        compiled: std::cell::OnceCell::new(),
+        bytecode: std::cell::OnceCell::new(),
     })
 }
 
