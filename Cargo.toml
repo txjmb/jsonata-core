@@ -3,7 +3,7 @@ name = "jsonatapy"
 version = "2.1.0"
 edition = "2021"
 authors = ["txjmb <txjmb@users.noreply.github.com>"]
-description = "High-performance Python implementation of JSONata query and transformation language"
+description = "High-performance Python/Rust implementation of JSONata query and transformation language"
 license = "MIT"
 repository = "https://github.com/yourusername/jsonatapy"
 homepage = "https://github.com/yourusername/jsonatapy"
@@ -18,7 +18,7 @@ name = "jsonatapy"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.24", features = ["extension-module"] }
+pyo3 = { version = "0.24", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 thiserror = "1.0"
@@ -32,12 +32,21 @@ rand = "0.8"
 simd-json = { version = "0.14", optional = true }
 
 [features]
-default = ["simd"]
+default = ["simd", "python"]
 simd = ["dep:simd-json"]
+python = ["dep:pyo3"]
 
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.4"
+
+[[bench]]
+name = "evaluator_bench"
+harness = false
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
 
 [profile.release]
 opt-level = 3

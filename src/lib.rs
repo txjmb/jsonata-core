@@ -4,16 +4,22 @@
 
 //! # jsonatapy
 //!
-//! A high-performance Python implementation of JSONata - the JSON query and transformation language.
+//! A high-performance Rust implementation of JSONata - the JSON query and
+//! transformation language - with optional Python bindings via PyO3.
 //!
-//! This library provides Python bindings to a Rust implementation of JSONata,
-//! offering significantly better performance than JavaScript wrapper solutions
-//! while maintaining 100% compatibility with the reference implementation.
+//! ## Rust API
+//!
+//! ```rust,ignore
+//! use jsonatapy::parser;
+//! use jsonatapy::evaluator::Evaluator;
+//! use jsonatapy::value::JValue;
+//!
+//! let ast = parser::parse("user.name").unwrap();
+//! let data = JValue::from_json_str(r#"{"user":{"name":"Alice"}}"#).unwrap();
+//! let result = Evaluator::new().evaluate(&ast, &data).unwrap();
+//! ```
 //!
 //! ## Architecture
-//!
-//! The implementation mirrors the structure of the reference JavaScript implementation
-//! (jsonata-js) to facilitate maintenance and upstream synchronization:
 //!
 //! - `parser` - Expression parser (converts JSONata strings to AST)
 //! - `evaluator` - Expression evaluator (executes AST against data)
@@ -21,12 +27,7 @@
 //! - `datetime` - Date/time handling functions
 //! - `signature` - Function signature validation
 //! - `ast` - Abstract Syntax Tree definitions
-
-use crate::value::JValue;
-use indexmap::IndexMap;
-use pyo3::exceptions::{PyTypeError, PyValueError};
-use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+//! - `value` - JValue type (the runtime value representation)
 
 pub mod ast;
 mod compiler;
@@ -37,6 +38,19 @@ pub mod parser;
 mod signature;
 pub mod value;
 mod vm;
+
+// ── Python bindings (only when the "python" feature is enabled) ───────────────
+
+#[cfg(feature = "python")]
+use crate::value::JValue;
+#[cfg(feature = "python")]
+use indexmap::IndexMap;
+#[cfg(feature = "python")]
+use pyo3::exceptions::{PyTypeError, PyValueError};
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+#[cfg(feature = "python")]
+use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 
 /// Pre-converted data handle for efficient repeated evaluation.
 ///
@@ -52,11 +66,13 @@ mod vm;
 /// expr = jsonatapy.compile("orders[price > 100]")
 /// result = expr.evaluate_with_data(data)
 /// ```
+#[cfg(feature = "python")]
 #[pyclass(unsendable)]
 struct JsonataData {
     data: JValue,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl JsonataData {
     /// Create from a Python object (dict, list, etc.)
@@ -95,6 +111,7 @@ impl JsonataData {
 /// data2 = {"orders": [{"product": "B", "price": 50}]}
 /// result2 = expr.evaluate(data2)
 /// ```
+#[cfg(feature = "python")]
 #[pyclass(unsendable)]
 struct JsonataExpression {
     /// The parsed Abstract Syntax Tree
@@ -105,6 +122,7 @@ struct JsonataExpression {
     bytecode: std::cell::OnceCell<Option<vm::BytecodeProgram>>,
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl JsonataExpression {
     /// Evaluate this expression against the provided data.
@@ -297,6 +315,7 @@ impl JsonataExpression {
 /// result = expr.evaluate({"name": "Alice"})
 /// print(result)  # "Alice"
 /// ```
+#[cfg(feature = "python")]
 #[pyfunction]
 fn compile(expression: &str) -> PyResult<JsonataExpression> {
     let ast = parser::parse(expression)
@@ -335,6 +354,7 @@ fn compile(expression: &str) -> PyResult<JsonataExpression> {
 /// result = jsonatapy.evaluate("$uppercase(name)", {"name": "alice"})
 /// print(result)  # "ALICE"
 /// ```
+#[cfg(feature = "python")]
 #[pyfunction]
 #[pyo3(signature = (expression, data, bindings=None))]
 fn evaluate(
@@ -356,6 +376,7 @@ fn evaluate(
 /// - str -> String
 /// - list -> Array
 /// - dict -> Object
+#[cfg(feature = "python")]
 fn python_to_json(py: Python, obj: &PyObject) -> PyResult<JValue> {
     python_to_json_bound(obj.bind(py))
 }
@@ -365,6 +386,7 @@ fn python_to_json(py: Python, obj: &PyObject) -> PyResult<JValue> {
 /// Uses is_instance_of::<T>() which compiles to C-level type pointer comparisons
 /// (PyBool_Check, PyLong_Check, etc.) — single pointer comparison vs qualname()
 /// which allocates a Python string and does string comparison.
+#[cfg(feature = "python")]
 fn python_to_json_bound(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
     if obj.is_none() {
         return Ok(JValue::Null);
@@ -429,6 +451,7 @@ fn python_to_json_bound(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
 /// - Array -> list (batch-constructed via PyList::new for fewer C API calls)
 /// - Object -> dict
 /// - Lambda/Builtin/Regex -> None
+#[cfg(feature = "python")]
 fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
     match value {
         JValue::Null | JValue::Undefined => Ok(py.None()),
@@ -512,6 +535,7 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
 }
 
 /// Create an evaluator, optionally configured with Python bindings
+#[cfg(feature = "python")]
 fn create_evaluator(py: Python, bindings: Option<PyObject>) -> PyResult<evaluator::Evaluator> {
     if let Some(bindings_obj) = bindings {
         let bindings_json = python_to_json(py, &bindings_obj)?;
@@ -531,6 +555,7 @@ fn create_evaluator(py: Python, bindings: Option<PyObject>) -> PyResult<evaluato
 }
 
 /// Convert an EvaluatorError to a PyErr
+#[cfg(feature = "python")]
 fn evaluator_error_to_py(e: evaluator::EvaluatorError) -> PyErr {
     match e {
         evaluator::EvaluatorError::TypeError(msg) => PyValueError::new_err(msg),
@@ -540,6 +565,7 @@ fn evaluator_error_to_py(e: evaluator::EvaluatorError) -> PyErr {
 }
 
 /// JSONata Python module
+#[cfg(feature = "python")]
 #[pymodule]
 fn _jsonatapy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compile, m)?)?;
