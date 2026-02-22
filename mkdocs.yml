@@ -1,12 +1,12 @@
-site_name: jsonatapy
-site_description: High-performance Python implementation of JSONata - JSON query and transformation language
+site_name: jsonata-core + jsonatapy
+site_description: High-performance JSONata implementation in Rust, with Python bindings
 site_author: jsonatapy contributors
-site_url: https://txjmb.github.io/jsonatapy
+site_url: https://txjmb.github.io/jsonata-core
 
 # Disable Jekyll processing on GitHub Pages
 use_directory_urls: true
 
-repo_name: jsonatapy
+repo_name: jsonata-core
 repo_url: https://github.com/txjmb/jsonata-core
 edit_uri: edit/master/docs/
 
@@ -84,7 +84,9 @@ nav:
       - Installation: installation.md
       - Quick Start: usage.md
       - Examples: examples.md
-  - User Guide:
+  - Rust Crate (jsonata-core):
+      - Overview: rust-crate.md
+  - Python Package (jsonatapy):
       - API Reference: api.md
       - JSONata Language: jsonata-language.md
       - Error Handling: error-handling.md

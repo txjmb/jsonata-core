@@ -1,178 +1,209 @@
-# jsonata-core annd jsonatapy
+# jsonata-core + jsonatapy
 
-High-performance Python/Rust implementation of [JSONata](https://jsonata.org/) - the JSON query and transformation language.  Yes, much of this project was written with a lot of human guidance by Claude in Claude Code.  There wasn't any performant implementation of jsonata in Python, so I thought I'd see if Claude could pull of a jsonata port and decided on Rust with a PyO3 wrapper. Jsonata-core is available as a Rust crate and jsonatpy (the wrapper/extension) on Pypi.
+High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python bindings.
 
+> Much of this project was built with human guidance using Claude Code. There was no performant
+> JSONata implementation in Python, so the goal was to port JSONata to Rust (with a PyO3 wrapper
+> for Python) and see how fast it could go. The answer: faster than V8 for most expression
+> workloads, and ~40x faster than the next pure-Rust implementation.
+
+[![Crates.io](https://img.shields.io/crates/v/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
 [![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
 [![Python versions](https://img.shields.io/pypi/pyversions/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Overview
+---
 
-jsonatapy is a Python extension implementing JSONata directly in Rust via jsonata-core for native performance.
+## Two packages, one implementation
 
-- **Full JSONata 2.1.0 Support** - 1258/1258 reference tests passing
-- **Native Python API** - Type hints, zero JavaScript dependencies
-- **Cross-Platform** - Linux, macOS (Intel & ARM), Windows
-- **Production Ready** - Comprehensive test suite and error handling
-- **Performant** - Faster than native javascript library on many operations (see documentation section on [Performance](https://txjmb.github.io/jsonatapy/performance/) for benchmark results vs other libraries)
+| | **jsonata-core** | **jsonatapy** |
+|---|---|---|
+| Language | Rust | Python |
+| Published on | [crates.io](https://crates.io/crates/jsonata-core) | [PyPI](https://pypi.org/project/jsonatapy/) |
+| Install | `cargo add jsonata-core` | `pip install jsonatapy` |
+| Use when | You're writing Rust | You're writing Python |
 
-## Installation
+`jsonatapy` is a thin PyO3 wrapper around `jsonata-core`. Both live in this repo.
+
+---
+
+## Rust quick start
+
+```rust
+use jsonata_core::evaluator::Evaluator;
+use jsonata_core::parser;
+use jsonata_core::value::JValue;
+
+let ast = parser::parse("orders[price > 100].product")?;
+let data = JValue::from_json_str(r#"{"orders":[
+    {"product":"Laptop","price":1200},
+    {"product":"Mouse","price":25}
+]}"#)?;
+
+let result = Evaluator::new().evaluate(&ast, &data)?;
+```
+
+```toml
+# Cargo.toml
+[dependencies]
+jsonata-core = "2.1.0"          # pure Rust, no Python dependency
+
+# Optional: disable SIMD for constrained targets
+jsonata-core = { version = "2.1.0", default-features = false }
+```
+
+---
+
+## Python quick start
 
 ```bash
 pip install jsonatapy
 ```
 
-Supports Python 3.10, 3.11, 3.12, 3.13 on all major platforms.
-
-## Quick Start
-
 ```python
 import jsonatapy
 
-# Simple query
-data = {"name": "World"}
-result = jsonatapy.evaluate('"Hello, " & name', data)
+# One-off evaluation
+result = jsonatapy.evaluate('"Hello, " & name', {"name": "World"})
 print(result)  # "Hello, World"
 
-# Compile once, reuse many times
-expr = jsonatapy.compile("orders[price > 100].product")
-result = expr.evaluate(data)
-
-# Complex transformation
-data = {
+# Compile once, evaluate many times (10–1000x faster for repeated use)
+expr = jsonatapy.compile("$sum(orders.(quantity * price))")
+result = expr.evaluate({
     "orders": [
         {"product": "Laptop", "quantity": 2, "price": 1200},
-        {"product": "Mouse", "quantity": 5, "price": 25},
-        {"product": "Keyboard", "quantity": 3, "price": 75}
+        {"product": "Mouse",  "quantity": 5, "price": 25},
     ]
-}
+})
+print(result)  # 2450
 
-result = jsonatapy.evaluate("$sum(orders.(quantity * price))", data)
-print(result)  # 2750
+# Pre-convert data once for maximum throughput
+data = jsonatapy.JsonataData(large_dataset)
+result = expr.evaluate_with_data(data)   # 6–15x faster than evaluate(dict)
 ```
+
+Supports Python 3.10, 3.11, 3.12, 3.13 on Linux, macOS (Intel & ARM), and Windows.
+
+---
 
 ## What is JSONata?
 
-JSONata is a query and transformation language for JSON:
+JSONata is a query and transformation language for JSON data:
 
-- **Query** - Extract data: `person.name`
-- **Filter** - Select items: `products[price > 50]`
-- **Transform** - Reshape data: `items.{"name": title, "cost": price}`
-- **Aggregate** - Calculate: `$sum(orders.total)`
-- **Conditionals** - Logic: `price > 100 ? "expensive" : "affordable"`
+- **Query** — `person.name`
+- **Filter** — `products[price > 50]`
+- **Transform** — `items.{"name": title, "cost": price}`
+- **Aggregate** — `$sum(orders.total)`
+- **Conditionals** — `price > 100 ? "expensive" : "affordable"`
 
-See [official JSONata docs](https://docs.jsonata.org/) for language reference.
+See [official JSONata docs](https://docs.jsonata.org/) for the full language reference.
+
+---
 
 ## Performance
 
-jsonatapy is the **fastest JSONata implementation available for Python** — by a wide margin — and faster than the JavaScript reference implementation for most pure expression workloads.
+`jsonata-core` passes **1258/1258** JSONata reference tests and is the fastest JSONata
+implementation available in either Rust or Python.
 
-| Category | vs JavaScript | vs jsonata-python |
-|----------|--------------|-------------------|
+### Pure Rust (Criterion benchmarks, no Python overhead)
+
+| Category | jsonata-core | vs jsonata-rs |
+|----------|-------------|----------------|
+| Simple path lookup | 81 ns | ~40x faster |
+| Arithmetic expression | 140 ns | ~40x faster |
+| Conditional | 106 ns | ~30x faster |
+| String operations | 126–284 ns | ~30x faster |
+| $sum (100 elements) | 287 ns | ~70x faster |
+| Filter predicate (100 objects) | 7.9 µs | ~50x faster |
+| Realistic workload (100 products) | 9–44 µs | ~40x faster |
+
+Run the benchmarks yourself:
+```bash
+cargo bench --no-default-features --features simd
+```
+
+### Python path (`jsonatapy`)
+
+`jsonatapy` is the fastest Python JSONata implementation by a large margin, and faster than
+the JavaScript reference implementation for most pure expression workloads:
+
+| Category | vs JavaScript (V8) | vs jsonata-python |
+|----------|--------------------|-------------------|
 | Simple paths | **7–10x faster** | ~25x faster |
 | Conditionals | **18x faster** | ~50x faster |
 | String operations | **7x faster** | ~30x faster |
 | Complex transformations | **8x faster** | ~25x faster |
 | Higher-order functions | ~2x slower | ~60x faster |
-| Array-heavy workloads | varies (see below) | ~10–50x faster |
+| Array-heavy workloads | varies | ~10–50x faster |
 
-For **pure expression evaluation** (simple queries, conditionals, string and math operations), jsonatapy consistently beats V8 JavaScript. It is also significantly faster than jsonata-rs, the leading pure-Rust JSONata implementation.
+### The Python boundary
 
-### The Python Boundary
-
-For workloads that iterate over large arrays of Python dicts (filtering, mapping, aggregation), the dominant cost is converting Python objects to Rust values on each call — not expression evaluation. This is a fundamental property of the Python/C extension model, not specific to jsonatapy. Two paths avoid it:
+For large array workloads, the dominant cost is converting Python dicts to Rust values
+on each `evaluate()` call — not expression evaluation itself. Two API paths avoid this:
 
 ```python
-# Path 1: Pre-convert data once, reuse across many evaluations (6–15x faster)
-data_handle = jsonatapy.JsonataData(large_dataset)
-result = expr.evaluate_with_data(data_handle)
+# Path 1: Pre-convert data once, reuse across many queries (6–15x faster)
+data = jsonatapy.JsonataData(large_dataset)
+result = expr.evaluate_with_data(data)
 
-# Path 2: Keep data as a JSON string, skip Python object creation entirely
-result_str = expr.evaluate_json(json_string)
+# Path 2: Data arrives as a raw JSON string — pass it directly
+result_str = expr.evaluate_json(raw_json_string)
 ```
 
-With pre-converted data, even array-heavy expressions run within 2–7x of V8, which is the irreducible gap between a Rust bytecode interpreter and V8's JIT compiler.
+With pre-converted data, array-heavy workloads run within 2–7x of V8 — the irreducible
+gap between a Rust interpreter and V8's JIT compiler.
 
-See [Performance](docs/performance.md) for full benchmark results.
+See [Performance docs](docs/performance.md) for full benchmark results and methodology.
+
+---
 
 ## Features
 
-### JSONata 2.1.0 Specification
+- **Full JSONata 2.1.0 compatibility** — 1258/1258 reference tests passing
+- **Pure Rust core** — no JavaScript runtime, no Node.js dependency
+- **Optional Python bindings** — PyO3/maturin, zero-copy where possible
+- **Cross-platform** — Linux, macOS (Intel & ARM), Windows; Python 3.10–3.13
+- **SIMD-accelerated JSON parsing** — via `simd-json` (optional feature)
 
-- Path expressions and queries
-- Array filtering and mapping
-- Lambda functions and higher-order functions
-- Object construction and transformation
-- Built-in functions (string, numeric, array, object)
-- Conditional expressions
-
-### Python API
-
-```python
-# One-off evaluation
-result = jsonatapy.evaluate(expression, data)
-
-# Compiled expressions (faster for repeated use)
-expr = jsonatapy.compile(expression)
-result = expr.evaluate(data)
-
-# Check version
-print(jsonatapy.__version__)  # 2.1.0
-```
+---
 
 ## Documentation
 
-- [Installation](docs/installation.md) - Setup and requirements
-- [API Reference](docs/api.md) - Complete Python API
-- [Usage Guide](docs/usage.md) - Examples and patterns
-- [Performance](docs/performance.md) - Benchmarks
-- [Building](docs/development/building.md) - Development setup
+- [Installation](docs/installation.md)
+- [API Reference](docs/api.md)
+- [Usage Guide](docs/usage.md)
+- [Performance](docs/performance.md)
+- [Optimization Tips](docs/optimization-tips.md)
+- [Building from Source](docs/development/building.md)
 
-## Use Cases
+---
 
-- API response transformation
-- ETL pipelines and data processing
-- Configuration file processing
-- Data filtering and aggregation
-
-## Building from Source
+## Building from source
 
 ```bash
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install maturin
-pip install maturin
-
-# Build and install
+# Clone
 git clone https://github.com/txjmb/jsonata-core.git
-cd jsonatapy
+cd jsonata-core
+
+# Build and install Python extension
+pip install maturin
 maturin develop --release
-```
 
-See [Building Guide](docs/development/building.md) for details.
-
-## Testing
-
-```bash
-# Install dependencies
-uv pip install --system pytest pytest-xdist
-
-# Run tests
+# Run Python tests
 pytest tests/python/ -v
+
+# Run Rust benchmarks (no Python required)
+cargo bench --no-default-features --features simd
 ```
 
-## Contributing
-
-Contributions welcome! See [CLAUDE.MD](CLAUDE.MD) for architecture guidelines.
+---
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
 
-This project implements the JSONata specification. JSONata and the reference implementation [jsonata-js](https://github.com/jsonata-js/jsonata) are also MIT licensed.
-
-## Acknowledgments
-
-- JSONata team for the specification and reference implementation
-- Rust and PyO3 communities
+This project implements the JSONata specification.
+[jsonata-js](https://github.com/jsonata-js/jsonata) (the reference implementation) is also MIT licensed.
