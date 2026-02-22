@@ -12,6 +12,25 @@ keywords = ["jsonata", "json", "query", "transform"]
 categories = ["parsing", "data-structures"]
 readme = "README.md"
 rust-version = "1.70"
+exclude = [
+    "tests/jsonata-js/*",
+    "tests/python/*",
+    "python/*",
+    "benchmarks/*",
+    "docs/*",
+    ".github/*",
+    "dist-mac/*",
+    "node_modules/*",
+    "scripts/*",
+    ".claude/*",
+    "examples/*.py",
+    "*.png",
+    "mkdocs.yml",
+    "CLAUDE.MD",
+    "pyproject.toml",
+    "uv.lock",
+    "rustup-init.exe",
+]
 
 [lib]
 name = "jsonata_core"
@@ -32,7 +51,7 @@ rand = "0.8"
 simd-json = { version = "0.14", optional = true }
 
 [features]
-default = ["simd", "python"]
+default = ["simd"]
 simd = ["dep:simd-json"]
 python = ["dep:pyo3"]
 
