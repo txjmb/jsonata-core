@@ -1043,6 +1043,7 @@ pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, Evalua
 
 /// Value equality for the bytecode VM.
 /// Mirrors `CompiledCmp::Eq` in `eval_compiled_inner`: uses `values_equal` from functions.
+#[allow(dead_code)]
 #[inline]
 pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> JValue {
     JValue::Bool(crate::functions::array::values_equal(lhs, rhs))
@@ -1050,6 +1051,7 @@ pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> JValue {
 
 /// String concatenation for the bytecode VM.
 /// Converts both operands to strings and concatenates them.
+#[allow(dead_code)]
 #[inline]
 pub(crate) fn compiled_concat(lhs: JValue, rhs: JValue) -> Result<JValue, EvaluatorError> {
     let l = compiled_to_concat_string(&lhs)?;
@@ -1059,6 +1061,7 @@ pub(crate) fn compiled_concat(lhs: JValue, rhs: JValue) -> Result<JValue, Evalua
 
 /// Public entry point for the bytecode VM to call pure builtins by name.
 /// Thin wrapper around the private `call_pure_builtin` used internally.
+#[allow(dead_code)]
 #[inline]
 pub(crate) fn call_pure_builtin_by_name(
     name: &str,

@@ -1,4 +1,5 @@
 //! Bytecode compiler: lowers a `CompiledExpr` tree into a flat `BytecodeProgram`.
+#![allow(dead_code)]
 //!
 //! The compiler does a single recursive traversal of the `CompiledExpr` tree,
 //! emitting `Instr` values into a flat `Vec`.  After emission, a lightweight

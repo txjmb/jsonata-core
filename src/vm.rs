@@ -1,4 +1,5 @@
 //! Bytecode VM for JSONata compiled expressions.
+#![allow(dead_code)]
 //!
 //! A `BytecodeProgram` is produced by `crate::compiler::BytecodeCompiler` from a
 //! `CompiledExpr` tree.  Running a program involves the `Vm` struct which walks
