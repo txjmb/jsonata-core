@@ -39,6 +39,40 @@ mod signature;
 pub mod value;
 mod vm;
 
+// ── Benchmarking facade (only when the "bench" feature is enabled) ────────────
+//
+// Exposes the compiler/VM pipeline for Criterion benchmarks without making
+// the internals part of the permanent public API.
+
+/// Internal benchmarking API — do not use in production code.
+///
+/// Enabled with `--features bench`. Provides access to the bytecode compiler
+/// and VM so that Criterion benchmarks can measure tree-walker vs VM directly.
+#[cfg(feature = "bench")]
+pub mod _bench {
+    use crate::ast::AstNode;
+    use crate::value::JValue;
+    pub use crate::evaluator::EvaluatorError;
+
+    /// An opaque handle to a compiled bytecode program.
+    pub struct CompiledProgram(crate::vm::BytecodeProgram);
+
+    /// Compile an AST node to bytecode.
+    ///
+    /// Returns `None` if the expression contains constructs the compiler
+    /// doesn't handle (e.g. wildcards, `$eval`, higher-order functions at
+    /// the top level). In that case, fall back to `Evaluator::new().evaluate()`.
+    pub fn compile(ast: &AstNode) -> Option<CompiledProgram> {
+        crate::evaluator::try_compile_expr(ast)
+            .map(|ce| CompiledProgram(crate::compiler::BytecodeCompiler::compile(&ce)))
+    }
+
+    /// Execute a compiled program against `data`.
+    pub fn run(prog: &CompiledProgram, data: &JValue) -> Result<JValue, EvaluatorError> {
+        crate::vm::Vm::new(&prog.0).run(data, None)
+    }
+}
+
 // ── Python bindings (only when the "python" feature is enabled) ───────────────
 
 #[cfg(feature = "python")]

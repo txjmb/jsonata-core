@@ -18,6 +18,9 @@ use jsonata_core::evaluator::Evaluator;
 use jsonata_core::parser;
 use jsonata_core::value::JValue;
 
+#[cfg(feature = "bench")]
+use jsonata_core::_bench;
+
 // ── Data builders ─────────────────────────────────────────────────────────────
 
 /// Tiny single-field object used by simple-path benchmarks.
@@ -372,6 +375,131 @@ fn bench_realistic_workload(c: &mut Criterion) {
     group.finish();
 }
 
+/// Compare tree-walker vs bytecode VM for every expression the compiler handles.
+///
+/// Run with: `cargo bench --features bench -- vm_vs`
+///
+/// For each expression, Criterion reports both paths in the same group so you
+/// get a direct timing comparison and a speedup ratio in the HTML report.
+/// Expressions where `_bench::compile` returns `None` (the compiler falls back
+/// to the tree-walker) are skipped for the VM column.
+#[cfg(feature = "bench")]
+fn bench_vm_vs_tree_walker(c: &mut Criterion) {
+    // ── Tiny-data expressions ─────────────────────────────────────────────────
+
+    let tiny_cases: &[(&str, &str, &str)] = &[
+        ("simple_path",       "name",                             r#"{"name":"Alice"}"#),
+        ("arithmetic",        "price * quantity",                  r#"{"price":10.5,"quantity":3}"#),
+        ("conditional",       r#"value > 0 ? "positive" : "non-positive""#, r#"{"value":42}"#),
+        ("nested_builtins",   "$length($uppercase(name))",         r#"{"name":"JSONata Performance Test"}"#),
+        ("deep_path_5",       "a.b.c.d.e",                        r#"{"a":{"b":{"c":{"d":{"e":42}}}}}"#),
+        ("deep_path_12",      "a.b.c.d.e.f.g.h.i.j.k.l",
+            r#"{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":{"k":{"l":42}}}}}}}}}}}}"#),
+        ("uppercase",         "$uppercase(name)",                  r#"{"name":"hello world"}"#),
+        ("lowercase",         "$lowercase(name)",                  r#"{"name":"HELLO WORLD"}"#),
+        ("str_length",        "$length(name)",                     r#"{"name":"JSONata Performance Benchmark"}"#),
+        ("substring",         "$substring(text, 0, 10)",           r#"{"text":"This is a long string for substring"}"#),
+        ("contains",          r#"$contains(text, "JSONata")"#,     r#"{"text":"JSONata is a query language"}"#),
+        ("concat",            r#"first & " " & last"#,             r#"{"first":"John","last":"Doe"}"#),
+    ];
+
+    for (name, expr, data_str) in tiny_cases {
+        let ast  = parser::parse(expr).unwrap();
+        let data = JValue::from_json_str(data_str).unwrap();
+        let bc   = _bench::compile(&ast);
+
+        let mut group = c.benchmark_group(format!("vm_vs/{name}"));
+        group.sample_size(300);
+
+        group.bench_function("tree_walker", |b| {
+            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&data)).unwrap()))
+        });
+        if let Some(bc) = &bc {
+            group.bench_function("vm", |b| {
+                b.iter(|| black_box(_bench::run(bc, black_box(&data)).unwrap()))
+            });
+        }
+        group.finish();
+    }
+
+    // ── Aggregates on 100-element numeric array ───────────────────────────────
+
+    let data100 = numeric_array(100);
+    for (name, expr) in [("sum_100", "$sum(values)"), ("max_100", "$max(values)"), ("count_100", "$count(values)")] {
+        let ast = parser::parse(expr).unwrap();
+        let bc  = _bench::compile(&ast);
+
+        let mut group = c.benchmark_group(format!("vm_vs/{name}"));
+        group.bench_function("tree_walker", |b| {
+            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&data100)).unwrap()))
+        });
+        if let Some(bc) = &bc {
+            group.bench_function("vm", |b| {
+                b.iter(|| black_box(_bench::run(bc, black_box(&data100)).unwrap()))
+            });
+        }
+        group.finish();
+    }
+
+    // ── Array mapping + aggregate on 100 product objects ─────────────────────
+
+    let products = products_simple_100();
+    for (name, expr) in [
+        ("map_field_100",    "products.price"),
+        ("map_sum_100",      "$sum(products.price)"),
+        ("filter_pred_100",  "products[price > 100]"),
+    ] {
+        let ast = parser::parse(expr).unwrap();
+        let bc  = _bench::compile(&ast);
+
+        let mut group = c.benchmark_group(format!("vm_vs/{name}"));
+        group.bench_function("tree_walker", |b| {
+            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&products)).unwrap()))
+        });
+        if let Some(bc) = &bc {
+            group.bench_function("vm", |b| {
+                b.iter(|| black_box(_bench::run(bc, black_box(&products)).unwrap()))
+            });
+        }
+        group.finish();
+    }
+
+    // ── Higher-order functions (top level doesn't compile; lambda body does) ──
+    //
+    // These show tree_walker-only timing. The speedup from Phase 3 compiled
+    // lambda bodies is already baked in — compare against the same expressions
+    // in the `higher_order_functions` group from a pre-Phase-3 baseline.
+
+    let numbers: Vec<JValue> = (1..=100).map(|i| JValue::from(i as f64)).collect();
+    let mut hof_root = IndexMap::new();
+    hof_root.insert("numbers".to_string(), JValue::array(numbers));
+    let hof_data = JValue::object(hof_root);
+
+    for (name, expr) in [
+        ("hof_map",    "$map(numbers, function($v) { $v * 2 })"),
+        ("hof_filter", "$filter(numbers, function($v) { $v > 50 })"),
+        ("hof_reduce", "$reduce(numbers, function($acc, $v) { $acc + $v }, 0)"),
+    ] {
+        let ast = parser::parse(expr).unwrap();
+        // compile() returns None for HOF top-level — only tree_walker shown
+        let bc = _bench::compile(&ast);
+
+        let mut group = c.benchmark_group(format!("vm_vs/{name}"));
+        group.bench_function("tree_walker", |b| {
+            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&hof_data)).unwrap()))
+        });
+        if let Some(bc) = &bc {
+            group.bench_function("vm", |b| {
+                b.iter(|| black_box(_bench::run(bc, black_box(&hof_data)).unwrap()))
+            });
+        }
+        group.finish();
+    }
+}
+
+#[cfg(not(feature = "bench"))]
+fn bench_vm_vs_tree_walker(_c: &mut Criterion) {}
+
 criterion_group!(
     benches,
     bench_simple_paths,
@@ -380,5 +508,6 @@ criterion_group!(
     bench_string_operations,
     bench_higher_order_functions,
     bench_realistic_workload,
+    bench_vm_vs_tree_walker,
 );
 criterion_main!(benches);
