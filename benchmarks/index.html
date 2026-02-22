@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -936,10 +936,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#custom-benchmarks" class="md-nav__link">
+  <a href="#key-findings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Custom Benchmarks
+        Key Findings
       
     </span>
   </a>
@@ -947,10 +947,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#visualization" class="md-nav__link">
+  <a href="#custom-benchmarks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Visualization
+        Custom Benchmarks
       
     </span>
   </a>
@@ -1563,10 +1563,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#custom-benchmarks" class="md-nav__link">
+  <a href="#key-findings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Custom Benchmarks
+        Key Findings
       
     </span>
   </a>
@@ -1574,10 +1574,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#visualization" class="md-nav__link">
+  <a href="#custom-benchmarks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Visualization
+        Custom Benchmarks
       
     </span>
   </a>
@@ -1610,19 +1610,23 @@
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Build jsonatapy</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>maturin<span class="w"> </span>develop<span class="w"> </span>--release
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Install benchmark dependencies (includes jsonata-python for comparison)</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Install benchmark dependencies</span>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>bench
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Run full benchmark suite</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/python/benchmark.py
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># Update docs/performance.md with latest results</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/update_docs.py
 </span></code></pre></div>
 <h2 id="implementations-compared">Implementations Compared<a class="headerlink" href="#implementations-compared" title="Permanent link">&para;</a></h2>
-<p>Latest benchmark results (2026-02-08) compare:</p>
+<p>Latest benchmark results (2026-02-21) compare:</p>
 <ol>
-<li><strong>jsonatapy</strong> - Rust-based Python extension (this project)</li>
-<li><strong>jsonata-js</strong> - Official JavaScript reference implementation (Node.js)</li>
-<li><strong>jsonata-python</strong> - Python wrapper around JavaScript implementation</li>
-<li><strong>jsonata-rs</strong> - Pure Rust implementation (optional, requires building the binary)</li>
+<li><strong>jsonatapy</strong> - Rust-based Python extension (this project), <code>evaluate(dict)</code> path</li>
+<li><strong>jsonatapy (rust-only)</strong> - Same library, <code>evaluate_json(str)</code> path (bypasses Python object conversion)</li>
+<li><strong>jsonata-js</strong> - Official JavaScript reference implementation (Node.js v24.13.1)</li>
+<li><strong>jsonata-python</strong> - Pure Python implementation</li>
+<li><strong>jsonata-rs</strong> - Pure Rust CLI implementation (optional, requires building the binary)</li>
 </ol>
 <p>To include jsonata-rs in benchmarks:
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>benchmarks/rust
@@ -1630,32 +1634,30 @@
 </span></code></pre></div></p>
 <h2 id="benchmark-categories">Benchmark Categories<a class="headerlink" href="#benchmark-categories" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Simple Paths</strong> - Basic field access and navigation</li>
-<li><strong>Array Operations</strong> - Filtering, mapping, aggregation</li>
-<li><strong>String Functions</strong> - String manipulation operations</li>
-<li><strong>Numeric Functions</strong> - Mathematical operations</li>
-<li><strong>Object Construction</strong> - Creating new object structures</li>
-<li><strong>Conditionals</strong> - Ternary operators and branching</li>
-<li><strong>Higher-Order Functions</strong> - Map, filter, reduce with lambdas</li>
+<li><strong>Simple Paths</strong> - Basic field access and arithmetic (<code>name</code>, <code>a.b.c</code>, <code>x + y</code>)</li>
+<li><strong>Array Operations</strong> - Aggregation and filtering on arrays of scalars and objects</li>
+<li><strong>Complex Transformations</strong> - Object construction, conditionals, nested function calls</li>
+<li><strong>Deep Nesting</strong> - Paths 12+ levels deep, nested array access</li>
+<li><strong>String Operations</strong> - <code>$uppercase</code>, <code>$substring</code>, <code>$contains</code>, etc.</li>
+<li><strong>Higher-Order Functions</strong> - <code>$map</code>, <code>$filter</code>, <code>$reduce</code> with lambdas</li>
+<li><strong>Realistic Workload</strong> - E-commerce dataset queries: filter, aggregate, transform, sort</li>
+<li><strong>Path Comparison</strong> - Same expressions across all four evaluation paths (<code>evaluate</code>, <code>evaluate_json</code>, <code>evaluate_with_data</code>, <code>evaluate_data_to_json</code>)</li>
 </ul>
 <h2 id="results">Results<a class="headerlink" href="#results" title="Permanent link">&para;</a></h2>
-<p>See <a href="../performance/">Performance</a> for detailed benchmark results and analysis.</p>
+<p>See <a href="../performance/">Performance</a> for detailed benchmark results, charts, and analysis of the performance characteristics of each category.</p>
+<h2 id="key-findings">Key Findings<a class="headerlink" href="#key-findings" title="Permanent link">&para;</a></h2>
+<p>jsonatapy is the fastest Python JSONata implementation available, and faster than the JavaScript reference for pure expression workloads. The performance ceiling for array-heavy workloads is set by Python's object model: converting Python dicts to Rust values costs roughly 1µs per field, which dominates evaluation time for large datasets. The <code>JsonataData</code> API and <code>evaluate_json</code> path avoid this cost.</p>
 <h2 id="custom-benchmarks">Custom Benchmarks<a class="headerlink" href="#custom-benchmarks" title="Permanent link">&para;</a></h2>
-<p>To add new benchmark cases, edit <code>benchmarks/benchmark.py</code> and add test cases to the suite.</p>
+<p>To add new benchmark cases, edit <code>benchmarks/python/benchmark.py</code> and add entries to the benchmark list:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;My custom test&quot;</span><span class="p">,</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;custom&quot;</span><span class="p">,</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;Custom&quot;</span><span class="p">,</span>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="s2">&quot;expression&quot;</span><span class="p">:</span> <span class="s2">&quot;items[price &gt; 100].name&quot;</span><span class="p">,</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;items&quot;</span><span class="p">:</span> <span class="p">[</span><span class="o">...</span><span class="p">]},</span>
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="s2">&quot;iterations&quot;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="s2">&quot;warmup&quot;</span><span class="p">:</span> <span class="mi">100</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="s2">&quot;warmup&quot;</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
 </span></code></pre></div>
-<h2 id="visualization">Visualization<a class="headerlink" href="#visualization" title="Permanent link">&para;</a></h2>
-<p>Generate enhanced reports with charts:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/enhanced_report.py
-</span></code></pre></div>
-<p>This creates charts in <code>benchmarks/charts/</code> showing performance comparisons.</p>
 
 
 

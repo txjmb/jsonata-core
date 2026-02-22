@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -965,10 +965,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-use-json-string-api-for-large-data" class="md-nav__link">
+  <a href="#3-use-json-string-api-when-data-is-already-json" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Use JSON String API for Large Data
+        3. Use JSON String API When Data is Already JSON
       
     </span>
   </a>
@@ -1875,10 +1875,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-use-json-string-api-for-large-data" class="md-nav__link">
+  <a href="#3-use-json-string-api-when-data-is-already-json" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Use JSON String API for Large Data
+        3. Use JSON String API When Data is Already JSON
       
     </span>
   </a>
@@ -2274,22 +2274,19 @@
 - Multiple expressions on same data
 - Dashboard queries with shared data
 - Interactive data exploration</p>
-<h3 id="3-use-json-string-api-for-large-data">3. Use JSON String API for Large Data<a class="headerlink" href="#3-use-json-string-api-for-large-data" title="Permanent link">&para;</a></h3>
-<p><strong>Impact:</strong> 10-50x faster for datasets with 1000+ items</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1">#Fast path - JSON string in/out</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">large_data</span><span class="p">)</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">result_str</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">json_str</span><span class="p">)</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">result</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result_str</span><span class="p">)</span>
+<h3 id="3-use-json-string-api-when-data-is-already-json">3. Use JSON String API When Data is Already JSON<a class="headerlink" href="#3-use-json-string-api-when-data-is-already-json" title="Permanent link">&para;</a></h3>
+<p><strong>Impact:</strong> Avoids Python object creation cost; best when data comes from a file, HTTP response, or database as a raw JSON string</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># Skip json.loads() entirely — pass the raw string directly</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">result_str</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">raw_json_string</span><span class="p">)</span>
 </span></code></pre></div>
 <p><strong>When to use:</strong>
-- Large datasets (1000+ items)
-- High-frequency evaluation (millions of calls)
-- Data already in JSON format (API responses, files)</p>
+- Data arrives as a JSON string (HTTP response body, file contents) and you haven't deserialized it yet
+- Result can be consumed as a JSON string downstream</p>
+<p><strong>Note:</strong> If you've already called <code>json.loads()</code> on your data, <code>evaluate_json()</code> offers no advantage over <code>evaluate()</code> — both pay a similar conversion cost. Use <code>JsonataData</code> instead.</p>
 <h3 id="4-fastest-path-pre-converted-data-json-output">4. Fastest Path: Pre-converted Data + JSON Output<a class="headerlink" href="#4-fastest-path-pre-converted-data-json-output" title="Permanent link">&para;</a></h3>
 <p><strong>Impact:</strong> Maximum performance, zero conversion overhead</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
@@ -2383,21 +2380,21 @@
 <div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;large_array[field &gt; 100]&quot;</span><span class="p">)</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;products[price &gt; 100]&quot;</span><span class="p">)</span>
 </span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># Benchmark results (1000 items):</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># evaluate():           ~50ms  (Python object conversion)</span>
-</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># evaluate_json():      ~5ms   (JSON string, 10x faster)</span>
-</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># evaluate_with_data(): ~45ms  (pre-converted, amortized)</span>
-</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
-</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="c1"># For one-time use with large data</span>
-</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
-</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">json_str</span><span class="p">)</span>  <span class="c1"># Fastest</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># Benchmark results (100 products, 5 fields each):</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># evaluate(dict):              ~150µs  (Python→Rust conversion dominates)</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># evaluate_json(json_str):     ~145µs  (similar — JSON parse ≈ dict walk cost)</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># evaluate_with_data(handle):   ~25µs  (no input conversion)</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># evaluate_data_to_json(handle): ~14µs (no conversion either direction)</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="c1"># For data arriving as a raw JSON string (not yet parsed)</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="n">result_str</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">raw_json_str</span><span class="p">)</span>   <span class="c1"># Skips Python object creation</span>
 </span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
-</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="c1"># For repeated queries on same data</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="c1"># For repeated queries on same data — the real win</span>
 </span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="n">data_handle</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">JsonataData</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
-</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="n">result1</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">data_handle</span><span class="p">)</span>  <span class="c1"># Fast</span>
-</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="n">result2</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">data_handle</span><span class="p">)</span>  <span class="c1"># No re-conversion</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="n">result1</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">data_handle</span><span class="p">)</span>  <span class="c1"># ~6x faster than evaluate(dict)</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="n">result2</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">data_handle</span><span class="p">)</span>  <span class="c1"># Same speed — no re-conversion</span>
 </span></code></pre></div>
 <h3 id="benchmark-your-use-case">Benchmark Your Use Case<a class="headerlink" href="#benchmark-your-use-case" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
@@ -2630,51 +2627,46 @@
 </span><span id="__span-20-33"><a id="__codelineno-20-33" name="__codelineno-20-33" href="#__codelineno-20-33"></a><span class="n">profile_expression</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 50].name&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="performance-comparison-summary">Performance Comparison Summary<a class="headerlink" href="#performance-comparison-summary" title="Permanent link">&para;</a></h2>
+<p>The dominant cost for array-heavy workloads is Python→Rust data conversion (~1µs per field). Expression evaluation itself is typically 2–15µs regardless of data size.</p>
 <table>
 <thead>
 <tr>
 <th>Scenario</th>
 <th>Method</th>
-<th>Relative Speed</th>
-<th>Best For</th>
+<th>vs <code>evaluate(dict)</code></th>
+<th>Notes</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Small data, one-time</td>
-<td><code>evaluate()</code></td>
-<td>1x</td>
-<td>Quick queries</td>
+<td>Any query</td>
+<td><code>evaluate(dict)</code></td>
+<td>1x baseline</td>
+<td>Pays conversion every call</td>
 </tr>
 <tr>
-<td>Large data, one-time</td>
-<td><code>evaluate_json()</code></td>
-<td>10-50x</td>
-<td>API responses</td>
+<td>Data already as JSON string</td>
+<td><code>evaluate_json(str)</code></td>
+<td>~1x</td>
+<td>Avoids Python objects; similar total cost</td>
 </tr>
 <tr>
-<td>Small data, repeated</td>
-<td><code>compile()</code> + <code>evaluate()</code></td>
-<td>10-100x</td>
-<td>Multiple queries</td>
-</tr>
-<tr>
-<td>Large data, repeated</td>
-<td><code>compile()</code> + <code>evaluate_json()</code></td>
-<td>100-1000x</td>
-<td>High throughput</td>
-</tr>
-<tr>
-<td>Multiple exprs, same data</td>
+<td>Same data, multiple queries</td>
 <td><code>JsonataData</code> + <code>evaluate_with_data()</code></td>
-<td>50-200x</td>
-<td>Dashboards</td>
+<td><strong>6–15x faster</strong></td>
+<td>Conversion paid once</td>
 </tr>
 <tr>
-<td>Maximum performance</td>
+<td>Same data, JSON output needed</td>
 <td><code>JsonataData.from_json()</code> + <code>evaluate_data_to_json()</code></td>
-<td>100-1000x</td>
-<td>Critical paths</td>
+<td><strong>10–20x faster</strong></td>
+<td>Zero conversion overhead both ways</td>
+</tr>
+<tr>
+<td>Simple expressions (paths, math, strings)</td>
+<td>any of the above</td>
+<td>already fast</td>
+<td>jsonatapy beats V8 regardless of path</td>
 </tr>
 </tbody>
 </table>

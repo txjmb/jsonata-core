@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.2">
     
     
       
@@ -1003,10 +1003,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#optimizing-array-workloads" class="md-nav__link">
+  <a href="#where-jsonatapy-excels" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Optimizing Array Workloads
+        Where jsonatapy excels
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-javascript-is-faster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where JavaScript is faster
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-pre-converted-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using pre-converted data
       
     </span>
   </a>
@@ -1758,10 +1780,32 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#optimizing-array-workloads" class="md-nav__link">
+  <a href="#where-jsonatapy-excels" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Optimizing Array Workloads
+        Where jsonatapy excels
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#where-javascript-is-faster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where JavaScript is faster
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-pre-converted-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using pre-converted data
       
     </span>
   </a>
@@ -1833,7 +1877,7 @@
 <td><strong>jsonata-js</strong></td>
 <td>JavaScript</td>
 <td>2.1.0</td>
-<td>Reference implementation (Node.js v24.13.0)</td>
+<td>Reference implementation (Node.js v24.13.1)</td>
 </tr>
 <tr>
 <td><strong>jsonata-python</strong></td>
@@ -1849,7 +1893,7 @@
 </tr>
 </tbody>
 </table>
-<p>Benchmarks run on 2026-02-08.</p>
+<p>Benchmarks run on 2026-02-21.</p>
 <h2 id="summary-by-category">Summary by Category<a class="headerlink" href="#summary-by-category" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1861,31 +1905,31 @@
 <tbody>
 <tr>
 <td>Simple Paths</td>
-<td><strong>5.7x faster</strong></td>
+<td><strong>7.4x faster</strong></td>
 </tr>
 <tr>
 <td>Array Operations</td>
-<td>1.4x slower</td>
+<td>1.9x slower</td>
 </tr>
 <tr>
 <td>Complex Transformations</td>
-<td><strong>6.4x faster</strong></td>
+<td><strong>8.3x faster</strong></td>
 </tr>
 <tr>
 <td>Deep Nesting</td>
-<td>1.1x slower</td>
+<td>1.3x slower</td>
 </tr>
 <tr>
 <td>String Operations</td>
-<td><strong>6.3x faster</strong></td>
+<td><strong>7.0x faster</strong></td>
 </tr>
 <tr>
 <td>Higher-Order Functions</td>
-<td>3.4x slower</td>
+<td>2.0x slower</td>
 </tr>
 <tr>
 <td>Realistic Workload</td>
-<td>28.1x slower</td>
+<td>26.7x slower</td>
 </tr>
 </tbody>
 </table>
@@ -1908,42 +1952,42 @@
 <tr>
 <td>Simple Path</td>
 <td>tiny</td>
-<td>3.979</td>
-<td>5.295</td>
-<td>23.720</td>
-<td>80.853</td>
-<td>68.775</td>
-<td><strong>6.0x faster</strong></td>
+<td>3.418</td>
+<td>4.861</td>
+<td>33.450</td>
+<td>79.845</td>
+<td>69.655</td>
+<td><strong>9.8x faster</strong></td>
 </tr>
 <tr>
 <td>Deep Path (5 levels)</td>
 <td>tiny</td>
-<td>5.470</td>
-<td>6.962</td>
-<td>24.150</td>
-<td>147.993</td>
-<td>92.053</td>
-<td><strong>4.4x faster</strong></td>
+<td>5.267</td>
+<td>6.676</td>
+<td>23.720</td>
+<td>144.328</td>
+<td>89.320</td>
+<td><strong>4.5x faster</strong></td>
 </tr>
 <tr>
 <td>Array Index Access</td>
 <td>100 elements</td>
-<td>9.587</td>
-<td>15.426</td>
-<td>15.500</td>
-<td>186.515</td>
-<td>106.663</td>
+<td>8.875</td>
+<td>16.370</td>
+<td>13.900</td>
+<td>175.037</td>
+<td>108.928</td>
 <td><strong>1.6x faster</strong></td>
 </tr>
 <tr>
 <td>Arithmetic Expression</td>
 <td>tiny</td>
-<td>3.263</td>
-<td>4.993</td>
-<td>35.780</td>
-<td>100.909</td>
-<td>67.750</td>
-<td><strong>11.0x faster</strong></td>
+<td>2.477</td>
+<td>4.368</td>
+<td>34.290</td>
+<td>96.192</td>
+<td>63.679</td>
+<td><strong>13.8x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -1965,92 +2009,92 @@
 <tr>
 <td>Array Sum (100 elements)</td>
 <td>100 elements</td>
-<td>2.198</td>
-<td>3.578</td>
-<td>2.680</td>
-<td>102.015</td>
-<td>20.776</td>
-<td><strong>1.2x faster</strong></td>
+<td>1.921</td>
+<td>3.446</td>
+<td>2.700</td>
+<td>99.382</td>
+<td>22.349</td>
+<td><strong>1.4x faster</strong></td>
 </tr>
 <tr>
 <td>Array Max (100 elements)</td>
 <td>100 elements</td>
-<td>1.962</td>
-<td>3.155</td>
-<td>5.690</td>
-<td>102.278</td>
-<td>21.723</td>
-<td><strong>2.9x faster</strong></td>
+<td>2.009</td>
+<td>3.560</td>
+<td>2.750</td>
+<td>105.869</td>
+<td>21.035</td>
+<td><strong>1.4x faster</strong></td>
 </tr>
 <tr>
 <td>Array Count (100 elements)</td>
 <td>100 elements</td>
-<td>3.655</td>
-<td>6.289</td>
-<td>4.240</td>
-<td>84.101</td>
-<td>42.518</td>
+<td>3.605</td>
+<td>6.585</td>
+<td>4.290</td>
+<td>78.911</td>
+<td>40.881</td>
 <td><strong>1.2x faster</strong></td>
 </tr>
 <tr>
 <td>Array Sum (1000 elements)</td>
 <td>1000 elements</td>
-<td>3.643</td>
-<td>5.905</td>
-<td>1.300</td>
-<td>178.662</td>
-<td>31.185</td>
-<td>2.8x slower</td>
+<td>3.703</td>
+<td>6.153</td>
+<td>0.930</td>
+<td>168.281</td>
+<td>36.927</td>
+<td>4.0x slower</td>
 </tr>
 <tr>
 <td>Array Max (1000 elements)</td>
 <td>1000 elements</td>
-<td>3.650</td>
-<td>5.385</td>
-<td>0.930</td>
-<td>189.745</td>
-<td>32.524</td>
-<td>3.9x slower</td>
+<td>3.336</td>
+<td>5.551</td>
+<td>0.910</td>
+<td>167.937</td>
+<td>30.045</td>
+<td>3.7x slower</td>
 </tr>
 <tr>
 <td>Array Sum (10000 elements)</td>
 <td>10000 elements</td>
-<td>9.887</td>
-<td>14.222</td>
-<td>0.110</td>
-<td>442.689</td>
-<td>92.677</td>
-<td>89.9x slower</td>
+<td>11.906</td>
+<td>16.955</td>
+<td>0.090</td>
+<td>412.132</td>
+<td>84.302</td>
+<td>132.3x slower</td>
 </tr>
 <tr>
 <td>Array Mapping (extract field)</td>
 <td>100 objects</td>
-<td>51.198</td>
-<td>55.960</td>
-<td>7.630</td>
-<td>405.450</td>
-<td>244.766</td>
-<td>6.7x slower</td>
+<td>46.030</td>
+<td>47.858</td>
+<td>4.430</td>
+<td>383.882</td>
+<td>258.456</td>
+<td>10.4x slower</td>
 </tr>
 <tr>
 <td>Array Mapping + Sum</td>
 <td>100 objects</td>
-<td>53.457</td>
-<td>51.161</td>
-<td>3.680</td>
-<td>468.919</td>
-<td>249.063</td>
-<td>14.5x slower</td>
+<td>44.196</td>
+<td>47.854</td>
+<td>2.690</td>
+<td>448.681</td>
+<td>261.346</td>
+<td>16.4x slower</td>
 </tr>
 <tr>
 <td>Array Filtering (predicate)</td>
 <td>100 objects</td>
-<td>34.179</td>
-<td>30.816</td>
-<td>5.010</td>
-<td>460.752</td>
-<td>126.282</td>
-<td>6.8x slower</td>
+<td>33.973</td>
+<td>28.789</td>
+<td>1.660</td>
+<td>440.762</td>
+<td>121.827</td>
+<td>20.5x slower</td>
 </tr>
 </tbody>
 </table>
@@ -2072,42 +2116,42 @@
 <tr>
 <td>Object Construction (simple)</td>
 <td>tiny</td>
-<td>5.779</td>
-<td>5.994</td>
-<td>16.550</td>
-<td>101.349</td>
-<td>40.663</td>
-<td><strong>2.9x faster</strong></td>
+<td>4.104</td>
+<td>4.618</td>
+<td>15.720</td>
+<td>91.767</td>
+<td>37.249</td>
+<td><strong>3.8x faster</strong></td>
 </tr>
 <tr>
 <td>Object Construction (nested)</td>
 <td>tiny</td>
-<td>8.964</td>
-<td>8.469</td>
-<td>15.630</td>
-<td>114.156</td>
-<td>43.904</td>
-<td><strong>1.7x faster</strong></td>
+<td>6.143</td>
+<td>6.059</td>
+<td>15.660</td>
+<td>116.394</td>
+<td>44.571</td>
+<td><strong>2.5x faster</strong></td>
 </tr>
 <tr>
 <td>Conditional Expression</td>
 <td>tiny</td>
-<td>1.354</td>
-<td>2.072</td>
-<td>18.780</td>
-<td>44.279</td>
-<td>32.117</td>
-<td><strong>13.9x faster</strong></td>
+<td>1.085</td>
+<td>1.808</td>
+<td>20.090</td>
+<td>40.364</td>
+<td>30.020</td>
+<td><strong>18.5x faster</strong></td>
 </tr>
 <tr>
 <td>Multiple Nested Functions</td>
 <td>tiny</td>
-<td>1.719</td>
-<td>2.467</td>
-<td>12.180</td>
-<td>69.471</td>
-<td>32.049</td>
-<td><strong>7.1x faster</strong></td>
+<td>1.596</td>
+<td>2.211</td>
+<td>12.970</td>
+<td>69.301</td>
+<td>30.505</td>
+<td><strong>8.1x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2129,22 +2173,22 @@
 <tr>
 <td>Deep Path (12 levels)</td>
 <td>12 levels</td>
-<td>9.119</td>
-<td>11.071</td>
-<td>15.080</td>
-<td>157.158</td>
-<td>69.299</td>
-<td><strong>1.7x faster</strong></td>
+<td>8.188</td>
+<td>9.465</td>
+<td>10.770</td>
+<td>160.139</td>
+<td>66.444</td>
+<td><strong>1.3x faster</strong></td>
 </tr>
 <tr>
 <td>Nested Array Access</td>
 <td>4-level nested arrays</td>
-<td>22.598</td>
-<td>31.174</td>
-<td>5.630</td>
-<td>258.326</td>
-<td>133.304</td>
-<td>4.0x slower</td>
+<td>21.349</td>
+<td>32.423</td>
+<td>5.090</td>
+<td>252.984</td>
+<td>128.685</td>
+<td>4.2x slower</td>
 </tr>
 </tbody>
 </table>
@@ -2166,62 +2210,62 @@
 <tr>
 <td>String Uppercase</td>
 <td>tiny</td>
-<td>3.038</td>
-<td>4.228</td>
-<td>20.610</td>
-<td>96.609</td>
-<td>66.030</td>
-<td><strong>6.8x faster</strong></td>
+<td>2.637</td>
+<td>3.903</td>
+<td>19.710</td>
+<td>94.128</td>
+<td>59.715</td>
+<td><strong>7.5x faster</strong></td>
 </tr>
 <tr>
 <td>String Lowercase</td>
 <td>tiny</td>
-<td>3.016</td>
-<td>4.427</td>
-<td>20.410</td>
-<td>94.675</td>
-<td>64.486</td>
-<td><strong>6.8x faster</strong></td>
+<td>2.616</td>
+<td>3.845</td>
+<td>19.950</td>
+<td>93.876</td>
+<td>66.215</td>
+<td><strong>7.6x faster</strong></td>
 </tr>
 <tr>
 <td>String Length</td>
 <td>tiny</td>
-<td>2.905</td>
-<td>4.266</td>
-<td>21.580</td>
-<td>96.430</td>
-<td>73.537</td>
-<td><strong>7.4x faster</strong></td>
+<td>2.560</td>
+<td>3.965</td>
+<td>20.120</td>
+<td>93.868</td>
+<td>59.884</td>
+<td><strong>7.9x faster</strong></td>
 </tr>
 <tr>
 <td>String Concatenation</td>
 <td>tiny</td>
-<td>3.330</td>
-<td>4.087</td>
-<td>9.420</td>
-<td>107.408</td>
-<td>34.262</td>
-<td><strong>2.8x faster</strong></td>
+<td>2.653</td>
+<td>3.187</td>
+<td>9.030</td>
+<td>99.441</td>
+<td>32.199</td>
+<td><strong>3.4x faster</strong></td>
 </tr>
 <tr>
 <td>String Substring</td>
 <td>tiny</td>
-<td>2.229</td>
-<td>3.331</td>
-<td>12.520</td>
-<td>71.734</td>
-<td>35.090</td>
-<td><strong>5.6x faster</strong></td>
+<td>2.114</td>
+<td>2.803</td>
+<td>12.160</td>
+<td>65.012</td>
+<td>30.429</td>
+<td><strong>5.8x faster</strong></td>
 </tr>
 <tr>
 <td>String Contains</td>
 <td>tiny</td>
-<td>1.461</td>
-<td>2.493</td>
-<td>12.060</td>
-<td>61.979</td>
-<td>35.852</td>
-<td><strong>8.3x faster</strong></td>
+<td>1.220</td>
+<td>2.087</td>
+<td>12.420</td>
+<td>55.135</td>
+<td>30.694</td>
+<td><strong>10.2x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2243,32 +2287,32 @@
 <tr>
 <td>$map with lambda</td>
 <td>100 elements</td>
-<td>3.160</td>
-<td>3.358</td>
-<td>0.950</td>
-<td>109.875</td>
-<td>7.712</td>
-<td>3.3x slower</td>
+<td>1.787</td>
+<td>2.083</td>
+<td>0.850</td>
+<td>114.098</td>
+<td>7.153</td>
+<td>2.1x slower</td>
 </tr>
 <tr>
 <td>$filter with lambda</td>
 <td>100 elements</td>
-<td>3.013</td>
-<td>3.114</td>
-<td>1.010</td>
-<td>113.849</td>
-<td>7.451</td>
-<td>3.0x slower</td>
+<td>1.636</td>
+<td>1.900</td>
+<td>0.990</td>
+<td>103.713</td>
+<td>6.476</td>
+<td>1.7x slower</td>
 </tr>
 <tr>
 <td>$reduce with lambda</td>
 <td>100 elements</td>
-<td>3.696</td>
-<td>4.326</td>
-<td>0.920</td>
-<td>107.816</td>
-<td>8.616</td>
-<td>4.0x slower</td>
+<td>2.044</td>
+<td>2.364</td>
+<td>0.850</td>
+<td>100.455</td>
+<td>7.090</td>
+<td>2.4x slower</td>
 </tr>
 </tbody>
 </table>
@@ -2290,52 +2334,52 @@
 <tr>
 <td>Filter by category</td>
 <td>100 products</td>
-<td>81.563</td>
-<td>76.437</td>
-<td>1.780</td>
-<td>734.315</td>
-<td>376.793</td>
-<td>45.8x slower</td>
+<td>78.289</td>
+<td>74.613</td>
+<td>1.880</td>
+<td>734.265</td>
+<td>384.977</td>
+<td>41.6x slower</td>
 </tr>
 <tr>
 <td>Calculate total value</td>
 <td>100 products</td>
-<td>71.135</td>
-<td>73.102</td>
-<td>1.560</td>
-<td>670.159</td>
-<td>390.203</td>
-<td>45.6x slower</td>
+<td>71.979</td>
+<td>73.042</td>
+<td>1.750</td>
+<td>652.558</td>
+<td>372.265</td>
+<td>41.1x slower</td>
 </tr>
 <tr>
 <td>Complex transformation</td>
 <td>100 products</td>
-<td>43.302</td>
-<td>41.364</td>
-<td>1.240</td>
-<td>563.856</td>
-<td>161.663</td>
-<td>34.9x slower</td>
+<td>42.814</td>
+<td>36.595</td>
+<td>4.200</td>
+<td>540.489</td>
+<td>161.282</td>
+<td>10.2x slower</td>
 </tr>
 <tr>
 <td>Group by category (aggregate)</td>
 <td>100 products</td>
-<td>43.660</td>
-<td>43.613</td>
-<td>4.200</td>
-<td>654.537</td>
-<td>164.877</td>
-<td>10.4x slower</td>
+<td>43.870</td>
+<td>47.985</td>
+<td>1.180</td>
+<td>618.170</td>
+<td>155.178</td>
+<td>37.2x slower</td>
 </tr>
 <tr>
 <td>Top rated products</td>
 <td>100 products</td>
-<td>22.192</td>
-<td>18.907</td>
-<td>0.210</td>
-<td>192.178</td>
-<td>85.421</td>
-<td>105.7x slower</td>
+<td>17.891</td>
+<td>15.873</td>
+<td>0.250</td>
+<td>199.836</td>
+<td>76.446</td>
+<td>71.6x slower</td>
 </tr>
 </tbody>
 </table>
@@ -2351,55 +2395,55 @@
 <tbody>
 <tr>
 <td>Filter by category (data handle)</td>
-<td>12.778</td>
+<td>12.501</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Filter by category (data→json)</td>
-<td>8.475</td>
+<td>6.803</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Complex transformation (data handle)</td>
-<td>33.812</td>
+<td>29.559</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Complex transformation (data→json)</td>
-<td>31.929</td>
+<td>26.926</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Aggregate (data handle)</td>
-<td>4.825</td>
+<td>4.506</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Aggregate (data→json)</td>
-<td>4.526</td>
+<td>4.317</td>
 <td>500</td>
 </tr>
 </tbody>
 </table>
 <h2 id="performance-characteristics">Performance Characteristics<a class="headerlink" href="#performance-characteristics" title="Permanent link">&para;</a></h2>
-<p><strong>Faster than JavaScript:</strong></p>
+<h3 id="where-jsonatapy-excels">Where jsonatapy excels<a class="headerlink" href="#where-jsonatapy-excels" title="Permanent link">&para;</a></h3>
+<p>jsonatapy is the <strong>fastest Python JSONata implementation by a wide margin</strong> — 50–150x faster than jsonata-python across all categories. It is also <strong>faster than jsonata-rs</strong> (the leading pure-Rust JSONata implementation) for most workloads, demonstrating that the compilation layer and bytecode VM pay off even without Python overhead.</p>
+<p>For <strong>pure expression evaluation</strong> — simple paths, arithmetic, conditionals, string operations, and complex transformations — jsonatapy consistently beats the JavaScript reference implementation running on V8:</p>
 <ul>
-<li>Simple Paths (5.7x faster)</li>
-<li>Complex Transformations (6.4x faster)</li>
-<li>String Operations (6.3x faster)</li>
+<li>Simple Paths (7.4x faster)</li>
+<li>Complex Transformations (8.3x faster)</li>
+<li>String Operations (7.0x faster)</li>
 </ul>
-<p><strong>Comparable to JavaScript:</strong></p>
+<h3 id="where-javascript-is-faster">Where JavaScript is faster<a class="headerlink" href="#where-javascript-is-faster" title="Permanent link">&para;</a></h3>
+<p>For workloads that iterate over large arrays of Python dicts, the dominant cost is converting Python objects to Rust values on every <code>evaluate()</code> call — roughly 1µs per field, or ~130µs for 100 objects with 5 fields each. This is a property of the Python/C extension model, not of jsonatapy specifically: any Rust or C extension must pay this cost when reading Python dict data.</p>
 <ul>
-<li>Deep Nesting</li>
+<li>Array Operations (1.9x slower overall; aggregates on 100-element arrays are competitive)</li>
+<li>Higher-Order Functions (2.0x slower)</li>
+<li>Realistic Workload (26.7x slower on full-conversion path)</li>
 </ul>
-<p><strong>Slower than JavaScript:</strong></p>
-<ul>
-<li>Array Operations (1.4x slower, primarily due to Python/Rust boundary overhead on per-call data conversion)</li>
-<li>Higher-Order Functions (3.4x slower, primarily due to Python/Rust boundary overhead on per-call data conversion)</li>
-<li>Realistic Workload (28.1x slower, primarily due to Python/Rust boundary overhead on per-call data conversion)</li>
-</ul>
-<h3 id="optimizing-array-workloads">Optimizing Array Workloads<a class="headerlink" href="#optimizing-array-workloads" title="Permanent link">&para;</a></h3>
-<p>For array-heavy workloads, the dominant cost is converting Python dicts to Rust values on every call. Use <code>JsonataData</code> to pre-convert data once and reuse across multiple evaluations:</p>
+<p>V8's JIT compiler eliminates equivalent overhead through type specialisation and loop vectorisation. Without a JIT, this gap is irreducible for the <code>evaluate(dict)</code> call path.</p>
+<h3 id="using-pre-converted-data">Using pre-converted data<a class="headerlink" href="#using-pre-converted-data" title="Permanent link">&para;</a></h3>
+<p>With <code>JsonataData</code>, the conversion cost is paid once and amortized across all evaluations. With pre-converted data, the remaining gap to V8 is 2–7x — the pure interpreter vs JIT gap — which is the practical performance ceiling without adding a JIT compiler.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="o">...</span><span class="p">}</span>  <span class="c1"># your data</span>
@@ -2408,15 +2452,15 @@
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Pre-convert once</span>
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">jdata</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">JsonataData</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Reuse many times (6-15x faster than evaluate(dict))</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Reuse many times (6–15x faster than evaluate(dict))</span>
 </span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">jdata</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="methodology">Methodology<a class="headerlink" href="#methodology" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Date:</strong> 2026-02-08</li>
+<li><strong>Date:</strong> 2026-02-21</li>
 <li><strong>Platform:</strong> Linux (WSL2) on x86_64</li>
 <li><strong>Python:</strong> 3.13</li>
-<li><strong>Node.js:</strong> v24.13.0</li>
+<li><strong>Node.js:</strong> v24.13.1</li>
 <li>All times are total wall-clock time for the stated number of iterations</li>
 <li>Each benchmark includes a warmup phase before measurement</li>
 <li>'vs JS' column shows jsonatapy speedup relative to the JavaScript reference implementation</li>
