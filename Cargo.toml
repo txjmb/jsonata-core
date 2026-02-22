@@ -1,6 +1,6 @@
 [package]
 name = "jsonata-core"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 authors = ["txjmb <txjmb@users.noreply.github.com>"]
 description = "High-performance Rust implementation of JSONata query and transformation language"
