@@ -332,7 +332,7 @@ impl Signature {
         for (i, (param, arg)) in self.params.iter().zip(args.iter()).enumerate() {
             // Special case: if argument is null (undefined), return UndefinedArgument
             // This allows the caller to decide whether to return undefined or error
-            if matches!(arg, JValue::Null)
+            if arg.is_null()
                 && !matches!(param.param_type, ParamType::Null | ParamType::Any)
             {
                 return Err(SignatureError::UndefinedArgument);

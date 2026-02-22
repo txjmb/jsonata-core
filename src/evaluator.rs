@@ -161,7 +161,6 @@ pub(crate) enum CompiledArithOp {
     Mod,
 }
 
-
 /// Unified compiled expression — replaces SpecializedPredicate & CompiledObjectMap.
 ///
 /// `try_compile_expr()` converts an AstNode subtree into a CompiledExpr at
@@ -607,7 +606,6 @@ pub(crate) fn eval_compiled(
 ) -> Result<JValue, EvaluatorError> {
     eval_compiled_inner(expr, data, vars, None, None)
 }
-
 
 /// Like `eval_compiled` but with an optional shape cache for O(1) positional
 /// field access. The shape cache maps field names to their index in the object's
@@ -1292,7 +1290,7 @@ fn call_pure_builtin(
             "string" => {
                 // $string() with a null/undefined context returns undefined, not "null".
                 // This mirrors the tree-walker's special case at the function-call site.
-                if data.is_undefined() || matches!(data, JValue::Null) {
+                if data.is_undefined() || data.is_null() {
                     return Ok(JValue::Undefined);
                 }
                 args_storage = vec![data.clone()];
@@ -2969,7 +2967,7 @@ impl Evaluator {
                     self.context.bind_lambda(lambda_name, transform_lambda);
 
                     // Return lambda marker
-                    Ok(JValue::string("<lambda>".to_string()))
+                    Ok(JValue::string("<lambda>"))
                 }
             }
         }
@@ -2981,8 +2979,8 @@ impl Evaluator {
     fn apply_stages(&mut self, value: JValue, stages: &[Stage]) -> Result<JValue, EvaluatorError> {
         // Wrap non-arrays in an array for filtering (JSONata semantics)
         let mut result = match value {
-            JValue::Array(arr) => JValue::Array(arr),
             JValue::Null => return Ok(JValue::Null), // Null passes through unchanged
+            JValue::Array(_) => value,
             other => JValue::array(vec![other]),
         };
 
@@ -3060,7 +3058,7 @@ impl Evaluator {
                         match item {
                             JValue::Array(_) => {
                                 let indexed = self.array_index(item, &JValue::Number(*n))?;
-                                if !matches!(indexed, JValue::Null) {
+                                if !indexed.is_null() {
                                     result.push(indexed);
                                 }
                             }
@@ -3126,7 +3124,7 @@ impl Evaluator {
                             match item {
                                 JValue::Array(_) => {
                                     let indexed = self.array_index(item, &pred_result)?;
-                                    if !matches!(indexed, JValue::Null) {
+                                    if !indexed.is_null() {
                                         result.push(indexed);
                                     }
                                 }
@@ -3287,7 +3285,7 @@ impl Evaluator {
                             for item in arr.iter() {
                                 if let JValue::Object(obj) = item {
                                     if let Some(val) = obj.get(field_name) {
-                                        if !matches!(val, JValue::Null) {
+                                        if !val.is_null() {
                                             match val {
                                                 JValue::Array(arr_val) => {
                                                     result.extend(arr_val.iter().cloned());
@@ -3334,7 +3332,7 @@ impl Evaluator {
                                         };
 
                                         if let Some(val) = inner.get(field_name) {
-                                            if !matches!(val, JValue::Null) {
+                                            if !val.is_null() {
                                                 // Build tuple wrapper - only clone bindings when needed
                                                 let wrap = |v: JValue| -> JValue {
                                                     let mut wrapper = IndexMap::new();
@@ -3364,7 +3362,7 @@ impl Evaluator {
                                     } else {
                                         // Non-tuple: access field directly by reference, only clone the field value
                                         if let Some(val) = obj.get(field_name) {
-                                            if !matches!(val, JValue::Null) {
+                                            if !val.is_null() {
                                                 match val {
                                                     JValue::Array(arr_val) => {
                                                         for item in arr_val.iter() {
@@ -3435,7 +3433,7 @@ impl Evaluator {
                                 for item in arr.iter() {
                                     if let JValue::Object(obj) = item {
                                         if let Some(val) = obj.get(field_name) {
-                                            if !matches!(val, JValue::Null) {
+                                            if !val.is_null() {
                                                 match val {
                                                     JValue::Array(inner) => {
                                                         result.extend(inner.iter().cloned());
@@ -3525,7 +3523,7 @@ impl Evaluator {
                             match item {
                                 JValue::Object(obj) => {
                                     let val = obj.get(field_name).cloned().unwrap_or(JValue::Null);
-                                    if !matches!(val, JValue::Null) {
+                                    if !val.is_null() {
                                         if !stages.is_empty() {
                                             // Apply stages to the extracted value
                                             let processed_val = self.apply_stages(val, stages)?;
@@ -3610,7 +3608,7 @@ impl Evaluator {
         for step in steps[1..].iter() {
             // Early return if current is null/undefined - no point continuing
             // This handles cases like `blah.{}` where blah doesn't exist
-            if matches!(current, JValue::Null) || current.is_undefined() {
+            if current.is_null() || current.is_undefined() {
                 return Ok(JValue::Null);
             }
 
@@ -3693,7 +3691,7 @@ impl Evaluator {
                             }
 
                             // Collect result
-                            if !matches!(step_result, JValue::Null) && !step_result.is_undefined() {
+                            if !step_result.is_null() && !step_result.is_undefined() {
                                 // For object constructors, collect results directly
                                 // For other steps, handle arrays
                                 if matches!(&step.node, AstNode::Object(_)) {
@@ -3819,7 +3817,7 @@ impl Evaluator {
                                     match item {
                                         JValue::Object(obj) => {
                                             if let Some(val) = obj.get(field_name) {
-                                                if !matches!(val, JValue::Null) {
+                                                if !val.is_null() {
                                                     match val {
                                                         JValue::Array(arr_val) => {
                                                             result.extend(arr_val.iter().cloned())
@@ -3875,7 +3873,7 @@ impl Evaluator {
                                                 .cloned()
                                                 .unwrap_or(JValue::Null);
 
-                                            if !matches!(val, JValue::Null) {
+                                            if !val.is_null() {
                                                 // Helper to wrap value in tuple if we have bindings
                                                 let wrap_in_tuple = |v: JValue, bindings: &Option<Vec<(String, JValue)>>| -> JValue {
                                                     if let Some(b) = bindings {
@@ -4043,7 +4041,7 @@ impl Evaluator {
                                         } else {
                                             eval_compiled(&compiled, item, None)?
                                         };
-                                        if !matches!(value, JValue::Null) && !value.is_undefined() {
+                                        if !value.is_null() && !value.is_undefined() {
                                             result.push(value);
                                         }
                                     }
@@ -4068,7 +4066,7 @@ impl Evaluator {
                                         }
 
                                         // Only include non-null/undefined values
-                                        if !matches!(value, JValue::Null) && !value.is_undefined() {
+                                        if !value.is_null() && !value.is_undefined() {
                                             result.push(value);
                                         }
                                     }
@@ -4249,7 +4247,7 @@ impl Evaluator {
                             // Evaluate the variable in the context of this tuple
                             // This allows tuple bindings ($i, etc.) to be found
                             let val = self.evaluate_internal(step, tuple)?;
-                            if !matches!(val, JValue::Null) && !val.is_undefined() {
+                            if !val.is_null() && !val.is_undefined() {
                                 results.push(val);
                             }
                         }
@@ -4328,7 +4326,7 @@ impl Evaluator {
                         Ok(value)
                     }
                     // For paths and variables, null means undefined - use RHS
-                    else if matches!(value, JValue::Null)
+                    else if value.is_null()
                         && (matches!(lhs, AstNode::Path { .. })
                             || matches!(lhs, AstNode::String(_))
                             || matches!(lhs, AstNode::Variable(_)))
@@ -4423,7 +4421,7 @@ impl Evaluator {
             // Early check: if LHS evaluates to undefined, return undefined
             // This matches JSONata behavior where undefined ~> anyFunc returns undefined
             let lhs_value_for_check = self.evaluate_internal(lhs, data)?;
-            if lhs_value_for_check.is_undefined() || matches!(lhs_value_for_check, JValue::Null) {
+            if lhs_value_for_check.is_undefined() || lhs_value_for_check.is_null() {
                 return Ok(JValue::Undefined);
             }
 
@@ -5128,7 +5126,7 @@ impl Evaluator {
             // For other expressions, evaluate and check if non-null/non-undefined
             let value = self.evaluate_internal(arg, data)?;
             return Ok(JValue::Bool(
-                !matches!(value, JValue::Null) && !value.is_undefined(),
+                !value.is_null() && !value.is_undefined(),
             ));
         }
 
@@ -5284,7 +5282,7 @@ impl Evaluator {
         if name == "string"
             && args.is_empty()
             && !evaluated_args.is_empty()
-            && matches!(evaluated_args[0], JValue::Null)
+            && evaluated_args[0].is_null()
         {
             // Context was null/undefined, so return undefined
             return Ok(JValue::Null);
@@ -5553,7 +5551,7 @@ impl Evaluator {
                         "contains() requires exactly 2 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
@@ -5569,7 +5567,7 @@ impl Evaluator {
                         "split() requires 2 or 3 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
@@ -5612,7 +5610,7 @@ impl Evaluator {
                             .to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
 
@@ -5701,7 +5699,7 @@ impl Evaluator {
                         "replace() requires 3 or 4 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
 
@@ -5770,7 +5768,7 @@ impl Evaluator {
                         "match() requires 1 to 3 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
 
@@ -6041,7 +6039,7 @@ impl Evaluator {
                         "power() requires exactly 2 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
@@ -6059,7 +6057,7 @@ impl Evaluator {
                         "formatNumber() requires 2 or 3 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
@@ -6083,7 +6081,7 @@ impl Evaluator {
                     ));
                 }
                 // Handle undefined input
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
@@ -6118,12 +6116,12 @@ impl Evaluator {
                 let second = &evaluated_args[1];
 
                 // If second arg is null, return first as-is (no change)
-                if matches!(second, JValue::Null) {
+                if second.is_null() {
                     return Ok(first.clone());
                 }
 
                 // If first arg is null, return second as-is (appending to nothing gives second)
-                if matches!(first, JValue::Null) {
+                if first.is_null() {
                     return Ok(second.clone());
                 }
 
@@ -6155,7 +6153,7 @@ impl Evaluator {
                         "shuffle() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
@@ -6320,7 +6318,7 @@ impl Evaluator {
                 let array_value = &evaluated_args[0];
 
                 // Handle undefined input
-                if matches!(array_value, JValue::Null) {
+                if array_value.is_null() {
                     return Ok(JValue::Null);
                 }
 
@@ -6421,7 +6419,7 @@ impl Evaluator {
                         "lookup() requires exactly 2 arguments".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
 
@@ -6656,7 +6654,7 @@ impl Evaluator {
                 }
 
                 // Handle null input
-                if matches!(array, JValue::Null) {
+                if array.is_null() {
                     return Ok(JValue::Undefined);
                 }
 
@@ -7028,7 +7026,7 @@ impl Evaluator {
 
                             let fn_result = self.apply_function(func_arg, &call_args, data)?;
                             // Skip undefined results (similar to map behavior)
-                            if !matches!(fn_result, JValue::Null) && !fn_result.is_undefined() {
+                            if !fn_result.is_null() && !fn_result.is_undefined() {
                                 result.push(fn_result);
                             }
                         }
@@ -7069,22 +7067,22 @@ impl Evaluator {
                 // In JavaScript: $type(undefined) returns undefined, $type(null) returns "null"
                 // We use a special marker object to distinguish undefined from null
                 match &evaluated_args[0] {
-                    JValue::Null => Ok(JValue::string("null".to_string())), // explicit null
-                    JValue::Bool(_) => Ok(JValue::string("boolean".to_string())),
-                    JValue::Number(_) => Ok(JValue::string("number".to_string())),
+                    JValue::Null => Ok(JValue::string("null")),
+                    JValue::Bool(_) => Ok(JValue::string("boolean")),
+                    JValue::Number(_) => Ok(JValue::string("number")),
                     JValue::String(_) => Ok(JValue::string("string")),
-                    JValue::Array(_) => Ok(JValue::string("array".to_string())),
-                    JValue::Object(_) => Ok(JValue::string("object".to_string())),
+                    JValue::Array(_) => Ok(JValue::string("array")),
+                    JValue::Object(_) => Ok(JValue::string("object")),
                     JValue::Undefined => Ok(JValue::Undefined),
                     JValue::Lambda { .. } | JValue::Builtin { .. } => {
-                        Ok(JValue::string("function".to_string()))
+                        Ok(JValue::string("function"))
                     }
-                    JValue::Regex { .. } => Ok(JValue::string("regex".to_string())),
+                    JValue::Regex { .. } => Ok(JValue::string("regex")),
                 }
             }
 
             "base64encode" => {
-                if evaluated_args.is_empty() || matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args.is_empty() || evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 if evaluated_args.len() != 1 {
@@ -7100,7 +7098,7 @@ impl Evaluator {
                 }
             }
             "base64decode" => {
-                if evaluated_args.is_empty() || matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args.is_empty() || evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 if evaluated_args.len() != 1 {
@@ -7121,7 +7119,7 @@ impl Evaluator {
                         "encodeUrlComponent() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
@@ -7137,7 +7135,7 @@ impl Evaluator {
                         "decodeUrlComponent() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
@@ -7153,7 +7151,7 @@ impl Evaluator {
                         "encodeUrl() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
@@ -7169,7 +7167,7 @@ impl Evaluator {
                         "decodeUrl() requires exactly 1 argument".to_string(),
                     ));
                 }
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
                 match &evaluated_args[0] {
@@ -7244,7 +7242,7 @@ impl Evaluator {
                 }
 
                 // If the first argument is null/undefined, return undefined
-                if matches!(evaluated_args[0], JValue::Null) {
+                if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
 
@@ -8110,7 +8108,7 @@ impl Evaluator {
         let mut current_match = self.apply_function(matcher_node, &[str_val], data)?;
 
         // Iterate through matches following the 'next' chain
-        while !current_match.is_undefined() && !matches!(current_match, JValue::Null) {
+        while !current_match.is_undefined() && !current_match.is_null() {
             // Check limit
             if let Some(lim) = limit {
                 if count >= lim {
@@ -8531,7 +8529,7 @@ impl Evaluator {
                     )),
                 }
             }
-            "exists" => Ok(JValue::Bool(!matches!(arg, JValue::Null))),
+            "exists" => Ok(JValue::Bool(!arg.is_null())),
             "abs" => match arg {
                 JValue::Number(n) => Ok(functions::numeric::abs(*n)?),
                 _ => Err(EvaluatorError::TypeError(
@@ -8617,8 +8615,8 @@ impl Evaluator {
             "count" => {
                 match arg {
                     JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
-                    JValue::Null => Ok(JValue::Number(0 as f64)),
-                    _ => Ok(JValue::Number(1_f64)), // Single value counts as 1
+                    JValue::Null => Ok(JValue::Number(0.0)),
+                    _ => Ok(JValue::Number(1.0)), // Single value counts as 1
                 }
             }
             "max" => match arg {
@@ -9016,7 +9014,7 @@ impl Evaluator {
         // "missing field" or "explicit null". For now, treat null results as undefined
         // to maintain compatibility with existing tests.
         // TODO: For full JS compatibility, would need deeper analysis of the expression
-        if matches!(result, JValue::Null) {
+        if result.is_null() {
             return Ok(JValue::Undefined);
         }
 
@@ -9030,7 +9028,7 @@ impl Evaluator {
         terms: &[(AstNode, bool)],
     ) -> Result<JValue, EvaluatorError> {
         // If data is null, return null
-        if matches!(data, JValue::Null) {
+        if data.is_null() {
             return Ok(JValue::Null);
         }
 
@@ -9150,7 +9148,6 @@ impl Evaluator {
 
     /// Compare two values for sorting (JSONata semantics)
     fn compare_values(&self, left: &JValue, right: &JValue) -> Ordering {
-
         // Handle undefined markers first - they sort to the end
         let left_undef = left.is_undefined();
         let right_undef = right.is_undefined();
@@ -9804,7 +9801,7 @@ impl Evaluator {
     fn in_operator(&self, left: &JValue, right: &JValue) -> Result<JValue, EvaluatorError> {
         // If either side is undefined/null, return false (not an error)
         // This matches JavaScript behavior
-        if matches!(left, JValue::Null) || matches!(right, JValue::Null) {
+        if left.is_null() || right.is_null() {
             return Ok(JValue::Bool(false));
         }
 
@@ -9958,7 +9955,7 @@ mod tests {
         let result = evaluator
             .evaluate(&AstNode::string("hello"), &data)
             .unwrap();
-        assert_eq!(result, JValue::string("hello".to_string()));
+        assert_eq!(result, JValue::string("hello"));
 
         // Number literal
         let result = evaluator.evaluate(&AstNode::number(42.0), &data).unwrap();
@@ -10209,7 +10206,7 @@ mod tests {
             rhs: Box::new(AstNode::string(" World")),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, JValue::string("Hello World".to_string()));
+        assert_eq!(result, JValue::string("Hello World"));
     }
 
     #[test]
@@ -10343,7 +10340,7 @@ mod tests {
             else_branch: Some(Box::new(AstNode::string("no"))),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, JValue::string("yes".to_string()));
+        assert_eq!(result, JValue::string("yes"));
 
         // False condition
         let expr = AstNode::Conditional {
@@ -10352,7 +10349,7 @@ mod tests {
             else_branch: Some(Box::new(AstNode::string("no"))),
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, JValue::string("no".to_string()));
+        assert_eq!(result, JValue::string("no"));
 
         // No else branch returns undefined (not null)
         let expr = AstNode::Conditional {
@@ -10391,7 +10388,7 @@ mod tests {
             is_builtin: true,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, JValue::string("HELLO".to_string()));
+        assert_eq!(result, JValue::string("HELLO"));
 
         // lowercase function
         let expr = AstNode::Function {
@@ -10400,7 +10397,7 @@ mod tests {
             is_builtin: true,
         };
         let result = evaluator.evaluate(&expr, &data).unwrap();
-        assert_eq!(result, JValue::string("hello".to_string()));
+        assert_eq!(result, JValue::string("hello"));
 
         // length function
         let expr = AstNode::Function {
@@ -10460,7 +10457,7 @@ mod tests {
             ],
         };
         let result = evaluator.evaluate(&path, &data).unwrap();
-        assert_eq!(result, JValue::string("1.0".to_string()));
+        assert_eq!(result, JValue::string("1.0"));
     }
 
     #[test]
@@ -10496,8 +10493,8 @@ mod tests {
         assert!(evaluator.is_truthy(&JValue::Bool(true)));
         assert!(!evaluator.is_truthy(&JValue::from(0i64)));
         assert!(evaluator.is_truthy(&JValue::from(1i64)));
-        assert!(!evaluator.is_truthy(&JValue::string("".to_string())));
-        assert!(evaluator.is_truthy(&JValue::string("hello".to_string())));
+        assert!(!evaluator.is_truthy(&JValue::string("")));
+        assert!(evaluator.is_truthy(&JValue::string("hello")));
         assert!(!evaluator.is_truthy(&JValue::array(vec![])));
         assert!(evaluator.is_truthy(&JValue::from(serde_json::json!([1, 2, 3]))));
     }

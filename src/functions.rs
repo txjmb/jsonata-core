@@ -30,7 +30,7 @@ fn js_slice<T: Clone>(arr: &[T], start: i64, end: Option<i64>) -> Vec<T> {
     let s = if start < 0 {
         (len + start).max(0) as usize
     } else {
-        (start.min(len)) as usize
+        start.min(len) as usize
     };
     let e = match end {
         Some(end) => {
@@ -54,10 +54,10 @@ pub mod string {
 
     /// Helper to detect and extract regex from a JValue
     pub fn extract_regex(value: &JValue) -> Option<(String, String)> {
-        if let JValue::Regex { pattern, flags } = value {
-            return Some((pattern.to_string(), flags.to_string()));
+        match value {
+            JValue::Regex { pattern, flags } => Some((pattern.to_string(), flags.to_string())),
+            _ => None,
         }
-        None
     }
 
     /// Helper to build a Regex from pattern and flags
@@ -1722,7 +1722,7 @@ pub mod array {
 
     /// $exists(value) - Check if value exists (not null/undefined)
     pub fn exists(value: &JValue) -> Result<JValue, FunctionError> {
-        let is_missing = matches!(value, JValue::Null) || value.is_undefined();
+        let is_missing = value.is_null() || value.is_undefined();
         Ok(JValue::Bool(!is_missing))
     }
 
