@@ -30,14 +30,12 @@
 //! - `value` - JValue type (the runtime value representation)
 
 pub mod ast;
-mod compiler;
 mod datetime;
 pub mod evaluator;
 pub mod functions;
 pub mod parser;
 mod signature;
 pub mod value;
-mod vm;
 
 // ── Python bindings (only when the "python" feature is enabled) ───────────────
 
