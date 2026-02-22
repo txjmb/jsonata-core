@@ -1325,7 +1325,7 @@ fn call_pure_builtin(
     // Apply undefined propagation: if the first effective argument is Undefined
     // and the function propagates undefined, return Undefined immediately.
     // This matches the tree-walker's `propagates_undefined` check.
-    if effective_args.first().map_or(false, JValue::is_undefined)
+    if effective_args.first().is_some_and(JValue::is_undefined)
         && propagates_undefined(name)
     {
         return Ok(JValue::Undefined);
@@ -2366,11 +2366,8 @@ impl Evaluator {
                         return None; // Tuple data needs full evaluator
                     }
                 }
-                if let Some(value) = self.context.lookup(name) {
-                    Some(Ok(value.clone()))
-                } else {
-                    None // May be a lambda/builtin — needs full evaluator
-                }
+                // May be a lambda/builtin — needs full evaluator if None
+                self.context.lookup(name).map(|value| Ok(value.clone()))
             }
             _ => None,
         }
@@ -3082,7 +3079,7 @@ impl Evaluator {
                 if Self::is_filter_predicate(predicate) {
                     // Try CompiledExpr fast path (handles compound predicates, arithmetic, etc.)
                     if let Some(compiled) = try_compile_expr(predicate) {
-                        let shape = arr.first().and_then(|e| build_shape_cache(e));
+                        let shape = arr.first().and_then(build_shape_cache);
                         let mut filtered = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
                             let result = if let Some(ref s) = shape {
@@ -4038,7 +4035,7 @@ impl Evaluator {
                             // path evaluation code after all steps are processed.
                             let mapped: Vec<JValue> =
                                 if let Some(compiled) = try_compile_expr(expr) {
-                                    let shape = arr.first().and_then(|e| build_shape_cache(e));
+                                    let shape = arr.first().and_then(build_shape_cache);
                                     let mut result = Vec::with_capacity(arr.len());
                                     for item in arr.iter() {
                                         let value = if let Some(ref s) = shape {
@@ -4192,7 +4189,7 @@ impl Evaluator {
                 (JValue::Array(arr), AstNode::Object(pairs)) => {
                     // Try CompiledExpr for object construction (handles arithmetic, conditionals, etc.)
                     if let Some(compiled) = try_compile_expr(&AstNode::Object(pairs.clone())) {
-                        let shape = arr.first().and_then(|e| build_shape_cache(e));
+                        let shape = arr.first().and_then(build_shape_cache);
                         let mut mapped = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
                             let result = if let Some(ref s) = shape {
@@ -4918,6 +4915,7 @@ impl Evaluator {
     /// Handles patterns like:
     /// - $sum(arr.field) → iterate arr, extract field, accumulate
     /// - $sum(arr[pred].field) → iterate arr, filter, extract, accumulate
+    ///
     /// Returns None if the pattern doesn't match (falls back to normal evaluation).
     fn try_fused_aggregate(
         &mut self,
@@ -4977,7 +4975,7 @@ impl Evaluator {
         }
 
         // Build shape cache for the array
-        let shape = arr.first().and_then(|e| build_shape_cache(e));
+        let shape = arr.first().and_then(build_shape_cache);
 
         // Fused iteration: filter (optional) + extract + aggregate
         let mut total = 0.0f64;
@@ -8795,7 +8793,7 @@ impl Evaluator {
                 if Self::is_filter_predicate(predicate) {
                     // Try CompiledExpr fast path
                     if let Some(compiled) = try_compile_expr(predicate) {
-                        let shape = _arr.first().and_then(|e| build_shape_cache(e));
+                        let shape = _arr.first().and_then(build_shape_cache);
                         let mut filtered = Vec::with_capacity(_arr.len());
                         for item in _arr.iter() {
                             let result = if let Some(ref s) = shape {
@@ -8885,7 +8883,7 @@ impl Evaluator {
 
                 // Try CompiledExpr fast path for filter expressions
                 if let Some(compiled) = try_compile_expr(predicate) {
-                    let shape = _arr.first().and_then(|e| build_shape_cache(e));
+                    let shape = _arr.first().and_then(build_shape_cache);
                     let mut filtered = Vec::with_capacity(_arr.len());
                     for item in _arr.iter() {
                         let result = if let Some(ref s) = shape {
