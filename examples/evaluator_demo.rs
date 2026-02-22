@@ -11,8 +11,8 @@
 // - Conditional expressions
 // - Arrays and objects
 
-use jsonatapy::value::JValue;
-use jsonatapy::{evaluator::Evaluator, parser::parse};
+use jsonata_core::value::JValue;
+use jsonata_core::{evaluator::Evaluator, parser::parse};
 use serde_json::json;
 
 fn main() {

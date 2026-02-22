@@ -34,7 +34,7 @@ print(result)  # "Hello, World"
 ### Build
 
 ```bash
-git clone https://github.com/txjmb/jsonatapy.git
+git clone https://github.com/txjmb/jsonata-core.git
 cd jsonatapy
 maturin develop --release
 ```

@@ -104,27 +104,27 @@ Several workflow files contain placeholder URLs that need updating:
 1. **`.github/workflows/docs.yml`**
    ```yaml
    # Line ~10
-   repo_url: https://github.com/yourusername/jsonatapy
+   repo_url: https://github.com/txjmb/jsonata-core
 
    # Line ~95
-   Homepage = "https://github.com/yourusername/jsonatapy"
+   Homepage = "https://github.com/txjmb/jsonata-core"
 
    # Line ~206
-   # View at: https://yourusername.github.io/jsonatapy/
+   # View at: https://txjmb.github.io/jsonata-core/
    ```
 
 2. **`pyproject.toml`**
    ```toml
    [project.urls]
-   Homepage = "https://github.com/YOURUSERNAME/jsonatapy"
-   Repository = "https://github.com/YOURUSERNAME/jsonatapy"
+   Homepage = "https://github.com/txjmb/jsonata-core"
+   Repository = "https://github.com/txjmb/jsonata-core"
    # etc.
    ```
 
 3. **`Cargo.toml`**
    ```toml
-   repository = "https://github.com/YOURUSERNAME/jsonatapy"
-   homepage = "https://github.com/YOURUSERNAME/jsonatapy"
+   repository = "https://github.com/txjmb/jsonata-core"
+   homepage = "https://github.com/txjmb/jsonata-core"
    ```
 
 **Quick find and replace:**

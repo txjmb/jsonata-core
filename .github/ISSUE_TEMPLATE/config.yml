@@ -1,16 +1,16 @@
 blank_issues_enabled: false
 contact_links:
   - name: Ask a Question
-    url: https://github.com/jsonatapy/jsonatapy/discussions/categories/q-a
+    url: https://github.com/txjmb/jsonata-core/discussions/categories/q-a
     about: Ask questions about usage, best practices, or get help with your JSONata expressions
   - name: Performance Issue
-    url: https://github.com/jsonatapy/jsonatapy/discussions/categories/performance
+    url: https://github.com/txjmb/jsonata-core/discussions/categories/performance
     about: Report performance problems or discuss optimization opportunities
   - name: Documentation Improvement
-    url: https://github.com/jsonatapy/jsonatapy/discussions/categories/documentation
+    url: https://github.com/txjmb/jsonata-core/discussions/categories/documentation
     about: Suggest improvements to documentation, examples, or tutorials
   - name: General Discussion
-    url: https://github.com/jsonatapy/jsonatapy/discussions
+    url: https://github.com/txjmb/jsonata-core/discussions
     about: General discussions about jsonatapy and JSONata
   - name: JSONata Specification
     url: https://docs.jsonata.org/

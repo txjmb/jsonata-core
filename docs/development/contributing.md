@@ -9,7 +9,7 @@ Contributions to jsonatapy are welcome!
 3. Set up development environment
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/jsonatapy.git
+git clone https://github.com/txjmb/jsonata-core.git
 cd jsonatapy
 git submodule update --init --recursive
 

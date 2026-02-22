@@ -99,7 +99,7 @@ This directory contains automated CI/CD workflows for jsonatapy. All workflows f
 **Usage:**
 ```bash
 # Automatically builds and deploys on push to main
-# View at: https://yourusername.github.io/jsonatapy/
+# View at: https://txjmb.github.io/jsonata-core/
 ```
 
 **Required Settings:**
@@ -248,9 +248,9 @@ Add these in repository Settings → Secrets and variables → Actions:
 Add to README.md:
 
 ```markdown
-[![Tests](https://github.com/yourusername/jsonatapy/workflows/Test%20Suite/badge.svg)](https://github.com/yourusername/jsonatapy/actions/workflows/test.yml)
-[![Security](https://github.com/yourusername/jsonatapy/workflows/Security%20Scanning/badge.svg)](https://github.com/yourusername/jsonatapy/actions/workflows/security.yml)
-[![Code Quality](https://github.com/yourusername/jsonatapy/workflows/Code%20Quality/badge.svg)](https://github.com/yourusername/jsonatapy/actions/workflows/lint.yml)
+[![Tests](https://github.com/txjmb/jsonata-core/workflows/Test%20Suite/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/test.yml)
+[![Security](https://github.com/txjmb/jsonata-core/workflows/Security%20Scanning/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/security.yml)
+[![Code Quality](https://github.com/txjmb/jsonata-core/workflows/Code%20Quality/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/lint.yml)
 ```
 
 ## Monitoring and Maintenance

@@ -1,7 +1,7 @@
 // Parser demonstration
 // This example shows how to use the JSONata parser
 
-use jsonatapy::parser;
+use jsonata_core::parser;
 
 fn main() {
     println!("JSONata Parser Demo\n");

@@ -145,7 +145,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 pip install maturin
 
 # Build and install
-git clone https://github.com/txjmb/jsonatapy.git
+git clone https://github.com/txjmb/jsonata-core.git
 cd jsonatapy
 maturin develop --release
 ```

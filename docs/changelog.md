@@ -6,7 +6,7 @@ For the complete changelog with detailed version history, see [CHANGELOG.md](../
 
 ## Latest Changes
 
-See the [full CHANGELOG.md](https://github.com/yourorg/jsonatapy/blob/master/CHANGELOG.md) for the complete version history.
+See the [full CHANGELOG.md](https://github.com/txjmb/jsonata-core/blob/master/CHANGELOG.md) for the complete version history.
 
 ## Version History
 
@@ -21,5 +21,5 @@ jsonatapy tracks the [jsonata-js](https://github.com/jsonata-js/jsonata) referen
 ## Quick Links
 
 - [Full Changelog](../CHANGELOG.md)
-- [GitHub Releases](https://github.com/yourorg/jsonatapy/releases)
+- [GitHub Releases](https://github.com/txjmb/jsonata-core/releases)
 - [PyPI Release History](https://pypi.org/project/jsonatapy/#history)

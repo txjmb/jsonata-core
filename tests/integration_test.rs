@@ -3,7 +3,7 @@
 // These tests verify that the parser and evaluator work together correctly
 // to process complete JSONata expressions.
 
-use jsonatapy::{
+use jsonata_core::{
     evaluator::{Context, Evaluator},
     parser::parse,
     value::JValue,

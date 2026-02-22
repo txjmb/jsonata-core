@@ -52,10 +52,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/txjmb/jsonatapy"
-Documentation = "https://github.com/txjmb/jsonatapy"
-Repository = "https://github.com/txjmb/jsonatapy"
-"Bug Tracker" = "https://github.com/txjmb/jsonatapy/issues"
+Homepage = "https://github.com/txjmb/jsonata-core"
+Documentation = "https://github.com/txjmb/jsonata-core"
+Repository = "https://github.com/txjmb/jsonata-core"
+"Bug Tracker" = "https://github.com/txjmb/jsonata-core/issues"
 
 [tool.maturin]
 python-source = "python"

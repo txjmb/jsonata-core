@@ -1,20 +1,20 @@
 [package]
-name = "jsonatapy"
+name = "jsonata-core"
 version = "2.1.0"
 edition = "2021"
 authors = ["txjmb <txjmb@users.noreply.github.com>"]
-description = "High-performance Python/Rust implementation of JSONata query and transformation language"
+description = "High-performance Rust implementation of JSONata query and transformation language"
 license = "MIT"
-repository = "https://github.com/yourusername/jsonatapy"
-homepage = "https://github.com/yourusername/jsonatapy"
-documentation = "https://docs.rs/jsonatapy"
-keywords = ["jsonata", "json", "query", "transform", "python"]
+repository = "https://github.com/txjmb/jsonata-core"
+homepage = "https://github.com/txjmb/jsonata-core"
+documentation = "https://docs.rs/jsonata-core"
+keywords = ["jsonata", "json", "query", "transform"]
 categories = ["parsing", "data-structures"]
 readme = "README.md"
 rust-version = "1.70"
 
 [lib]
-name = "jsonatapy"
+name = "jsonata_core"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

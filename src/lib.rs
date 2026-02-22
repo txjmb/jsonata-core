@@ -10,9 +10,9 @@
 //! ## Rust API
 //!
 //! ```rust,ignore
-//! use jsonatapy::parser;
-//! use jsonatapy::evaluator::Evaluator;
-//! use jsonatapy::value::JValue;
+//! use jsonata_core::parser;
+//! use jsonata_core::evaluator::Evaluator;
+//! use jsonata_core::value::JValue;
 //!
 //! let ast = parser::parse("user.name").unwrap();
 //! let data = JValue::from_json_str(r#"{"user":{"name":"Alice"}}"#).unwrap();

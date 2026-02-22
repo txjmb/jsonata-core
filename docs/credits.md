@@ -29,7 +29,7 @@ The JavaScript reference implementation (jsonata-js) serves as the authoritative
 Thank you to all contributors who have helped build jsonatapy:
 
 - Contributors list will be maintained as the project grows
-- See [GitHub Contributors](https://github.com/yourorg/jsonatapy/graphs/contributors) for the complete list
+- See [GitHub Contributors](https://github.com/txjmb/jsonata-core/graphs/contributors) for the complete list
 
 ### Community
 
@@ -182,8 +182,8 @@ Want to be part of the credits? See our [Contributing Guide](development/contrib
 
 ## Contact
 
-- **Issues:** [GitHub Issues](https://github.com/yourorg/jsonatapy/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/yourorg/jsonatapy/discussions)
+- **Issues:** [GitHub Issues](https://github.com/txjmb/jsonata-core/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/txjmb/jsonata-core/discussions)
 - **Email:** Contact information (if available)
 
 ## License

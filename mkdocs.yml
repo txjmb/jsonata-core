@@ -7,7 +7,7 @@ site_url: https://txjmb.github.io/jsonatapy
 use_directory_urls: true
 
 repo_name: jsonatapy
-repo_url: https://github.com/txjmb/jsonatapy
+repo_url: https://github.com/txjmb/jsonata-core
 edit_uri: edit/master/docs/
 
 copyright: Copyright &copy; 2024-2026 jsonatapy contributors
@@ -110,7 +110,7 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/txjmb/jsonatapy
+      link: https://github.com/txjmb/jsonata-core
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/jsonatapy/
   version:

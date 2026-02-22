@@ -212,7 +212,7 @@ MIT License - Compatible with upstream JSONata project.
 
 ## Links
 
-- **GitHub**: https://github.com/txjmb/jsonatapy
+- **GitHub**: https://github.com/txjmb/jsonata-core
 - **PyPI**: https://pypi.org/project/jsonatapy/
 - **JSONata Spec**: https://docs.jsonata.org/
 - **Reference Implementation**: https://github.com/jsonata-js/jsonata

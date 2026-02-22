@@ -14,9 +14,9 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use indexmap::IndexMap;
-use jsonatapy::evaluator::Evaluator;
-use jsonatapy::parser;
-use jsonatapy::value::JValue;
+use jsonata_core::evaluator::Evaluator;
+use jsonata_core::parser;
+use jsonata_core::value::JValue;
 
 // ── Data builders ─────────────────────────────────────────────────────────────
 
@@ -101,7 +101,7 @@ fn ecommerce_100() -> JValue {
 // ── Helper: evaluate expression on data ───────────────────────────────────────
 
 #[inline]
-fn eval(ast: &jsonatapy::ast::AstNode, data: &JValue) -> JValue {
+fn eval(ast: &jsonata_core::ast::AstNode, data: &JValue) -> JValue {
     Evaluator::new().evaluate(ast, data).unwrap()
 }
 

@@ -75,5 +75,5 @@ For the complete license text, see [LICENSE](../LICENSE) in the repository root.
 
 If you have questions about licensing:
 - Review the [MIT License FAQ](https://opensource.org/licenses/MIT)
-- Open an issue on [GitHub](https://github.com/txjmb/jsonatapy/issues)
+- Open an issue on [GitHub](https://github.com/txjmb/jsonata-core/issues)
 - Check the [Open Source Initiative](https://opensource.org/) resources
