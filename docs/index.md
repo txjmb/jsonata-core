@@ -55,9 +55,9 @@ let result = Evaluator::new().evaluate(&ast, &data)?;
 ## Performance highlights
 
 - **1258/1258** JSONata reference tests passing
-- **7–18x faster** than the JavaScript reference implementation for pure expression workloads
+- **up to 18x faster** than the JavaScript reference implementation for pure expression workloads
 - **~40x faster** than jsonata-rs (the next pure-Rust JSONata implementation)
-- **50–150x faster** than jsonata-python across all categories
+- **~10–65x faster** than jsonata-python across all categories
 
 See [Performance](performance.md) for full benchmark results.
 

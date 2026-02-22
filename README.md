@@ -129,12 +129,12 @@ the JavaScript reference implementation for most pure expression workloads:
 
 | Category | vs JavaScript (V8) | vs jsonata-python |
 |----------|--------------------|-------------------|
-| Simple paths | **7–10x faster** | ~25x faster |
-| Conditionals | **18x faster** | ~50x faster |
-| String operations | **7x faster** | ~30x faster |
-| Complex transformations | **8x faster** | ~25x faster |
-| Higher-order functions | ~2x slower | ~60x faster |
-| Array-heavy workloads | varies | ~10–50x faster |
+| Simple paths | **4–14x faster** | ~25x faster |
+| Conditionals | **18x faster** | ~40x faster |
+| String operations | **3–10x faster** | ~30–45x faster |
+| Complex transformations | **3–18x faster** | ~20–45x faster |
+| Higher-order functions | ~2x slower | ~50–65x faster |
+| Array-heavy workloads | varies | ~10–65x faster |
 
 ### The Python boundary
 
