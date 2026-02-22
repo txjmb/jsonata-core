@@ -1,6 +1,6 @@
-# jsonatapy
+# jsonata-core annd jsonatapy
 
-High-performance Python/Rust implementation of [JSONata](https://jsonata.org/) - the JSON query and transformation language.
+High-performance Python/Rust implementation of [JSONata](https://jsonata.org/) - the JSON query and transformation language.  Yes, much of this project was written with a lot of human guidance by Claude in Claude Code.  There wasn't any performant implementation of jsonata in Python, so I thought I'd see if Claude could pull of a jsonata port and decided on Rust with a PyO3 wrapper. Jsonata-core is available as a Rust crate and jsonatpy (the wrapper/extension) on Pypi.
 
 [![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
 [![Python versions](https://img.shields.io/pypi/pyversions/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
@@ -8,7 +8,7 @@ High-performance Python/Rust implementation of [JSONata](https://jsonata.org/) -
 
 ## Overview
 
-jsonatapy is a Rust-based Python extension implementing JSONata directly in Rust for native performance.
+jsonatapy is a Python extension implementing JSONata directly in Rust via jsonata-core for native performance.
 
 - **Full JSONata 2.1.0 Support** - 1258/1258 reference tests passing
 - **Native Python API** - Type hints, zero JavaScript dependencies
