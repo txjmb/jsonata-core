@@ -452,8 +452,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonatapy"
-version = "2.1.0"
+name = "jsonata-core"
+version = "2.1.2"
 dependencies = [
  "base64",
  "chrono",
