@@ -75,6 +75,9 @@ pub mod _bench {
 
 // ── Python bindings (only when the "python" feature is enabled) ───────────────
 
+/// The JSONata reference implementation version this library targets.
+const JSONATA_REFERENCE_VERSION: &str = "2.1.0";
+
 #[cfg(feature = "python")]
 use crate::value::JValue;
 #[cfg(feature = "python")]
@@ -157,21 +160,32 @@ struct JsonataExpression {
 }
 
 #[cfg(feature = "python")]
+impl JsonataExpression {
+    /// Evaluate the compiled expression against pre-converted data.
+    /// Uses bytecode VM when available, falls back to tree-walker.
+    fn run_eval(&self, py: Python, data: &JValue, bindings: Option<Py<PyAny>>) -> PyResult<JValue> {
+        if bindings.is_none() {
+            let bytecode = self.bytecode.get_or_init(|| {
+                evaluator::try_compile_expr(&self.ast)
+                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
+            });
+            if let Some(bc) = bytecode {
+                vm::Vm::new(bc)
+                    .run(data, None)
+                    .map_err(evaluator_error_to_py)
+            } else {
+                let mut ev = evaluator::Evaluator::new();
+                ev.evaluate(&self.ast, data).map_err(evaluator_error_to_py)
+            }
+        } else {
+            let mut ev = create_evaluator(py, bindings)?;
+            ev.evaluate(&self.ast, data).map_err(evaluator_error_to_py)
+        }
+    }
+}
+
 #[pymethods]
 impl JsonataExpression {
-    /// Evaluate this expression against the provided data.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - A Python object (typically dict) to query/transform
-    /// * `bindings` - Optional additional variable bindings
-    ///
-    /// # Returns
-    ///
-    /// The result of evaluating the expression
-    ///
-    /// # Errors
-    ///
     /// Returns ValueError if evaluation fails
     #[pyo3(signature = (data, bindings=None))]
     fn evaluate(
@@ -181,26 +195,7 @@ impl JsonataExpression {
         bindings: Option<Py<PyAny>>,
     ) -> PyResult<Py<PyAny>> {
         let json_data = python_to_json(py, &data)?;
-        let result = if bindings.is_none() {
-            let bytecode = self.bytecode.get_or_init(|| {
-                evaluator::try_compile_expr(&self.ast)
-                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
-            });
-            if let Some(bc) = bytecode {
-                vm::Vm::new(bc)
-                    .run(&json_data, None)
-                    .map_err(evaluator_error_to_py)?
-            } else {
-                let mut ev = evaluator::Evaluator::new();
-                ev.evaluate(&self.ast, &json_data)
-                    .map_err(evaluator_error_to_py)?
-            }
-        } else {
-            let mut ev = create_evaluator(py, bindings)?;
-            ev.evaluate(&self.ast, &json_data)
-                .map_err(evaluator_error_to_py)?
-        };
-        json_to_python(py, &result)
+        json_to_python(py, &self.run_eval(py, &json_data, bindings)?)
     }
 
     /// Evaluate with a pre-converted data handle (fastest for repeated evaluation).
@@ -220,26 +215,7 @@ impl JsonataExpression {
         data: &JsonataData,
         bindings: Option<Py<PyAny>>,
     ) -> PyResult<Py<PyAny>> {
-        let result = if bindings.is_none() {
-            let bytecode = self.bytecode.get_or_init(|| {
-                evaluator::try_compile_expr(&self.ast)
-                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
-            });
-            if let Some(bc) = bytecode {
-                vm::Vm::new(bc)
-                    .run(&data.data, None)
-                    .map_err(evaluator_error_to_py)?
-            } else {
-                let mut ev = evaluator::Evaluator::new();
-                ev.evaluate(&self.ast, &data.data)
-                    .map_err(evaluator_error_to_py)?
-            }
-        } else {
-            let mut ev = create_evaluator(py, bindings)?;
-            ev.evaluate(&self.ast, &data.data)
-                .map_err(evaluator_error_to_py)?
-        };
-        json_to_python(py, &result)
+        json_to_python(py, &self.run_eval(py, &data.data, bindings)?)
     }
 
     /// Evaluate with a pre-converted data handle, return JSON string (zero-overhead output).
@@ -259,26 +235,7 @@ impl JsonataExpression {
         data: &JsonataData,
         bindings: Option<Py<PyAny>>,
     ) -> PyResult<String> {
-        let result = if bindings.is_none() {
-            let bytecode = self.bytecode.get_or_init(|| {
-                evaluator::try_compile_expr(&self.ast)
-                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
-            });
-            if let Some(bc) = bytecode {
-                vm::Vm::new(bc)
-                    .run(&data.data, None)
-                    .map_err(evaluator_error_to_py)?
-            } else {
-                let mut ev = evaluator::Evaluator::new();
-                ev.evaluate(&self.ast, &data.data)
-                    .map_err(evaluator_error_to_py)?
-            }
-        } else {
-            let mut ev = create_evaluator(py, bindings)?;
-            ev.evaluate(&self.ast, &data.data)
-                .map_err(evaluator_error_to_py)?
-        };
-        result
+        self.run_eval(py, &data.data, bindings)?
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
     }
@@ -309,26 +266,7 @@ impl JsonataExpression {
     ) -> PyResult<String> {
         let json_data = JValue::from_json_str(json_str)
             .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
-        let result = if bindings.is_none() {
-            let bytecode = self.bytecode.get_or_init(|| {
-                evaluator::try_compile_expr(&self.ast)
-                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
-            });
-            if let Some(bc) = bytecode {
-                vm::Vm::new(bc)
-                    .run(&json_data, None)
-                    .map_err(evaluator_error_to_py)?
-            } else {
-                let mut ev = evaluator::Evaluator::new();
-                ev.evaluate(&self.ast, &json_data)
-                    .map_err(evaluator_error_to_py)?
-            }
-        } else {
-            let mut ev = create_evaluator(py, bindings)?;
-            ev.evaluate(&self.ast, &json_data)
-                .map_err(evaluator_error_to_py)?
-        };
-        result
+        self.run_eval(py, &json_data, bindings)?
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
     }
@@ -447,14 +385,14 @@ fn python_to_json_bound(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
     if obj.is_instance_of::<PyString>() {
         return Ok(JValue::string(obj.extract::<String>()?));
     }
-    if let Ok(list) = obj.cast_exact::<PyList>() {
+    if let Ok(list) = obj.cast::<PyList>() {
         let mut result = Vec::with_capacity(list.len());
         for item in list.iter() {
             result.push(python_to_json_bound(&item)?);
         }
         return Ok(JValue::array(result));
     }
-    if let Ok(dict) = obj.cast_exact::<PyDict>() {
+    if let Ok(dict) = obj.cast::<PyDict>() {
         let mut result = IndexMap::with_capacity(dict.len());
         for (key, value) in dict.iter() {
             let key_str = key.extract::<String>()?;
@@ -616,7 +554,7 @@ fn _jsonatapy(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Add version info
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    m.add("__jsonata_version__", "2.1.0")?; // Reference implementation version
+    m.add("__jsonata_version__", JSONATA_REFERENCE_VERSION)?;
 
     Ok(())
 }
@@ -626,6 +564,6 @@ mod tests {
     #[test]
     fn test_module_creation() {
         // Basic smoke test
-        assert_eq!(env!("CARGO_PKG_VERSION"), "2.1.2");
+        assert!(!env!("CARGO_PKG_VERSION").is_empty());
     }
 }

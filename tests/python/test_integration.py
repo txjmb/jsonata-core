@@ -305,9 +305,13 @@ class TestComplexExpressions:
 
     def test_filter_and_transform(self):
         """Filter orders by price and extract product names"""
-        # This would require predicate support
-        # result = jsonatapy.evaluate("orders[price > 100].product", data)
-        # assert result == ["A", "C"]
+        data = {"orders": [
+            {"product": "A", "price": 150},
+            {"product": "B", "price": 50},
+            {"product": "C", "price": 200},
+        ]}
+        result = jsonatapy.evaluate("orders[price > 100].product", data)
+        assert result == ["A", "C"]
 
     def test_nested_function_calls(self):
         """Test nested function calls"""
@@ -418,16 +422,9 @@ class TestErrorHandling:
             jsonatapy.compile("invalid [[[ syntax")
 
     def test_undefined_variable(self):
-        """Test that undefined variables raise appropriate error"""
-        # This depends on how the evaluator handles undefined variables
-        # It might return None or raise an error
-        try:
-            result = jsonatapy.evaluate("$undefined", {})
-            # If it returns None, that's acceptable
-            assert result is None or result == {}
-        except ValueError:
-            # If it raises an error, that's also acceptable
-            pass
+        """Test that an undefined variable evaluates to None (JSONata undefined → Python None)"""
+        result = jsonatapy.evaluate("$undefined", {})
+        assert result is None
 
     def test_type_error(self):
         """Test that type errors are properly handled"""
