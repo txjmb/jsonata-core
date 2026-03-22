@@ -111,7 +111,7 @@ struct JsonataData {
 impl JsonataData {
     /// Create from a Python object (dict, list, etc.)
     #[new]
-    fn new(py: Python, data: PyObject) -> PyResult<Self> {
+    fn new(py: Python, data: Py<PyAny>) -> PyResult<Self> {
         let jvalue = python_to_json(py, &data)?;
         Ok(JsonataData { data: jvalue })
     }
@@ -177,9 +177,9 @@ impl JsonataExpression {
     fn evaluate(
         &self,
         py: Python,
-        data: PyObject,
-        bindings: Option<PyObject>,
-    ) -> PyResult<PyObject> {
+        data: Py<PyAny>,
+        bindings: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let json_data = python_to_json(py, &data)?;
         let result = if bindings.is_none() {
             let bytecode = self.bytecode.get_or_init(|| {
@@ -218,8 +218,8 @@ impl JsonataExpression {
         &self,
         py: Python,
         data: &JsonataData,
-        bindings: Option<PyObject>,
-    ) -> PyResult<PyObject> {
+        bindings: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
         let result = if bindings.is_none() {
             let bytecode = self.bytecode.get_or_init(|| {
                 evaluator::try_compile_expr(&self.ast)
@@ -257,7 +257,7 @@ impl JsonataExpression {
         &self,
         py: Python,
         data: &JsonataData,
-        bindings: Option<PyObject>,
+        bindings: Option<Py<PyAny>>,
     ) -> PyResult<String> {
         let result = if bindings.is_none() {
             let bytecode = self.bytecode.get_or_init(|| {
@@ -305,7 +305,7 @@ impl JsonataExpression {
         &self,
         py: Python,
         json_str: &str,
-        bindings: Option<PyObject>,
+        bindings: Option<Py<PyAny>>,
     ) -> PyResult<String> {
         let json_data = JValue::from_json_str(json_str)
             .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
@@ -402,9 +402,9 @@ fn compile(expression: &str) -> PyResult<JsonataExpression> {
 fn evaluate(
     py: Python,
     expression: &str,
-    data: PyObject,
-    bindings: Option<PyObject>,
-) -> PyResult<PyObject> {
+    data: Py<PyAny>,
+    bindings: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
     let expr = compile(expression)?;
     expr.evaluate(py, data, bindings)
 }
@@ -419,7 +419,7 @@ fn evaluate(
 /// - list -> Array
 /// - dict -> Object
 #[cfg(feature = "python")]
-fn python_to_json(py: Python, obj: &PyObject) -> PyResult<JValue> {
+fn python_to_json(py: Python, obj: &Py<PyAny>) -> PyResult<JValue> {
     python_to_json_bound(obj.bind(py))
 }
 
@@ -494,7 +494,7 @@ fn python_to_json_bound(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
 /// - Object -> dict
 /// - Lambda/Builtin/Regex -> None
 #[cfg(feature = "python")]
-fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
+fn json_to_python(py: Python, value: &JValue) -> PyResult<Py<PyAny>> {
     match value {
         JValue::Null | JValue::Undefined => Ok(py.None()),
 
@@ -529,7 +529,7 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
                     .map(|k| (k.as_str(), PyString::new(py, k).unbind()))
                     .collect();
 
-                let items: Vec<PyObject> = arr
+                let items: Vec<Py<PyAny>> = arr
                     .iter()
                     .map(|item| {
                         // Safe to unwrap: all_objects guarantees every element is Object
@@ -556,7 +556,7 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
             }
 
             // General array: batch construction
-            let items: Vec<PyObject> = arr
+            let items: Vec<Py<PyAny>> = arr
                 .iter()
                 .map(|item| json_to_python(py, item))
                 .collect::<PyResult<Vec<_>>>()?;
@@ -577,7 +577,7 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
 
 /// Create an evaluator, optionally configured with Python bindings
 #[cfg(feature = "python")]
-fn create_evaluator(py: Python, bindings: Option<PyObject>) -> PyResult<evaluator::Evaluator> {
+fn create_evaluator(py: Python, bindings: Option<Py<PyAny>>) -> PyResult<evaluator::Evaluator> {
     if let Some(bindings_obj) = bindings {
         let bindings_json = python_to_json(py, &bindings_obj)?;
 
