@@ -163,11 +163,11 @@ jobs:
           # Linux
           - { os: 'Linux', runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: 'Linux', runner: ubuntu-latest, target: aarch64-unknown-linux-gnu }
-          # macOS
-          - { os: 'macOS', runner: macos-14, target: x86_64-apple-darwin }
-          - { os: 'macOS', runner: macos-14, target: aarch64-apple-darwin }
           # Windows
           - { os: 'Windows', runner: windows-latest, target: x86_64-pc-windows-msvc }
+          # macOS (disabled to conserve Actions credits)
+          # - { os: 'macOS', runner: macos-14, target: x86_64-apple-darwin }
+          # - { os: 'macOS', runner: macos-14, target: aarch64-apple-darwin }
 
     steps:
       - name: Checkout
@@ -252,7 +252,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        os: [ubuntu-latest, windows-latest]
+        # macOS disabled to conserve Actions credits
         python: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
