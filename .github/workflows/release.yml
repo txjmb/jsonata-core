@@ -141,12 +141,22 @@ jobs:
         run: |
           VERSION="${{ needs.validate-version.outputs.version }}"
           git add Cargo.toml pyproject.toml Cargo.lock
-          git commit -m "chore: Bump version to $VERSION"
-          git push origin HEAD:${{ github.ref_name }}
 
-          # Create and push tag
-          git tag -a "v$VERSION" -m "Release v$VERSION"
-          git push origin "v$VERSION"
+          # Skip commit if nothing changed (re-run case)
+          if git diff --cached --quiet; then
+            echo "Version files already at $VERSION, skipping commit"
+          else
+            git commit -m "chore: Bump version to $VERSION"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+          # Create tag only if it doesn't already exist
+          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q "v$VERSION"; then
+            echo "Tag v$VERSION already exists, skipping"
+          else
+            git tag -a "v$VERSION" -m "Release v$VERSION"
+            git push origin "v$VERSION"
+          fi
 
           echo "tag=v$VERSION" >> $GITHUB_ENV
 
