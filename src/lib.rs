@@ -447,14 +447,14 @@ fn python_to_json_bound(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
     if obj.is_instance_of::<PyString>() {
         return Ok(JValue::string(obj.extract::<String>()?));
     }
-    if let Ok(list) = obj.downcast::<PyList>() {
+    if let Ok(list) = obj.cast_exact::<PyList>() {
         let mut result = Vec::with_capacity(list.len());
         for item in list.iter() {
             result.push(python_to_json_bound(&item)?);
         }
         return Ok(JValue::array(result));
     }
-    if let Ok(dict) = obj.downcast::<PyDict>() {
+    if let Ok(dict) = obj.cast_exact::<PyDict>() {
         let mut result = IndexMap::with_capacity(dict.len());
         for (key, value) in dict.iter() {
             let key_str = key.extract::<String>()?;

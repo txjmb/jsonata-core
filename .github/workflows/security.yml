@@ -115,6 +115,7 @@ jobs:
               "Apache-2.0 WITH LLVM-exception",
               "BSD-2-Clause",
               "Unicode-3.0",
+              "Zlib",
           ]
           confidence-threshold = 0.8
 

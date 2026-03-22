@@ -1753,10 +1753,9 @@ pub mod array {
         }
 
         use rand::seq::SliceRandom;
-        use rand::thread_rng;
 
         let mut result = arr.to_vec();
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         result.shuffle(&mut rng);
 
         Ok(JValue::array(result))

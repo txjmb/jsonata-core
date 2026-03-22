@@ -12,11 +12,12 @@
 //!   cargo bench -- simple_path        # one group
 //!   cargo bench -- realistic_workload # one group
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use indexmap::IndexMap;
 use jsonata_core::evaluator::Evaluator;
 use jsonata_core::parser;
 use jsonata_core::value::JValue;
+use std::hint::black_box;
 
 #[cfg(feature = "bench")]
 use jsonata_core::_bench;
