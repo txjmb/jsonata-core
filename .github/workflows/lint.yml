@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload Clippy results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: clippy-results
           path: clippy-output.txt
@@ -144,7 +144,7 @@ jobs:
 
       - name: Upload Ruff results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ruff-results
           path: |
@@ -192,7 +192,7 @@ jobs:
 
       - name: Upload mypy results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mypy-results
           path: mypy-output.txt
@@ -389,7 +389,7 @@ jobs:
             --timeout 300
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/
