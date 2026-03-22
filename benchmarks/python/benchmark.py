@@ -194,9 +194,7 @@ class BenchmarkSuite:
 
         return elapsed * 1000  # Convert to milliseconds
 
-    def _run_jsonatapy_json_benchmark(
-        self, expression: str, data: Any, iterations: int
-    ) -> float:
+    def _run_jsonatapy_json_benchmark(self, expression: str, data: Any, iterations: int) -> float:
         """Run benchmark using jsonatapy's pure Rust path (JSON string I/O).
 
         This bypasses Python↔Rust object conversion by using evaluate_json(),
@@ -388,9 +386,7 @@ class BenchmarkSuite:
 
         # Run jsonatapy (pure Rust JSON path) benchmark
         if JSONATAPY_AVAILABLE:
-            jsonatapy_json_time = self._run_jsonatapy_json_benchmark(
-                expression, data, iterations
-            )
+            jsonatapy_json_time = self._run_jsonatapy_json_benchmark(expression, data, iterations)
             if jsonatapy_json_time > 0:
                 result.jsonatapy_json_ms = jsonatapy_json_time
                 if verbose:
@@ -599,17 +595,13 @@ class BenchmarkSuite:
             for result in results:
                 jsonatapy_str = f"{result.jsonatapy_ms:.2f} ms" if result.jsonatapy_ms else "N/A"
                 jsonatapy_json_str = (
-                    f"{result.jsonatapy_json_ms:.2f} ms"
-                    if result.jsonatapy_json_ms
-                    else "N/A"
+                    f"{result.jsonatapy_json_ms:.2f} ms" if result.jsonatapy_json_ms else "N/A"
                 )
                 js_str = f"{result.js_ms:.2f} ms" if result.js_ms else "N/A"
                 python_str = (
                     f"{result.jsonata_python_ms:.2f} ms" if result.jsonata_python_ms else "N/A"
                 )
-                rs_str = (
-                    f"{result.jsonata_rs_ms:.2f} ms" if result.jsonata_rs_ms else "N/A"
-                )
+                rs_str = f"{result.jsonata_rs_ms:.2f} ms" if result.jsonata_rs_ms else "N/A"
 
                 if result.jsonatapy_speedup:
                     if result.jsonatapy_speedup > 1:
@@ -661,9 +653,7 @@ class BenchmarkSuite:
             if json_speedups:
                 avg_json_speedup = sum(json_speedups) / len(json_speedups)
                 json_faster = sum(1 for s in json_speedups if s > 1)
-                stats_table.add_row(
-                    "Average speedup (rust-only vs JS)", f"{avg_json_speedup:.2f}x"
-                )
+                stats_table.add_row("Average speedup (rust-only vs JS)", f"{avg_json_speedup:.2f}x")
                 stats_table.add_row(
                     "Tests where rust-only is faster", f"{json_faster}/{len(json_speedups)}"
                 )

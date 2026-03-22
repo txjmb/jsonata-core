@@ -51,8 +51,8 @@ mod vm;
 #[cfg(feature = "bench")]
 pub mod _bench {
     use crate::ast::AstNode;
-    use crate::value::JValue;
     pub use crate::evaluator::EvaluatorError;
+    use crate::value::JValue;
 
     /// An opaque handle to a compiled bytecode program.
     pub struct CompiledProgram(crate::vm::BytecodeProgram);
@@ -187,7 +187,9 @@ impl JsonataExpression {
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
             });
             if let Some(bc) = bytecode {
-                vm::Vm::new(bc).run(&json_data, None).map_err(evaluator_error_to_py)?
+                vm::Vm::new(bc)
+                    .run(&json_data, None)
+                    .map_err(evaluator_error_to_py)?
             } else {
                 let mut ev = evaluator::Evaluator::new();
                 ev.evaluate(&self.ast, &json_data)
@@ -224,7 +226,9 @@ impl JsonataExpression {
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
             });
             if let Some(bc) = bytecode {
-                vm::Vm::new(bc).run(&data.data, None).map_err(evaluator_error_to_py)?
+                vm::Vm::new(bc)
+                    .run(&data.data, None)
+                    .map_err(evaluator_error_to_py)?
             } else {
                 let mut ev = evaluator::Evaluator::new();
                 ev.evaluate(&self.ast, &data.data)
@@ -261,7 +265,9 @@ impl JsonataExpression {
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
             });
             if let Some(bc) = bytecode {
-                vm::Vm::new(bc).run(&data.data, None).map_err(evaluator_error_to_py)?
+                vm::Vm::new(bc)
+                    .run(&data.data, None)
+                    .map_err(evaluator_error_to_py)?
             } else {
                 let mut ev = evaluator::Evaluator::new();
                 ev.evaluate(&self.ast, &data.data)
@@ -309,7 +315,9 @@ impl JsonataExpression {
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
             });
             if let Some(bc) = bytecode {
-                vm::Vm::new(bc).run(&json_data, None).map_err(evaluator_error_to_py)?
+                vm::Vm::new(bc)
+                    .run(&json_data, None)
+                    .map_err(evaluator_error_to_py)?
             } else {
                 let mut ev = evaluator::Evaluator::new();
                 ev.evaluate(&self.ast, &json_data)
@@ -494,8 +502,7 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
 
         JValue::Number(n) => {
             // If it's a whole number that fits in i64, return as Python int
-            if n.fract() == 0.0 && n.is_finite() && *n >= i64::MIN as f64 && *n <= i64::MAX as f64
-            {
+            if n.fract() == 0.0 && n.is_finite() && *n >= i64::MIN as f64 && *n <= i64::MAX as f64 {
                 Ok((*n as i64).into_pyobject(py).unwrap().into_any().unbind())
             } else {
                 Ok(n.into_pyobject(py).unwrap().into_any().unbind())
@@ -507,8 +514,8 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<PyObject> {
         JValue::Array(arr) => {
             // Array of objects with shared keys: intern first object's keys as
             // Python strings to avoid repeated UTF-8 -> PyString conversion.
-            let all_objects = arr.len() >= 2
-                && arr.iter().all(|item| matches!(item, JValue::Object(_)));
+            let all_objects =
+                arr.len() >= 2 && arr.iter().all(|item| matches!(item, JValue::Object(_)));
             if all_objects {
                 let first_obj = match arr.first() {
                     Some(JValue::Object(obj)) => obj,

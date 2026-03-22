@@ -44,7 +44,11 @@ fn compare_sort_keys(a: &SortKey, b: &SortKey, descending: bool) -> Ordering {
         // Mixed types: maintain original order
         _ => Ordering::Equal,
     };
-    if descending { ord.reverse() } else { ord }
+    if descending {
+        ord.reverse()
+    } else {
+        ord
+    }
 }
 
 /// Try to extract a specialized sort comparator from a lambda AST node.
@@ -69,12 +73,24 @@ fn try_specialize_sort_comparator(
 
     // Extract field name from a `$param.field` path with no stages.
     let extract_var_field = |node: &AstNode, param: &str| -> Option<String> {
-        let AstNode::Path { steps } = node else { return None };
-        if steps.len() != 2 { return None; }
-        let AstNode::Variable(var) = &steps[0].node else { return None };
-        if var != param { return None; }
-        let AstNode::Name(field) = &steps[1].node else { return None };
-        if !steps[0].stages.is_empty() || !steps[1].stages.is_empty() { return None; }
+        let AstNode::Path { steps } = node else {
+            return None;
+        };
+        if steps.len() != 2 {
+            return None;
+        }
+        let AstNode::Variable(var) = &steps[0].node else {
+            return None;
+        };
+        if var != param {
+            return None;
+        }
+        let AstNode::Name(field) = &steps[1].node else {
+            return None;
+        };
+        if !steps[0].stages.is_empty() || !steps[1].stages.is_empty() {
+            return None;
+        }
         Some(field.clone())
     };
 
@@ -97,7 +113,11 @@ fn try_specialize_sort_comparator(
                     // Comparison: `$l.f > $r.f` → ascending, flipped inverts.
                     _ => {
                         let ascending = is_ascending(op)?;
-                        if flipped { ascending } else { !ascending }
+                        if flipped {
+                            ascending
+                        } else {
+                            !ascending
+                        }
                     }
                 };
                 return Some(SpecializedSortComparator {
@@ -303,10 +323,7 @@ pub(crate) fn try_compile_expr_with_allowed_vars(
     try_compile_expr_inner(node, Some(allowed_vars))
 }
 
-fn try_compile_expr_inner(
-    node: &AstNode,
-    allowed_vars: Option<&[&str]>,
-) -> Option<CompiledExpr> {
+fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Option<CompiledExpr> {
     match node {
         // ── Literals ────────────────────────────────────────────────────
         AstNode::String(s) => Some(CompiledExpr::Literal(JValue::string(s.clone()))),
@@ -323,9 +340,7 @@ fn try_compile_expr_inner(
         // variable is in the allowed set (lambda params supplied via vars map).
         // In top-level mode (allowed_vars=None), compile unknown variables as
         // ContextVar — they return Undefined at runtime when no bindings are passed.
-        AstNode::Variable(var) if var.is_empty() => {
-            Some(CompiledExpr::VariableLookup(var.clone()))
-        }
+        AstNode::Variable(var) if var.is_empty() => Some(CompiledExpr::VariableLookup(var.clone())),
         AstNode::Variable(var) => {
             if let Some(allowed) = allowed_vars {
                 // HOF mode: only compile if the variable is a known lambda param.
@@ -528,7 +543,12 @@ fn try_compile_expr_inner(
 /// node is not a simple lambda (i.e. has a signature or is a TCO thunk).
 fn extract_inline_lambda(node: &AstNode) -> Option<(&Vec<String>, &AstNode)> {
     match node {
-        AstNode::Lambda { params, body, signature: None, thunk: false } => Some((params, body)),
+        AstNode::Lambda {
+            params,
+            body,
+            signature: None,
+            thunk: false,
+        } => Some((params, body)),
         _ => None,
     }
 }
@@ -574,9 +594,17 @@ fn try_compile_hof_expr(
             let (array, compiled_body) =
                 compile_hof_array_and_body(&args[0], params, body, allowed_vars)?;
             if name == "map" {
-                Some(CompiledExpr::MapCall { array, params: params.clone(), body: compiled_body })
+                Some(CompiledExpr::MapCall {
+                    array,
+                    params: params.clone(),
+                    body: compiled_body,
+                })
             } else {
-                Some(CompiledExpr::FilterCall { array, params: params.clone(), body: compiled_body })
+                Some(CompiledExpr::FilterCall {
+                    array,
+                    params: params.clone(),
+                    body: compiled_body,
+                })
             }
         }
         "reduce" => {
@@ -764,7 +792,10 @@ fn eval_compiled_inner(
                             .unwrap_or(JValue::Undefined));
                     }
                 }
-                Ok(obj.get(field.as_str()).cloned().unwrap_or(JValue::Undefined))
+                Ok(obj
+                    .get(field.as_str())
+                    .cloned()
+                    .unwrap_or(JValue::Undefined))
             }
             _ => Ok(JValue::Undefined),
         },
@@ -811,27 +842,43 @@ fn eval_compiled_inner(
             let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
             let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
             match op {
-                CompiledCmp::Eq => Ok(JValue::Bool(
-                    crate::functions::array::values_equal(&left, &right),
-                )),
-                CompiledCmp::Ne => Ok(JValue::Bool(
-                    !crate::functions::array::values_equal(&left, &right),
-                )),
+                CompiledCmp::Eq => Ok(JValue::Bool(crate::functions::array::values_equal(
+                    &left, &right,
+                ))),
+                CompiledCmp::Ne => Ok(JValue::Bool(!crate::functions::array::values_equal(
+                    &left, &right,
+                ))),
                 CompiledCmp::Lt => compiled_ordered_cmp(
-                    &left, &right, lhs_explicit_null, rhs_explicit_null,
-                    |a, b| a < b, |a, b| a < b,
+                    &left,
+                    &right,
+                    lhs_explicit_null,
+                    rhs_explicit_null,
+                    |a, b| a < b,
+                    |a, b| a < b,
                 ),
                 CompiledCmp::Le => compiled_ordered_cmp(
-                    &left, &right, lhs_explicit_null, rhs_explicit_null,
-                    |a, b| a <= b, |a, b| a <= b,
+                    &left,
+                    &right,
+                    lhs_explicit_null,
+                    rhs_explicit_null,
+                    |a, b| a <= b,
+                    |a, b| a <= b,
                 ),
                 CompiledCmp::Gt => compiled_ordered_cmp(
-                    &left, &right, lhs_explicit_null, rhs_explicit_null,
-                    |a, b| a > b, |a, b| a > b,
+                    &left,
+                    &right,
+                    lhs_explicit_null,
+                    rhs_explicit_null,
+                    |a, b| a > b,
+                    |a, b| a > b,
                 ),
                 CompiledCmp::Ge => compiled_ordered_cmp(
-                    &left, &right, lhs_explicit_null, rhs_explicit_null,
-                    |a, b| a >= b, |a, b| a >= b,
+                    &left,
+                    &right,
+                    lhs_explicit_null,
+                    rhs_explicit_null,
+                    |a, b| a >= b,
+                    |a, b| a >= b,
                 ),
             }
         }
@@ -961,9 +1008,7 @@ fn eval_compiled_inner(
         }
 
         // FieldPath: multi-step field access with implicit array mapping.
-        CompiledExpr::FieldPath(steps) => {
-            compiled_eval_field_path(steps, data, vars, ctx, shape)
-        }
+        CompiledExpr::FieldPath(steps) => compiled_eval_field_path(steps, data, vars, ctx, shape),
 
         // BuiltinCall: evaluate all args, dispatch to pure builtin.
         CompiledExpr::BuiltinCall { name, args } => {
@@ -1000,8 +1045,11 @@ fn eval_compiled_inner(
         // is an inline lambda literal with a compilable body. Outer vars are merged
         // with the lambda params so that nested HOF can access variables from
         // enclosing lambda scopes (e.g. `$map(a, function($x) { $map(b, function($y) { $x + $y }) })`).
-
-        CompiledExpr::MapCall { array, params, body } => {
+        CompiledExpr::MapCall {
+            array,
+            params,
+            body,
+        } => {
             let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
             let single_holder;
             let items: &[JValue] = match &arr_val {
@@ -1021,10 +1069,14 @@ fn eval_compiled_inner(
                 for (idx, item) in items.iter().enumerate() {
                     let idx_val = JValue::Number(idx as f64);
                     let mut call_vars = clone_outer_vars(vars, 2);
-                    if let Some(p) = p0 { call_vars.insert(p, item); }
+                    if let Some(p) = p0 {
+                        call_vars.insert(p, item);
+                    }
                     call_vars.insert(p1, &idx_val);
                     let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
-                    if !mapped.is_undefined() { result.push(mapped); }
+                    if !mapped.is_undefined() {
+                        result.push(mapped);
+                    }
                 }
             } else if let Some(p0) = p0 {
                 // 1-param lambda (most common): build HashMap once, update element ref each iteration.
@@ -1032,13 +1084,23 @@ fn eval_compiled_inner(
                 for item in items.iter() {
                     call_vars.insert(p0, item);
                     let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
-                    if !mapped.is_undefined() { result.push(mapped); }
+                    if !mapped.is_undefined() {
+                        result.push(mapped);
+                    }
                 }
             }
-            Ok(if result.is_empty() { JValue::Undefined } else { JValue::array(result) })
+            Ok(if result.is_empty() {
+                JValue::Undefined
+            } else {
+                JValue::array(result)
+            })
         }
 
-        CompiledExpr::FilterCall { array, params, body } => {
+        CompiledExpr::FilterCall {
+            array,
+            params,
+            body,
+        } => {
             let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
             if arr_val.is_undefined() || arr_val.is_null() {
                 return Ok(JValue::Undefined);
@@ -1058,17 +1120,23 @@ fn eval_compiled_inner(
                 for (idx, item) in items.iter().enumerate() {
                     let idx_val = JValue::Number(idx as f64);
                     let mut call_vars = clone_outer_vars(vars, 2);
-                    if let Some(p) = p0 { call_vars.insert(p, item); }
+                    if let Some(p) = p0 {
+                        call_vars.insert(p, item);
+                    }
                     call_vars.insert(p1, &idx_val);
                     let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
-                    if compiled_is_truthy(&pred) { result.push(item.clone()); }
+                    if compiled_is_truthy(&pred) {
+                        result.push(item.clone());
+                    }
                 }
             } else if let Some(p0) = p0 {
                 let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
                     call_vars.insert(p0, item);
                     let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
-                    if compiled_is_truthy(&pred) { result.push(item.clone()); }
+                    if compiled_is_truthy(&pred) {
+                        result.push(item.clone());
+                    }
                 }
             }
             if was_single {
@@ -1082,7 +1150,12 @@ fn eval_compiled_inner(
             }
         }
 
-        CompiledExpr::ReduceCall { array, params, body, initial } => {
+        CompiledExpr::ReduceCall {
+            array,
+            params,
+            body,
+            initial,
+        } => {
             let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
             let single_holder;
             let items: &[JValue] = match &arr_val {
@@ -1096,10 +1169,14 @@ fn eval_compiled_inner(
             };
             let (start_idx, mut accumulator) = if let Some(init_expr) = initial {
                 let init_val = eval_compiled_inner(init_expr, data, vars, ctx, shape)?;
-                if items.is_empty() { return Ok(init_val); }
+                if items.is_empty() {
+                    return Ok(init_val);
+                }
                 (0usize, init_val)
             } else {
-                if items.is_empty() { return Ok(JValue::Null); }
+                if items.is_empty() {
+                    return Ok(JValue::Null);
+                }
                 (1, items[0].clone())
             };
             let acc_param = params[0].as_str();
@@ -1166,11 +1243,9 @@ pub(crate) fn compiled_ordered_cmp(
         )),
         // Boolean with undefined → T2010 error
         (JValue::Bool(_), JValue::Null | JValue::Undefined)
-        | (JValue::Null | JValue::Undefined, JValue::Bool(_)) => {
-            Err(EvaluatorError::EvaluationError(
-                "T2010: Type mismatch in comparison".to_string(),
-            ))
-        }
+        | (JValue::Null | JValue::Undefined, JValue::Bool(_)) => Err(
+            EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()),
+        ),
         // Number or String with implicit undefined (missing field) → undefined result
         (JValue::Number(_) | JValue::String(_), JValue::Null | JValue::Undefined)
         | (JValue::Null | JValue::Undefined, JValue::Number(_) | JValue::String(_)) => {
@@ -1314,7 +1389,10 @@ pub(crate) fn call_pure_builtin_by_name(
 ///
 /// Handles paths like `a.b.c`, `a[pred].b`, `$var.field`.
 /// Returns `None` if any step is not compilable (e.g. wildcards, function apps).
-fn try_compile_path(steps: &[crate::ast::PathStep], allowed_vars: Option<&[&str]>) -> Option<CompiledExpr> {
+fn try_compile_path(
+    steps: &[crate::ast::PathStep],
+    allowed_vars: Option<&[&str]>,
+) -> Option<CompiledExpr> {
     use crate::ast::{AstNode, Stage};
 
     if steps.is_empty() {
@@ -1335,7 +1413,9 @@ fn try_compile_path(steps: &[crate::ast::PathStep], allowed_vars: Option<&[&str]
     // Compile a boolean filter predicate, rejecting numeric predicates (`[0]`, `[1]`)
     // which represent index access in JSONata, not boolean filtering.
     let compile_filter = |node: &AstNode| -> Option<CompiledExpr> {
-        if matches!(node, AstNode::Number(_)) { return None; }
+        if matches!(node, AstNode::Number(_)) {
+            return None;
+        }
         try_compile_expr_inner(node, allowed_vars)
     };
 
@@ -1353,13 +1433,20 @@ fn try_compile_path(steps: &[crate::ast::PathStep], allowed_vars: Option<&[&str]
                     [Stage::Filter(filter_node)] => Some(compile_filter(filter_node)?),
                     _ => return None,
                 };
-                compiled_steps.push(CompiledStep { field: name.clone(), filter });
+                compiled_steps.push(CompiledStep {
+                    field: name.clone(),
+                    filter,
+                });
             }
             AstNode::Predicate(filter_node) => {
                 // Standalone predicate step — fold into the previous Name step's filter slot.
-                if !step.stages.is_empty() { return None; }
+                if !step.stages.is_empty() {
+                    return None;
+                }
                 let last = compiled_steps.last_mut()?;
-                if last.filter.is_some() { return None; }
+                if last.filter.is_some() {
+                    return None;
+                }
                 last.filter = Some(compile_filter(filter_node)?);
             }
             _ => return None,
@@ -1528,7 +1615,7 @@ fn compiled_apply_filter(
             } else {
                 None
             };
-            let effective_shape = shape.or_else(|| local_shape.as_ref());
+            let effective_shape = shape.or(local_shape.as_ref());
             for item in arr.iter() {
                 let pred = eval_compiled_inner(filter, item, vars, ctx, effective_shape)?;
                 if compiled_is_truthy(&pred) {
@@ -1560,11 +1647,7 @@ fn compiled_apply_filter(
 /// Replicates the tree-walker's evaluation for the subset of builtins in
 /// `COMPILABLE_BUILTINS`: no side effects, no lambdas, no context mutations.
 /// `data` is the current context value for implicit-argument insertion.
-fn call_pure_builtin(
-    name: &str,
-    args: &[JValue],
-    data: &JValue,
-) -> Result<JValue, EvaluatorError> {
+fn call_pure_builtin(name: &str, args: &[JValue], data: &JValue) -> Result<JValue, EvaluatorError> {
     use crate::functions;
 
     // Apply implicit context insertion matching the tree-walker
@@ -1607,9 +1690,7 @@ fn call_pure_builtin(
     // Apply undefined propagation: if the first effective argument is Undefined
     // and the function propagates undefined, return Undefined immediately.
     // This matches the tree-walker's `propagates_undefined` check.
-    if effective_args.first().is_some_and(JValue::is_undefined)
-        && propagates_undefined(name)
-    {
+    if effective_args.first().is_some_and(JValue::is_undefined) && propagates_undefined(name) {
         return Ok(JValue::Undefined);
     }
 
@@ -1817,8 +1898,7 @@ fn call_pure_builtin(
                 }
                 JValue::String(s) => Ok(JValue::String(s.clone())),
                 _ => Err(EvaluatorError::TypeError(
-                    "T0412: Argument 1 of function $join must be an array of String"
-                        .to_string(),
+                    "T0412: Argument 1 of function $join must be an array of String".to_string(),
                 )),
             }
         }
@@ -1848,7 +1928,11 @@ fn call_pure_builtin(
             Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
             Some(JValue::Number(n)) => {
                 let precision = effective_args.get(1).and_then(|v| {
-                    if let JValue::Number(p) = v { Some(*p as i32) } else { None }
+                    if let JValue::Number(p) = v {
+                        Some(*p as i32)
+                    } else {
+                        None
+                    }
                 });
                 Ok(functions::numeric::round(*n, precision)?)
             }
@@ -1974,8 +2058,7 @@ fn call_pure_builtin(
                 if obj.is_empty() {
                     Ok(JValue::Null)
                 } else {
-                    let keys: Vec<JValue> =
-                        obj.keys().map(|k| JValue::string(k.clone())).collect();
+                    let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
                     if keys.len() == 1 {
                         Ok(keys.into_iter().next().unwrap())
                     } else {
@@ -2020,7 +2103,10 @@ fn call_pure_builtin(
             _ => Ok(functions::object::merge(effective_args)?),
         },
 
-        _ => unreachable!("call_pure_builtin called with non-compilable builtin: {}", name),
+        _ => unreachable!(
+            "call_pure_builtin called with non-compilable builtin: {}",
+            name
+        ),
     }
 }
 
@@ -2510,9 +2596,7 @@ impl Evaluator {
         // function($l, $r) { $l.price > $r.price }
         if let AstNode::Lambda { params, body, .. } = comparator {
             if params.len() >= 2 {
-                if let Some(spec) =
-                    try_specialize_sort_comparator(body, &params[0], &params[1])
-                {
+                if let Some(spec) = try_specialize_sort_comparator(body, &params[0], &params[1]) {
                     Self::merge_sort_specialized(arr, &spec);
                     return Ok(());
                 }
@@ -2579,11 +2663,8 @@ impl Evaluator {
         } else {
             // Non-lambda comparator: use generic apply_function path
             while i < left.len() && j < right.len() {
-                let cmp_result = self.apply_function(
-                    comparator,
-                    &[left[i].clone(), right[j].clone()],
-                    data,
-                )?;
+                let cmp_result =
+                    self.apply_function(comparator, &[left[i].clone(), right[j].clone()], data)?;
                 if self.is_truthy(&cmp_result) {
                     temp.push(right[j].clone());
                     j += 1;
@@ -2623,7 +2704,11 @@ impl Evaluator {
     /// Returns Some for literals, simple field access on objects, and simple variable lookups.
     /// Returns None for anything requiring the full evaluator.
     #[inline(always)]
-    fn evaluate_leaf(&mut self, node: &AstNode, data: &JValue) -> Option<Result<JValue, EvaluatorError>> {
+    fn evaluate_leaf(
+        &mut self,
+        node: &AstNode,
+        data: &JValue,
+    ) -> Option<Result<JValue, EvaluatorError>> {
         match node {
             AstNode::String(s) => Some(Ok(JValue::string(s.clone()))),
             AstNode::Number(n) => {
@@ -2638,7 +2723,9 @@ impl Evaluator {
             AstNode::Undefined => Some(Ok(JValue::Undefined)),
             AstNode::Name(field_name) => match data {
                 // Array mapping and other cases need full evaluator
-                JValue::Object(obj) => Some(Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null))),
+                JValue::Object(obj) => {
+                    Some(Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null)))
+                }
                 _ => None,
             },
             AstNode::Variable(name) if !name.is_empty() => {
@@ -2871,9 +2958,7 @@ impl Evaluator {
                 let mut result = IndexMap::with_capacity(pairs.len());
 
                 // Check if all keys are string literals — can skip D1009 HashMap
-                let all_literal_keys = pairs
-                    .iter()
-                    .all(|(k, _)| matches!(k, AstNode::String(_)));
+                let all_literal_keys = pairs.iter().all(|(k, _)| matches!(k, AstNode::String(_)));
 
                 if all_literal_keys {
                     // Fast path: literal keys, no need for D1009 tracking
@@ -3601,94 +3686,95 @@ impl Evaluator {
                                 Ok(JValue::array(result))
                             }
                         } else {
-                        // Tuple path: per-element tuple handling
-                        let mut result = Vec::new();
-                        for item in arr.iter() {
-                            match item {
-                                JValue::Object(obj) => {
-                                    let is_tuple =
-                                        obj.get("__tuple__") == Some(&JValue::Bool(true));
+                            // Tuple path: per-element tuple handling
+                            let mut result = Vec::new();
+                            for item in arr.iter() {
+                                match item {
+                                    JValue::Object(obj) => {
+                                        let is_tuple =
+                                            obj.get("__tuple__") == Some(&JValue::Bool(true));
 
-                                    if is_tuple {
-                                        let inner = match obj.get("@") {
-                                            Some(JValue::Object(inner)) => inner,
-                                            _ => continue,
-                                        };
+                                        if is_tuple {
+                                            let inner = match obj.get("@") {
+                                                Some(JValue::Object(inner)) => inner,
+                                                _ => continue,
+                                            };
 
-                                        if let Some(val) = inner.get(field_name) {
-                                            if !val.is_null() {
-                                                // Build tuple wrapper - only clone bindings when needed
-                                                let wrap = |v: JValue| -> JValue {
-                                                    let mut wrapper = IndexMap::new();
-                                                    wrapper.insert("@".to_string(), v);
-                                                    wrapper.insert(
-                                                        "__tuple__".to_string(),
-                                                        JValue::Bool(true),
-                                                    );
-                                                    for (k, v) in obj.iter() {
-                                                        if k.starts_with('$') {
-                                                            wrapper.insert(k.clone(), v.clone());
+                                            if let Some(val) = inner.get(field_name) {
+                                                if !val.is_null() {
+                                                    // Build tuple wrapper - only clone bindings when needed
+                                                    let wrap = |v: JValue| -> JValue {
+                                                        let mut wrapper = IndexMap::new();
+                                                        wrapper.insert("@".to_string(), v);
+                                                        wrapper.insert(
+                                                            "__tuple__".to_string(),
+                                                            JValue::Bool(true),
+                                                        );
+                                                        for (k, v) in obj.iter() {
+                                                            if k.starts_with('$') {
+                                                                wrapper
+                                                                    .insert(k.clone(), v.clone());
+                                                            }
                                                         }
-                                                    }
-                                                    JValue::object(wrapper)
-                                                };
+                                                        JValue::object(wrapper)
+                                                    };
 
-                                                match val {
-                                                    JValue::Array(arr_val) => {
-                                                        for item in arr_val.iter() {
-                                                            result.push(wrap(item.clone()));
+                                                    match val {
+                                                        JValue::Array(arr_val) => {
+                                                            for item in arr_val.iter() {
+                                                                result.push(wrap(item.clone()));
+                                                            }
                                                         }
+                                                        other => result.push(wrap(other.clone())),
                                                     }
-                                                    other => result.push(wrap(other.clone())),
                                                 }
                                             }
-                                        }
-                                    } else {
-                                        // Non-tuple: access field directly by reference, only clone the field value
-                                        if let Some(val) = obj.get(field_name) {
-                                            if !val.is_null() {
-                                                match val {
-                                                    JValue::Array(arr_val) => {
-                                                        for item in arr_val.iter() {
-                                                            result.push(item.clone());
+                                        } else {
+                                            // Non-tuple: access field directly by reference, only clone the field value
+                                            if let Some(val) = obj.get(field_name) {
+                                                if !val.is_null() {
+                                                    match val {
+                                                        JValue::Array(arr_val) => {
+                                                            for item in arr_val.iter() {
+                                                                result.push(item.clone());
+                                                            }
                                                         }
+                                                        other => result.push(other.clone()),
                                                     }
-                                                    other => result.push(other.clone()),
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                JValue::Array(inner_arr) => {
-                                    // Recursively map over nested array
-                                    let nested_result = self.evaluate_path(
-                                        &[PathStep::new(AstNode::Name(field_name.clone()))],
-                                        &JValue::Array(inner_arr.clone()),
-                                    )?;
-                                    // Add nested result to our results
-                                    match nested_result {
-                                        JValue::Array(nested) => {
-                                            // Flatten nested arrays from recursive mapping
-                                            result.extend(nested.iter().cloned());
+                                    JValue::Array(inner_arr) => {
+                                        // Recursively map over nested array
+                                        let nested_result = self.evaluate_path(
+                                            &[PathStep::new(AstNode::Name(field_name.clone()))],
+                                            &JValue::Array(inner_arr.clone()),
+                                        )?;
+                                        // Add nested result to our results
+                                        match nested_result {
+                                            JValue::Array(nested) => {
+                                                // Flatten nested arrays from recursive mapping
+                                                result.extend(nested.iter().cloned());
+                                            }
+                                            JValue::Null => {} // Skip nulls from nested arrays
+                                            other => result.push(other),
                                         }
-                                        JValue::Null => {} // Skip nulls from nested arrays
-                                        other => result.push(other),
                                     }
+                                    _ => {} // Skip non-object items
                                 }
-                                _ => {} // Skip non-object items
                             }
-                        }
 
-                        // Return array result
-                        // JSONata singleton unwrapping: if we have exactly one result,
-                        // unwrap it (even if it's an array)
-                        if result.is_empty() {
-                            Ok(JValue::Null)
-                        } else if result.len() == 1 {
-                            Ok(result.into_iter().next().unwrap())
-                        } else {
-                            Ok(JValue::array(result))
-                        }
+                            // Return array result
+                            // JSONata singleton unwrapping: if we have exactly one result,
+                            // unwrap it (even if it's an array)
+                            if result.is_empty() {
+                                Ok(JValue::Null)
+                            } else if result.len() == 1 {
+                                Ok(result.into_iter().next().unwrap())
+                            } else {
+                                Ok(JValue::array(result))
+                            }
                         } // end else (tuple path)
                     }
                     _ => Ok(JValue::Null),
@@ -3698,10 +3784,7 @@ impl Evaluator {
 
         // Fast path: 2-step $variable.field with no stages
         // Handles common patterns like $l.rating, $item.price in sort/HOF bodies
-        if steps.len() == 2
-            && steps[0].stages.is_empty()
-            && steps[1].stages.is_empty()
-        {
+        if steps.len() == 2 && steps[0].stages.is_empty() && steps[1].stages.is_empty() {
             if let (AstNode::Variable(var_name), AstNode::Name(field_name)) =
                 (&steps[0].node, &steps[1].node)
             {
@@ -4134,23 +4217,25 @@ impl Evaluator {
                                     match item {
                                         JValue::Object(obj) => {
                                             // Check if this is a tuple stream element
-                                            let (actual_obj, tuple_bindings) =
-                                                if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                                                    // This is a tuple - extract '@' value and preserve bindings
-                                                    if let Some(JValue::Object(inner)) = obj.get("@") {
-                                                        // Collect index bindings (variables starting with $)
-                                                        let bindings: Vec<(String, JValue)> = obj
-                                                            .iter()
-                                                            .filter(|(k, _)| k.starts_with('$'))
-                                                            .map(|(k, v)| (k.clone(), v.clone()))
-                                                            .collect();
-                                                        (inner.clone(), Some(bindings))
-                                                    } else {
-                                                        continue; // Invalid tuple
-                                                    }
+                                            let (actual_obj, tuple_bindings) = if obj
+                                                .get("__tuple__")
+                                                == Some(&JValue::Bool(true))
+                                            {
+                                                // This is a tuple - extract '@' value and preserve bindings
+                                                if let Some(JValue::Object(inner)) = obj.get("@") {
+                                                    // Collect index bindings (variables starting with $)
+                                                    let bindings: Vec<(String, JValue)> = obj
+                                                        .iter()
+                                                        .filter(|(k, _)| k.starts_with('$'))
+                                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                                        .collect();
+                                                    (inner.clone(), Some(bindings))
                                                 } else {
-                                                    (obj.clone(), None)
-                                                };
+                                                    continue; // Invalid tuple
+                                                }
+                                            } else {
+                                                (obj.clone(), None)
+                                            };
 
                                             let val = actual_obj
                                                 .get(field_name)
@@ -4315,47 +4400,47 @@ impl Evaluator {
                             // Produce the mapped result (compiled fast path or tree-walker fallback).
                             // Do NOT return early — singleton unwrapping is applied by the outer
                             // path evaluation code after all steps are processed.
-                            let mapped: Vec<JValue> =
-                                if let Some(compiled) = try_compile_expr(expr) {
-                                    let shape = arr.first().and_then(build_shape_cache);
-                                    let mut result = Vec::with_capacity(arr.len());
-                                    for item in arr.iter() {
-                                        let value = if let Some(ref s) = shape {
-                                            eval_compiled_shaped(&compiled, item, None, s)?
-                                        } else {
-                                            eval_compiled(&compiled, item, None)?
-                                        };
-                                        if !value.is_null() && !value.is_undefined() {
-                                            result.push(value);
-                                        }
+                            let mapped: Vec<JValue> = if let Some(compiled) = try_compile_expr(expr)
+                            {
+                                let shape = arr.first().and_then(build_shape_cache);
+                                let mut result = Vec::with_capacity(arr.len());
+                                for item in arr.iter() {
+                                    let value = if let Some(ref s) = shape {
+                                        eval_compiled_shaped(&compiled, item, None, s)?
+                                    } else {
+                                        eval_compiled(&compiled, item, None)?
+                                    };
+                                    if !value.is_null() && !value.is_undefined() {
+                                        result.push(value);
                                     }
-                                    result
-                                } else {
-                                    let mut result = Vec::new();
-                                    for item in arr.iter() {
-                                        // Save the current $ binding
-                                        let saved_dollar = self.context.lookup("$").cloned();
+                                }
+                                result
+                            } else {
+                                let mut result = Vec::new();
+                                for item in arr.iter() {
+                                    // Save the current $ binding
+                                    let saved_dollar = self.context.lookup("$").cloned();
 
-                                        // Bind $ to the current item
-                                        self.context.bind("$".to_string(), item.clone());
+                                    // Bind $ to the current item
+                                    self.context.bind("$".to_string(), item.clone());
 
-                                        // Evaluate the expression in the context of this item
-                                        let value = self.evaluate_internal(expr, item)?;
+                                    // Evaluate the expression in the context of this item
+                                    let value = self.evaluate_internal(expr, item)?;
 
-                                        // Restore the previous $ binding
-                                        if let Some(saved) = saved_dollar {
-                                            self.context.bind("$".to_string(), saved);
-                                        } else {
-                                            self.context.unbind("$");
-                                        }
-
-                                        // Only include non-null/undefined values
-                                        if !value.is_null() && !value.is_undefined() {
-                                            result.push(value);
-                                        }
+                                    // Restore the previous $ binding
+                                    if let Some(saved) = saved_dollar {
+                                        self.context.bind("$".to_string(), saved);
+                                    } else {
+                                        self.context.unbind("$");
                                     }
-                                    result
-                                };
+
+                                    // Only include non-null/undefined values
+                                    if !value.is_null() && !value.is_undefined() {
+                                        result.push(value);
+                                    }
+                                }
+                                result
+                            };
                             // Don't do singleton unwrapping here - let the path result
                             // handling deal with it, which respects has_explicit_array_keep
                             JValue::array(mapped)
@@ -5293,7 +5378,10 @@ impl Evaluator {
                 "sum" => total += val,
                 "max" => max_val = max_val.max(val),
                 "min" => min_val = min_val.min(val),
-                "average" => { total += val; count += 1; }
+                "average" => {
+                    total += val;
+                    count += 1;
+                }
                 _ => unreachable!(),
             }
         }
@@ -5409,9 +5497,7 @@ impl Evaluator {
 
             // For other expressions, evaluate and check if non-null/non-undefined
             let value = self.evaluate_internal(arg, data)?;
-            return Ok(JValue::Bool(
-                !value.is_null() && !value.is_undefined(),
-            ));
+            return Ok(JValue::Bool(!value.is_null() && !value.is_undefined()));
         }
 
         // Check if any arguments are undefined variables or undefined paths
@@ -6827,7 +6913,10 @@ impl Evaluator {
                         // CompiledExpr fast path: direct lambda with 1 param, compilable body
                         if param_count == 1 {
                             if let AstNode::Lambda {
-                                params, body, signature: None, thunk: false,
+                                params,
+                                body,
+                                signature: None,
+                                thunk: false,
                             } = &args[1]
                             {
                                 let var_refs: Vec<&str> =
@@ -6856,12 +6945,13 @@ impl Evaluator {
                                         let captured_data = stored.captured_data.clone();
                                         let captured_env_clone = stored.captured_env.clone();
                                         let ce_clone = ce.clone();
-                                        if !captured_env_clone
-                                            .values()
-                                            .any(|v| matches!(v, JValue::Lambda { .. } | JValue::Builtin { .. }))
-                                        {
-                                            let call_data =
-                                                captured_data.as_ref().unwrap_or(data);
+                                        if !captured_env_clone.values().any(|v| {
+                                            matches!(
+                                                v,
+                                                JValue::Lambda { .. } | JValue::Builtin { .. }
+                                            )
+                                        }) {
+                                            let call_data = captured_data.as_ref().unwrap_or(data);
                                             let mut result = Vec::with_capacity(arr.len());
                                             let mut vars: HashMap<&str, &JValue> =
                                                 captured_env_clone
@@ -6948,7 +7038,10 @@ impl Evaluator {
                 let single_holder;
                 let (items, was_single_value): (&[JValue], bool) = match &array {
                     JValue::Array(arr) => (arr.as_slice(), false),
-                    _ => { single_holder = [array]; (&single_holder[..], true) }
+                    _ => {
+                        single_holder = [array];
+                        (&single_holder[..], true)
+                    }
                 };
 
                 // Detect how many parameters the callback expects
@@ -6957,13 +7050,14 @@ impl Evaluator {
                 // CompiledExpr fast path: direct lambda with 1 param, compilable body
                 if param_count == 1 {
                     if let AstNode::Lambda {
-                        params, body, signature: None, thunk: false,
+                        params,
+                        body,
+                        signature: None,
+                        thunk: false,
                     } = &args[1]
                     {
-                        let var_refs: Vec<&str> =
-                            params.iter().map(|s| s.as_str()).collect();
-                        if let Some(compiled) =
-                            try_compile_expr_with_allowed_vars(body, &var_refs)
+                        let var_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+                        if let Some(compiled) = try_compile_expr_with_allowed_vars(body, &var_refs)
                         {
                             let param_name = params[0].as_str();
                             let mut result = Vec::with_capacity(items.len() / 2);
@@ -6993,10 +7087,9 @@ impl Evaluator {
                                 let captured_data = stored.captured_data.clone();
                                 let captured_env_clone = stored.captured_env.clone();
                                 let ce_clone = ce.clone();
-                                if !captured_env_clone
-                                    .values()
-                                    .any(|v| matches!(v, JValue::Lambda { .. } | JValue::Builtin { .. }))
-                                {
+                                if !captured_env_clone.values().any(|v| {
+                                    matches!(v, JValue::Lambda { .. } | JValue::Builtin { .. })
+                                }) {
                                     let call_data = captured_data.as_ref().unwrap_or(data);
                                     let mut result = Vec::with_capacity(items.len() / 2);
                                     let mut vars: HashMap<&str, &JValue> = captured_env_clone
@@ -7094,7 +7187,10 @@ impl Evaluator {
                 let items: &[JValue] = match &array {
                     JValue::Array(arr) => arr.as_slice(),
                     JValue::Null => return Ok(JValue::Null),
-                    _ => { single_holder = [array]; &single_holder[..] }
+                    _ => {
+                        single_holder = [array];
+                        &single_holder[..]
+                    }
                 };
 
                 if items.is_empty() {
@@ -7121,21 +7217,20 @@ impl Evaluator {
                 // CompiledExpr fast path: direct lambda with 2 params, compilable body
                 if param_count == 2 {
                     if let AstNode::Lambda {
-                        params, body, signature: None, thunk: false,
+                        params,
+                        body,
+                        signature: None,
+                        thunk: false,
                     } = &args[1]
                     {
-                        let var_refs: Vec<&str> =
-                            params.iter().map(|s| s.as_str()).collect();
-                        if let Some(compiled) =
-                            try_compile_expr_with_allowed_vars(body, &var_refs)
+                        let var_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+                        if let Some(compiled) = try_compile_expr_with_allowed_vars(body, &var_refs)
                         {
                             let acc_name = params[0].as_str();
                             let item_name = params[1].as_str();
                             for item in items[start_idx..].iter() {
-                                let vars: HashMap<&str, &JValue> = HashMap::from([
-                                    (acc_name, &accumulator),
-                                    (item_name, item),
-                                ]);
+                                let vars: HashMap<&str, &JValue> =
+                                    HashMap::from([(acc_name, &accumulator), (item_name, item)]);
                                 accumulator = eval_compiled(&compiled, data, Some(&vars))?;
                             }
                             return Ok(accumulator);
@@ -7154,8 +7249,7 @@ impl Evaluator {
                                     if !captured_env_clone.values().any(|v| {
                                         matches!(v, JValue::Lambda { .. } | JValue::Builtin { .. })
                                     }) {
-                                        let call_data =
-                                            captured_data.as_ref().unwrap_or(data);
+                                        let call_data = captured_data.as_ref().unwrap_or(data);
                                         for item in items[start_idx..].iter() {
                                             let mut vars: HashMap<&str, &JValue> =
                                                 captured_env_clone
@@ -7939,42 +8033,40 @@ impl Evaluator {
         if let Some(sig_str) = signature {
             // Validate and coerce arguments with signature
             let coerced_values = match crate::signature::Signature::parse(sig_str) {
-                Ok(sig) => {
-                    match sig.validate_and_coerce(values) {
-                        Ok(coerced) => coerced,
-                        Err(e) => {
-                            self.context.pop_scope();
-                            match e {
-                                crate::signature::SignatureError::UndefinedArgument => {
-                                    return Ok(JValue::Null);
-                                }
-                                crate::signature::SignatureError::ArgumentTypeMismatch {
-                                    index,
-                                    expected,
-                                } => {
-                                    return Err(EvaluatorError::TypeError(
+                Ok(sig) => match sig.validate_and_coerce(values) {
+                    Ok(coerced) => coerced,
+                    Err(e) => {
+                        self.context.pop_scope();
+                        match e {
+                            crate::signature::SignatureError::UndefinedArgument => {
+                                return Ok(JValue::Null);
+                            }
+                            crate::signature::SignatureError::ArgumentTypeMismatch {
+                                index,
+                                expected,
+                            } => {
+                                return Err(EvaluatorError::TypeError(
                                         format!("T0410: Argument {} of function does not match function signature (expected {})", index, expected)
                                     ));
-                                }
-                                crate::signature::SignatureError::ArrayTypeMismatch {
-                                    index,
-                                    expected,
-                                } => {
-                                    return Err(EvaluatorError::TypeError(format!(
-                                        "T0412: Argument {} of function must be an array of {}",
-                                        index, expected
-                                    )));
-                                }
-                                _ => {
-                                    return Err(EvaluatorError::TypeError(format!(
-                                        "Signature validation failed: {}",
-                                        e
-                                    )));
-                                }
+                            }
+                            crate::signature::SignatureError::ArrayTypeMismatch {
+                                index,
+                                expected,
+                            } => {
+                                return Err(EvaluatorError::TypeError(format!(
+                                    "T0412: Argument {} of function must be an array of {}",
+                                    index, expected
+                                )));
+                            }
+                            _ => {
+                                return Err(EvaluatorError::TypeError(format!(
+                                    "Signature validation failed: {}",
+                                    e
+                                )));
                             }
                         }
                     }
-                }
+                },
                 Err(e) => {
                     self.context.pop_scope();
                     return Err(EvaluatorError::EvaluationError(format!(
@@ -8075,9 +8167,14 @@ impl Evaluator {
 
         // Pop lambda scope, preserving any lambdas referenced by the return value
         // Fast path: scalar results can never contain lambda references
-        let is_scalar = matches!(&result,
-            JValue::Number(_) | JValue::Bool(_) | JValue::String(_)
-            | JValue::Null | JValue::Undefined);
+        let is_scalar = matches!(
+            &result,
+            JValue::Number(_)
+                | JValue::Bool(_)
+                | JValue::String(_)
+                | JValue::Null
+                | JValue::Undefined
+        );
         if is_scalar {
             self.context.pop_scope();
         } else {
@@ -9553,8 +9650,12 @@ impl Evaluator {
     fn extract_lambda_ids(&self, value: &JValue) -> Vec<String> {
         // Fast path: scalars can never contain lambda references
         match value {
-            JValue::Number(_) | JValue::Bool(_) | JValue::String(_)
-            | JValue::Null | JValue::Undefined | JValue::Regex { .. }
+            JValue::Number(_)
+            | JValue::Bool(_)
+            | JValue::String(_)
+            | JValue::Null
+            | JValue::Undefined
+            | JValue::Regex { .. }
             | JValue::Builtin { .. } => return Vec::new(),
             _ => {}
         }

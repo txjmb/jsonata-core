@@ -44,7 +44,10 @@ pub(crate) enum Instr {
     /// Push the variable `string_pool[idx]` from the `vars` map.
     GetVar(u16),
     /// Shorthand for `GetVar(v); GetField(f)` — common `$var.field` pattern.
-    GetVarField { var_idx: u16, field_idx: u16 },
+    GetVarField {
+        var_idx: u16,
+        field_idx: u16,
+    },
 
     // ── Arithmetic ───────────────────────────────────────────────────────
     /// `lhs_en` / `rhs_en` — whether the operand was a compile-time explicit `null`
@@ -100,7 +103,10 @@ pub(crate) enum Instr {
     // ── Builtins ─────────────────────────────────────────────────────────
     /// Call the builtin named `string_pool[name_idx]` with `arg_count` stack args.
     /// Pops args (first pushed = first arg), pushes result.
-    CallBuiltin { name_idx: u16, arg_count: u8 },
+    CallBuiltin {
+        name_idx: u16,
+        arg_count: u8,
+    },
 
     // ── Array filtering ──────────────────────────────────────────────────
     /// Pop TOS (must be Array or Undefined), run `sub_programs[idx]` for each element
@@ -264,31 +270,61 @@ fn run_inner(
             Instr::Add(lhs_en, rhs_en) => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(CompiledArithOp::Add, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                stack.push(compiled_arithmetic(
+                    CompiledArithOp::Add,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
+                )?);
                 ip += 1;
             }
             Instr::Sub(lhs_en, rhs_en) => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(CompiledArithOp::Sub, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                stack.push(compiled_arithmetic(
+                    CompiledArithOp::Sub,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
+                )?);
                 ip += 1;
             }
             Instr::Mul(lhs_en, rhs_en) => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(CompiledArithOp::Mul, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                stack.push(compiled_arithmetic(
+                    CompiledArithOp::Mul,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
+                )?);
                 ip += 1;
             }
             Instr::Div(lhs_en, rhs_en) => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(CompiledArithOp::Div, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                stack.push(compiled_arithmetic(
+                    CompiledArithOp::Div,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
+                )?);
                 ip += 1;
             }
             Instr::Mod(lhs_en, rhs_en) => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(CompiledArithOp::Mod, &lhs, &rhs, *lhs_en, *rhs_en)?);
+                stack.push(compiled_arithmetic(
+                    CompiledArithOp::Mod,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
+                )?);
                 ip += 1;
             }
 
@@ -314,7 +350,10 @@ fn run_inner(
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
                 stack.push(compiled_ordered_cmp(
-                    &lhs, &rhs, *lhs_en, *rhs_en,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
                     |a, b| a < b,
                     |a, b| a < b,
                 )?);
@@ -324,7 +363,10 @@ fn run_inner(
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
                 stack.push(compiled_ordered_cmp(
-                    &lhs, &rhs, *lhs_en, *rhs_en,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
                     |a, b| a <= b,
                     |a, b| a <= b,
                 )?);
@@ -334,7 +376,10 @@ fn run_inner(
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
                 stack.push(compiled_ordered_cmp(
-                    &lhs, &rhs, *lhs_en, *rhs_en,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
                     |a, b| a > b,
                     |a, b| a > b,
                 )?);
@@ -344,7 +389,10 @@ fn run_inner(
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
                 stack.push(compiled_ordered_cmp(
-                    &lhs, &rhs, *lhs_en, *rhs_en,
+                    &lhs,
+                    &rhs,
+                    *lhs_en,
+                    *rhs_en,
                     |a, b| a >= b,
                     |a, b| a >= b,
                 )?);
@@ -481,7 +529,10 @@ fn run_inner(
             }
 
             // ── Builtins ─────────────────────────────────────────────
-            Instr::CallBuiltin { name_idx, arg_count } => {
+            Instr::CallBuiltin {
+                name_idx,
+                arg_count,
+            } => {
                 let name = &string_pool[*name_idx as usize];
                 let n = *arg_count as usize;
                 let start = stack.len().saturating_sub(n);
@@ -515,7 +566,11 @@ fn run_inner(
                     other => {
                         // Single value: apply predicate directly
                         let test = run_inner(sub_prog, &other, vars, &mut sub_stack)?;
-                        if compiled_is_truthy(&test) { other } else { JValue::Undefined }
+                        if compiled_is_truthy(&test) {
+                            other
+                        } else {
+                            JValue::Undefined
+                        }
                     }
                 };
                 stack.push(result);
