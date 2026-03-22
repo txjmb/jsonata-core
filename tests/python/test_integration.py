@@ -305,11 +305,13 @@ class TestComplexExpressions:
 
     def test_filter_and_transform(self):
         """Filter orders by price and extract product names"""
-        data = {"orders": [
-            {"product": "A", "price": 150},
-            {"product": "B", "price": 50},
-            {"product": "C", "price": 200},
-        ]}
+        data = {
+            "orders": [
+                {"product": "A", "price": 150},
+                {"product": "B", "price": 50},
+                {"product": "C", "price": 200},
+            ]
+        }
         result = jsonatapy.evaluate("orders[price > 100].product", data)
         assert result == ["A", "C"]
 

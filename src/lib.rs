@@ -184,6 +184,7 @@ impl JsonataExpression {
     }
 }
 
+#[cfg(feature = "python")]
 #[pymethods]
 impl JsonataExpression {
     /// Returns ValueError if evaluation fails
