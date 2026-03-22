@@ -8,9 +8,9 @@ Usage:
 
 import json
 import subprocess
-from pathlib import Path
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
 
 
 def find_latest_results():
