@@ -37,18 +37,18 @@ name = "jsonata_core"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.24", optional = true }
+pyo3 = { version = "0.28", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-thiserror = "1.0"
-regex = "1.10"
+thiserror = "2.0"
+regex = "1.12"
 chrono = "0.4"
 num-traits = "0.2"
 base64 = "0.22"
 indexmap = "2.2"
 percent-encoding = "2.3"
-rand = "0.8"
-simd-json = { version = "0.14", optional = true }
+rand = "0.9"
+simd-json = { version = "0.17", optional = true }
 
 [features]
 default = ["simd"]
@@ -57,8 +57,8 @@ python = ["dep:pyo3"]
 bench = []   # exposes _bench facade for Criterion benchmarks
 
 [dev-dependencies]
-criterion = "0.5"
-proptest = "1.4"
+criterion = "0.8"
+proptest = "1.10"
 
 [[bench]]
 name = "evaluator_bench"
