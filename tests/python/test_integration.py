@@ -161,7 +161,7 @@ class TestStringFunctions:
 
     def test_substring(self):
         result = jsonatapy.evaluate('$substring("hello", 1, 3)', {})
-        assert result == "el"
+        assert result == "ell"
 
     def test_substring_before(self):
         result = jsonatapy.evaluate('$substringBefore("hello-world", "-")', {})
