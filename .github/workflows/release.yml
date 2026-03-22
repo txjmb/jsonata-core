@@ -135,7 +135,7 @@ jobs:
 
       - name: Update Cargo.lock
         run: |
-          cargo update -p jsonatapy
+          cargo update -p jsonata-core
 
       - name: Commit version bump
         run: |
