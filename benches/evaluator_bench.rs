@@ -79,10 +79,7 @@ fn ecommerce_100() -> JValue {
             let mut p = IndexMap::new();
             p.insert("id".to_string(), JValue::from(i as f64));
             p.insert("name".to_string(), JValue::string(format!("Product {i}")));
-            p.insert(
-                "category".to_string(),
-                JValue::string(categories[i % 4]),
-            );
+            p.insert("category".to_string(), JValue::string(categories[i % 4]));
             p.insert("price".to_string(), JValue::from(10.0 + i as f64 * 5.5));
             p.insert("inStock".to_string(), JValue::Bool(i % 3 != 0));
             p.insert(
@@ -148,8 +145,7 @@ fn bench_simple_paths(c: &mut Criterion) {
     // a.b.c.d.e — 5-level deep
     {
         let ast = parser::parse("a.b.c.d.e").unwrap();
-        let data =
-            JValue::from_json_str(r#"{"a":{"b":{"c":{"d":{"e":42}}}}}"#).unwrap();
+        let data = JValue::from_json_str(r#"{"a":{"b":{"c":{"d":{"e":42}}}}}"#).unwrap();
         group.bench_function("deep_path_5", |b| {
             b.iter(|| black_box(eval(black_box(&ast), black_box(&data))))
         });
@@ -250,8 +246,7 @@ fn bench_complex_transformations(c: &mut Criterion) {
 
     // Object construction (simple)
     {
-        let ast =
-            parser::parse(r#"{"name": name, "greeting": "Hello, " & name & "!"}"#).unwrap();
+        let ast = parser::parse(r#"{"name": name, "greeting": "Hello, " & name & "!"}"#).unwrap();
         let data = JValue::from_json_str(r#"{"name":"World","value":42}"#).unwrap();
         group.bench_function("object_construction_simple", |b| {
             b.iter(|| black_box(eval(black_box(&ast), black_box(&data))))
@@ -260,10 +255,8 @@ fn bench_complex_transformations(c: &mut Criterion) {
 
     // Object construction (nested)
     {
-        let ast = parser::parse(
-            r#"{"outer": {"inner": {"value": value * 2, "name": name}}}"#,
-        )
-        .unwrap();
+        let ast =
+            parser::parse(r#"{"outer": {"inner": {"value": value * 2, "name": name}}}"#).unwrap();
         let data = JValue::from_json_str(r#"{"name":"test","value":21}"#).unwrap();
         group.bench_function("object_construction_nested", |b| {
             b.iter(|| black_box(eval(black_box(&ast), black_box(&data))))
@@ -298,7 +291,11 @@ fn bench_string_operations(c: &mut Criterion) {
     let cases: &[(&str, &str, &str)] = &[
         ("uppercase", "$uppercase(name)", r#"{"name":"hello world"}"#),
         ("lowercase", "$lowercase(name)", r#"{"name":"HELLO WORLD"}"#),
-        ("length", "$length(name)", r#"{"name":"JSONata Performance Benchmark"}"#),
+        (
+            "length",
+            "$length(name)",
+            r#"{"name":"JSONata Performance Benchmark"}"#,
+        ),
         (
             "concat",
             r#"first & " " & last"#,
@@ -364,10 +361,7 @@ fn bench_realistic_workload(c: &mut Criterion) {
             "filter_by_category",
             r#"products[category = "Electronics"]"#,
         ),
-        (
-            "calculate_total_value",
-            "$sum(products[inStock].price)",
-        ),
+        ("calculate_total_value", "$sum(products[inStock].price)"),
         (
             "complex_transformation",
             r#"products[price > 50 and inStock].{"name": name, "price": price, "vendor": vendor.name}"#,
@@ -410,31 +404,72 @@ fn bench_vm_vs_tree_walker(c: &mut Criterion) {
     // ── Tiny-data expressions ─────────────────────────────────────────────────
 
     let tiny_cases: &[(&str, &str, &str)] = &[
-        ("simple_path",       "name",                             r#"{"name":"Alice"}"#),
-        ("arithmetic",        "price * quantity",                  r#"{"price":10.5,"quantity":3}"#),
-        ("conditional",       r#"value > 0 ? "positive" : "non-positive""#, r#"{"value":42}"#),
-        ("nested_builtins",   "$length($uppercase(name))",         r#"{"name":"JSONata Performance Test"}"#),
-        ("deep_path_5",       "a.b.c.d.e",                        r#"{"a":{"b":{"c":{"d":{"e":42}}}}}"#),
-        ("deep_path_12",      "a.b.c.d.e.f.g.h.i.j.k.l",
-            r#"{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":{"k":{"l":42}}}}}}}}}}}}"#),
-        ("uppercase",         "$uppercase(name)",                  r#"{"name":"hello world"}"#),
-        ("lowercase",         "$lowercase(name)",                  r#"{"name":"HELLO WORLD"}"#),
-        ("str_length",        "$length(name)",                     r#"{"name":"JSONata Performance Benchmark"}"#),
-        ("substring",         "$substring(text, 0, 10)",           r#"{"text":"This is a long string for substring"}"#),
-        ("contains",          r#"$contains(text, "JSONata")"#,     r#"{"text":"JSONata is a query language"}"#),
-        ("concat",            r#"first & " " & last"#,             r#"{"first":"John","last":"Doe"}"#),
+        ("simple_path", "name", r#"{"name":"Alice"}"#),
+        (
+            "arithmetic",
+            "price * quantity",
+            r#"{"price":10.5,"quantity":3}"#,
+        ),
+        (
+            "conditional",
+            r#"value > 0 ? "positive" : "non-positive""#,
+            r#"{"value":42}"#,
+        ),
+        (
+            "nested_builtins",
+            "$length($uppercase(name))",
+            r#"{"name":"JSONata Performance Test"}"#,
+        ),
+        (
+            "deep_path_5",
+            "a.b.c.d.e",
+            r#"{"a":{"b":{"c":{"d":{"e":42}}}}}"#,
+        ),
+        (
+            "deep_path_12",
+            "a.b.c.d.e.f.g.h.i.j.k.l",
+            r#"{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":{"k":{"l":42}}}}}}}}}}}}"#,
+        ),
+        ("uppercase", "$uppercase(name)", r#"{"name":"hello world"}"#),
+        ("lowercase", "$lowercase(name)", r#"{"name":"HELLO WORLD"}"#),
+        (
+            "str_length",
+            "$length(name)",
+            r#"{"name":"JSONata Performance Benchmark"}"#,
+        ),
+        (
+            "substring",
+            "$substring(text, 0, 10)",
+            r#"{"text":"This is a long string for substring"}"#,
+        ),
+        (
+            "contains",
+            r#"$contains(text, "JSONata")"#,
+            r#"{"text":"JSONata is a query language"}"#,
+        ),
+        (
+            "concat",
+            r#"first & " " & last"#,
+            r#"{"first":"John","last":"Doe"}"#,
+        ),
     ];
 
     for (name, expr, data_str) in tiny_cases {
-        let ast  = parser::parse(expr).unwrap();
+        let ast = parser::parse(expr).unwrap();
         let data = JValue::from_json_str(data_str).unwrap();
-        let bc   = _bench::compile(&ast);
+        let bc = _bench::compile(&ast);
 
         let mut group = c.benchmark_group(format!("vm_vs/{name}"));
         group.sample_size(300);
 
         group.bench_function("tree_walker", |b| {
-            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&data)).unwrap()))
+            b.iter(|| {
+                black_box(
+                    Evaluator::new()
+                        .evaluate(black_box(&ast), black_box(&data))
+                        .unwrap(),
+                )
+            })
         });
         if let Some(bc) = &bc {
             group.bench_function("vm", |b| {
@@ -447,13 +482,23 @@ fn bench_vm_vs_tree_walker(c: &mut Criterion) {
     // ── Aggregates on 100-element numeric array ───────────────────────────────
 
     let data100 = numeric_array(100);
-    for (name, expr) in [("sum_100", "$sum(values)"), ("max_100", "$max(values)"), ("count_100", "$count(values)")] {
+    for (name, expr) in [
+        ("sum_100", "$sum(values)"),
+        ("max_100", "$max(values)"),
+        ("count_100", "$count(values)"),
+    ] {
         let ast = parser::parse(expr).unwrap();
-        let bc  = _bench::compile(&ast);
+        let bc = _bench::compile(&ast);
 
         let mut group = c.benchmark_group(format!("vm_vs/{name}"));
         group.bench_function("tree_walker", |b| {
-            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&data100)).unwrap()))
+            b.iter(|| {
+                black_box(
+                    Evaluator::new()
+                        .evaluate(black_box(&ast), black_box(&data100))
+                        .unwrap(),
+                )
+            })
         });
         if let Some(bc) = &bc {
             group.bench_function("vm", |b| {
@@ -467,16 +512,22 @@ fn bench_vm_vs_tree_walker(c: &mut Criterion) {
 
     let products = products_simple_100();
     for (name, expr) in [
-        ("map_field_100",    "products.price"),
-        ("map_sum_100",      "$sum(products.price)"),
-        ("filter_pred_100",  "products[price > 100]"),
+        ("map_field_100", "products.price"),
+        ("map_sum_100", "$sum(products.price)"),
+        ("filter_pred_100", "products[price > 100]"),
     ] {
         let ast = parser::parse(expr).unwrap();
-        let bc  = _bench::compile(&ast);
+        let bc = _bench::compile(&ast);
 
         let mut group = c.benchmark_group(format!("vm_vs/{name}"));
         group.bench_function("tree_walker", |b| {
-            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&products)).unwrap()))
+            b.iter(|| {
+                black_box(
+                    Evaluator::new()
+                        .evaluate(black_box(&ast), black_box(&products))
+                        .unwrap(),
+                )
+            })
         });
         if let Some(bc) = &bc {
             group.bench_function("vm", |b| {
@@ -494,11 +545,17 @@ fn bench_vm_vs_tree_walker(c: &mut Criterion) {
     {
         let orders = orders_100();
         let ast = parser::parse("orders[total > 100].customer").unwrap();
-        let bc  = _bench::compile(&ast);
+        let bc = _bench::compile(&ast);
 
         let mut group = c.benchmark_group("vm_vs/filter_nested_100");
         group.bench_function("tree_walker", |b| {
-            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&orders)).unwrap()))
+            b.iter(|| {
+                black_box(
+                    Evaluator::new()
+                        .evaluate(black_box(&ast), black_box(&orders))
+                        .unwrap(),
+                )
+            })
         });
         if let Some(bc) = &bc {
             group.bench_function("vm", |b| {
@@ -521,16 +578,25 @@ fn bench_vm_vs_tree_walker(c: &mut Criterion) {
     let hof_data = JValue::object(hof_root);
 
     for (name, expr) in [
-        ("hof_map",    "$map(numbers, function($v) { $v * 2 })"),
+        ("hof_map", "$map(numbers, function($v) { $v * 2 })"),
         ("hof_filter", "$filter(numbers, function($v) { $v > 50 })"),
-        ("hof_reduce", "$reduce(numbers, function($acc, $v) { $acc + $v }, 0)"),
+        (
+            "hof_reduce",
+            "$reduce(numbers, function($acc, $v) { $acc + $v }, 0)",
+        ),
     ] {
         let ast = parser::parse(expr).unwrap();
         let bc = _bench::compile(&ast);
 
         let mut group = c.benchmark_group(format!("vm_vs/{name}"));
         group.bench_function("tree_walker", |b| {
-            b.iter(|| black_box(Evaluator::new().evaluate(black_box(&ast), black_box(&hof_data)).unwrap()))
+            b.iter(|| {
+                black_box(
+                    Evaluator::new()
+                        .evaluate(black_box(&ast), black_box(&hof_data))
+                        .unwrap(),
+                )
+            })
         });
         if let Some(bc) = &bc {
             group.bench_function("vm", |b| {

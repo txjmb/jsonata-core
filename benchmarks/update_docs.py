@@ -39,6 +39,7 @@ def get_versions():
     # jsonatapy
     try:
         import jsonatapy
+
         versions["jsonatapy"] = jsonatapy.__version__
     except Exception:
         versions["jsonatapy"] = "unknown"
@@ -46,8 +47,7 @@ def get_versions():
     # jsonata-python
     try:
         result = subprocess.run(
-            ["uv", "pip", "show", "jsonata-python"],
-            capture_output=True, text=True, timeout=10
+            ["uv", "pip", "show", "jsonata-python"], capture_output=True, text=True, timeout=10
         )
         for line in result.stdout.splitlines():
             if line.startswith("Version:"):
@@ -79,9 +79,7 @@ def get_versions():
 
     # Node.js version
     try:
-        result = subprocess.run(
-            ["node", "--version"], capture_output=True, text=True, timeout=5
-        )
+        result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
         versions["nodejs"] = result.stdout.strip()
     except Exception:
         versions["nodejs"] = "unknown"
@@ -103,7 +101,7 @@ def format_speedup(speedup):
     if speedup >= 1.0:
         return f"**{speedup:.1f}x faster**"
     else:
-        return f"{1.0/speedup:.1f}x slower"
+        return f"{1.0 / speedup:.1f}x slower"
 
 
 def group_by_category(results):
@@ -260,7 +258,9 @@ def generate_markdown(data, versions):
             md.append("**Slower than JavaScript:**\n")
             for cat in slower_cats:
                 avg = category_avgs[cat]
-                md.append(f"- {cat} ({1.0/avg:.1f}x slower, primarily due to Python/Rust boundary overhead on per-call data conversion)")
+                md.append(
+                    f"- {cat} ({1.0 / avg:.1f}x slower, primarily due to Python/Rust boundary overhead on per-call data conversion)"
+                )
             md.append("")
 
     # Data handle optimization note
@@ -290,7 +290,9 @@ def generate_markdown(data, versions):
     md.append(f"- **Node.js:** {versions.get('nodejs', 'unknown')}")
     md.append("- All times are total wall-clock time for the stated number of iterations")
     md.append("- Each benchmark includes a warmup phase before measurement")
-    md.append("- 'vs JS' column shows jsonatapy speedup relative to the JavaScript reference implementation")
+    md.append(
+        "- 'vs JS' column shows jsonatapy speedup relative to the JavaScript reference implementation"
+    )
     md.append("- Values > 1x mean jsonatapy is faster; < 1x means JavaScript is faster")
 
     return "\n".join(md) + "\n"
