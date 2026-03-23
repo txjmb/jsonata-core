@@ -47,7 +47,7 @@ num-traits = "0.2"
 base64 = "0.22"
 indexmap = "2.2"
 percent-encoding = "2.3"
-rand = "0.9"
+rand = "0.10"
 simd-json = { version = "0.17", optional = true }
 
 [features]
