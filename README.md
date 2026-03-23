@@ -5,7 +5,7 @@ High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Py
 > Much of this project was built with human guidance using Claude Code. There was no performant
 > JSONata implementation in Python, so the goal was to port JSONata to Rust (with a PyO3 wrapper
 > for Python) and see how fast it could go. The answer: faster than V8 for most expression
-> workloads, and ~40x faster than the next pure-Rust implementation.
+> workloads, and faster than the next pure-Rust implementation.
 
 [![Crates.io](https://img.shields.io/crates/v/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
 [![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
