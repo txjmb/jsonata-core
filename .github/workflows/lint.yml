@@ -103,7 +103,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Install Ruff
         run: uv pip install --system ruff
@@ -167,7 +167,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
         run: |
@@ -266,7 +266,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Install codespell
         run: uv pip install --system codespell
