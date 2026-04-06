@@ -45,9 +45,9 @@ regex = "1.12"
 chrono = "0.4"
 num-traits = "0.2"
 base64 = "0.22"
-indexmap = "2.2"
+indexmap = "2.13"
 percent-encoding = "2.3"
-rand = "0.9"
+rand = "0.10"
 simd-json = { version = "0.17", optional = true }
 
 [features]
@@ -58,7 +58,7 @@ bench = []   # exposes _bench facade for Criterion benchmarks
 
 [dev-dependencies]
 criterion = "0.8"
-proptest = "1.10"
+proptest = "1.11"
 
 [[bench]]
 name = "evaluator_bench"
