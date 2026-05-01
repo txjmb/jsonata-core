@@ -315,7 +315,7 @@ jobs:
 
       - name: Comment on PR
         if: failure() && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             github.rest.issues.createComment({
@@ -387,7 +387,7 @@ jobs:
 
     steps:
       - name: Create issue for vulnerabilities
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const title = '🔴 Security vulnerabilities detected';
