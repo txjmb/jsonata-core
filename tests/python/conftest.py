@@ -149,7 +149,9 @@ class ReferenceSuiteReporter:
             for group, stats in sorted(self.by_group.items()):
                 total_group = stats["passed"] + stats["failed"] + stats["skipped"]
                 pct_group = stats["passed"] / total_group * 100 if total_group > 0 else 0
-                status_icon = "✓" if stats["failed"] == 0 else "✗"
+                # ASCII only: Windows' default console codepage (cp1252) can't
+                # encode ✓/✗ and would crash this hook mid-teardown.
+                status_icon = "OK" if stats["failed"] == 0 else "FAIL"
 
                 print(
                     f"{group:<40} {stats['passed']:>6} {stats['failed']:>6} "
