@@ -514,3 +514,38 @@ fn test_with_variables() {
     let result = evaluator.evaluate(&ast, &data).unwrap();
     assert_eq!(result, JValue::from(json!(90.0)));
 }
+
+/// Deep non-tail recursion must hit the soft recursion-depth guard and return
+/// a graceful U1001 error - not overrun the *real* OS stack and crash the
+/// process. Windows' default thread stack (~1MB) is much smaller than
+/// Linux's (~8MB), so this is run on a thread with an explicitly small stack
+/// to make the platform-independent of the test host: reference test suite
+/// case `tail-recursion/case005` crashed the whole process on windows-latest
+/// CI runners before the fix (see GitHub issue #34).
+#[test]
+fn test_deep_recursion_does_not_overflow_native_stack() {
+    // JValue/EvaluatorError are Rc-based (deliberately !Send for speed), so the
+    // evaluation has to stay inside the spawned closure - only a plain String
+    // summary crosses the join boundary.
+    let handle = std::thread::Builder::new()
+        .stack_size(1024 * 1024) // 1MB, matching Windows' default thread stack
+        .spawn(|| {
+            let data = JValue::Null;
+            let ast = parse("($inf := function($n){$n+$inf($n-1)}; $inf(5))").unwrap();
+            let mut evaluator = Evaluator::new();
+            match evaluator.evaluate(&ast, &data) {
+                Ok(v) => format!("Ok({v:?})"),
+                Err(e) => format!("Err({e})"),
+            }
+        })
+        .unwrap();
+
+    let outcome = handle
+        .join()
+        .expect("evaluation overflowed the native stack instead of returning a graceful error");
+
+    assert!(
+        outcome.contains("U1001"),
+        "expected a U1001 stack-overflow error, got: {outcome}"
+    );
+}
