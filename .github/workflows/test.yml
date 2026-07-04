@@ -87,6 +87,7 @@ jobs:
           uv run maturin develop --release
 
       - name: Run Python integration tests
+        shell: bash
         run: |
           uv run pytest tests/python/ \
             -v \
@@ -95,6 +96,7 @@ jobs:
             -n auto
 
       - name: Run reference test suite
+        shell: bash
         run: |
           uv run pytest tests/python/test_reference_suite.py \
             -v \

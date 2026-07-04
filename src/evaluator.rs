@@ -5556,11 +5556,9 @@ impl Evaluator {
                                     }
                                     // Field exists with value null - continue to throw T0410
                                 }
-                                JValue::Null => {
-                                    // Trying to access field on null data - return undefined
-                                    if propagates_undefined(name) {
-                                        return Ok(JValue::Null);
-                                    }
+                                // Trying to access field on null data - return undefined
+                                JValue::Null if propagates_undefined(name) => {
+                                    return Ok(JValue::Null);
                                 }
                                 _ => {}
                             }
