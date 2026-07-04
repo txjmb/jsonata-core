@@ -42,6 +42,14 @@ jobs:
           echo "RUNNER_TOOL_CACHE=${{ runner.temp }}/tool_cache" >> "$GITHUB_ENV"
           echo "AGENT_TOOLSDIRECTORY=${{ runner.temp }}/tool_cache" >> "$GITHUB_ENV"
 
+      - name: Debug what Node.js itself sees (temporary)
+        run: |
+          echo "--- from bash ---"
+          echo "RUNNER_TOOL_CACHE=[$RUNNER_TOOL_CACHE]"
+          echo "HOME=[$HOME]"
+          echo "--- from node (same process family setup-python will use) ---"
+          node -e "console.log('RUNNER_TOOL_CACHE=[' + process.env.RUNNER_TOOL_CACHE + ']'); console.log('AGENT_TOOLSDIRECTORY=[' + process.env.AGENT_TOOLSDIRECTORY + ']'); console.log('HOME=[' + process.env.HOME + ']'); console.log('os.homedir=[' + require('os').homedir() + ']');"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
