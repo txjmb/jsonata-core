@@ -590,3 +590,26 @@ fn test_object_construction_keeps_explicit_null() {
 
     assert_eq!(result, JValue::from(json!({"k": null})));
 }
+
+/// Lambda ids were derived from the AST node's pointer address, which is
+/// constant for a given lambda expression but gets evaluated fresh on every
+/// invocation of a recursive lambda (Y-combinator style). Two invocations of
+/// the *same* lambda expression - each creating its own closure with its own
+/// captured environment - collided on the same id and aliased each other,
+/// intermittently producing wrong results or spurious recursion-depth errors
+/// (see GitHub issue #35). Repeats many times since the bug was probabilistic.
+#[test]
+fn test_recursive_lambda_ids_do_not_collide() {
+    let expr = "λ($f) { λ($x) { $x($x) }( λ($g) { $f( (λ($a) {$g($g)($a)}))})}\
+                (λ($f) { λ($n) { $n < 2 ? 1 : $n * $f($n - 1) } })(6)";
+    let ast = parse(expr).unwrap();
+    let data = JValue::Null;
+
+    for i in 0..3000 {
+        let mut evaluator = Evaluator::new();
+        let result = evaluator
+            .evaluate(&ast, &data)
+            .unwrap_or_else(|e| panic!("iteration {i} failed: {e}"));
+        assert_eq!(result, JValue::from(json!(720.0)), "iteration {i}");
+    }
+}

@@ -2425,6 +2425,12 @@ pub struct Evaluator {
     context: Context,
     recursion_depth: usize,
     max_recursion_depth: usize,
+    /// Monotonic counter for generating unique lambda IDs. Each evaluation of a
+    /// Lambda AST node creates a new closure *instance* and must get a fresh ID -
+    /// using the AST node's pointer address (as before) collided whenever the same
+    /// lambda expression was evaluated more than once (e.g. each level of Y-combinator
+    /// or other repeated recursion), aliasing unrelated closures that shared an id.
+    next_lambda_id: u64,
 }
 
 impl Evaluator {
@@ -2435,6 +2441,7 @@ impl Evaluator {
             // Limit recursion depth to prevent stack overflow
             // True TCO would allow deeper recursion but requires parser-level thunk marking
             max_recursion_depth: 302,
+            next_lambda_id: 0,
         }
     }
 
@@ -2443,7 +2450,15 @@ impl Evaluator {
             context,
             recursion_depth: 0,
             max_recursion_depth: 302,
+            next_lambda_id: 0,
         }
+    }
+
+    /// Allocate a fresh, process-unique-per-Evaluator id for a new lambda instance.
+    fn fresh_lambda_id(&mut self) -> u64 {
+        let id = self.next_lambda_id;
+        self.next_lambda_id += 1;
+        id
     }
 
     /// Invoke a stored lambda with its captured environment and data.
@@ -3203,7 +3218,7 @@ impl Evaluator {
                 signature,
                 thunk,
             } => {
-                let lambda_id = format!("__lambda_{}_{:p}", params.len(), body.as_ref());
+                let lambda_id = format!("__lambda_{}_{}", params.len(), self.fresh_lambda_id());
 
                 let compiled_body = if !thunk {
                     let var_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
@@ -3346,7 +3361,7 @@ impl Evaluator {
                     };
 
                     // Store with a generated unique name
-                    let lambda_name = format!("__transform_{:p}", location);
+                    let lambda_name = format!("__transform_{}", self.fresh_lambda_id());
                     self.context.bind_lambda(lambda_name, transform_lambda);
 
                     // Return lambda marker
