@@ -1,0 +1,152 @@
+name: Backfill macOS Release Wheel
+
+# One-off/repeatable workflow to build a macOS wheel for an *already-published*
+# release (on the self-hosted Mac Mini runner) and add it to that release on
+# PyPI and GitHub, without re-running the full release.yml pipeline (which
+# would fail: crates.io rejects re-publishing an existing version, and PyPI's
+# publish step has skip-existing: false).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Already-released version to add a macOS wheel for (e.g. 2.1.5)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-wheel:
+    name: Build macOS wheel (aarch64, self-hosted)
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/v${{ inputs.version }}
+          submodules: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: aarch64-apple-darwin
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13
+
+      - name: List built wheels
+        run: ls -lh dist/
+
+      - name: Upload wheels artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-macOS-aarch64-apple-darwin
+          path: dist
+          retention-days: 7
+
+  test-macos-wheel:
+    name: Test macOS wheel with Python ${{ matrix.python }}
+    runs-on: [self-hosted, macOS, ARM64]
+    needs: build-macos-wheel
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v7
+
+      - name: Download wheel
+        uses: actions/download-artifact@v8
+        with:
+          name: wheels-macOS-aarch64-apple-darwin
+          path: dist
+
+      - name: Install wheel
+        run: |
+          uv pip install --system --find-links dist jsonatapy
+          python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
+
+      - name: Install test dependencies
+        run: uv pip install --system pytest pytest-xdist
+
+      - name: Run tests
+        run: |
+          pytest tests/python/ \
+            --ignore=tests/python/test_reference_suite.py \
+            -v \
+            --tb=short \
+            -n auto
+
+      - name: Run reference suite (smoke test)
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          pytest tests/python/test_reference_suite.py \
+            -v \
+            --tb=short \
+            --maxfail=10 \
+            -k "array-constructor"
+
+  publish-macos-wheel:
+    name: Publish macOS wheel to PyPI and attach to release
+    runs-on: ubuntu-latest
+    needs: test-macos-wheel
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/project/jsonatapy/
+
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - name: Download wheel
+        uses: actions/download-artifact@v8
+        with:
+          name: wheels-macOS-aarch64-apple-darwin
+          path: dist
+
+      - name: List distribution files
+        run: ls -lh dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+          verbose: true
+
+      - name: Attach wheel to existing GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ inputs.version }}
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
