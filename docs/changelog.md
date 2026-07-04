@@ -6,7 +6,7 @@ For the complete changelog with detailed version history, see [CHANGELOG.md](../
 
 ## Latest Changes
 
-See the [full CHANGELOG.md](https://github.com/txjmb/jsonata-core/blob/master/CHANGELOG.md) for the complete version history.
+See the [full CHANGELOG.md](https://github.com/txjmb/jsonata-core/blob/main/CHANGELOG.md) for the complete version history.
 
 ## Version History
 

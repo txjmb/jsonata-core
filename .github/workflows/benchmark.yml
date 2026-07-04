@@ -2,7 +2,7 @@ name: Performance Benchmarks
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [main]
     paths:
       - 'src/**'
       - 'Cargo.toml'
@@ -10,7 +10,7 @@ on:
       - 'benchmarks/**'
       - '.github/workflows/benchmark.yml'
   push:
-    branches: [main, master]
+    branches: [main]
     paths:
       - 'src/**'
       - 'Cargo.toml'
@@ -73,7 +73,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Install Python dependencies
         run: |
@@ -127,9 +127,11 @@ jobs:
           # Try to download from gh-pages branch
           git fetch origin gh-pages:gh-pages 2>/dev/null || true
 
-          if git show gh-pages:benchmark-results/latest.json > benchmarks/baseline/baseline.json 2>/dev/null; then
+          if git show gh-pages:benchmark-results/latest.json > benchmarks/baseline/baseline.json.tmp 2>/dev/null; then
+            mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
             echo "Baseline results downloaded from gh-pages"
           else
+            rm -f benchmarks/baseline/baseline.json.tmp
             echo "No baseline results found"
           fi
 
@@ -221,7 +223,7 @@ jobs:
 
       - name: Comment on PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -383,7 +385,7 @@ jobs:
           path: gh-pages
 
       - name: Download benchmark results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: benchmark-results
           path: results

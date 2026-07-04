@@ -69,12 +69,12 @@ Value: <your-codecov-token>
 ## Step 3: Branch Protection Rules
 
 1. Go to **Settings** → **Branches**
-2. Click **Add rule** or edit existing rule for `main`/`master`
+2. Click **Add rule** or edit existing rule for `main`
 
 ### Recommended Settings
 
 ```
-Branch name pattern: main  (or master)
+Branch name pattern: main
 ```
 
 **Protect matching branches:**

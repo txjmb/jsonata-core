@@ -2,9 +2,9 @@ name: Code Quality
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -103,7 +103,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Install Ruff
         run: uv pip install --system ruff
@@ -167,7 +167,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
         run: |
@@ -212,23 +212,26 @@ jobs:
 
       - name: Check commit messages
         run: |
-          # Get commits in PR
+          # Get commits in PR (excluding merge commits - the checked-out merge-ref
+          # itself shows up as "Merge X into Y", which never matches conventional format)
           git fetch origin ${{ github.base_ref }}
-          COMMITS=$(git log --pretty=format:"%s" origin/${{ github.base_ref }}..HEAD)
+          COMMITS=$(git log --no-merges --pretty=format:"%s" origin/${{ github.base_ref }}..HEAD)
 
           echo "Checking commit messages for conventional commit format..."
           echo ""
 
           FAIL=0
-          while IFS= read -r commit; do
-            # Check if commit follows conventional commit format
-            if echo "$commit" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?: .+"; then
-              echo "✅ $commit"
-            else
-              echo "❌ $commit"
-              FAIL=1
-            fi
-          done <<< "$COMMITS"
+          if [ -n "$COMMITS" ]; then
+            while IFS= read -r commit; do
+              # Check if commit follows conventional commit format
+              if echo "$commit" | grep -qE "^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?: .+"; then
+                echo "✅ $commit"
+              else
+                echo "❌ $commit"
+                FAIL=1
+              fi
+            done <<< "$COMMITS"
+          fi
 
           if [ $FAIL -eq 1 ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -266,7 +269,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install UV
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Install codespell
         run: uv pip install --system codespell
@@ -397,7 +400,7 @@ jobs:
 
       - name: Comment coverage on PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
