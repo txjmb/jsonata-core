@@ -388,7 +388,10 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: benchmark-results
-          path: results
+          # The artifact already contains a results/ prefix (from the
+          # benchmarks/results/*.json upload glob) - download to the workspace
+          # root so paths land at results/*.json, not results/results/*.json.
+          path: .
 
       - name: Update results
         run: |
