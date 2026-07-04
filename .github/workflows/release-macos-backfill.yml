@@ -30,26 +30,6 @@ jobs:
           ref: refs/tags/v${{ inputs.version }}
           submodules: true
 
-      - name: Configure tool cache
-        # actions/setup-python's bundled installer script needs one of these
-        # set to a writable path - the runner's ambient environment (even via
-        # a correctly-configured .env) isn't reliably visible to `uses:` (JS)
-        # steps the same way it is to `run:` (shell) steps, so set it
-        # explicitly here instead. runner.temp is guaranteed to exist and be
-        # writable. (runner.temp is only valid at step level, not job-level env:.)
-        run: |
-          mkdir -p "${{ runner.temp }}/tool_cache"
-          echo "RUNNER_TOOL_CACHE=${{ runner.temp }}/tool_cache" >> "$GITHUB_ENV"
-          echo "AGENT_TOOLSDIRECTORY=${{ runner.temp }}/tool_cache" >> "$GITHUB_ENV"
-
-      - name: Debug what Node.js itself sees (temporary)
-        run: |
-          echo "--- from bash ---"
-          echo "RUNNER_TOOL_CACHE=[$RUNNER_TOOL_CACHE]"
-          echo "HOME=[$HOME]"
-          echo "--- from node (same process family setup-python will use) ---"
-          node -e "console.log('RUNNER_TOOL_CACHE=[' + process.env.RUNNER_TOOL_CACHE + ']'); console.log('AGENT_TOOLSDIRECTORY=[' + process.env.AGENT_TOOLSDIRECTORY + ']'); console.log('HOME=[' + process.env.HOME + ']'); console.log('os.homedir=[' + require('os').homedir() + ']');"
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -92,12 +72,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: true
-
-      - name: Configure tool cache
-        run: |
-          mkdir -p "${{ runner.temp }}/tool_cache"
-          echo "RUNNER_TOOL_CACHE=${{ runner.temp }}/tool_cache" >> "$GITHUB_ENV"
-          echo "AGENT_TOOLSDIRECTORY=${{ runner.temp }}/tool_cache" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v6
