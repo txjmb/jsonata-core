@@ -123,19 +123,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: test-macos-wheel
     timeout-minutes: 15
-    # Needed for secret access: PYPI_API_TOKEN is an environment-scoped
-    # secret tied to "pypi", not a plain repo secret.
+    # This project publishes via PyPI Trusted Publishing (OIDC) exclusively -
+    # there is no stored PYPI_API_TOKEN secret. Trusted Publishing is
+    # registered per-workflow-filename on pypi.org, so this workflow needs
+    # its own entry there (owner=txjmb, repo=jsonata-core,
+    # workflow=release-macos-backfill.yml, environment=pypi) in addition to
+    # release.yml's existing one.
     environment:
       name: pypi
       url: https://pypi.org/project/jsonatapy/
 
-    # Deliberately no id-token: write: PyPI's trusted-publisher (OIDC)
-    # registration is scoped to release.yml by workflow filename, so OIDC
-    # from this workflow is rejected outright (invalid-publisher). Omitting
-    # id-token: write makes pypa/gh-action-pypi-publish fall back to the API
-    # token instead (combined with attestations: false below, which also
-    # requires OIDC unconditionally otherwise).
     permissions:
+      id-token: write
       contents: write
 
     steps:
@@ -151,13 +150,7 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
-          # PEP 740 attestations always require OIDC/Trusted Publishing
-          # regardless of the primary auth method, and this workflow can't
-          # use OIDC (see the id-token: write comment above) - disable so
-          # the plain token-based publish doesn't also need an OIDC token.
-          attestations: false
           verbose: true
 
       - name: Attach wheel to existing GitHub Release
