@@ -22,6 +22,14 @@ jobs:
     name: Build macOS wheel (aarch64, self-hosted)
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 60
+    env:
+      # actions/setup-python's bundled installer script needs one of these set
+      # to a writable path - the runner's ambient environment (even via a
+      # correctly-configured .env) isn't reliably visible to `uses:` (JS)
+      # steps the same way it is to `run:` (shell) steps, so set it explicitly
+      # here instead. runner.temp is guaranteed to exist and be writable.
+      RUNNER_TOOL_CACHE: ${{ runner.temp }}/tool_cache
+      AGENT_TOOLSDIRECTORY: ${{ runner.temp }}/tool_cache
 
     steps:
       - name: Checkout
@@ -29,32 +37,6 @@ jobs:
         with:
           ref: refs/tags/v${{ inputs.version }}
           submodules: true
-
-      - name: Debug runner environment (temporary, no secret values printed)
-        run: |
-          echo "RUNNER_TOOL_CACHE=[$RUNNER_TOOL_CACHE]"
-          if [ -z ${AGENT_TOOLSDIRECTORY+x} ]; then
-            echo "AGENT_TOOLSDIRECTORY is UNSET"
-          else
-            echo "AGENT_TOOLSDIRECTORY=[$AGENT_TOOLSDIRECTORY] (set, even if shown empty)"
-          fi
-          echo "HOME=[$HOME]"
-          echo "whoami: $(whoami)"
-          echo "RUNNER_WORKSPACE=[$RUNNER_WORKSPACE]"
-          echo "--- what the bundled python installer script would compute ---"
-          if [ -z ${AGENT_TOOLSDIRECTORY+x} ]; then
-            echo "would use RUNNER_TOOL_CACHE branch -> TOOLCACHE_ROOT=[$RUNNER_TOOL_CACHE]"
-          else
-            echo "would use AGENT_TOOLSDIRECTORY branch -> TOOLCACHE_ROOT=[$AGENT_TOOLSDIRECTORY]"
-          fi
-          echo "--- looking for .env files near common runner install paths (names only, plus whether they define RUNNER_TOOL_CACHE - no values) ---"
-          for d in "$HOME" "$HOME"/actions-runner "$HOME"/source/jsonatapy/actions-runner ~/*/actions-runner ~/*/*/actions-runner; do
-            if [ -f "$d/.env" ]; then
-              echo "found: $d/.env"
-              grep -c '^RUNNER_TOOL_CACHE=' "$d/.env" 2>/dev/null && echo "  (defines RUNNER_TOOL_CACHE)" || echo "  (does NOT define RUNNER_TOOL_CACHE)"
-              grep -c '^AGENT_TOOLSDIRECTORY=' "$d/.env" 2>/dev/null && echo "  (defines AGENT_TOOLSDIRECTORY)" || echo "  (does NOT define AGENT_TOOLSDIRECTORY)"
-            fi
-          done
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -87,6 +69,9 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     needs: build-macos-wheel
     timeout-minutes: 30
+    env:
+      RUNNER_TOOL_CACHE: ${{ runner.temp }}/tool_cache
+      AGENT_TOOLSDIRECTORY: ${{ runner.temp }}/tool_cache
 
     strategy:
       fail-fast: false
