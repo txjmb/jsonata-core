@@ -8,7 +8,7 @@ use_directory_urls: true
 
 repo_name: jsonata-core
 repo_url: https://github.com/txjmb/jsonata-core
-edit_uri: edit/master/docs/
+edit_uri: edit/main/docs/
 
 copyright: Copyright &copy; 2024-2026 jsonatapy contributors
 
