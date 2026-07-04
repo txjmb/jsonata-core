@@ -2763,7 +2763,18 @@ impl Evaluator {
             )));
         }
 
-        let result = self.evaluate_internal_impl(node, data);
+        // The soft depth counter above is calibrated against a comfortably
+        // large native stack. Hosts with a much smaller default thread stack
+        // (notably Windows, ~1MB vs Linux's ~8MB) can exhaust the *real*
+        // stack well before this counter trips, crashing the process instead
+        // of returning U1001 (see GitHub issue #34). stacker::maybe_grow
+        // transparently swaps in a bigger stack segment when headroom is
+        // low, so this stays a no-op cost on the common shallow path.
+        const RED_ZONE: usize = 128 * 1024;
+        const GROW_STACK_SIZE: usize = 8 * 1024 * 1024;
+        let result = stacker::maybe_grow(RED_ZONE, GROW_STACK_SIZE, || {
+            self.evaluate_internal_impl(node, data)
+        });
 
         self.recursion_depth -= 1;
         result
