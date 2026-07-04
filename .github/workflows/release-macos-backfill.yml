@@ -147,6 +147,11 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
+          # PEP 740 attestations always require OIDC/Trusted Publishing
+          # regardless of the primary auth method, and this workflow can't
+          # use OIDC (see the id-token: write comment above) - disable so
+          # the plain token-based publish doesn't also need an OIDC token.
+          attestations: false
           verbose: true
 
       - name: Attach wheel to existing GitHub Release
