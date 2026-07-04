@@ -33,14 +33,26 @@ jobs:
       - name: Debug runner environment (temporary, no secret values printed)
         run: |
           echo "RUNNER_TOOL_CACHE=[$RUNNER_TOOL_CACHE]"
+          if [ -z ${AGENT_TOOLSDIRECTORY+x} ]; then
+            echo "AGENT_TOOLSDIRECTORY is UNSET"
+          else
+            echo "AGENT_TOOLSDIRECTORY=[$AGENT_TOOLSDIRECTORY] (set, even if shown empty)"
+          fi
           echo "HOME=[$HOME]"
           echo "whoami: $(whoami)"
           echo "RUNNER_WORKSPACE=[$RUNNER_WORKSPACE]"
+          echo "--- what the bundled python installer script would compute ---"
+          if [ -z ${AGENT_TOOLSDIRECTORY+x} ]; then
+            echo "would use RUNNER_TOOL_CACHE branch -> TOOLCACHE_ROOT=[$RUNNER_TOOL_CACHE]"
+          else
+            echo "would use AGENT_TOOLSDIRECTORY branch -> TOOLCACHE_ROOT=[$AGENT_TOOLSDIRECTORY]"
+          fi
           echo "--- looking for .env files near common runner install paths (names only, plus whether they define RUNNER_TOOL_CACHE - no values) ---"
           for d in "$HOME" "$HOME"/actions-runner "$HOME"/source/jsonatapy/actions-runner ~/*/actions-runner ~/*/*/actions-runner; do
             if [ -f "$d/.env" ]; then
               echo "found: $d/.env"
               grep -c '^RUNNER_TOOL_CACHE=' "$d/.env" 2>/dev/null && echo "  (defines RUNNER_TOOL_CACHE)" || echo "  (does NOT define RUNNER_TOOL_CACHE)"
+              grep -c '^AGENT_TOOLSDIRECTORY=' "$d/.env" 2>/dev/null && echo "  (defines AGENT_TOOLSDIRECTORY)" || echo "  (does NOT define AGENT_TOOLSDIRECTORY)"
             fi
           done
 
