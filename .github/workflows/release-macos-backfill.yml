@@ -5,6 +5,11 @@ name: Backfill macOS Release Wheel
 # PyPI and GitHub, without re-running the full release.yml pipeline (which
 # would fail: crates.io rejects re-publishing an existing version, and PyPI's
 # publish step has skip-existing: false).
+#
+# Uses uv (not actions/setup-python) to manage Python interpreters: uv installs
+# standalone Python builds into a user-writable, per-user directory with no
+# sudo and no dependency on the runner's GitHub-hosted-oriented tool cache
+# conventions - both of which broke on this self-hosted macOS runner.
 
 on:
   workflow_dispatch:
@@ -30,10 +35,11 @@ jobs:
           ref: refs/tags/v${{ inputs.version }}
           submodules: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python versions
+        run: uv python install 3.10 3.11 3.12 3.13
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -41,10 +47,13 @@ jobs:
           targets: aarch64-apple-darwin
 
       - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: aarch64-apple-darwin
-          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13
+        run: |
+          uvx maturin build --release --out dist \
+            --interpreter \
+            "$(uv python find 3.10)" \
+            "$(uv python find 3.11)" \
+            "$(uv python find 3.12)" \
+            "$(uv python find 3.13)"
 
       - name: List built wheels
         run: ls -lh dist/
@@ -73,13 +82,11 @@ jobs:
         with:
           submodules: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python }}
-
-      - name: Install UV
+      - name: Install uv
         uses: astral-sh/setup-uv@v7
+
+      - name: Install Python ${{ matrix.python }}
+        run: uv python install ${{ matrix.python }}
 
       - name: Download wheel
         uses: actions/download-artifact@v8
@@ -87,17 +94,15 @@ jobs:
           name: wheels-macOS-aarch64-apple-darwin
           path: dist
 
-      - name: Install wheel
+      - name: Create venv and install wheel
         run: |
-          uv pip install --system --find-links dist jsonatapy
-          python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
-
-      - name: Install test dependencies
-        run: uv pip install --system pytest pytest-xdist
+          uv venv --python ${{ matrix.python }} .venv
+          uv pip install --python .venv/bin/python --find-links dist jsonatapy pytest pytest-xdist
+          .venv/bin/python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Run tests
         run: |
-          pytest tests/python/ \
+          .venv/bin/python -m pytest tests/python/ \
             --ignore=tests/python/test_reference_suite.py \
             -v \
             --tb=short \
@@ -107,7 +112,7 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          pytest tests/python/test_reference_suite.py \
+          .venv/bin/python -m pytest tests/python/test_reference_suite.py \
             -v \
             --tb=short \
             --maxfail=10 \
