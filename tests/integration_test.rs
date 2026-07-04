@@ -243,7 +243,7 @@ fn test_complex_real_world_example() {
 }
 
 #[test]
-fn test_missing_field_returns_null() {
+fn test_missing_field_returns_undefined() {
     let data: JValue = json!({
         "name": "Alice"
     })
@@ -253,7 +253,7 @@ fn test_missing_field_returns_null() {
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
-    assert_eq!(result, JValue::Null);
+    assert_eq!(result, JValue::Undefined);
 }
 
 #[test]
@@ -548,4 +548,45 @@ fn test_deep_recursion_does_not_overflow_native_stack() {
         outcome.contains("U1001"),
         "expected a U1001 stack-overflow error, got: {outcome}"
     );
+}
+
+/// Object construction must drop keys whose value is an undefined (no-match)
+/// path, matching reference JSONata and this crate's own VM backend - not
+/// keep them as an explicit `null` (see GitHub issue #32).
+#[test]
+fn test_object_construction_drops_undefined_valued_keys() {
+    let data: JValue = json!({"a": 1}).into();
+
+    let ast = parse(r#"{ "keep": a, "drop": b }"#).unwrap();
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.evaluate(&ast, &data).unwrap();
+
+    assert_eq!(result, JValue::from(json!({"keep": 1})));
+}
+
+/// Same as above, but through a multi-step dotted path (a.b.c) rather than a
+/// bare name - a separate code path within the tree-walker that had the same
+/// bug (see GitHub issue #32).
+#[test]
+fn test_object_construction_drops_undefined_valued_dotted_path() {
+    let data: JValue = json!({"a": {}}).into();
+
+    let ast = parse(r#"{ "k": a.b.c }"#).unwrap();
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.evaluate(&ast, &data).unwrap();
+
+    assert_eq!(result, JValue::from(json!({})));
+}
+
+/// An *explicit* null value must still be kept - only undefined (missing
+/// path) values are dropped.
+#[test]
+fn test_object_construction_keeps_explicit_null() {
+    let data = JValue::Null;
+
+    let ast = parse(r#"{ "k": $exists(x) ? x : null }"#).unwrap();
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.evaluate(&ast, &data).unwrap();
+
+    assert_eq!(result, JValue::from(json!({"k": null})));
 }

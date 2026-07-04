@@ -97,7 +97,7 @@ pub mod string {
     pub fn string(value: &JValue, prettify: Option<bool>) -> Result<JValue, FunctionError> {
         // Check if this is undefined or a function first
         if value.is_undefined() {
-            return Ok(JValue::string(""));
+            return Ok(JValue::Undefined);
         }
         if value.is_function() {
             return Ok(JValue::string(""));

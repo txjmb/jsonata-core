@@ -2723,9 +2723,10 @@ impl Evaluator {
             AstNode::Undefined => Some(Ok(JValue::Undefined)),
             AstNode::Name(field_name) => match data {
                 // Array mapping and other cases need full evaluator
-                JValue::Object(obj) => {
-                    Some(Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null)))
-                }
+                JValue::Object(obj) => Some(Ok(obj
+                    .get(field_name)
+                    .cloned()
+                    .unwrap_or(JValue::Undefined))),
                 _ => None,
             },
             AstNode::Variable(name) if !name.is_empty() => {
@@ -2792,7 +2793,9 @@ impl Evaluator {
             // Name nodes represent field access on the current data
             AstNode::Name(field_name) => {
                 match data {
-                    JValue::Object(obj) => Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null)),
+                    JValue::Object(obj) => {
+                        Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
+                    }
                     JValue::Array(arr) => {
                         // Map over array
                         let mut result = Vec::new();
@@ -2804,14 +2807,14 @@ impl Evaluator {
                             }
                         }
                         if result.is_empty() {
-                            Ok(JValue::Null)
+                            Ok(JValue::Undefined)
                         } else if result.len() == 1 {
                             Ok(result.into_iter().next().unwrap())
                         } else {
                             Ok(JValue::array(result))
                         }
                     }
-                    _ => Ok(JValue::Null),
+                    _ => Ok(JValue::Undefined),
                 }
             }
 
@@ -3438,7 +3441,7 @@ impl Evaluator {
                         match item {
                             JValue::Array(_) => {
                                 let indexed = self.array_index(item, &JValue::Number(*n))?;
-                                if !indexed.is_null() {
+                                if !indexed.is_null() && !indexed.is_undefined() {
                                     result.push(indexed);
                                 }
                             }
@@ -3504,7 +3507,7 @@ impl Evaluator {
                             match item {
                                 JValue::Array(_) => {
                                     let indexed = self.array_index(item, &pred_result)?;
-                                    if !indexed.is_null() {
+                                    if !indexed.is_null() && !indexed.is_undefined() {
                                         result.push(indexed);
                                     }
                                 }
@@ -3643,12 +3646,12 @@ impl Evaluator {
                         // Check if this is a tuple - extract '@' value
                         if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
                             if let Some(JValue::Object(inner)) = obj.get("@") {
-                                Ok(inner.get(field_name).cloned().unwrap_or(JValue::Null))
+                                Ok(inner.get(field_name).cloned().unwrap_or(JValue::Undefined))
                             } else {
-                                Ok(JValue::Null)
+                                Ok(JValue::Undefined)
                             }
                         } else {
-                            Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null))
+                            Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
                         }
                     }
                     JValue::Array(arr) => {
@@ -3886,7 +3889,7 @@ impl Evaluator {
 
                 match data {
                     JValue::Object(obj) => {
-                        let val = obj.get(field_name).cloned().unwrap_or(JValue::Null);
+                        let val = obj.get(field_name).cloned().unwrap_or(JValue::Undefined);
                         // Apply any stages to the extracted value
                         if !stages.is_empty() {
                             self.apply_stages(val, stages)?
@@ -3900,8 +3903,9 @@ impl Evaluator {
                         for item in arr.iter() {
                             match item {
                                 JValue::Object(obj) => {
-                                    let val = obj.get(field_name).cloned().unwrap_or(JValue::Null);
-                                    if !val.is_null() {
+                                    let val =
+                                        obj.get(field_name).cloned().unwrap_or(JValue::Undefined);
+                                    if !val.is_null() && !val.is_undefined() {
                                         if !stages.is_empty() {
                                             // Apply stages to the extracted value
                                             let processed_val = self.apply_stages(val, stages)?;
@@ -3986,8 +3990,11 @@ impl Evaluator {
         for step in steps[1..].iter() {
             // Early return if current is null/undefined - no point continuing
             // This handles cases like `blah.{}` where blah doesn't exist
-            if current.is_null() || current.is_undefined() {
+            if current.is_null() {
                 return Ok(JValue::Null);
+            }
+            if current.is_undefined() {
+                return Ok(JValue::Undefined);
             }
 
             // Check if current is a tuple array - if so, we need to bind tuple variables
@@ -4169,7 +4176,7 @@ impl Evaluator {
                             // a single value, not mapping over an array. The field's value
                             // (even if it's an array) should be preserved as-is.
                             did_array_mapping = false;
-                            let val = obj.get(field_name).cloned().unwrap_or(JValue::Null);
+                            let val = obj.get(field_name).cloned().unwrap_or(JValue::Undefined);
                             // Apply stages if present
                             if !stages.is_empty() {
                                 self.apply_stages(val, stages)?
@@ -4663,7 +4670,7 @@ impl Evaluator {
             let step_value = self.evaluate_internal(step, original_data)?;
             Ok(match (current, &step_value) {
                 (JValue::Object(obj), JValue::String(key)) => {
-                    obj.get(&**key).cloned().unwrap_or(JValue::Null)
+                    obj.get(&**key).cloned().unwrap_or(JValue::Undefined)
                 }
                 (JValue::Array(arr), JValue::Number(n)) => {
                     let index = *n as i64;
@@ -4673,12 +4680,12 @@ impl Evaluator {
                     let actual_idx = if index < 0 { len + index } else { index };
 
                     if actual_idx < 0 || actual_idx >= len {
-                        JValue::Null
+                        JValue::Undefined
                     } else {
                         arr[actual_idx as usize].clone()
                     }
                 }
-                _ => JValue::Null,
+                _ => JValue::Undefined,
             })
         }
     }
@@ -4705,8 +4712,8 @@ impl Evaluator {
                     if matches!(lhs, AstNode::Null) {
                         Ok(value)
                     }
-                    // For paths and variables, null means undefined - use RHS
-                    else if value.is_null()
+                    // For paths and variables, undefined (no match/unbound) - use RHS
+                    else if value.is_undefined()
                         && (matches!(lhs, AstNode::Path { .. })
                             || matches!(lhs, AstNode::String(_))
                             || matches!(lhs, AstNode::Variable(_)))
@@ -5279,7 +5286,7 @@ impl Evaluator {
         match op {
             UnaryOp::Negate => match value {
                 // undefined returns undefined
-                JValue::Null => Ok(JValue::Null),
+                JValue::Null | JValue::Undefined => Ok(JValue::Null),
                 JValue::Number(n) => Ok(JValue::Number(-n)),
                 _ => Err(EvaluatorError::TypeError(
                     "D1002: Cannot negate non-number value".to_string(),
@@ -5710,6 +5717,9 @@ impl Evaluator {
                         "uppercase() requires exactly 1 argument".to_string(),
                     ));
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::string::uppercase(s)?),
                     _ => Err(EvaluatorError::TypeError(
@@ -5723,6 +5733,9 @@ impl Evaluator {
                     return Err(EvaluatorError::EvaluationError(
                         "lowercase() requires exactly 1 argument".to_string(),
                     ));
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::string::lowercase(s)?),
@@ -5743,6 +5756,9 @@ impl Evaluator {
                         "T0410: Argument 2 of function number does not match function signature"
                             .to_string(),
                     ));
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 Ok(functions::numeric::number(&evaluated_args[0])?)
             }
@@ -5789,6 +5805,9 @@ impl Evaluator {
                         "substring() requires 2 or 3 arguments".to_string(),
                     ));
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match (&evaluated_args[0], &evaluated_args[1]) {
                     (JValue::String(s), JValue::Number(start)) => {
                         let length = if evaluated_args.len() == 3 {
@@ -5819,6 +5838,9 @@ impl Evaluator {
                         "T0411: Context value is not a compatible type with argument 2 of function substringBefore".to_string(),
                     ));
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match (&evaluated_args[0], &evaluated_args[1]) {
                     (JValue::String(s), JValue::String(sep)) => Ok(functions::string::substring_before(s, sep)?),
                     (JValue::String(_), _) => Err(EvaluatorError::TypeError(
@@ -5834,6 +5856,9 @@ impl Evaluator {
                     return Err(EvaluatorError::TypeError(
                         "T0411: Context value is not a compatible type with argument 2 of function substringAfter".to_string(),
                     ));
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
                     (JValue::String(s), JValue::String(sep)) => Ok(functions::string::substring_after(s, sep)?),
@@ -5933,6 +5958,9 @@ impl Evaluator {
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::string::contains(s, &evaluated_args[1])?),
                     _ => Err(EvaluatorError::TypeError(
@@ -5948,6 +5976,9 @@ impl Evaluator {
                 }
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::String(s) => {
@@ -5991,6 +6022,9 @@ impl Evaluator {
                 }
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
 
                 // Signature: <a<s>s?:s> - array of strings, optional separator, returns string
@@ -6081,6 +6115,9 @@ impl Evaluator {
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
 
                 // Check if replacement (3rd arg) is a function/lambda
                 let replacement_is_lambda = matches!(
@@ -6149,6 +6186,9 @@ impl Evaluator {
                 }
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
 
                 let s = match &evaluated_args[0] {
@@ -6421,6 +6461,9 @@ impl Evaluator {
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match (&evaluated_args[0], &evaluated_args[1]) {
                     (JValue::Number(base), JValue::Number(exp)) => {
                         Ok(functions::numeric::power(*base, *exp)?)
@@ -6438,6 +6481,9 @@ impl Evaluator {
                 }
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
                     (JValue::Number(num), JValue::String(picture)) => {
@@ -6462,6 +6508,9 @@ impl Evaluator {
                 // Handle undefined input
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::Number(num) => {
@@ -6494,13 +6543,13 @@ impl Evaluator {
                 let first = &evaluated_args[0];
                 let second = &evaluated_args[1];
 
-                // If second arg is null, return first as-is (no change)
-                if second.is_null() {
+                // If second arg is null/undefined, return first as-is (no change)
+                if second.is_null() || second.is_undefined() {
                     return Ok(first.clone());
                 }
 
-                // If first arg is null, return second as-is (appending to nothing gives second)
-                if first.is_null() {
+                // If first arg is null/undefined, return second as-is (appending to nothing gives second)
+                if first.is_null() || first.is_undefined() {
                     return Ok(second.clone());
                 }
 
@@ -6519,7 +6568,8 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    JValue::Null => Ok(JValue::Null), // undefined returns undefined
+                    JValue::Null => Ok(JValue::Null),
+                    JValue::Undefined => Ok(JValue::Undefined),
                     JValue::Array(arr) => Ok(functions::array::reverse(arr)?),
                     _ => Err(EvaluatorError::TypeError(
                         "reverse() requires an array argument".to_string(),
@@ -6534,6 +6584,9 @@ impl Evaluator {
                 }
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::Array(arr) => Ok(functions::array::shuffle(arr)?),
@@ -6700,6 +6753,9 @@ impl Evaluator {
                 if array_value.is_null() {
                     return Ok(JValue::Null);
                 }
+                if array_value.is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
 
                 let mut arr = match array_value {
                     JValue::Array(arr) => arr.to_vec(),
@@ -6801,6 +6857,9 @@ impl Evaluator {
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
 
                 let key = match &evaluated_args[1] {
                     JValue::String(k) => &**k,
@@ -6850,7 +6909,9 @@ impl Evaluator {
                 }
                 match &evaluated_args[0] {
                     JValue::Null => Ok(JValue::Null),
-                    JValue::Lambda { .. } | JValue::Builtin { .. } => Ok(JValue::Undefined),
+                    // Not a container - pass through unchanged (e.g. so $string() still
+                    // sees the function value and applies its own function->"" rule).
+                    lambda @ (JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(lambda.clone()),
                     JValue::Object(obj) => Ok(functions::object::spread(obj)?),
                     JValue::Array(arr) => {
                         // Spread each object in the array
@@ -6890,7 +6951,8 @@ impl Evaluator {
                 if evaluated_args.len() == 1 {
                     match &evaluated_args[0] {
                         JValue::Array(arr) => Ok(functions::object::merge(arr)?),
-                        JValue::Null => Ok(JValue::Null), // $merge(undefined) returns undefined
+                        JValue::Null => Ok(JValue::Null),
+                        JValue::Undefined => Ok(JValue::Undefined),
                         JValue::Object(_) => {
                             // Single object - just return it
                             Ok(evaluated_args[0].clone())
@@ -7015,6 +7077,7 @@ impl Evaluator {
                         Ok(JValue::array(result))
                     }
                     JValue::Null => Ok(JValue::Null),
+                    JValue::Undefined => Ok(JValue::Undefined),
                     _ => Err(EvaluatorError::TypeError(
                         "map() first argument must be an array".to_string(),
                     )),
@@ -7433,7 +7496,10 @@ impl Evaluator {
                     ));
                 }
                 // $not(x) returns the logical negation of x
-                // null is falsy, so $not(null) = true
+                // null is falsy, so $not(null) = true; undefined stays undefined
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 Ok(JValue::Bool(!self.is_truthy(&evaluated_args[0])))
             }
             "boolean" => {
@@ -7441,6 +7507,9 @@ impl Evaluator {
                     return Err(EvaluatorError::EvaluationError(
                         "boolean() requires exactly 1 argument".to_string(),
                     ));
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 Ok(functions::boolean::boolean(&evaluated_args[0])?)
             }
@@ -7509,6 +7578,9 @@ impl Evaluator {
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::encoding::encode_url_component(s)?),
                     _ => Err(EvaluatorError::TypeError(
@@ -7524,6 +7596,9 @@ impl Evaluator {
                 }
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::encoding::decode_url_component(s)?),
@@ -7541,6 +7616,9 @@ impl Evaluator {
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::encoding::encode_url(s)?),
                     _ => Err(EvaluatorError::TypeError(
@@ -7556,6 +7634,9 @@ impl Evaluator {
                 }
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::encoding::decode_url(s)?),
@@ -7631,6 +7712,9 @@ impl Evaluator {
                 // If the first argument is null/undefined, return undefined
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
 
                 // First argument must be a string expression
@@ -7715,6 +7799,7 @@ impl Evaluator {
                                     Ok(crate::datetime::to_millis_with_picture(s, picture)?)
                                 }
                                 JValue::Null => Ok(JValue::Null),
+                                JValue::Undefined => Ok(JValue::Undefined),
                                 _ => Err(EvaluatorError::TypeError(
                                     "toMillis() second argument must be a string".to_string(),
                                 )),
@@ -7725,6 +7810,7 @@ impl Evaluator {
                         }
                     }
                     JValue::Null => Ok(JValue::Null),
+                    JValue::Undefined => Ok(JValue::Undefined),
                     _ => Err(EvaluatorError::TypeError(
                         "toMillis() requires a string argument".to_string(),
                     )),
@@ -7753,6 +7839,7 @@ impl Evaluator {
                         Ok(crate::datetime::from_millis(millis)?)
                     }
                     JValue::Null => Ok(JValue::Null),
+                    JValue::Undefined => Ok(JValue::Undefined),
                     _ => Err(EvaluatorError::TypeError(
                         "fromMillis() requires a number argument".to_string(),
                     )),
@@ -7905,7 +7992,7 @@ impl Evaluator {
                     })
                     .collect(),
                 JValue::String(s) => vec![s.to_string()],
-                JValue::Null => Vec::new(), // Undefined variable is treated as no deletion
+                JValue::Null | JValue::Undefined => Vec::new(), // Undefined variable is treated as no deletion
                 _ => {
                     // Delete parameter must be an array of strings or a string
                     return Err(EvaluatorError::EvaluationError(
@@ -7939,7 +8026,7 @@ impl Evaluator {
                                 map.insert(key.clone(), val.clone());
                             }
                         }
-                        JValue::Null => {
+                        JValue::Null | JValue::Undefined => {
                             // Null/undefined means no updates, just continue to deletions
                         }
                         _ => {
@@ -9739,10 +9826,9 @@ impl Evaluator {
                     "T2002: The left side of the + operator must evaluate to a number".to_string(),
                 ))
             }
-            // Undefined variable (null) with number -> undefined result
-            (JValue::Null, JValue::Number(_)) | (JValue::Number(_), JValue::Null) => {
-                Ok(JValue::Null)
-            }
+            // Undefined variable (null/undefined) with number -> undefined result
+            (JValue::Null | JValue::Undefined, JValue::Number(_))
+            | (JValue::Number(_), JValue::Null | JValue::Undefined) => Ok(JValue::Null),
             // Boolean with anything (including undefined) -> T2001 error
             (JValue::Bool(_), _) => Err(EvaluatorError::TypeError(
                 "T2001: The left side of the '+' operator must evaluate to a number or a string"
@@ -9753,7 +9839,9 @@ impl Evaluator {
                     .to_string(),
             )),
             // Undefined with undefined -> undefined
-            (JValue::Null, JValue::Null) => Ok(JValue::Null),
+            (JValue::Null | JValue::Undefined, JValue::Null | JValue::Undefined) => {
+                Ok(JValue::Null)
+            }
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot add {:?} and {:?}",
                 left, right
@@ -9779,7 +9867,9 @@ impl Evaluator {
                 "T2002: The right side of the - operator must evaluate to a number".to_string(),
             )),
             // Undefined variables -> undefined result
-            (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
+            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
+                Ok(JValue::Null)
+            }
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot subtract {:?} and {:?}",
                 left, right
@@ -9814,7 +9904,9 @@ impl Evaluator {
                 "T2002: The right side of the * operator must evaluate to a number".to_string(),
             )),
             // Undefined variables -> undefined result
-            (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
+            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
+                Ok(JValue::Null)
+            }
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot multiply {:?} and {:?}",
                 left, right
@@ -9848,7 +9940,9 @@ impl Evaluator {
                 "T2002: The right side of the / operator must evaluate to a number".to_string(),
             )),
             // Undefined variables -> undefined result
-            (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
+            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
+                Ok(JValue::Null)
+            }
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot divide {:?} and {:?}",
                 left, right
@@ -9882,7 +9976,9 @@ impl Evaluator {
                 "T2002: The right side of the % operator must evaluate to a number".to_string(),
             )),
             // Undefined variables -> undefined result
-            (JValue::Null, _) | (_, JValue::Null) => Ok(JValue::Null),
+            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
+                Ok(JValue::Null)
+            }
             _ => Err(EvaluatorError::TypeError(format!(
                 "Cannot compute modulo of {:?} and {:?}",
                 left, right
@@ -10148,7 +10244,7 @@ impl Evaluator {
                 let actual_idx = if idx < 0 { len + idx } else { idx };
 
                 if actual_idx < 0 || actual_idx >= len {
-                    Ok(JValue::Null)
+                    Ok(JValue::Undefined)
                 } else {
                     Ok(arr[actual_idx as usize].clone())
                 }
@@ -10416,12 +10512,12 @@ mod tests {
         let result = evaluator.evaluate(&path, &data).unwrap();
         assert_eq!(result, JValue::from(42i64));
 
-        // Missing path returns null
+        // Missing path returns undefined (not null - see issue #32)
         let path = AstNode::Path {
             steps: vec![PathStep::new(AstNode::Name("missing".to_string()))],
         };
         let result = evaluator.evaluate(&path, &data).unwrap();
-        assert_eq!(result, JValue::Null);
+        assert_eq!(result, JValue::Undefined);
     }
 
     #[test]
