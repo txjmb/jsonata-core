@@ -24,6 +24,7 @@ def test_detects_regression_over_10_percent(tmp_path):
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
     assert result.returncode == 0, result.stderr
@@ -46,6 +47,7 @@ def test_detects_improvement_over_10_percent(tmp_path):
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
     assert result.returncode == 0, result.stderr
@@ -65,6 +67,7 @@ def test_within_threshold_is_neither(tmp_path):
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
     assert result.returncode == 0, result.stderr
@@ -89,6 +92,7 @@ def test_writes_regression_detected_to_github_output(tmp_path, monkeypatch):
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
     )
 
@@ -101,5 +105,6 @@ def test_missing_args_exits_nonzero():
         [sys.executable, str(COMPARE_SCRIPT)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert result.returncode != 0
