@@ -232,24 +232,19 @@ class BenchmarkSuite:
     def _run_jsonata_python_benchmark(self, expression: str, data: Any, iterations: int) -> float:
         """Run benchmark using jsonata-python (rayokota) implementation.
 
-        Note: jsonata-python doesn't support pre-compilation, so we call transform()
-        directly in each iteration, which includes parsing overhead.
+        jsonata-python doesn't support pre-compilation - jsonata.transform()
+        parses and evaluates in one call each time, so this includes parsing
+        overhead on every iteration (unlike jsonatapy's compile-once,
+        evaluate-many path).
         """
         if not JSONATA_PYTHON_AVAILABLE:
-            return -1.0
-
-        # Compile expression once (new API: Jsonata class)
-        try:
-            expr = jsonata_python.Jsonata(expression)
-        except Exception as e:
-            print(f"⚠ jsonata-python compilation failed: {e}")
             return -1.0
 
         # Warm up
         warmup_iters = min(100, max(10, iterations // 10))
         for _ in range(warmup_iters):
             try:
-                expr.evaluate(data)
+                jsonata_python.transform(expression, data)
             except Exception as e:
                 print(f"⚠ jsonata-python warmup failed: {e}")
                 return -1.0
@@ -258,7 +253,7 @@ class BenchmarkSuite:
         start = time.perf_counter()
         for _ in range(iterations):
             try:
-                expr.evaluate(data)
+                jsonata_python.transform(expression, data)
             except Exception as e:
                 print(f"⚠ jsonata-python evaluation failed: {e}")
                 return -1.0
