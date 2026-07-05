@@ -3806,7 +3806,7 @@ impl Evaluator {
                             }
                         } // end else (tuple path)
                     }
-                    _ => Ok(JValue::Null),
+                    _ => Ok(JValue::Undefined),
                 };
             }
         }
@@ -5896,6 +5896,7 @@ impl Evaluator {
                 let string = match &evaluated_args[0] {
                     JValue::String(s) => s.clone(),
                     JValue::Null => return Ok(JValue::Null),
+                    JValue::Undefined => return Ok(JValue::Undefined),
                     _ => {
                         return Err(EvaluatorError::TypeError(
                             "pad() first argument must be a string".to_string(),
@@ -6050,7 +6051,7 @@ impl Evaluator {
                     EvaluatorError::EvaluationError(format!("Invalid signature: {}", e))
                 })?;
 
-                let coerced_args = match signature.validate_and_coerce(&evaluated_args) {
+                let coerced_args = match signature.validate_and_coerce(&evaluated_args, data) {
                     Ok(args) => args,
                     Err(crate::signature::SignatureError::UndefinedArgument) => {
                         // This can happen if the separator is undefined
@@ -6059,7 +6060,7 @@ impl Evaluator {
                             EvaluatorError::EvaluationError(format!("Invalid signature: {}", e))
                         })?;
 
-                        match sig_first_arg.validate_and_coerce(&evaluated_args[0..1]) {
+                        match sig_first_arg.validate_and_coerce(&evaluated_args[0..1], data) {
                             Ok(args) => args,
                             Err(crate::signature::SignatureError::ArrayTypeMismatch {
                                 index,
@@ -6723,7 +6724,7 @@ impl Evaluator {
                             }
                             arrays.push(arr.to_vec());
                         }
-                        JValue::Null => {
+                        JValue::Null | JValue::Undefined => {
                             // Null/undefined means result is empty
                             return Ok(JValue::array(vec![]));
                         }
@@ -8144,7 +8145,7 @@ impl Evaluator {
         if let Some(sig_str) = signature {
             // Validate and coerce arguments with signature
             let coerced_values = match crate::signature::Signature::parse(sig_str) {
-                Ok(sig) => match sig.validate_and_coerce(values) {
+                Ok(sig) => match sig.validate_and_coerce(values, data) {
                     Ok(coerced) => coerced,
                     Err(e) => {
                         self.context.pop_scope();
@@ -8166,6 +8167,15 @@ impl Evaluator {
                             } => {
                                 return Err(EvaluatorError::TypeError(format!(
                                     "T0412: Argument {} of function must be an array of {}",
+                                    index, expected
+                                )));
+                            }
+                            crate::signature::SignatureError::ContextTypeMismatch {
+                                index,
+                                expected,
+                            } => {
+                                return Err(EvaluatorError::TypeError(format!(
+                                    "T0411: Context value at argument {} does not match function signature (expected {})",
                                     index, expected
                                 )));
                             }
@@ -8364,7 +8374,7 @@ impl Evaluator {
         // Validate signature if present
         let coerced_values = if let Some(sig_str) = &lambda.signature {
             match crate::signature::Signature::parse(sig_str) {
-                Ok(sig) => match sig.validate_and_coerce(values) {
+                Ok(sig) => match sig.validate_and_coerce(values, data) {
                     Ok(coerced) => coerced,
                     Err(e) => match e {
                         crate::signature::SignatureError::UndefinedArgument => {
@@ -8381,6 +8391,15 @@ impl Evaluator {
                         crate::signature::SignatureError::ArrayTypeMismatch { index, expected } => {
                             return Err(EvaluatorError::TypeError(format!(
                                 "T0412: Argument {} of function must be an array of {}",
+                                index, expected
+                            )));
+                        }
+                        crate::signature::SignatureError::ContextTypeMismatch {
+                            index,
+                            expected,
+                        } => {
+                            return Err(EvaluatorError::TypeError(format!(
+                                "T0411: Context value at argument {} does not match function signature (expected {})",
                                 index, expected
                             )));
                         }
@@ -10180,7 +10199,7 @@ impl Evaluator {
         // Check left operand is a number or null
         let start_f64 = match left {
             JValue::Number(n) => Some(*n),
-            JValue::Null => None,
+            JValue::Null | JValue::Undefined => None,
             _ => {
                 return Err(EvaluatorError::EvaluationError(
                     "T2003: Left operand of range operator must be a number".to_string(),
@@ -10200,7 +10219,7 @@ impl Evaluator {
         // Check right operand is a number or null
         let end_f64 = match right {
             JValue::Number(n) => Some(*n),
-            JValue::Null => None,
+            JValue::Null | JValue::Undefined => None,
             _ => {
                 return Err(EvaluatorError::EvaluationError(
                     "T2004: Right operand of range operator must be a number".to_string(),
