@@ -227,7 +227,11 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const resultsFile = '${{ steps.run_benchmark.outputs.results_file }}';
+            const path = require('path');
+            // steps.run_benchmark.outputs.results_file is relative to the
+            // benchmarks/ directory (that step runs after `cd benchmarks`).
+            // This step does not cd, so resolve it from the workspace root.
+            const resultsFile = path.join('benchmarks', '${{ steps.run_benchmark.outputs.results_file }}');
             const results = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
 
             // Calculate summary statistics
