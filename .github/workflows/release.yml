@@ -543,3 +543,158 @@ jobs:
 
           To publish this release, run the workflow again without the dry_run flag.
           EOF
+
+  benchmark-and-record:
+    name: Benchmark and Record Release Performance
+    runs-on: ubuntu-latest
+    needs: [validate-version, create-github-release]
+    if: needs.create-github-release.result == 'success' && github.event.inputs.dry_run != 'true'
+    timeout-minutes: 90
+
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/v${{ needs.validate-version.outputs.version }}
+          submodules: true
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: benchmarks/javascript/package.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python dependencies
+        run: |
+          uv pip install --system --upgrade maturin rich matplotlib pandas jsonata
+
+      - name: Install JavaScript dependencies
+        run: |
+          cd benchmarks/javascript
+          npm install jsonata@latest
+
+      - name: Build jsonata-rs comparison binary
+        run: |
+          cd benchmarks/rust
+          cargo update -p jsonata-rs
+          cargo build --release
+
+      - name: Build jsonatapy (optimized)
+        run: |
+          maturin build --release --out dist
+          uv pip install --system --find-links dist jsonatapy
+
+      - name: Verify installation
+        run: |
+          python -c "import jsonatapy; print(f'jsonatapy version: {jsonatapy.__version__}')"
+          python -c "import jsonata; print('jsonata-python installed')"
+          cd benchmarks/javascript && node -e "const jsonata = require('jsonata'); console.log('jsonata installed');"
+          test -x ../rust/target/release/jsonata-rs-bench && echo "jsonata-rs-bench built"
+
+      - name: Run benchmark suite
+        id: run_benchmark
+        run: |
+          cd benchmarks
+          # Note: benchmark.py has no --iterations flag (each test hardcodes its
+          # own iteration count internally) - do not add one here, it would be
+          # silently ignored. This step takes ~40 minutes because it includes
+          # jsonata-python, which can be 2,300-69,000x slower than JS on some
+          # tests; that's expected and accounted for in this job's timeout.
+          python python/benchmark.py
+          RESULTS_FILE=$(ls -t results/benchmark_results_*.json | head -1)
+          echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
+          echo "Benchmark results saved to: $RESULTS_FILE"
+
+      - name: Download previous release baseline
+        id: baseline
+        continue-on-error: true
+        run: |
+          mkdir -p benchmarks/baseline
+          git fetch origin benchmark-data
+
+          if git show FETCH_HEAD:results/latest.json > benchmarks/baseline/baseline.json.tmp; then
+            mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
+            echo "has_baseline=true" >> $GITHUB_OUTPUT
+            echo "Baseline results downloaded from benchmark-data"
+          else
+            rm -f benchmarks/baseline/baseline.json.tmp
+            echo "has_baseline=false" >> $GITHUB_OUTPUT
+            echo "No baseline results found (this is the first release recorded to benchmark-data)"
+          fi
+
+      - name: Compare with previous release
+        id: compare
+        if: steps.baseline.outputs.has_baseline == 'true'
+        run: |
+          cd benchmarks
+          python python/compare.py baseline/baseline.json "${{ steps.run_benchmark.outputs.results_file }}"
+
+      - name: Record results to benchmark-data
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          RESULTS_FILE="$(pwd)/benchmarks/${{ steps.run_benchmark.outputs.results_file }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Read from FETCH_HEAD, not origin/benchmark-data - see the comment in
+          # the "Download previous release baseline" step above for why.
+          git fetch origin benchmark-data
+          git worktree add -B benchmark-data /tmp/benchmark-data FETCH_HEAD
+
+          mkdir -p /tmp/benchmark-data/results
+          cp "$RESULTS_FILE" "/tmp/benchmark-data/results/v${VERSION}.json"
+          # latest.json always becomes this release's results, even if this
+          # release regressed - so a regression only opens an issue once (at
+          # the release that introduced it), not on every subsequent release
+          # compared against it. This matches "one fresh issue per release"
+          # rather than ongoing alerting for an unfixed regression.
+          cp "$RESULTS_FILE" "/tmp/benchmark-data/results/latest.json"
+
+          cd /tmp/benchmark-data
+          git add "results/v${VERSION}.json" results/latest.json
+          git commit -m "chore: record benchmark results for v${VERSION}"
+          git push origin HEAD:benchmark-data
+
+      - name: Open regression issue
+        if: steps.compare.outputs.regression_detected == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const comparison = JSON.parse(fs.readFileSync('benchmarks/comparison.json', 'utf8'));
+            const version = '${{ needs.validate-version.outputs.version }}';
+
+            let body = `Release v${version} is more than 10% slower than the previous release on the following benchmarks:\n\n`;
+            body += '| Test | Previous | Current | Change |\n';
+            body += '|------|----------|---------|--------|\n';
+            for (const r of comparison.regressions) {
+              body += `| ${r.name} | ${r.baseline_ms.toFixed(2)}ms | ${r.current_ms.toFixed(2)}ms | **${r.change_pct.toFixed(1)}%** |\n`;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Performance regression detected in v${version}`,
+              body: body,
+            });
