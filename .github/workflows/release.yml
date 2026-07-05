@@ -549,7 +549,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [validate-version, create-github-release]
     if: needs.create-github-release.result == 'success' && github.event.inputs.dry_run != 'true'
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     permissions:
       contents: write
@@ -615,7 +615,12 @@ jobs:
         id: run_benchmark
         run: |
           cd benchmarks
-          python python/benchmark.py --iterations 5000
+          # Note: benchmark.py has no --iterations flag (each test hardcodes its
+          # own iteration count internally) - do not add one here, it would be
+          # silently ignored. This step takes ~40 minutes because it includes
+          # jsonata-python, which can be 2,300-69,000x slower than JS on some
+          # tests; that's expected and accounted for in this job's timeout.
+          python python/benchmark.py
           RESULTS_FILE=$(ls -t results/benchmark_results_*.json | head -1)
           echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
           echo "Benchmark results saved to: $RESULTS_FILE"
@@ -625,9 +630,9 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p benchmarks/baseline
-          git fetch origin benchmark-data 2>/dev/null || true
+          git fetch origin benchmark-data
 
-          if git show origin/benchmark-data:results/latest.json > benchmarks/baseline/baseline.json.tmp 2>/dev/null; then
+          if git show FETCH_HEAD:results/latest.json > benchmarks/baseline/baseline.json.tmp; then
             mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
             echo "has_baseline=true" >> $GITHUB_OUTPUT
             echo "Baseline results downloaded from benchmark-data"
@@ -652,11 +657,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # Read from FETCH_HEAD, not origin/benchmark-data - see the comment in
+          # the "Download previous release baseline" step above for why.
           git fetch origin benchmark-data
-          git worktree add -B benchmark-data /tmp/benchmark-data origin/benchmark-data
+          git worktree add -B benchmark-data /tmp/benchmark-data FETCH_HEAD
 
           mkdir -p /tmp/benchmark-data/results
           cp "$RESULTS_FILE" "/tmp/benchmark-data/results/v${VERSION}.json"
+          # latest.json always becomes this release's results, even if this
+          # release regressed - so a regression only opens an issue once (at
+          # the release that introduced it), not on every subsequent release
+          # compared against it. This matches "one fresh issue per release"
+          # rather than ongoing alerting for an unfixed regression.
           cp "$RESULTS_FILE" "/tmp/benchmark-data/results/latest.json"
 
           cd /tmp/benchmark-data

@@ -135,10 +135,14 @@ jobs:
         run: |
           mkdir -p benchmarks/baseline
 
-          # Try to download from the benchmark-data branch
-          git fetch origin benchmark-data 2>/dev/null || true
+          # Try to download from the benchmark-data branch. Read via FETCH_HEAD,
+          # not origin/benchmark-data - a plain `git fetch` always updates
+          # FETCH_HEAD, but whether it also updates the origin/benchmark-data
+          # remote-tracking ref depends on actions/checkout's configured fetch
+          # refspec, which isn't guaranteed.
+          git fetch origin benchmark-data
 
-          if git show origin/benchmark-data:results/latest.json > benchmarks/baseline/baseline.json.tmp 2>/dev/null; then
+          if git show FETCH_HEAD:results/latest.json > benchmarks/baseline/baseline.json.tmp; then
             mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
             echo "Baseline results downloaded from benchmark-data"
           else
@@ -285,12 +289,10 @@ jobs:
               });
             }
 
-      - name: Fail on regression
+      - name: Warn on regression
         if: steps.compare.outputs.regression_detected == 'true'
         run: |
-          echo "::error::Performance regression detected (>10% slower on some tests)"
-          echo "Review the PR comment for details."
-          exit 1
+          echo "::warning::Performance regression detected (>10% slower on some tests) - see the PR comment for details. This does not fail the check: microbenchmark noise on shared CI runners can trigger false positives, so regressions are reported, not enforced, at PR time."
 
       - name: Add job summary
         if: always()
