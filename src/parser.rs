@@ -762,6 +762,10 @@ impl Parser {
                     signature.push('-');
                     self.advance()?;
                 }
+                Token::Plus => {
+                    signature.push('+');
+                    self.advance()?;
+                }
                 Token::Colon => {
                     signature.push(':');
                     self.advance()?;
@@ -2190,5 +2194,18 @@ mod tests {
             }
             _ => panic!("Expected Function node"),
         }
+    }
+
+    #[test]
+    fn test_signature_with_repeat_modifier_parses() {
+        // A lambda literal with a '+' (one-or-more) signature modifier must parse
+        // without error. This was rejected before jsonata-js 2.2.1 compatibility work
+        // ("Unexpected token in signature: Plus").
+        let result = parse("λ($arg1, $arg2)<n+n:o>{{\"a\": $arg1, \"b\": $arg2}}(1, 2, 3)");
+        assert!(
+            result.is_ok(),
+            "expected parse to succeed, got {:?}",
+            result
+        );
     }
 }

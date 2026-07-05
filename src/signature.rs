@@ -2,6 +2,7 @@
 // Mirrors signature.js from the reference implementation
 
 use crate::value::JValue;
+use regex::Regex;
 use thiserror::Error;
 
 /// Signature validation errors
@@ -18,6 +19,9 @@ pub enum SignatureError {
 
     #[error("T0412: Argument {index} must be an array of {expected}")]
     ArrayTypeMismatch { index: usize, expected: String },
+
+    #[error("T0411: Context value does not match function signature (expected {expected})")]
+    ContextTypeMismatch { index: usize, expected: String },
 
     #[error("Undefined argument")]
     UndefinedArgument,
@@ -82,11 +86,100 @@ impl ParamType {
     }
 }
 
+/// Map a ParamType back to its single-character signature symbol.
+/// Used to rebuild a union type's regex character class from its parsed
+/// component types.
+fn type_char(t: &ParamType) -> char {
+    match t {
+        ParamType::String => 's',
+        ParamType::Number => 'n',
+        ParamType::Boolean => 'b',
+        ParamType::Null => 'l',
+        ParamType::Object => 'o',
+        ParamType::Array(_) => 'a',
+        ParamType::Function(_) => 'f',
+        ParamType::Any => 'x',
+        // Unreachable in practice: signature.js does not nest unions inside
+        // unions, and our parser never constructs one this way either.
+        ParamType::Union(_) => 'x',
+    }
+}
+
+/// Get the single-character type symbol for a value, mirroring signature.js's
+/// getSymbol(): used to build the "supplied signature" string that gets
+/// matched against a Signature's compiled regex.
+fn type_symbol(value: &JValue) -> char {
+    match value {
+        JValue::Null => 'l',
+        JValue::Bool(_) => 'b',
+        JValue::Number(_) => 'n',
+        JValue::String(_) => 's',
+        JValue::Array(_) => 'a',
+        JValue::Object(_) => 'o',
+        JValue::Undefined => 'm',
+        JValue::Lambda { .. } => 'f',
+        JValue::Builtin { .. } => 'f',
+        JValue::Regex { .. } => 'o',
+    }
+}
+
 /// Function parameter definition
 #[derive(Debug, Clone)]
 pub struct Parameter {
     pub param_type: ParamType,
     pub optional: bool,
+    /// Regex fragment for this parameter, e.g. "[nm]", "[nm]+", "[sm]?".
+    /// Combined across all params to build a Signature's full_regex.
+    regex: String,
+    /// True if this parameter was declared with the '+' (one-or-more) modifier.
+    repeatable: bool,
+    /// True if this parameter was declared with the '-' modifier: when the
+    /// caller omits this argument, substitute the evaluation context value
+    /// instead (if its type is compatible).
+    context: bool,
+    /// Regex fragment (without the '-'-induced trailing '?') used to test
+    /// whether the context value's type is compatible, when `context` is true.
+    context_regex: Option<String>,
+}
+
+impl Parameter {
+    /// Construct a Parameter directly (not via signature-string parsing).
+    /// Used by tests and by Signature::new. Produces a non-repeatable,
+    /// non-context parameter with the standard base regex for its type.
+    #[allow(dead_code)]
+    pub fn new(param_type: ParamType, optional: bool) -> Self {
+        let mut regex = Self::base_regex(&param_type);
+        if optional {
+            regex.push('?');
+        }
+        Parameter {
+            param_type,
+            optional,
+            regex,
+            repeatable: false,
+            context: false,
+            context_regex: None,
+        }
+    }
+
+    /// The base (unquantified) regex character class for a parameter type,
+    /// mirroring signature.js's per-symbol regex assignment.
+    fn base_regex(param_type: &ParamType) -> String {
+        match param_type {
+            ParamType::Array(_) => "[asnblfom]".to_string(),
+            ParamType::Function(_) => "f".to_string(),
+            ParamType::Any => "[asnblfom]".to_string(),
+            ParamType::String => "[sm]".to_string(),
+            ParamType::Number => "[nm]".to_string(),
+            ParamType::Boolean => "[bm]".to_string(),
+            ParamType::Null => "[lm]".to_string(),
+            ParamType::Object => "[om]".to_string(),
+            ParamType::Union(types) => {
+                let chars: String = types.iter().map(type_char).collect();
+                format!("[{}m]", chars)
+            }
+        }
+    }
 }
 
 /// Function signature
@@ -95,16 +188,31 @@ pub struct Signature {
     pub params: Vec<Parameter>,
     #[allow(dead_code)]
     pub return_type: Option<ParamType>,
+    /// The compiled regex matching this signature's full parameter list
+    /// against a "supplied signature" type-symbol string, e.g. "^([nm]+)([nm])$".
+    full_regex: Regex,
 }
 
 impl Signature {
     /// Create a new signature
     #[allow(dead_code)]
     pub fn new(params: Vec<Parameter>, return_type: Option<ParamType>) -> Self {
+        let full_regex = Self::compile_full_regex(&params);
         Signature {
             params,
             return_type,
+            full_regex,
         }
+    }
+
+    /// Build the anchored whole-signature regex from each parameter's fragment.
+    fn compile_full_regex(params: &[Parameter]) -> Regex {
+        let pattern: String = std::iter::once("^".to_string())
+            .chain(params.iter().map(|p| format!("({})", p.regex)))
+            .chain(std::iter::once("$".to_string()))
+            .collect();
+        Regex::new(&pattern)
+            .unwrap_or_else(|e| panic!("generated signature regex `{}` is invalid: {}", pattern, e))
     }
 
     /// Parse a signature string like "<n-n:n>" or "<s?:b>"
@@ -143,9 +251,12 @@ impl Signature {
             Self::parse_params(param_str)?
         };
 
+        let full_regex = Self::compile_full_regex(&params);
+
         Ok(Signature {
             params,
             return_type,
+            full_regex,
         })
     }
 
@@ -164,31 +275,47 @@ impl Signature {
         None
     }
 
-    /// Parse parameter types from string like "n-n" or "a<s>s?"
+    /// Parse parameter types from string like "n-n" or "a<s>s?" or "n+n"
     fn parse_params(param_str: &str) -> Result<Vec<Parameter>, SignatureError> {
         let mut params = Vec::new();
         let mut chars = param_str.chars().peekable();
 
         while chars.peek().is_some() {
-            // Check for separator
-            if chars.peek() == Some(&'-') {
-                chars.next();
-                continue;
-            }
-
             let param_type = Self::parse_type_chars(&mut chars)?;
+            let mut regex = Parameter::base_regex(&param_type);
+            let mut optional = false;
+            let mut repeatable = false;
+            let mut context = false;
+            let mut context_regex = None;
 
-            // Check for optional marker
-            let optional = if chars.peek() == Some(&'?') {
-                chars.next();
-                true
-            } else {
-                false
-            };
+            match chars.peek() {
+                Some('?') => {
+                    chars.next();
+                    regex.push('?');
+                    optional = true;
+                }
+                Some('+') => {
+                    chars.next();
+                    regex.push('+');
+                    repeatable = true;
+                }
+                Some('-') => {
+                    chars.next();
+                    context = true;
+                    context_regex = Some(regex.clone());
+                    regex.push('?');
+                    optional = true;
+                }
+                _ => {}
+            }
 
             params.push(Parameter {
                 param_type,
                 optional,
+                regex,
+                repeatable,
+                context,
+                context_regex,
             });
         }
 
@@ -304,9 +431,10 @@ impl Signature {
     /// Validate argument count
     pub fn validate_arg_count(&self, actual: usize) -> Result<(), SignatureError> {
         let required = self.params.iter().filter(|p| !p.optional).count();
+        let unbounded = self.params.iter().any(|p| p.repeatable);
         let max = self.params.len();
 
-        if actual < required || actual > max {
+        if actual < required || (!unbounded && actual > max) {
             return Err(SignatureError::ArgumentCountMismatch {
                 expected: required,
                 actual,
@@ -316,70 +444,144 @@ impl Signature {
         Ok(())
     }
 
-    /// Validate and coerce arguments according to signature rules
+    /// Validate and coerce arguments according to signature rules.
     ///
-    /// Like the JavaScript implementation, this:
-    /// - Wraps non-array values in arrays when expecting array type
-    /// - Checks array element types when specified
-    /// - Returns the validated (and possibly coerced) arguments
-    pub fn validate_and_coerce(&self, args: &[JValue]) -> Result<Vec<JValue>, SignatureError> {
-        // Check argument count first
+    /// `context` is the JSONata evaluation context (`$`) at the point of the
+    /// call, used for the '-' modifier's fallback-to-context behavior.
+    /// Pass `&JValue::Undefined` if there is no meaningful context (e.g. a
+    /// signature with no '-'-marked parameters never inspects it).
+    ///
+    /// Mirrors signature.js's regex-based validate(): build a one-char-per-
+    /// argument type-symbol string, match it against this signature's
+    /// compiled regex, then walk each parameter's captured group back to
+    /// positional arguments (a captured group may span multiple characters
+    /// when the parameter is repeatable with '+').
+    pub fn validate_and_coerce(
+        &self,
+        args: &[JValue],
+        context: &JValue,
+    ) -> Result<Vec<JValue>, SignatureError> {
         self.validate_arg_count(args.len())?;
 
+        let supplied_sig: String = args.iter().map(type_symbol).collect();
+
+        let captures = match self.full_regex.captures(&supplied_sig) {
+            Some(c) => c,
+            None => return Err(self.arg_type_mismatch_error(&supplied_sig)),
+        };
+
         let mut coerced_args = Vec::with_capacity(args.len());
+        let mut arg_index = 0usize;
 
-        // Check and coerce each argument type
-        for (i, (param, arg)) in self.params.iter().zip(args.iter()).enumerate() {
-            // Special case: if argument is null or undefined, return UndefinedArgument
-            // This allows the caller to decide whether to return undefined or error
-            if (arg.is_null() || arg.is_undefined())
-                && !matches!(param.param_type, ParamType::Null | ParamType::Any)
-            {
-                return Err(SignatureError::UndefinedArgument);
-            }
+        for (i, param) in self.params.iter().enumerate() {
+            let matched = captures.get(i + 1).map(|m| m.as_str()).unwrap_or("");
 
-            // Handle array coercion: any value can be coerced to an array
-            if let ParamType::Array(elem_type) = &param.param_type {
-                let arr = if let JValue::Array(arr) = arg {
-                    // Already an array - check element types if specified
-                    if let Some(expected_elem) = elem_type {
-                        if !arr.is_empty() && !arr.iter().all(|v| expected_elem.matches(v)) {
-                            return Err(SignatureError::ArrayTypeMismatch {
-                                index: i + 1,
-                                expected: Self::type_name(expected_elem),
-                            });
-                        }
+            if matched.is_empty() {
+                let arg = args.get(arg_index).cloned().unwrap_or(JValue::Undefined);
+
+                if param.context {
+                    let context_symbol = type_symbol(context).to_string();
+                    let context_regex_str = param.context_regex.as_deref().unwrap_or("");
+                    let context_re = Regex::new(&format!("^{}$", context_regex_str))
+                        .map_err(|e| SignatureError::InvalidSignature(e.to_string()))?;
+                    if context_re.is_match(&context_symbol) {
+                        coerced_args.push(context.clone());
+                    } else {
+                        return Err(SignatureError::ContextTypeMismatch {
+                            index: arg_index + 1,
+                            expected: Self::type_name(&param.param_type),
+                        });
                     }
-                    arg.clone()
                 } else {
-                    // Non-array value - coerce by wrapping in array
-                    // But first check if the element type matches
-                    if let Some(expected_elem) = elem_type {
-                        if !expected_elem.matches(arg) {
-                            return Err(SignatureError::ArrayTypeMismatch {
-                                index: i + 1,
-                                expected: Self::type_name(expected_elem),
-                            });
-                        }
+                    // This position was genuinely supplied (not out-of-bounds
+                    // padding) only if arg_index is within the original args.
+                    let was_supplied = arg_index < args.len();
+                    if was_supplied
+                        && (arg.is_null() || arg.is_undefined())
+                        && !matches!(param.param_type, ParamType::Null | ParamType::Any)
+                    {
+                        return Err(SignatureError::UndefinedArgument);
                     }
-                    // Wrap the value in an array
-                    JValue::array(vec![arg.clone()])
-                };
-                coerced_args.push(arr);
+                    coerced_args.push(arg);
+                    arg_index += 1;
+                }
                 continue;
             }
 
-            // Standard type checking for non-array types
-            if !param.param_type.matches(arg) {
-                return Err(SignatureError::ArgumentTypeMismatch {
-                    index: i + 1,
-                    expected: Self::type_name(&param.param_type),
-                });
+            for single in matched.chars() {
+                let was_supplied = arg_index < args.len();
+                let arg = args.get(arg_index).cloned().unwrap_or(JValue::Undefined);
+
+                if was_supplied
+                    && (arg.is_null() || arg.is_undefined())
+                    && !matches!(param.param_type, ParamType::Null | ParamType::Any)
+                {
+                    return Err(SignatureError::UndefinedArgument);
+                }
+
+                let resolved = if let ParamType::Array(elem_type) = &param.param_type {
+                    if single == 'm' {
+                        JValue::Undefined
+                    } else if let JValue::Array(arr) = &arg {
+                        if let Some(expected_elem) = elem_type {
+                            if !arr.is_empty() && !arr.iter().all(|v| expected_elem.matches(v)) {
+                                return Err(SignatureError::ArrayTypeMismatch {
+                                    index: arg_index + 1,
+                                    expected: Self::type_name(expected_elem),
+                                });
+                            }
+                        }
+                        arg.clone()
+                    } else {
+                        if let Some(expected_elem) = elem_type {
+                            if !expected_elem.matches(&arg) {
+                                return Err(SignatureError::ArrayTypeMismatch {
+                                    index: arg_index + 1,
+                                    expected: Self::type_name(expected_elem),
+                                });
+                            }
+                        }
+                        JValue::array(vec![arg.clone()])
+                    }
+                } else {
+                    arg.clone()
+                };
+
+                coerced_args.push(resolved);
+                arg_index += 1;
             }
-            coerced_args.push(arg.clone());
         }
 
         Ok(coerced_args)
+    }
+
+    /// Build an ArgumentTypeMismatch error identifying roughly which argument
+    /// broke validation, by matching a growing prefix of the joint pattern
+    /// (mirrors signature.js's throwValidationError). Exact index parity with
+    /// signature.js's backtracking behavior is not guaranteed in all cases —
+    /// this is a best-effort diagnostic, not something any test asserts on
+    /// precisely (the reference suite only checks error *codes*, not indices).
+    fn arg_type_mismatch_error(&self, supplied_sig: &str) -> SignatureError {
+        let mut good_to = 0usize;
+        let mut partial_pattern = String::from("^");
+        let mut last_param_type = ParamType::Any;
+
+        for param in &self.params {
+            partial_pattern.push_str(&param.regex);
+            last_param_type = param.param_type.clone();
+            match Regex::new(&partial_pattern) {
+                Ok(re) => match re.find(supplied_sig) {
+                    Some(m) if m.start() == 0 => good_to = m.end(),
+                    _ => break,
+                },
+                Err(_) => break,
+            }
+        }
+
+        SignatureError::ArgumentTypeMismatch {
+            index: good_to + 1,
+            expected: Self::type_name(&last_param_type),
+        }
     }
 
     /// Get a human-readable name for a parameter type
@@ -411,14 +613,8 @@ mod tests {
     fn test_signature_validation() {
         let sig = Signature::new(
             vec![
-                Parameter {
-                    param_type: ParamType::String,
-                    optional: false,
-                },
-                Parameter {
-                    param_type: ParamType::Number,
-                    optional: true,
-                },
+                Parameter::new(ParamType::String, false),
+                Parameter::new(ParamType::Number, true),
             ],
             Some(ParamType::String),
         );
@@ -434,5 +630,139 @@ mod tests {
 
         // Invalid: too many args
         assert!(sig.validate_arg_count(3).is_err());
+    }
+
+    #[test]
+    fn test_parse_signature_with_repeat_modifier() {
+        // "<n+n:o>" must parse into exactly 2 params: a repeatable number,
+        // then a required number.
+        let sig = Signature::parse("<n+n:o>").expect("valid signature");
+        assert_eq!(sig.params.len(), 2);
+        assert_eq!(sig.params[0].param_type, ParamType::Number);
+        assert!(!sig.params[0].optional);
+        assert_eq!(sig.params[1].param_type, ParamType::Number);
+        assert!(!sig.params[1].optional);
+    }
+
+    #[test]
+    fn test_repeat_param_allows_more_args_than_declared_slots() {
+        // "<n+n>" (2 type-slots, one repeatable) must accept 3 args, whereas
+        // "<nn>" (2 required, non-repeatable slots) must reject 3 args.
+        let repeating = Signature::parse("<n+n:o>").expect("valid signature");
+        assert!(repeating.validate_arg_count(3).is_ok());
+
+        let non_repeating = Signature::parse("<nn:o>").expect("valid signature");
+        assert!(non_repeating.validate_arg_count(3).is_err());
+    }
+
+    #[test]
+    fn test_repeat_param_coerces_all_matched_args() {
+        // <n+n:o> called with (1, 2, 3): the repeat consumes 2 numbers, the
+        // final required slot consumes the 3rd. All 3 must appear in order.
+        let sig = Signature::parse("<n+n:o>").expect("valid signature");
+        let args = vec![
+            JValue::Number(1.0),
+            JValue::Number(2.0),
+            JValue::Number(3.0),
+        ];
+        let coerced = sig
+            .validate_and_coerce(&args, &JValue::Undefined)
+            .expect("should validate");
+        assert_eq!(coerced, args);
+    }
+
+    #[test]
+    fn test_repeat_param_rejects_wrong_type_within_repeat() {
+        // <n+> with (1, 2, "x"): the 3rd arg breaks the all-numbers repeat,
+        // and there's nothing else in the signature to absorb a string, so
+        // the whole match fails -> T0410-class error (ArgumentTypeMismatch).
+        let sig = Signature::parse("<n+:o>").expect("valid signature");
+        let args = vec![
+            JValue::Number(1.0),
+            JValue::Number(2.0),
+            JValue::string("x"),
+        ];
+        let result = sig.validate_and_coerce(&args, &JValue::Undefined);
+        assert!(
+            matches!(result, Err(SignatureError::ArgumentTypeMismatch { .. })),
+            "expected ArgumentTypeMismatch, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_context_substitution_success() {
+        // <n+s-:a<n>> called with (1, 2) and a string context: the omitted
+        // 3rd (context-fallback) argument should be filled from the context.
+        let sig = Signature::parse("<n+s-:a<n>>").expect("valid signature");
+        let args = vec![JValue::Number(1.0), JValue::Number(2.0)];
+        let context = JValue::string("b");
+        let coerced = sig
+            .validate_and_coerce(&args, &context)
+            .expect("should validate using context fallback");
+        assert_eq!(
+            coerced,
+            vec![
+                JValue::Number(1.0),
+                JValue::Number(2.0),
+                JValue::string("b")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_context_substitution_type_mismatch() {
+        // <s-:s> called with 0 args and a NUMBER context: the context type
+        // doesn't match the expected string type -> distinct T0411-class error.
+        let sig = Signature::parse("<s-:s>").expect("valid signature");
+        let args: Vec<JValue> = vec![];
+        let context = JValue::Number(42.0);
+        let result = sig.validate_and_coerce(&args, &context);
+        assert!(
+            matches!(result, Err(SignatureError::ContextTypeMismatch { .. })),
+            "expected ContextTypeMismatch, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_array_subtype_mismatch_within_repeat() {
+        // <a<n>+:o> called with an array containing a non-number element:
+        // the repeat's array-subtype check must still fire (T0412-class).
+        let sig = Signature::parse("<a<n>+:o>").expect("valid signature");
+        let bad_array = JValue::array(vec![JValue::string("x")]);
+        let args = vec![bad_array];
+        let result = sig.validate_and_coerce(&args, &JValue::Undefined);
+        assert!(
+            matches!(result, Err(SignatureError::ArrayTypeMismatch { .. })),
+            "expected ArrayTypeMismatch, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_repeat_with_leading_optional_does_not_spuriously_error() {
+        // <s?n+:a<n>> called with (1, 2, 3): the optional leading string slot
+        // matches zero characters (none of the 3 args is a string) and gets
+        // "phantom-assigned" args[0] per signature.js's own algorithm, while
+        // the repeat consumes args[1] and args[2] AND reads one position past
+        // the end of `args` (args[3], which doesn't exist). That out-of-bounds
+        // read must resolve to JValue::Undefined WITHOUT tripping the
+        // "explicit null/undefined for a non-nullable required type" error,
+        // since it was never actually supplied by the caller.
+        let sig = Signature::parse("<s?n+:a<n>>").expect("valid signature");
+        let args = vec![
+            JValue::Number(1.0),
+            JValue::Number(2.0),
+            JValue::Number(3.0),
+        ];
+        let coerced = sig
+            .validate_and_coerce(&args, &JValue::Undefined)
+            .expect("must not error on out-of-bounds repeat padding");
+        // Only the first 2 entries matter to callers (lambda binding only
+        // uses as many entries as there are declared params), but the full
+        // vector must not be an error.
+        assert_eq!(coerced[0], JValue::Number(1.0));
+        assert_eq!(coerced[1], JValue::Number(2.0));
     }
 }
