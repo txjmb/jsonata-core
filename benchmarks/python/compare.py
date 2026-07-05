@@ -19,6 +19,14 @@ IMPROVEMENT_THRESHOLD_PCT = -10
 
 
 def main() -> int:
+    # Force UTF-8 stdout/stderr regardless of platform/console encoding: the
+    # output below includes non-ASCII characters (⚠️, ✅, →), and on Windows,
+    # when stdout isn't a real console (e.g. under subprocess.run() in tests
+    # or CI), Python falls back to the legacy code page (cp1252), which can't
+    # encode them and crashes with UnicodeEncodeError before finishing.
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
     if len(sys.argv) != 3:
         print("Usage: compare.py <baseline.json> <results.json>", file=sys.stderr)
         return 2
