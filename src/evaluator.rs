@@ -3806,7 +3806,7 @@ impl Evaluator {
                             }
                         } // end else (tuple path)
                     }
-                    _ => Ok(JValue::Null),
+                    _ => Ok(JValue::Undefined),
                 };
             }
         }
@@ -5896,6 +5896,7 @@ impl Evaluator {
                 let string = match &evaluated_args[0] {
                     JValue::String(s) => s.clone(),
                     JValue::Null => return Ok(JValue::Null),
+                    JValue::Undefined => return Ok(JValue::Undefined),
                     _ => {
                         return Err(EvaluatorError::TypeError(
                             "pad() first argument must be a string".to_string(),
@@ -6723,7 +6724,7 @@ impl Evaluator {
                             }
                             arrays.push(arr.to_vec());
                         }
-                        JValue::Null => {
+                        JValue::Null | JValue::Undefined => {
                             // Null/undefined means result is empty
                             return Ok(JValue::array(vec![]));
                         }
@@ -8393,7 +8394,10 @@ impl Evaluator {
                                 index, expected
                             )));
                         }
-                        crate::signature::SignatureError::ContextTypeMismatch { index, expected } => {
+                        crate::signature::SignatureError::ContextTypeMismatch {
+                            index,
+                            expected,
+                        } => {
                             return Err(EvaluatorError::TypeError(format!(
                                 "T0411: Context value at argument {} does not match function signature (expected {})",
                                 index, expected
@@ -10195,7 +10199,7 @@ impl Evaluator {
         // Check left operand is a number or null
         let start_f64 = match left {
             JValue::Number(n) => Some(*n),
-            JValue::Null => None,
+            JValue::Null | JValue::Undefined => None,
             _ => {
                 return Err(EvaluatorError::EvaluationError(
                     "T2003: Left operand of range operator must be a number".to_string(),
@@ -10215,7 +10219,7 @@ impl Evaluator {
         // Check right operand is a number or null
         let end_f64 = match right {
             JValue::Number(n) => Some(*n),
-            JValue::Null => None,
+            JValue::Null | JValue::Undefined => None,
             _ => {
                 return Err(EvaluatorError::EvaluationError(
                     "T2004: Right operand of range operator must be a number".to_string(),

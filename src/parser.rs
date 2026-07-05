@@ -2202,6 +2202,10 @@ mod tests {
         // without error. This was rejected before jsonata-js 2.2.1 compatibility work
         // ("Unexpected token in signature: Plus").
         let result = parse("λ($arg1, $arg2)<n+n:o>{{\"a\": $arg1, \"b\": $arg2}}(1, 2, 3)");
-        assert!(result.is_ok(), "expected parse to succeed, got {:?}", result);
+        assert!(
+            result.is_ok(),
+            "expected parse to succeed, got {:?}",
+            result
+        );
     }
 }

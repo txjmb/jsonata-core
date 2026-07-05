@@ -463,7 +463,7 @@ impl Signature {
     ) -> Result<Vec<JValue>, SignatureError> {
         self.validate_arg_count(args.len())?;
 
-        let supplied_sig: String = args.iter().map(|a| type_symbol(a)).collect();
+        let supplied_sig: String = args.iter().map(type_symbol).collect();
 
         let captures = match self.full_regex.captures(&supplied_sig) {
             Some(c) => c,
