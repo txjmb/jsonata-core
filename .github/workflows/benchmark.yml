@@ -77,12 +77,18 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          uv pip install --system maturin rich matplotlib pandas
+          uv pip install --system --upgrade maturin rich matplotlib pandas jsonata
 
       - name: Install JavaScript dependencies
         run: |
           cd benchmarks/javascript
-          npm install
+          npm install jsonata@latest
+
+      - name: Build jsonata-rs comparison binary
+        run: |
+          cd benchmarks/rust
+          cargo update -p jsonata-rs
+          cargo build --release
 
       - name: Build jsonatapy (optimized)
         run: |
@@ -92,7 +98,9 @@ jobs:
       - name: Verify installation
         run: |
           python -c "import jsonatapy; print(f'jsonatapy version: {jsonatapy.__version__}')"
+          python -c "import jsonata; print('jsonata-python installed')"
           cd benchmarks/javascript && node -e "const jsonata = require('jsonata'); console.log('jsonata installed');"
+          test -x ../rust/target/release/jsonata-rs-bench && echo "jsonata-rs-bench built"
 
       - name: Run benchmark suite
         id: run_benchmark
@@ -118,18 +126,18 @@ jobs:
           cd benchmarks
           python python/enhanced_report.py
 
-      - name: Download baseline (main branch)
+      - name: Download baseline (previous release)
         if: github.event_name == 'pull_request'
         continue-on-error: true
         run: |
           mkdir -p benchmarks/baseline
 
-          # Try to download from gh-pages branch
-          git fetch origin gh-pages:gh-pages 2>/dev/null || true
+          # Try to download from the benchmark-data branch
+          git fetch origin benchmark-data 2>/dev/null || true
 
-          if git show gh-pages:benchmark-results/latest.json > benchmarks/baseline/baseline.json.tmp 2>/dev/null; then
+          if git show origin/benchmark-data:results/latest.json > benchmarks/baseline/baseline.json.tmp 2>/dev/null; then
             mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
-            echo "Baseline results downloaded from gh-pages"
+            echo "Baseline results downloaded from benchmark-data"
           else
             rm -f benchmarks/baseline/baseline.json.tmp
             echo "No baseline results found"
