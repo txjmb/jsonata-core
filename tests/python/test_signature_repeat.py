@@ -10,9 +10,7 @@ import jsonatapy
 
 
 def test_repeat_param_basic():
-    result = jsonatapy.evaluate(
-        'λ($arg1, $arg2)<n+n:o>{{"a": $arg1, "b": $arg2}}(1, 2, 3)', None
-    )
+    result = jsonatapy.evaluate('λ($arg1, $arg2)<n+n:o>{{"a": $arg1, "b": $arg2}}(1, 2, 3)', None)
     assert result == {"a": 1, "b": 2}
 
 
@@ -29,7 +27,7 @@ def test_context_fallback_bare_call_uses_context():
     # actually exercises signature.rs's own '-' context-substitution path
     # (dot-chained calls have a separate, unrelated implicit-arg mechanism).
     result = jsonatapy.evaluate(
-        'λ($arg1, $arg2, $arg3)<n+s-:a<n>>{[$arg1, $arg2, $arg3]}(1, 2)', "b"
+        "λ($arg1, $arg2, $arg3)<n+s-:a<n>>{[$arg1, $arg2, $arg3]}(1, 2)", "b"
     )
     assert result == [1, 2, "b"]
 
@@ -45,6 +43,4 @@ def test_repeat_param_rejects_wrong_type():
     import pytest
 
     with pytest.raises(ValueError, match="T0410"):
-        jsonatapy.evaluate(
-            'λ($arg1, $arg2)<n+n:o>{{"a": $arg1, "b": $arg2}}(1, "x")', None
-        )
+        jsonatapy.evaluate('λ($arg1, $arg2)<n+n:o>{{"a": $arg1, "b": $arg2}}(1, "x")', None)
