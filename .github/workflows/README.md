@@ -77,7 +77,7 @@ This directory contains automated CI/CD workflows for jsonatapy. All workflows f
 - Historical data on the `benchmark-data` branch (one `results/v<version>.json` per release, plus `results/latest.json`)
 
 ### 4. Documentation (`docs.yml`)
-**Triggers:** Push to main, Releases, Manual
+**Triggers:** Push to main, Manual
 **Purpose:** Build and deploy documentation to GitHub Pages
 
 **Features:**
