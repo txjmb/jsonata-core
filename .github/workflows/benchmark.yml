@@ -76,7 +76,12 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          uv pip install --system --upgrade maturin rich matplotlib pandas jsonata
+          # Deliberately not installing jsonata (rayokota's jsonata-python) here:
+          # it's ~18-45ms/iteration (vs jsonata-rs's ~0.01-0.3ms), which pushed
+          # this job's runtime from ~2 minutes to ~40 minutes once it actually
+          # ran instead of failing instantly. It's still benchmarked in the
+          # release-triggered job (release.yml), where a long runtime is fine.
+          uv pip install --system --upgrade maturin rich matplotlib pandas
 
       - name: Install JavaScript dependencies
         run: |
@@ -97,7 +102,6 @@ jobs:
       - name: Verify installation
         run: |
           python -c "import jsonatapy; print(f'jsonatapy version: {jsonatapy.__version__}')"
-          python -c "import jsonata; print('jsonata-python installed')"
           cd benchmarks/javascript && node -e "const jsonata = require('jsonata'); console.log('jsonata installed');"
           test -x ../rust/target/release/jsonata-rs-bench && echo "jsonata-rs-bench built"
 
