@@ -20,9 +20,10 @@ Quick setup guide for enabling all workflows in the jsonatapy repository.
 
 ### Enable GitHub Pages
 1. Go to **Settings** → **Pages**
-2. Under **Source**, select: **GitHub Actions**
-3. Click **Save**
-4. Note: First deployment will create the gh-pages branch automatically
+2. Under **Source**, select: **Deploy from a branch**
+3. Under **Branch**, select: **gh-pages** / **/ (root)**
+4. Click **Save**
+5. Note: The `gh-pages` branch is managed by `mike` (via `docs.yml`/`release.yml`) — do not select "GitHub Actions" as the source, it's incompatible with mike's branch-based deployment model
 
 ### Enable Security Features
 1. Go to **Settings** → **Security** → **Code security and analysis**

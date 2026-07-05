@@ -74,10 +74,10 @@ This directory contains automated CI/CD workflows for jsonatapy. All workflows f
 - JSON results files
 - Performance charts (speedup_comparison.png, category_comparison.png)
 - PR comments with benchmark summary
-- Historical data on gh-pages branch
+- Historical data on the `benchmark-data` branch (one `results/v<version>.json` per release, plus `results/latest.json`)
 
 ### 4. Documentation (`docs.yml`)
-**Triggers:** Push to main, Releases, Manual
+**Triggers:** Push to main, Manual
 **Purpose:** Build and deploy documentation to GitHub Pages
 
 **Features:**
@@ -257,7 +257,7 @@ Add to README.md:
 
 ### Weekly Tasks
 - Review security scan results (check email notifications)
-- Check benchmark trends on gh-pages
+- Check benchmark trends on the `benchmark-data` branch
 - Review open security advisories
 
 ### Monthly Tasks
