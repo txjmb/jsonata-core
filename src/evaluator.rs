@@ -4201,18 +4201,70 @@ impl Evaluator {
                                 }
                             }
 
-                            // Collect result
+                            // Rewrap results as tuples carrying this incoming
+                            // tuple's focus/index/ancestor bindings, so that
+                            // DOWNSTREAM steps keep seeing them: a predicate like
+                            // `[ssn = $e.SSN]` after `Employee@$e.(Contact)`, a
+                            // later `%`/`%.%` in `Account.Order.(Product).{...}`,
+                            // or a further path step all read those bindings from
+                            // the tuple wrapper (see AstNode::Variable's tuple
+                            // fallback). Without rewrapping, the tuple chain is
+                            // severed after a parenthesized/object/variable step
+                            // and those references resolve to nothing. The
+                            // wrappers are projected back to their `@` values by
+                            // the top-level `unwrap_tuple_output` pass.
+                            let carried: Vec<(String, JValue)> = tuple_obj
+                                .iter()
+                                .filter(|(k, _)| {
+                                    (k.starts_with('$') && k.len() > 1) || k.starts_with('!')
+                                })
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect();
+                            let wrap = |v: JValue| -> JValue {
+                                match v {
+                                    // If the step produced a nested tuple stream
+                                    // (e.g. `(Product)` whose inner `Product` is
+                                    // itself `%`-tagged), MERGE the inner tuple's
+                                    // keys over the carried outer bindings, mirroring
+                                    // jsonata-js's `res.tupleStream` branch
+                                    // (`Object.assign(tuple, res[bb])`) -- do NOT
+                                    // double-wrap, which would bury `@`/`!label`
+                                    // one level down and break a following `%`/`%.%`.
+                                    JValue::Object(inner)
+                                        if inner.get("__tuple__") == Some(&JValue::Bool(true)) =>
+                                    {
+                                        let mut w = IndexMap::new();
+                                        for (k, val) in &carried {
+                                            w.insert(k.clone(), val.clone());
+                                        }
+                                        for (k, val) in inner.iter() {
+                                            w.insert(k.clone(), val.clone());
+                                        }
+                                        w.insert("__tuple__".to_string(), JValue::Bool(true));
+                                        JValue::object(w)
+                                    }
+                                    other => {
+                                        let mut w = IndexMap::new();
+                                        w.insert("@".to_string(), other);
+                                        for (k, val) in &carried {
+                                            w.insert(k.clone(), val.clone());
+                                        }
+                                        w.insert("__tuple__".to_string(), JValue::Bool(true));
+                                        JValue::object(w)
+                                    }
+                                }
+                            };
                             if !step_result.is_null() && !step_result.is_undefined() {
-                                // For object constructors, collect results directly
-                                // For other steps, handle arrays
+                                // Object constructors yield one value per tuple;
+                                // other steps may yield an array to splice in.
                                 if matches!(&step.node, AstNode::Object(_)) {
-                                    results.push(step_result);
-                                } else if matches!(step_result, JValue::Array(_)) {
-                                    if let JValue::Array(arr) = step_result {
-                                        results.extend(arr.iter().cloned());
+                                    results.push(wrap(step_result));
+                                } else if let JValue::Array(arr) = step_result {
+                                    for it in arr.iter() {
+                                        results.push(wrap(it.clone()));
                                     }
                                 } else {
-                                    results.push(step_result);
+                                    results.push(wrap(step_result));
                                 }
                             }
                         }
@@ -9902,9 +9954,11 @@ impl Evaluator {
             }
         }
 
-        // For complex expressions, evaluate normally against the actual element
-        // but with the full tuple as the data context (so index bindings are accessible)
-        let result = self.evaluate_internal(term_expr, element)?;
+        // For complex expressions, evaluate against the tuple's `@` value (the
+        // real element), not the wrapper. The tuple's carried focus/index/ancestor
+        // bindings are reachable via context (bound by evaluate_sort), so a term
+        // like `$`, `%.Price`, or `$pos` still resolves correctly.
+        let result = self.evaluate_internal(term_expr, &actual_element)?;
 
         // If the result is null from a complex expression, we can't easily tell if it's
         // "missing field" or "explicit null". For now, treat null results as undefined
@@ -9969,13 +10023,25 @@ impl Evaluator {
                 }
             }
 
+            // When sorting a tuple stream, `$` and the term's data context are the
+            // tuple's `@` value, not the `{@, $var, !label, __tuple__}` wrapper --
+            // otherwise a term like `^($)` would try to order by the wrapper
+            // object and raise T2008. The carried focus/index/ancestor keys stay
+            // reachable via the context bindings established just above.
+            let term_data = match element {
+                JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)) => {
+                    obj.get("@").cloned().unwrap_or(JValue::Null)
+                }
+                other => other.clone(),
+            };
+
             // Evaluate each sort term with $ bound to the element
             for (term_expr, _ascending) in terms {
                 // Save current $ binding
                 let saved_dollar = self.context.lookup("$").cloned();
 
                 // Bind $ to current element
-                self.context.bind("$".to_string(), element.clone());
+                self.context.bind("$".to_string(), term_data.clone());
 
                 // Evaluate the sort expression, distinguishing missing fields from explicit null
                 let sort_value = self.evaluate_sort_term(term_expr, element)?;
