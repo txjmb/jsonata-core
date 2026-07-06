@@ -3912,7 +3912,7 @@ impl Evaluator {
         // stream up front, mirroring jsonata-js's evaluateTupleStep for the
         // first path step where tupleBindings is undefined.
         let mut current: JValue = if Self::step_creates_tuple(&steps[0]) {
-            JValue::array(self.create_tuple_stream(&steps[0], data)?)
+            JValue::array(self.create_tuple_stream(&steps[0], data, true)?)
         } else {
             match &steps[0].node {
                 AstNode::Wildcard => {
@@ -4101,7 +4101,7 @@ impl Evaluator {
             let is_parent_step_over_tuple =
                 matches!(step.node, AstNode::Parent(_)) && is_tuple_array;
             if Self::step_creates_tuple(step) || is_parent_step_over_tuple {
-                current = JValue::array(self.create_tuple_stream(step, &current)?);
+                current = JValue::array(self.create_tuple_stream(step, &current, false)?);
                 continue;
             }
 
@@ -4167,9 +4167,27 @@ impl Evaluator {
                                     // Variable lookup - check context (which now has bindings)
                                     self.evaluate_internal(&step.node, tuple)?
                                 }
-                                AstNode::Object(_) | AstNode::FunctionApplication(_) => {
-                                    // Object constructor or function application - evaluate on actual data
+                                AstNode::Object(_) => {
+                                    // Object constructor - evaluate on actual data
                                     self.evaluate_internal(&step.node, &actual_data)?
+                                }
+                                AstNode::FunctionApplication(inner) => {
+                                    // A parenthesized step `(expr)` consuming a tuple stream
+                                    // (e.g. `Account.Order.Product.( %.OrderID )` or
+                                    // `Employee@$e.(Contact)[...]`): evaluate the INNER
+                                    // expression on the tuple's `@` value with `$` bound to
+                                    // it, mirroring the non-tuple FunctionApplication step
+                                    // handling. Routing the wrapper node itself through
+                                    // evaluate_internal raises "Function application can only
+                                    // be used in path expressions".
+                                    let saved_dollar = self.context.lookup("$").cloned();
+                                    self.context.bind("$".to_string(), actual_data.clone());
+                                    let v = self.evaluate_internal(inner, &actual_data);
+                                    match saved_dollar {
+                                        Some(s) => self.context.bind("$".to_string(), s),
+                                        None => self.context.unbind("$"),
+                                    }
+                                    v?
                                 }
                                 _ => unreachable!(), // We only match specific types above
                             };
@@ -4385,9 +4403,55 @@ impl Evaluator {
                                                 };
 
                                                 if !stages.is_empty() {
+                                                    // Bind this tuple's carried focus/index/ancestor
+                                                    // bindings so a filter predicate that references
+                                                    // them resolves -- e.g. `library.loans@$l.books[$l.isbn=isbn]`,
+                                                    // where the `[$l.isbn=isbn]` stage on the (non-focus)
+                                                    // `books` step must see `$l` from the enclosing
+                                                    // `@$l` focus stream. Without this the predicate
+                                                    // evaluates `$l` as unbound and filters everything out.
+                                                    let saved_tuple: Vec<(String, Option<JValue>)> =
+                                                        obj.iter()
+                                                            .filter_map(|(k, _)| {
+                                                                if let Some(n) = k.strip_prefix('$')
+                                                                {
+                                                                    (!n.is_empty())
+                                                                        .then(|| n.to_string())
+                                                                } else if k.starts_with('!') {
+                                                                    Some(k.clone())
+                                                                } else {
+                                                                    None
+                                                                }
+                                                            })
+                                                            .map(|n| {
+                                                                (
+                                                                    n.clone(),
+                                                                    self.context
+                                                                        .lookup(&n)
+                                                                        .cloned(),
+                                                                )
+                                                            })
+                                                            .collect();
+                                                    for (k, v) in obj.iter() {
+                                                        if let Some(n) = k.strip_prefix('$') {
+                                                            if !n.is_empty() {
+                                                                self.context
+                                                                    .bind(n.to_string(), v.clone());
+                                                            }
+                                                        } else if k.starts_with('!') {
+                                                            self.context.bind(k.clone(), v.clone());
+                                                        }
+                                                    }
                                                     // Apply stages to the extracted value
                                                     let processed_val =
-                                                        self.apply_stages(val, stages)?;
+                                                        self.apply_stages(val, stages);
+                                                    for (n, old) in saved_tuple.into_iter().rev() {
+                                                        match old {
+                                                            Some(v) => self.context.bind(n, v),
+                                                            None => self.context.unbind(&n),
+                                                        }
+                                                    }
+                                                    let processed_val = processed_val?;
                                                     // Stages always return an array (or null); extend results
                                                     match processed_val {
                                                         JValue::Array(arr) => {
@@ -4675,6 +4739,7 @@ impl Evaluator {
         &mut self,
         step: &PathStep,
         input: &JValue,
+        is_first_path_step: bool,
     ) -> Result<Vec<JValue>, EvaluatorError> {
         use std::rc::Rc;
 
@@ -4702,7 +4767,22 @@ impl Evaluator {
             }
         } else {
             let items: Vec<JValue> = match input {
-                JValue::Array(arr) => arr.iter().cloned().collect(),
+                // Mirrors jsonata-js evaluatePath's inputSequence rule
+                // (`if (Array.isArray(input) && expr.steps[0].type !== 'variable')`):
+                // ONLY when the path's FIRST step is a variable reference (`$`/`$$`)
+                // is the input array taken as a SINGLE sequence value
+                // (`createSequence(input)`) rather than iterated per-element. This
+                // is what makes `$#$pos` bind `$pos` to each element's position
+                // within the whole array (one incoming tuple whose `@` is the
+                // array, then the inner `bb` counter walks its elements) instead of
+                // producing one singleton tuple per element (index always 0). The
+                // rule is scoped to step 0 so `$.$#$pos` (where `$#$pos` is a later
+                // step) still iterates per-element.
+                JValue::Array(arr)
+                    if !(is_first_path_step && matches!(&step.node, AstNode::Variable(_))) =>
+                {
+                    arr.iter().cloned().collect()
+                }
                 single => vec![single.clone()],
             };
             items
@@ -4786,6 +4866,10 @@ impl Evaluator {
                     new_tuple.insert("@".to_string(), value);
                 }
                 if let Some(index_var) = &step.index_var {
+                    // Index binding records the position of this value WITHIN the
+                    // per-binding result row (jsonata-js evaluateTupleStep: the
+                    // inner `bb` counter, `tuple[expr.index] = bb`), which resets
+                    // for each incoming tuple.
                     new_tuple.insert(format!("${}", index_var), JValue::from(position as i64));
                 }
                 if let Some(ancestor_label) = &step.ancestor_label {
