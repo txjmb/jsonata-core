@@ -159,7 +159,7 @@ See [Performance docs](docs/performance.md) for full benchmark results and metho
 
 ## Features
 
-- **Full JSONata 2.1.0 compatibility** — 1258/1258 reference tests passing
+- **Full JSONata 2.1.0/2.2.0 compatibility** — 1258/1258 reference tests passing
 - **Pure Rust core** — no JavaScript runtime, no Node.js dependency
 - **Optional Python bindings** — PyO3/maturin, zero-copy where possible
 - **Cross-platform** — Linux, macOS (Intel & ARM), Windows; Python 3.10–3.13
