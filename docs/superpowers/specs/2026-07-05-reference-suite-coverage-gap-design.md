@@ -152,7 +152,21 @@ new session shouldn't need to re-derive it, just verify and build on it.
   large phase. Phases 0-2 ship now as their own release; Phases 3+4 (combined) and 5 remain
   open follow-up work with no landing date attached.
 - **Phase 5 — remaining stragglers.** `array-constructor` (2), `function-distinct` (1),
-  `flattening` (1) — not yet triaged; likely quick once looked at individually.
+  `flattening` (1) — **DONE (2026-07-06)**. Three distinct root causes, all in
+  `src/evaluator.rs`: (1) the array-constructor step (`.[a,b]`) didn't implement
+  jsonata-js's `evaluateStep` special case where, when it's the path's last step and
+  maps over exactly one input item, the constructed sub-array becomes the whole path
+  result directly rather than being wrapped in an extra outer array (fixed by tracking
+  `is_last_step` in the path-step loop); (2) the compiled/VM fast path
+  (`try_compile_path`) folded the explicit `[]` keep-array marker
+  (`Predicate(Boolean(true))`) into an ordinary boolean filter, discarding its
+  keep-singleton semantics that the tree-walker's `evaluate_predicate` already handled
+  correctly — fixed by bailing out to the tree-walker for that marker, matching the
+  existing numeric-predicate bailout; (3) `$distinct` threw on non-array input instead
+  of jsonata-js's `functions.js` behavior of returning non-array (and length-<=1 array)
+  input unchanged. All three verified against real jsonata-js and fixed at both
+  builtin-dispatch call sites (compiled and tree-walker). 1682/1682 passing, zero
+  xfails remain in the suite.
 
 Out of scope: the jsonata-js 2.2.1 signature-engine spec's Phase 2
 (`docs/superpowers/specs/2026-07-04-jsonata-2.2.1-design.md`) — porting jsonata-js's new
