@@ -3600,6 +3600,10 @@ impl Evaluator {
                     // When applying stages, use stage-specific predicate logic
                     result = self.evaluate_predicate_as_stage(&result, predicate_expr)?;
                 }
+                // Positional index stages are meaningful only over a tuple stream
+                // (they set a variable to each tuple's position); they are applied
+                // in `create_tuple_stream`, not on a plain value sequence here.
+                Stage::Index(_) => {}
             }
         }
         Ok(result)
@@ -4995,8 +4999,7 @@ impl Evaluator {
             }
             // Check if any stage is an empty predicate
             step.stages.iter().any(|stage| {
-                let crate::ast::Stage::Filter(pred) = stage;
-                matches!(**pred, AstNode::Boolean(true))
+                matches!(stage, crate::ast::Stage::Filter(pred) if matches!(**pred, AstNode::Boolean(true)))
             })
         });
 
@@ -5183,7 +5186,14 @@ impl Evaluator {
             let step_value = self.evaluate_internal(&step.node, &actual_data);
 
             let mut step_value = step_value?;
-            if !step.stages.is_empty() {
+            // When the step carries an ORDERED index stage (a second `#$var`,
+            // e.g. `books@$b#$ib[...]#$ib2`), its stages must be applied to the
+            // BUILT tuple stream in order (filter then re-number) so the filter
+            // sees the per-tuple focus/index bindings and each index reflects the
+            // position at its point in the sequence. Those steps defer all stage
+            // application to `apply_tuple_stages` after the stream is built.
+            let has_index_stage = step.stages.iter().any(|s| matches!(s, Stage::Index(_)));
+            if !step.stages.is_empty() && !has_index_stage {
                 // A `%` inside a filter predicate refers to the ancestry of
                 // THIS step (its own input for a level-1 `%`, or an earlier
                 // step's input for a `%.%` chain). ast_transform tags this step
@@ -5246,7 +5256,80 @@ impl Evaluator {
             }
         }
 
+        // Apply ordered filter/index stages to the built tuple stream when a
+        // second index binding deferred them (see the has_index_stage comment
+        // in the build loop above).
+        if step.stages.iter().any(|s| matches!(s, Stage::Index(_))) {
+            result = self.apply_tuple_stages(result, &step.stages)?;
+        }
+
         Ok(result)
+    }
+
+    /// Apply a step's stages, in order, to an already-built tuple stream --
+    /// mirrors jsonata-js `evaluateStages` (jsonata.js ~L288-305): a `filter`
+    /// keeps the tuples whose predicate is truthy (evaluated against each tuple's
+    /// `@` with its carried `$var`/`!label` bindings in scope), and an `index`
+    /// stage sets its variable on every surviving tuple to that tuple's position
+    /// in the CURRENT stream. Used for steps carrying a second `#$var` index
+    /// binding (e.g. `books@$b#$ib[$l.isbn=$b.isbn]#$ib2`), where `$ib` is the
+    /// pre-filter position and `$ib2` the post-filter position.
+    fn apply_tuple_stages(
+        &mut self,
+        mut tuples: Vec<JValue>,
+        stages: &[Stage],
+    ) -> Result<Vec<JValue>, EvaluatorError> {
+        for stage in stages {
+            match stage {
+                Stage::Filter(pred) => {
+                    let mut kept = Vec::with_capacity(tuples.len());
+                    for tup in tuples.into_iter() {
+                        let JValue::Object(obj) = &tup else {
+                            continue;
+                        };
+                        // Bind this tuple's carried focus/index/ancestor keys so
+                        // the predicate can reference them.
+                        let mut saved: Vec<(String, Option<JValue>)> = Vec::new();
+                        for (k, v) in obj.iter() {
+                            let name = if let Some(n) = k.strip_prefix('$') {
+                                if n.is_empty() {
+                                    continue;
+                                }
+                                n.to_string()
+                            } else if k.starts_with('!') {
+                                k.clone()
+                            } else {
+                                continue;
+                            };
+                            saved.push((name.clone(), self.context.lookup(&name).cloned()));
+                            self.context.bind(name, v.clone());
+                        }
+                        let at = obj.get("@").cloned().unwrap_or(JValue::Undefined);
+                        let pred_res = self.evaluate_internal(pred, &at);
+                        for (name, old) in saved.into_iter().rev() {
+                            match old {
+                                Some(v) => self.context.bind(name, v),
+                                None => self.context.unbind(&name),
+                            }
+                        }
+                        if self.is_truthy(&pred_res?) {
+                            kept.push(tup);
+                        }
+                    }
+                    tuples = kept;
+                }
+                Stage::Index(var) => {
+                    for (pos, tup) in tuples.iter_mut().enumerate() {
+                        if let JValue::Object(obj) = tup {
+                            let mut m = (**obj).clone();
+                            m.insert(format!("${}", var), JValue::from(pos as i64));
+                            *tup = JValue::object(m);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(tuples)
     }
 
     /// Helper to evaluate a complex path step
@@ -5639,6 +5722,7 @@ impl Evaluator {
                                                 filter_expr,
                                             )?;
                                         }
+                                        Stage::Index(_) => {}
                                     }
                                 }
 
@@ -5673,6 +5757,7 @@ impl Evaluator {
                                                 filter_expr,
                                             )?;
                                         }
+                                        Stage::Index(_) => {}
                                     }
                                 }
 
@@ -9633,6 +9718,9 @@ impl Evaluator {
                     for stage in &step.stages {
                         match stage {
                             Stage::Filter(expr) => Self::collect_free_vars_walk(expr, bound, free),
+                            // An index stage binds a variable; it introduces no
+                            // free variable references.
+                            Stage::Index(_) => {}
                         }
                     }
                 }

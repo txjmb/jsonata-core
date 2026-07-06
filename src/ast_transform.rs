@@ -147,6 +147,7 @@ fn substitute_labels(node: AstNode, state: &AncestryState) -> AstNode {
                             Stage::Filter(e) => {
                                 Stage::Filter(Box::new(substitute_labels(*e, state)))
                             }
+                            Stage::Index(v) => Stage::Index(v),
                         })
                         .collect(),
                     ..s
@@ -367,7 +368,16 @@ fn splice_marker_steps(
             }
             if let Some(last) = steps.last_mut() {
                 check_focus_bind_target(&marker, &last.stages, &last.node)?;
-                apply_marker_to_step(last, marker);
+                // A SECOND index binding on the same step (e.g. `books#$ib[...]#$ib2`)
+                // must not overwrite the first: append it as an ordered index
+                // stage so it numbers the post-filter positions (jsonata's `#`
+                // case pushing an index stage when the step already has one).
+                if let (BindingMarker::Index(var), true) = (&marker, last.index_var.is_some()) {
+                    last.stages.push(Stage::Index(var.clone()));
+                    last.is_tuple = true;
+                } else {
+                    apply_marker_to_step(last, marker);
+                }
             }
             steps
         }
@@ -810,6 +820,9 @@ fn transform_path_steps(
                         pp.extend(t.pending);
                         new_stages.push(Stage::Filter(Box::new(t.node)));
                     }
+                    // Index stages carry only a variable name -- nothing to
+                    // resolve/transform.
+                    Stage::Index(v) => new_stages.push(Stage::Index(v)),
                 }
             }
             s.stages = new_stages;
@@ -1159,6 +1172,7 @@ mod tests {
         );
         // The `%` inside the predicate must carry Product's label.
         match &steps[2].stages[0] {
+            Stage::Index(_) => unreachable!("no index stage in this test"),
             Stage::Filter(expr) => match expr.as_ref() {
                 AstNode::Binary { lhs, .. } => match lhs.as_ref() {
                     AstNode::Path { steps: inner } => match &inner[0].node {
@@ -1187,6 +1201,7 @@ mod tests {
         assert!(order_label.is_some(), "Order must be tagged");
         assert_ne!(product_label, order_label);
         match &steps[2].stages[0] {
+            Stage::Index(_) => unreachable!("no index stage in this test"),
             Stage::Filter(expr) => match expr.as_ref() {
                 AstNode::Binary { lhs, .. } => match lhs.as_ref() {
                     AstNode::Path { steps: inner } => {
@@ -1247,6 +1262,7 @@ mod tests {
         assert_ne!(product_label, order_label);
         // first predicate: %  -> Product
         match &steps[2].stages[0] {
+            Stage::Index(_) => unreachable!("no index stage in this test"),
             Stage::Filter(expr) => match expr.as_ref() {
                 AstNode::Binary { lhs, .. } => match lhs.as_ref() {
                     AstNode::Path { steps: inner } => match &inner[0].node {
@@ -1260,6 +1276,7 @@ mod tests {
         }
         // second predicate: %.% -> Product (reuse), Order
         match &steps[2].stages[1] {
+            Stage::Index(_) => unreachable!("no index stage in this test"),
             Stage::Filter(expr) => match expr.as_ref() {
                 AstNode::Binary { lhs, .. } => match lhs.as_ref() {
                     AstNode::Path { steps: inner } => {

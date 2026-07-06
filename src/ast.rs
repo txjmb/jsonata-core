@@ -11,6 +11,12 @@ use serde::{Deserialize, Serialize};
 pub enum Stage {
     /// Filter/predicate stage [expr]
     Filter(Box<AstNode>),
+    /// Positional index stage `#$var` that lands on a step already carrying an
+    /// index/stages (jsonata-js's `{type: 'index', value}` stage). Binds the
+    /// variable to each surviving tuple's position in the CURRENT (post-earlier-
+    /// stages) result, so e.g. `books@$b#$ib[$l.isbn=$b.isbn]#$ib2` gives `$ib`
+    /// the pre-filter book position and `$ib2` the post-filter position.
+    Index(String),
 }
 
 /// A step in a path expression with optional stages
