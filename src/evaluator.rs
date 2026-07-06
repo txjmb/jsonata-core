@@ -1411,9 +1411,13 @@ fn try_compile_path(
     };
 
     // Compile a boolean filter predicate, rejecting numeric predicates (`[0]`, `[1]`)
-    // which represent index access in JSONata, not boolean filtering.
+    // which represent index access in JSONata, not boolean filtering, and the
+    // explicit `[]` keep-array marker (`Boolean(true)`), which forces the result
+    // to stay an array rather than filtering — the tree-walker's
+    // `evaluate_predicate` special-cases it and the compiled path has no
+    // equivalent, so bail out rather than silently treating it as `filter(true)`.
     let compile_filter = |node: &AstNode| -> Option<CompiledExpr> {
-        if matches!(node, AstNode::Number(_)) {
+        if matches!(node, AstNode::Number(_) | AstNode::Boolean(true)) {
             return None;
         }
         try_compile_expr_inner(node, allowed_vars)
@@ -2055,10 +2059,10 @@ fn call_pure_builtin(name: &str, args: &[JValue], data: &JValue) -> Result<JValu
         },
         "distinct" => match effective_args.first() {
             Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
-            Some(JValue::Array(arr)) => Ok(functions::array::distinct(arr)?),
-            _ => Err(EvaluatorError::TypeError(
-                "distinct() requires an array argument".to_string(),
-            )),
+            Some(JValue::Array(arr)) if arr.len() > 1 => Ok(functions::array::distinct(arr)?),
+            // Non-array input, and arrays of length <= 1, pass through unchanged
+            // (jsonata-js functions.js: `if(!Array.isArray(arr) || arr.length <= 1) return arr;`)
+            Some(other) => Ok(other.clone()),
         },
 
         // ── Object functions ────────────────────────────────────────────
@@ -4268,7 +4272,8 @@ impl Evaluator {
         };
 
         // Process remaining steps
-        for step in steps[1..].iter() {
+        for (step_idx, step) in steps[1..].iter().enumerate() {
+            let is_last_step = step_idx == steps.len() - 2;
             // Early return if current is null/undefined - no point continuing
             // This handles cases like `blah.{}` where blah doesn't exist
             if current.is_null() {
@@ -4843,7 +4848,17 @@ impl Evaluator {
                                 // Each array element gets its own sub-array with all values
                                 result.push(JValue::array(group_values));
                             }
-                            JValue::array(result)
+                            // jsonata-js's evaluateStep: when this is the path's last
+                            // step and mapping produced exactly one constructed
+                            // sub-array, that sub-array IS the path result directly
+                            // (not wrapped in an outer singleton array) — e.g.
+                            // `$.[value,epochSeconds]` over a 1-element array yields
+                            // `[3, 1578381600]`, not `[[3, 1578381600]]`.
+                            if is_last_step && result.len() == 1 {
+                                result.into_iter().next().unwrap()
+                            } else {
+                                JValue::array(result)
+                            }
                         }
                         _ => {
                             // For non-arrays, just evaluate the array constructor normally
@@ -7642,10 +7657,11 @@ impl Evaluator {
                     ));
                 }
                 match &evaluated_args[0] {
-                    JValue::Array(arr) => Ok(functions::array::distinct(arr)?),
-                    _ => Err(EvaluatorError::TypeError(
-                        "distinct() requires an array argument".to_string(),
-                    )),
+                    JValue::Array(arr) if arr.len() > 1 => Ok(functions::array::distinct(arr)?),
+                    // Non-array input, and arrays of length <= 1, pass through
+                    // unchanged (jsonata-js functions.js:
+                    // `if(!Array.isArray(arr) || arr.length <= 1) return arr;`)
+                    other => Ok(other.clone()),
                 }
             }
             "exists" => {
