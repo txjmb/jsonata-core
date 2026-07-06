@@ -1426,6 +1426,17 @@ fn try_compile_path(
     //     previous step's filter slot, since both encodings have identical runtime semantics.
     let mut compiled_steps = Vec::with_capacity(field_steps.len());
     for step in field_steps {
+        // Tuple-stream steps (@ focus / # index / % parent binding) require the
+        // tree-walker's tuple machinery (create_tuple_stream / evaluate_path's
+        // tuple handling). Never compile them to the flat bytecode field path,
+        // which is unaware of the binding flags and would silently drop them.
+        if step.focus.is_some()
+            || step.index_var.is_some()
+            || step.ancestor_label.is_some()
+            || step.is_tuple
+        {
+            return None;
+        }
         match &step.node {
             AstNode::Name(name) => {
                 let filter = match step.stages.as_slice() {
@@ -3338,10 +3349,17 @@ impl Evaluator {
                 }
             }
 
-            // Parent-reference operator: should be resolved by ast_transform pass (Task 2)
-            AstNode::Parent(_) => Err(EvaluatorError::EvaluationError(
-                "Parent operator (%) must be resolved by ast_transform pass".to_string(),
-            )),
+            // Parent-reference operator (%): ast_transform has already resolved
+            // this to a synthetic ancestor label ("!0", "!1", ...). The enclosing
+            // tuple step binds that label into scope (create_tuple_stream +
+            // needs_tuple_context_binding), so resolving it is an ordinary scope
+            // lookup, mirroring jsonata-js's
+            // `case 'parent': result = environment.lookup(expr.slot.label);`.
+            AstNode::Parent(label) => Ok(self
+                .context
+                .lookup(label)
+                .cloned()
+                .unwrap_or(JValue::Undefined)),
         }
     }
 
@@ -3627,8 +3645,10 @@ impl Evaluator {
         }
 
         // Fast path: single field access on object
-        // This is a very common pattern, so optimize it
-        if steps.len() == 1 {
+        // This is a very common pattern, so optimize it.
+        // Skipped for tuple-binding steps (@/#/%), which need full tuple-stream
+        // creation handled below.
+        if steps.len() == 1 && !Self::step_creates_tuple(&steps[0]) {
             if let AstNode::Name(field_name) = &steps[0].node {
                 return match data {
                     JValue::Object(obj) => {
@@ -3830,144 +3850,154 @@ impl Evaluator {
         // Track whether we did array mapping (for singleton unwrapping)
         let mut did_array_mapping = false;
 
-        // For the first step, work with a reference
-        let mut current: JValue = match &steps[0].node {
-            AstNode::Wildcard => {
-                // Wildcard as first step
-                match data {
-                    JValue::Object(obj) => {
-                        let mut result = Vec::new();
-                        for value in obj.values() {
-                            // Flatten arrays into the result
-                            match value {
-                                JValue::Array(arr) => result.extend(arr.iter().cloned()),
-                                _ => result.push(value.clone()),
+        // For the first step, work with a reference.
+        // Tuple-binding first steps (e.g. `items#$i`, `foo@$v`) create a tuple
+        // stream up front, mirroring jsonata-js's evaluateTupleStep for the
+        // first path step where tupleBindings is undefined.
+        let mut current: JValue = if Self::step_creates_tuple(&steps[0]) {
+            JValue::array(self.create_tuple_stream(&steps[0], data)?)
+        } else {
+            match &steps[0].node {
+                AstNode::Wildcard => {
+                    // Wildcard as first step
+                    match data {
+                        JValue::Object(obj) => {
+                            let mut result = Vec::new();
+                            for value in obj.values() {
+                                // Flatten arrays into the result
+                                match value {
+                                    JValue::Array(arr) => result.extend(arr.iter().cloned()),
+                                    _ => result.push(value.clone()),
+                                }
                             }
+                            JValue::array(result)
                         }
-                        JValue::array(result)
-                    }
-                    JValue::Array(arr) => JValue::Array(arr.clone()),
-                    _ => JValue::Null,
-                }
-            }
-            AstNode::Descendant => {
-                // Descendant as first step
-                let descendants = self.collect_descendants(data);
-                JValue::array(descendants)
-            }
-            AstNode::ParentVariable(name) => {
-                // Parent variable as first step
-                let parent_data = self.context.get_parent().ok_or_else(|| {
-                    EvaluatorError::ReferenceError("Parent context not available".to_string())
-                })?;
-
-                if name.is_empty() {
-                    // $$ alone returns parent context
-                    parent_data.clone()
-                } else {
-                    // $$field accesses field on parent
-                    match parent_data {
-                        JValue::Object(obj) => obj.get(name).cloned().unwrap_or(JValue::Null),
+                        JValue::Array(arr) => JValue::Array(arr.clone()),
                         _ => JValue::Null,
                     }
                 }
-            }
-            AstNode::Name(field_name) => {
-                // Field/property access - get the stages for this step
-                let stages = &steps[0].stages;
+                AstNode::Descendant => {
+                    // Descendant as first step
+                    let descendants = self.collect_descendants(data);
+                    JValue::array(descendants)
+                }
+                AstNode::ParentVariable(name) => {
+                    // Parent variable as first step
+                    let parent_data = self.context.get_parent().ok_or_else(|| {
+                        EvaluatorError::ReferenceError("Parent context not available".to_string())
+                    })?;
 
-                match data {
-                    JValue::Object(obj) => {
-                        let val = obj.get(field_name).cloned().unwrap_or(JValue::Undefined);
-                        // Apply any stages to the extracted value
-                        if !stages.is_empty() {
-                            self.apply_stages(val, stages)?
-                        } else {
-                            val
+                    if name.is_empty() {
+                        // $$ alone returns parent context
+                        parent_data.clone()
+                    } else {
+                        // $$field accesses field on parent
+                        match parent_data {
+                            JValue::Object(obj) => obj.get(name).cloned().unwrap_or(JValue::Null),
+                            _ => JValue::Null,
                         }
                     }
-                    JValue::Array(arr) => {
-                        // Array mapping: extract field from each element and apply stages
-                        let mut result = Vec::new();
-                        for item in arr.iter() {
-                            match item {
-                                JValue::Object(obj) => {
-                                    let val =
-                                        obj.get(field_name).cloned().unwrap_or(JValue::Undefined);
-                                    if !val.is_null() && !val.is_undefined() {
-                                        if !stages.is_empty() {
-                                            // Apply stages to the extracted value
-                                            let processed_val = self.apply_stages(val, stages)?;
-                                            // Stages always return an array (or null); extend results
-                                            match processed_val {
-                                                JValue::Array(arr) => {
-                                                    result.extend(arr.iter().cloned())
-                                                }
-                                                JValue::Null => {} // Skip nulls from stage application
-                                                other => result.push(other), // Shouldn't happen, but handle it
-                                            }
-                                        } else {
-                                            // No stages: flatten arrays, push scalars
-                                            match val {
-                                                JValue::Array(arr) => {
-                                                    result.extend(arr.iter().cloned())
-                                                }
-                                                other => result.push(other),
-                                            }
-                                        }
-                                    }
-                                }
-                                JValue::Array(inner_arr) => {
-                                    // Recursively map over nested array
-                                    let nested_result = self.evaluate_path(
-                                        &[steps[0].clone()],
-                                        &JValue::Array(inner_arr.clone()),
-                                    )?;
-                                    match nested_result {
-                                        JValue::Array(nested) => {
-                                            result.extend(nested.iter().cloned())
-                                        }
-                                        JValue::Null => {} // Skip nulls from nested arrays
-                                        other => result.push(other),
-                                    }
-                                }
-                                _ => {} // Skip non-object items
+                }
+                AstNode::Name(field_name) => {
+                    // Field/property access - get the stages for this step
+                    let stages = &steps[0].stages;
+
+                    match data {
+                        JValue::Object(obj) => {
+                            let val = obj.get(field_name).cloned().unwrap_or(JValue::Undefined);
+                            // Apply any stages to the extracted value
+                            if !stages.is_empty() {
+                                self.apply_stages(val, stages)?
+                            } else {
+                                val
                             }
                         }
-                        JValue::array(result)
+                        JValue::Array(arr) => {
+                            // Array mapping: extract field from each element and apply stages
+                            let mut result = Vec::new();
+                            for item in arr.iter() {
+                                match item {
+                                    JValue::Object(obj) => {
+                                        let val = obj
+                                            .get(field_name)
+                                            .cloned()
+                                            .unwrap_or(JValue::Undefined);
+                                        if !val.is_null() && !val.is_undefined() {
+                                            if !stages.is_empty() {
+                                                // Apply stages to the extracted value
+                                                let processed_val =
+                                                    self.apply_stages(val, stages)?;
+                                                // Stages always return an array (or null); extend results
+                                                match processed_val {
+                                                    JValue::Array(arr) => {
+                                                        result.extend(arr.iter().cloned())
+                                                    }
+                                                    JValue::Null => {} // Skip nulls from stage application
+                                                    other => result.push(other), // Shouldn't happen, but handle it
+                                                }
+                                            } else {
+                                                // No stages: flatten arrays, push scalars
+                                                match val {
+                                                    JValue::Array(arr) => {
+                                                        result.extend(arr.iter().cloned())
+                                                    }
+                                                    other => result.push(other),
+                                                }
+                                            }
+                                        }
+                                    }
+                                    JValue::Array(inner_arr) => {
+                                        // Recursively map over nested array
+                                        let nested_result = self.evaluate_path(
+                                            &[steps[0].clone()],
+                                            &JValue::Array(inner_arr.clone()),
+                                        )?;
+                                        match nested_result {
+                                            JValue::Array(nested) => {
+                                                result.extend(nested.iter().cloned())
+                                            }
+                                            JValue::Null => {} // Skip nulls from nested arrays
+                                            other => result.push(other),
+                                        }
+                                    }
+                                    _ => {} // Skip non-object items
+                                }
+                            }
+                            JValue::array(result)
+                        }
+                        JValue::Null => JValue::Null,
+                        // Accessing field on non-object returns undefined (not an error)
+                        _ => JValue::Undefined,
                     }
-                    JValue::Null => JValue::Null,
-                    // Accessing field on non-object returns undefined (not an error)
-                    _ => JValue::Undefined,
                 }
-            }
-            AstNode::String(string_literal) => {
-                // String literal in path context - evaluate as literal and apply stages
-                // This handles cases like "Red"[true] where "Red" is a literal, not a field access
-                let stages = &steps[0].stages;
-                let val = JValue::string(string_literal.clone());
+                AstNode::String(string_literal) => {
+                    // String literal in path context - evaluate as literal and apply stages
+                    // This handles cases like "Red"[true] where "Red" is a literal, not a field access
+                    let stages = &steps[0].stages;
+                    let val = JValue::string(string_literal.clone());
 
-                if !stages.is_empty() {
-                    // Apply stages (predicates) to the string literal
-                    let result = self.apply_stages(val, stages)?;
-                    // Unwrap single-element arrays back to scalar
-                    // (string literals with predicates should return scalar or null, not arrays)
-                    match result {
-                        JValue::Array(arr) if arr.len() == 1 => arr[0].clone(),
-                        JValue::Array(arr) if arr.is_empty() => JValue::Null,
-                        other => other,
+                    if !stages.is_empty() {
+                        // Apply stages (predicates) to the string literal
+                        let result = self.apply_stages(val, stages)?;
+                        // Unwrap single-element arrays back to scalar
+                        // (string literals with predicates should return scalar or null, not arrays)
+                        match result {
+                            JValue::Array(arr) if arr.len() == 1 => arr[0].clone(),
+                            JValue::Array(arr) if arr.is_empty() => JValue::Null,
+                            other => other,
+                        }
+                    } else {
+                        val
                     }
-                } else {
-                    val
                 }
-            }
-            AstNode::Predicate(pred_expr) => {
-                // Predicate as first step
-                self.evaluate_predicate(data, pred_expr)?
-            }
-            _ => {
-                // Complex first step - evaluate it
-                self.evaluate_path_step(&steps[0].node, data, data)?
+                AstNode::Predicate(pred_expr) => {
+                    // Predicate as first step
+                    self.evaluate_predicate(data, pred_expr)?
+                }
+                _ => {
+                    // Complex first step - evaluate it
+                    self.evaluate_path_step(&steps[0].node, data, data)?
+                }
             }
         };
 
@@ -3980,6 +4010,15 @@ impl Evaluator {
             }
             if current.is_undefined() {
                 return Ok(JValue::Undefined);
+            }
+
+            // Tuple-binding step (@ focus / # index / % parent): create/extend the
+            // tuple stream, mirroring jsonata-js's evaluateTupleStep. Downstream
+            // (non-binding) steps then consume the {@, $var, !label, __tuple__}
+            // wrappers via the existing tuple-aware handling below.
+            if Self::step_creates_tuple(step) {
+                current = JValue::array(self.create_tuple_stream(step, &current)?);
+                continue;
             }
 
             // Check if current is a tuple array - if so, we need to bind tuple variables
@@ -4017,11 +4056,25 @@ impl Evaluator {
 
                     for tuple in arr.iter() {
                         if let JValue::Object(tuple_obj) = tuple {
-                            // Extract tuple bindings (variables starting with $)
+                            // Extract tuple bindings so nested expressions can see
+                            // them: `$var` focus/index bindings (stored `$name`,
+                            // bound as `name`) AND `!label` ancestor bindings for
+                            // `%` (stored and bound under the full `!label` key).
                             let bindings: Vec<(String, JValue)> = tuple_obj
                                 .iter()
-                                .filter(|(k, _)| k.starts_with('$') && k.len() > 1) // $i, $j, etc.
-                                .map(|(k, v)| (k[1..].to_string(), v.clone())) // Remove $ prefix for context binding
+                                .filter_map(|(k, v)| {
+                                    if let Some(name) = k.strip_prefix('$') {
+                                        if name.is_empty() {
+                                            None
+                                        } else {
+                                            Some((name.to_string(), v.clone()))
+                                        }
+                                    } else if k.starts_with('!') {
+                                        Some((k.clone(), v.clone()))
+                                    } else {
+                                        None
+                                    }
+                                })
                                 .collect();
 
                             // Save current bindings
@@ -4519,6 +4572,129 @@ impl Evaluator {
         Ok(result)
     }
 
+    /// True when a path step carries a tuple-binding flag (`@$var` focus,
+    /// `#$var` index, or a resolved `%` ancestor label) and must therefore
+    /// produce/extend a tuple stream rather than be evaluated as a plain step.
+    fn step_creates_tuple(step: &PathStep) -> bool {
+        step.focus.is_some() || step.index_var.is_some() || step.ancestor_label.is_some()
+    }
+
+    /// Create or extend a tuple stream for a tuple-binding path step, mirroring
+    /// jsonata-js's `evaluateTupleStep` (jsonata.js ~L315-380). The returned
+    /// vector holds `JValue::Object` tuple wrappers of the shape
+    /// `{ "@": value, "$focus"/"$index": ..., "!label": ..., "__tuple__": true }`
+    /// which downstream steps consume via the existing tuple-aware handling in
+    /// `evaluate_path`.
+    ///
+    /// `input` is the previous step's result: either an already-built tuple
+    /// stream (each wrapper carried forward, per JS's `tupleBindings`) or a
+    /// plain value/array entering tuple mode for the first time (each item
+    /// wrapped as `{'@': item}`, per JS's `input.map(item => {'@': item})`).
+    fn create_tuple_stream(
+        &mut self,
+        step: &PathStep,
+        input: &JValue,
+    ) -> Result<Vec<JValue>, EvaluatorError> {
+        use std::rc::Rc;
+
+        // Gather the incoming tuple bindings.
+        let is_tuple_input = matches!(
+            input,
+            JValue::Array(arr) if arr.first().is_some_and(|f| {
+                matches!(f, JValue::Object(o) if o.get("__tuple__") == Some(&JValue::Bool(true)))
+            })
+        );
+        let incoming: Vec<Rc<IndexMap<String, JValue>>> = if is_tuple_input {
+            match input {
+                JValue::Array(arr) => arr
+                    .iter()
+                    .filter_map(|t| match t {
+                        JValue::Object(o) => Some(o.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => unreachable!(),
+            }
+        } else {
+            let items: Vec<JValue> = match input {
+                JValue::Array(arr) => arr.iter().cloned().collect(),
+                single => vec![single.clone()],
+            };
+            items
+                .into_iter()
+                .map(|item| {
+                    let mut wrapper = IndexMap::new();
+                    wrapper.insert("@".to_string(), item);
+                    wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
+                    Rc::new(wrapper)
+                })
+                .collect()
+        };
+
+        let mut result = Vec::new();
+        for tuple_obj in incoming {
+            // Bind every carried tuple key into a real scope frame so the step
+            // expression can see prior focus/index/ancestor bindings, mirroring
+            // createFrameFromTuple's "for every key in tuple, frame.bind(...)".
+            let mut bound_names: Vec<String> = Vec::new();
+            for (key, value) in tuple_obj.iter() {
+                if let Some(name) = key.strip_prefix('$') {
+                    if !name.is_empty() {
+                        self.context.bind(name.to_string(), value.clone());
+                        bound_names.push(name.to_string());
+                    }
+                } else if key.starts_with('!') {
+                    self.context.bind(key.clone(), value.clone());
+                    bound_names.push(key.clone());
+                }
+            }
+
+            let actual_data = tuple_obj.get("@").cloned().unwrap_or(JValue::Undefined);
+            let step_value = self.evaluate_internal(&step.node, &actual_data);
+
+            for name in &bound_names {
+                self.context.unbind(name);
+            }
+            let mut step_value = step_value?;
+            if !step.stages.is_empty() {
+                step_value = self.apply_stages(step_value, &step.stages)?;
+            }
+
+            let row: Vec<JValue> = match step_value {
+                JValue::Undefined => continue,
+                JValue::Array(arr) => arr.iter().cloned().collect(),
+                other => vec![other],
+            };
+
+            for (position, value) in row.into_iter().enumerate() {
+                if value.is_undefined() {
+                    continue;
+                }
+                let mut new_tuple = (*tuple_obj).clone();
+                if let Some(focus_var) = &step.focus {
+                    // Focus binding keeps `@` as this step's INPUT (already carried
+                    // in the cloned tuple) and binds the result to `$focus`,
+                    // matching jsonata-js: `tuple[expr.focus] = res[bb];
+                    // tuple['@'] = tupleBindings[ee]['@'];`.
+                    new_tuple.insert(format!("${}", focus_var), value);
+                } else {
+                    new_tuple.insert("@".to_string(), value);
+                }
+                if let Some(index_var) = &step.index_var {
+                    new_tuple.insert(format!("${}", index_var), JValue::from(position as i64));
+                }
+                if let Some(ancestor_label) = &step.ancestor_label {
+                    // `%` ancestor: preserve this step's INPUT under the label.
+                    new_tuple.insert(ancestor_label.clone(), actual_data.clone());
+                }
+                new_tuple.insert("__tuple__".to_string(), JValue::Bool(true));
+                result.push(JValue::object(new_tuple));
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Helper to evaluate a complex path step
     fn evaluate_path_step(
         &mut self,
@@ -4616,6 +4792,7 @@ impl Evaluator {
                     | AstNode::Function { .. }
                     | AstNode::Variable(_)
                     | AstNode::ParentVariable(_)
+                    | AstNode::Parent(_)
                     | AstNode::Array(_)
                     | AstNode::Object(_)
                     | AstNode::Sort { .. }
@@ -11177,6 +11354,105 @@ mod tests {
                 JValue::Number(3.0)
             ]),
             "Empty brackets should preserve array"
+        );
+    }
+
+    // ---- Tuple-stream runtime: %/@/# binding operators (Task 5) ----
+    // Expected values below are ground-truthed against jsonata-js 2.x.
+
+    #[test]
+    fn test_index_bind_makes_variable_available_in_next_step() {
+        // `#$o` binds each Order's position; `$o` must resolve in the later step.
+        let data: JValue = serde_json::json!({
+            "Account": {
+                "Order": [
+                    {"OrderID": "o1", "Product": [{"Name": "Hat"}]},
+                    {"OrderID": "o2", "Product": [{"Name": "Cap"}, {"Name": "Sock"}]}
+                ]
+            }
+        })
+        .into();
+        let ast =
+            crate::parser::parse("Account.Order#$o.Product.{ 'name': Name, 'idx': $o }").unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([
+                {"name": "Hat", "idx": 0},
+                {"name": "Cap", "idx": 1},
+                {"name": "Sock", "idx": 1}
+            ])
+            .into()
+        );
+    }
+
+    #[test]
+    fn test_index_bind_with_predicate_stage() {
+        // Mirrors reference joins/index[13]: index binding, then a predicate on
+        // the next step, carrying the index binding through.
+        let data: JValue = serde_json::json!({
+            "Account": {
+                "Order": [
+                    {"Product": [{"ProductID": 1, "Name": "A"}, {"ProductID": 9, "Name": "B"}]},
+                    {"Product": [{"ProductID": 9, "Name": "C"}]}
+                ]
+            }
+        })
+        .into();
+        let ast =
+            crate::parser::parse("Account.Order#$o.Product[ProductID=9].{ 'n': Name, 'idx': $o }")
+                .unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([
+                {"n": "B", "idx": 0},
+                {"n": "C", "idx": 1}
+            ])
+            .into()
+        );
+    }
+
+    #[test]
+    fn test_focus_bind_makes_variable_available_in_next_step() {
+        // NOTE: `Account.Order@$o.Product` is `undefined` in jsonata-js (focus
+        // does NOT advance the context `@`); the variable itself is what carries
+        // forward. This asserts the real jsonata-js behaviour.
+        let data: JValue = serde_json::json!({
+            "Account": {
+                "Order": [
+                    {"OrderID": "o1"},
+                    {"OrderID": "o2"}
+                ]
+            }
+        })
+        .into();
+        let ast = crate::parser::parse("Account.Order@$o.$o.OrderID").unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(result, serde_json::json!(["o1", "o2"]).into());
+    }
+
+    #[test]
+    fn test_parent_reference_resolves_to_enclosing_step_value() {
+        let data: JValue = serde_json::json!({
+            "Account": {
+                "Order": [
+                    {"OrderID": "o1", "Product": [{"Name": "Hat"}]}
+                ]
+            }
+        })
+        .into();
+        let ast =
+            crate::parser::parse("Account.Order.Product.{ 'name': Name, 'order': %.OrderID }")
+                .unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!([{"name": "Hat", "order": "o1"}]).into()
         );
     }
 }

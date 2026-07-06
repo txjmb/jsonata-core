@@ -2,9 +2,12 @@
 Test adapter for the JSONata reference test suite.
 
 This module loads and runs all 1682 test cases from the reference JavaScript JSONata
-implementation. 1610 currently pass (2 more xpass); the remaining 70 are xfailed pending
-fixes tracked by phase in docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md
+implementation. 1613 currently pass; the remaining 69 are marked xfail pending fixes
+tracked by phase in docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md
 and docs/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design.md.
+Of those, 24 already xpass: parent-and-focus-binding-operators Task 5 wired up the
+tuple-stream runtime for %/@/# and incidentally enabled many parent-operator/joins
+cases, but their markers stay until their owning tasks (6/7) land and can claim them.
 """
 
 import json
@@ -100,18 +103,6 @@ _XFAIL_PHASE_BY_GROUP = {
     "array-constructor": "Phase 5: untriaged straggler",
     "function-distinct": "Phase 5: untriaged straggler",
     "flattening": "Phase 5: untriaged straggler",
-    # parent-and-focus-binding-operators Task 4 (2026-07): retiring the
-    # dedicated AstNode::IndexBind variant (folded into the same PathStep
-    # flags @/# now share) also retired the narrow evaluator-side runtime
-    # wrapping it used to do for SOME #$var cases. ast_transform now always
-    # migrates #$var into PathStep.index_var, but the evaluator doesn't act
-    # on that flag yet (that's Task 5's tuple-stream runtime wiring, see
-    # docs/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design.md
-    # Section 3) -- so these previously-passing cases regress until Task 5
-    # lands. sorting/case020 and performance/case001 aren't otherwise in the
-    # "joins" group above, hence the separate entries.
-    "sorting": "Task 5: #$var tuple-stream runtime wiring not yet implemented",
-    "performance": "Task 5: #$var tuple-stream runtime wiring not yet implemented",
 }
 
 _XFAIL_TEST_IDS = {
@@ -135,7 +126,6 @@ _XFAIL_TEST_IDS = {
     "joins/index[10]",
     "joins/index[11]",
     "joins/index[12]",
-    "joins/index[13]",
     "joins/index[15]",
     "joins/index[1]",
     "joins/index[2]",
@@ -185,8 +175,6 @@ _XFAIL_TEST_IDS = {
     "parent-operator/parent[7]",
     "parent-operator/parent[8]",
     "parent-operator/parent[9]",
-    "performance/case001",
-    "sorting/case020",
 }
 
 
