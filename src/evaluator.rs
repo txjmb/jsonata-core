@@ -6556,6 +6556,40 @@ impl Evaluator {
                     )),
                 }
             }
+            "formatInteger" => {
+                if evaluated_args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "formatInteger() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (JValue::Number(n), JValue::String(picture)) => {
+                        Ok(crate::datetime::format_integer(*n, picture)?)
+                    }
+                    (JValue::Null, _) => Ok(JValue::Null),
+                    (JValue::Undefined, _) => Ok(JValue::Undefined),
+                    _ => Err(EvaluatorError::TypeError(
+                        "formatInteger() requires a number and a string".to_string(),
+                    )),
+                }
+            }
+            "parseInteger" => {
+                if evaluated_args.len() != 2 {
+                    return Err(EvaluatorError::EvaluationError(
+                        "parseInteger() requires exactly 2 arguments".to_string(),
+                    ));
+                }
+                match (&evaluated_args[0], &evaluated_args[1]) {
+                    (JValue::String(value), JValue::String(picture)) => {
+                        Ok(crate::datetime::parse_integer(value, picture)?)
+                    }
+                    (JValue::Null, _) => Ok(JValue::Null),
+                    (JValue::Undefined, _) => Ok(JValue::Undefined),
+                    _ => Err(EvaluatorError::TypeError(
+                        "parseInteger() requires a string and a string".to_string(),
+                    )),
+                }
+            }
             "append" => {
                 if evaluated_args.len() != 2 {
                     return Err(EvaluatorError::EvaluationError(

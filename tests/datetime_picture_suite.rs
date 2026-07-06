@@ -1,10 +1,11 @@
-// Fast-iteration mirror of the Phase 1 reference-suite cases (function-fromMillis,
-// function-tomillis) for the datetime picture-string engine. This is NOT a replacement
-// for `pytest tests/python/test_reference_suite.py` (which remains the real gate and
-// covers the full 1682-case suite through the actual Python API) -- it exists purely so
-// the picture-string engine can be iterated on with `cargo test` (seconds) instead of a
+// Fast-iteration mirror of the Phase 1/2 reference-suite cases (function-fromMillis,
+// function-tomillis, function-formatInteger, function-parseInteger) for the shared
+// picture-string engine in src/datetime.rs. This is NOT a replacement for
+// `pytest tests/python/test_reference_suite.py` (which remains the real gate and covers
+// the full 1682-case suite through the actual Python API) -- it exists purely so the
+// picture-string engine can be iterated on with `cargo test` (seconds) instead of a
 // maturin rebuild + pytest cycle (~2.5 minutes) per fix. See
-// docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md, Phase 1.
+// docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md, Phases 1-2.
 
 use jsonata_core::{
     evaluator::{Evaluator, EvaluatorError},
@@ -136,6 +137,32 @@ fn from_millis_iso_week_date() {
 fn to_millis_parse_date_time() {
     let (total, failures) =
         run_group_file(&suite_root().join("function-tomillis/parseDateTime.json"));
+    assert!(
+        failures.is_empty(),
+        "{}/{} failed:\n{}",
+        failures.len(),
+        total,
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn format_integer() {
+    let (total, failures) =
+        run_group_file(&suite_root().join("function-formatInteger/formatInteger.json"));
+    assert!(
+        failures.is_empty(),
+        "{}/{} failed:\n{}",
+        failures.len(),
+        total,
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn parse_integer() {
+    let (total, failures) =
+        run_group_file(&suite_root().join("function-parseInteger/parseInteger.json"));
     assert!(
         failures.is_empty(),
         "{}/{} failed:\n{}",

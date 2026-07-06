@@ -151,6 +151,25 @@ pub fn from_millis_with_picture(
     Ok(JValue::string(formatted))
 }
 
+/// $formatInteger(value, picture) - Format a number using a `fn:format-integer` picture
+/// string (roman numerals, spreadsheet letters, spelled-out words, decimal-digit
+/// patterns with grouping separators, ordinals).
+pub fn format_integer(value: f64, picture: &str) -> Result<JValue, DateTimeError> {
+    let format = analyse_integer_picture(picture)?;
+    let formatted = format_integer_value(value.floor(), &format)?;
+    Ok(JValue::string(formatted))
+}
+
+/// $parseInteger(value, picture) - Parse a string formatted per a `fn:format-integer`
+/// picture string back into a number. Note (matching the JS reference implementation):
+/// the input is not validated against the picture's shape before parsing -- an
+/// unparseable value simply fails at the underlying number/word/numeral conversion.
+pub fn parse_integer(value: &str, picture: &str) -> Result<JValue, DateTimeError> {
+    let format = analyse_integer_picture(picture)?;
+    let parsed = parse_integer_format_value(&format, value)?;
+    Ok(JValue::Number(parsed as f64))
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // §9.8.4 XPath fn:format-integer / fn:format-dateTime picture-string engine
 // Mirrors datetime.js's IIFE body (jsonata-js reference implementation).
@@ -207,8 +226,13 @@ const DECADES: [&str; 9] = [
 ];
 const MAGNITUDES: [&str; 4] = ["Thousand", "Million", "Billion", "Trillion"];
 
-fn words_lookup(num: i64, prev: bool, ord: bool) -> String {
-    if num <= 19 {
+// Uses f64 throughout (matching JS's Number type) rather than i64: $formatInteger/
+// $parseInteger with the 'w' picture must handle magnitudes far beyond i64::MAX (e.g.
+// 1e46, "ten billion trillion trillion trillion") since English number words are
+// unbounded. The magnitude clamp to MAGNITUDES.len() keeps recursion depth and the
+// literal word list finite regardless.
+fn words_lookup(num: f64, prev: bool, ord: bool) -> String {
+    if num <= 19.0 {
         format!(
             "{}{}",
             if prev { " and " } else { "" },
@@ -218,15 +242,15 @@ fn words_lookup(num: i64, prev: bool, ord: bool) -> String {
                 FEW[num as usize]
             }
         )
-    } else if num < 100 {
-        let tens = num / 10;
-        let remainder = num % 10;
+    } else if num < 100.0 {
+        let tens = (num / 10.0).floor();
+        let remainder = num - tens * 10.0;
         let mut words = format!(
             "{}{}",
             if prev { " and " } else { "" },
-            DECADES[(tens - 2) as usize]
+            DECADES[(tens as usize) - 2]
         );
-        if remainder > 0 {
+        if remainder > 0.0 {
             words.push('-');
             words.push_str(&words_lookup(remainder, false, ord));
         } else if ord {
@@ -234,27 +258,27 @@ fn words_lookup(num: i64, prev: bool, ord: bool) -> String {
             words.push_str("ieth");
         }
         words
-    } else if num < 1000 {
-        let hundreds = num / 100;
-        let remainder = num % 100;
+    } else if num < 1000.0 {
+        let hundreds = (num / 100.0).floor();
+        let remainder = num - hundreds * 100.0;
         let mut words = format!(
             "{}{} Hundred",
             if prev { ", " } else { "" },
             FEW[hundreds as usize]
         );
-        if remainder > 0 {
+        if remainder > 0.0 {
             words.push_str(&words_lookup(remainder, true, ord));
         } else if ord {
             words.push_str("th");
         }
         words
     } else {
-        let mut mag = ((num as f64).log10() / 3.0).floor() as usize;
+        let mut mag = (num.log10() / 3.0).floor() as usize;
         if mag > MAGNITUDES.len() {
             mag = MAGNITUDES.len();
         }
-        let factor = 10i64.pow((mag * 3) as u32);
-        let mant = num / factor;
+        let factor = 10f64.powi((mag * 3) as i32);
+        let mant = (num / factor).floor();
         let remainder = num - mant * factor;
         let mut words = format!(
             "{}{} {}",
@@ -262,7 +286,7 @@ fn words_lookup(num: i64, prev: bool, ord: bool) -> String {
             words_lookup(mant, false, false),
             MAGNITUDES[mag - 1]
         );
-        if remainder > 0 {
+        if remainder > 0.0 {
             words.push_str(&words_lookup(remainder, true, ord));
         } else if ord {
             words.push_str("th");
@@ -272,31 +296,31 @@ fn words_lookup(num: i64, prev: bool, ord: bool) -> String {
 }
 
 /// Converts a number into English words
-fn number_to_words(value: i64, ordinal: bool) -> String {
+fn number_to_words(value: f64, ordinal: bool) -> String {
     words_lookup(value, false, ordinal)
 }
 
-fn word_values() -> &'static HashMap<String, i64> {
-    static MAP: OnceLock<HashMap<String, i64>> = OnceLock::new();
+fn word_values() -> &'static HashMap<String, f64> {
+    static MAP: OnceLock<HashMap<String, f64>> = OnceLock::new();
     MAP.get_or_init(|| {
         let mut m = HashMap::new();
         for (i, w) in FEW.iter().enumerate() {
-            m.insert(w.to_lowercase(), i as i64);
+            m.insert(w.to_lowercase(), i as f64);
         }
         for (i, w) in ORDINALS.iter().enumerate() {
-            m.insert(w.to_lowercase(), i as i64);
+            m.insert(w.to_lowercase(), i as f64);
         }
         for (i, w) in DECADES.iter().enumerate() {
             let lword = w.to_lowercase();
-            let val = (i as i64 + 2) * 10;
+            let val = (i as f64 + 2.0) * 10.0;
             let ieth = format!("{}ieth", &lword[..lword.len() - 1]);
             m.insert(lword, val);
             m.insert(ieth, val);
         }
-        m.insert("hundredth".to_string(), 100);
+        m.insert("hundredth".to_string(), 100.0);
         for (i, w) in MAGNITUDES.iter().enumerate() {
             let lword = w.to_lowercase();
-            let val = 10i64.pow(((i + 1) * 3) as u32);
+            let val = 10f64.powi(((i + 1) * 3) as i32);
             m.insert(format!("{lword}th"), val);
             m.insert(lword, val);
         }
@@ -310,20 +334,20 @@ fn word_split_regex() -> &'static Regex {
 }
 
 /// Converts a number in English words to its numeric value
-fn words_to_number(text: &str) -> Option<i64> {
+fn words_to_number(text: &str) -> Option<f64> {
     let parts: Vec<&str> = word_split_regex().split(text).collect();
-    let values: Option<Vec<i64>> = parts
+    let values: Option<Vec<f64>> = parts
         .iter()
         .map(|p| word_values().get(*p).copied())
         .collect();
     let values = values?;
-    let mut segs: Vec<i64> = vec![0];
+    let mut segs: Vec<f64> = vec![0.0];
     for value in values {
-        if value < 100 {
+        if value < 100.0 {
             let mut top = segs.pop().unwrap();
-            if top >= 1000 {
+            if top >= 1000.0 {
                 segs.push(top);
-                top = 0;
+                top = 0.0;
             }
             segs.push(top + value);
         } else {
@@ -477,10 +501,11 @@ impl Default for IntegerFormat {
 
 // TODO: what about decimal digit groups in the unicode supplementary planes (surrogate
 // pairs)? -- matches a pre-existing "TODO" in the JS reference implementation.
-const DECIMAL_GROUPS: [u32; 36] = [
+const DECIMAL_GROUPS: [u32; 37] = [
     0x30, 0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6,
     0x0D66, 0x0DE6, 0x0E50, 0x0ED0, 0x0F20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80,
     0x1A90, 0x1B50, 0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900, 0xA9D0, 0xA9F0, 0xAA50, 0xABF0,
+    0xFF10,
 ];
 
 fn gcd(a: usize, b: usize) -> usize {
@@ -631,13 +656,18 @@ fn analyse_integer_picture(picture: &str) -> Result<IntegerFormat, DateTimeError
 
 /// Formats an integer as specified by a preprocessed `IntegerFormat` (mirrors
 /// datetime.js's private `_formatInteger`).
-fn format_integer_value(value: i64, format: &IntegerFormat) -> Result<String, DateTimeError> {
-    let negative = value < 0;
+///
+/// Takes `f64` (matching JS's Number type) rather than `i64` because the `words` format
+/// must support magnitudes far beyond `i64::MAX` (e.g. 1e46). Letters/roman/decimal are
+/// cast down to `i64` internally -- safe for the magnitudes they're actually specified
+/// and tested for (spreadsheet columns, roman numerals, decimal digit patterns).
+fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, DateTimeError> {
+    let negative = value < 0.0;
     let value = value.abs();
 
     let mut formatted = match format.primary {
         PrimaryFormat::Letters => decimal_to_letters(
-            value,
+            value as i64,
             if format.case == TCase::Upper {
                 'A'
             } else {
@@ -645,7 +675,7 @@ fn format_integer_value(value: i64, format: &IntegerFormat) -> Result<String, Da
             },
         ),
         PrimaryFormat::Roman => {
-            let r = decimal_to_roman(value);
+            let r = decimal_to_roman(value as i64);
             if format.case == TCase::Upper {
                 r.to_uppercase()
             } else {
@@ -661,7 +691,7 @@ fn format_integer_value(value: i64, format: &IntegerFormat) -> Result<String, Da
             }
         }
         PrimaryFormat::Decimal => {
-            let mut digits = value.to_string();
+            let mut digits = (value as i64).to_string();
             if format.mandatory_digits > digits.len() {
                 digits = format!(
                     "{}{}",
@@ -1128,21 +1158,21 @@ fn format_timezone_component(
         .expect("Z/z marker always has an integer_format");
 
     let mut component_value = if fmt.regular {
-        format_integer_value(offset, fmt)?
+        format_integer_value(offset as f64, fmt)?
     } else {
         let num_digits = fmt.mandatory_digits;
         if num_digits == 1 || num_digits == 2 {
-            let mut cv = format_integer_value(offset_hours, fmt)?;
+            let mut cv = format_integer_value(offset_hours as f64, fmt)?;
             if offset_minutes != 0 {
                 cv.push(':');
                 cv.push_str(&format_integer_value(
-                    offset_minutes,
+                    offset_minutes as f64,
                     &two_digit_decimal_format(),
                 )?);
             }
             cv
         } else if num_digits == 3 || num_digits == 4 {
-            format_integer_value(offset, fmt)?
+            format_integer_value(offset as f64, fmt)?
         } else {
             return Err(coded("D3134", num_digits.to_string()));
         }
@@ -1217,7 +1247,7 @@ fn format_component(
                 .integer_format
                 .as_ref()
                 .expect("numeric marker always has an integer_format");
-            format_integer_value(value, fmt)
+            format_integer_value(value as f64, fmt)
         }
     } else if marker.component == 'f' {
         // §9.8.4.5 Formatting Fractional Seconds
@@ -1226,7 +1256,7 @@ fn format_component(
             .integer_format
             .as_ref()
             .expect("f marker always has an integer_format");
-        format_integer_value(value, fmt)
+        format_integer_value(value as f64, fmt)
     } else {
         // C (calendar) / E (era) -- always "ISO"
         Ok("ISO".to_string())
@@ -1371,19 +1401,21 @@ fn integer_format_regex(fmt: &IntegerFormat) -> Result<String, DateTimeError> {
     })
 }
 
-fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> Result<i64, DateTimeError> {
+/// Returns `f64` (matching JS Number) since the `words` format can parse magnitudes far
+/// beyond `i64::MAX` (e.g. "ten billion trillion trillion trillion" -> 1e46).
+fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> Result<f64, DateTimeError> {
     match fmt.primary {
         PrimaryFormat::Letters => Ok(letters_to_decimal(
             captured,
             if fmt.case == TCase::Upper { 'A' } else { 'a' },
-        )),
+        ) as f64),
         PrimaryFormat::Roman => {
             let upper = if fmt.case == TCase::Upper {
                 captured.to_string()
             } else {
                 captured.to_uppercase()
             };
-            Ok(roman_to_decimal(&upper))
+            Ok(roman_to_decimal(&upper) as f64)
         }
         PrimaryFormat::Words => words_to_number(&captured.to_lowercase())
             .ok_or_else(|| coded("D3136", "unrecognized number word")),
@@ -1408,7 +1440,7 @@ fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> Result<i64
                     .collect();
             }
             digits
-                .parse::<i64>()
+                .parse::<f64>()
                 .map_err(|_| coded("D3136", "invalid number"))
         }
         PrimaryFormat::Sequence => Err(coded("D3130", fmt.token.clone().unwrap_or_default())),
@@ -1563,7 +1595,7 @@ fn parse_component_value(
             let f: f64 = padded.parse().unwrap_or(0.0);
             Ok((f * 1000.0).round() as i64)
         }
-        ParseKind::Integer(fmt) => parse_integer_format_value(fmt, captured),
+        ParseKind::Integer(fmt) => Ok(parse_integer_format_value(fmt, captured)? as i64),
         ParseKind::Name { width_max } => name_lookup(component, captured, *width_max),
     }
 }
@@ -1823,8 +1855,8 @@ mod tests {
     fn test_number_to_words() {
         // number_to_words() returns the natural title-case form; case-folding to
         // upper/lower happens in format_integer_value() based on the picture's case.
-        assert_eq!(number_to_words(2018, false), "Two Thousand and Eighteen");
-        assert_eq!(number_to_words(23, true), "Twenty-Third");
+        assert_eq!(number_to_words(2018.0, false), "Two Thousand and Eighteen");
+        assert_eq!(number_to_words(23.0, true), "Twenty-Third");
     }
 
     #[test]
