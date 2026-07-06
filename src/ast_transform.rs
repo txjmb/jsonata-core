@@ -4,7 +4,7 @@
 // model: instead of mutating tree nodes in place, this consumes the raw
 // tree and rebuilds an enriched one with ancestor/tuple metadata resolved.
 
-use crate::ast::{AstNode, BinaryOp, PathStep};
+use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -134,6 +134,21 @@ fn substitute_labels(node: AstNode, state: &AncestryState) -> AstNode {
                 .into_iter()
                 .map(|s| PathStep {
                     node: substitute_labels(s.node, state),
+                    // Stages (predicates) can contain `%` references whose
+                    // labels were aliased during resolution (e.g. a second
+                    // predicate reusing a step an earlier one already tagged),
+                    // so they must be substituted too -- otherwise the
+                    // pre-alias label survives and evaluates against the wrong
+                    // tuple key.
+                    stages: s
+                        .stages
+                        .into_iter()
+                        .map(|st| match st {
+                            Stage::Filter(e) => {
+                                Stage::Filter(Box::new(substitute_labels(*e, state)))
+                            }
+                        })
+                        .collect(),
                     ..s
                 })
                 .collect(),
@@ -620,25 +635,55 @@ fn transform_children(
             })
         }
         AstNode::Sort { input, terms } => {
-            // Structural transform + generic pending bubbling only.
-            // Deliberately NOT integrating Sort as a resolvable step against
-            // EARLIER steps of its own `input` path (jsonata-js's '^' case
-            // pushes a synthetic sortStep onto input's own steps list and
-            // re-runs resolveAncestry on the combined path) -- that
-            // sort-term-specific ancestor resolution is Task 6 scope. Here,
-            // a `%` inside a sort term simply bubbles up as this Sort node's
-            // own pending, same as any other composite node's children.
+            // Mirrors jsonata-js's `case '^'` (parser.js ~L1151-1170): the
+            // sort is modeled as a synthetic `sort` step APPENDED to the
+            // input path, each term's own seeking `%` slots are bubbled onto
+            // it, then resolveAncestry walks them backward. Because the sort
+            // step sits after every input step, resolveAncestry starts at the
+            // step BEFORE it -- i.e. the LAST real input step -- so a level-1
+            // term slot resolves against the last input step (no predicate-
+            // style "resolve against the step itself" special case is needed;
+            // it's a plain uniform backward walk over the input steps).
             let input_t = transform_node(*input, state)?;
+            let was_path = matches!(input_t.node, AstNode::Path { .. });
+            // jsonata wraps a non-path input into a single-step path so the
+            // sort step has something to walk back through. We do the same for
+            // the walk, then unwrap again if nothing tagged the wrapped step.
+            let mut steps = match input_t.node {
+                AstNode::Path { steps } => steps,
+                other => vec![PathStep::new(other)],
+            };
             let mut pending = input_t.pending;
             let mut transformed_terms = Vec::with_capacity(terms.len());
             for (expr, asc) in terms {
                 let t = transform_node(expr, state)?;
-                pending.extend(t.pending);
+                for slot in t.pending {
+                    let remaining = walk_backward(&mut steps, &slot.label, slot.level, state)?;
+                    if remaining > 0 {
+                        pending.push(PendingAncestor {
+                            label: slot.label,
+                            level: remaining,
+                        });
+                    }
+                }
                 transformed_terms.push((t.node, asc));
             }
+            let input_node = if was_path {
+                AstNode::Path { steps }
+            } else {
+                // Single-node input: keep it wrapped only if a sort term
+                // actually tagged it (so the ancestor label survives on a
+                // PathStep); otherwise restore the bare node unchanged.
+                let s = steps.pop().expect("single wrapped step");
+                if s.is_tuple || s.ancestor_label.is_some() {
+                    AstNode::Path { steps: vec![s] }
+                } else {
+                    s.node
+                }
+            };
             Ok(Transformed {
                 node: AstNode::Sort {
-                    input: Box::new(input_t.node),
+                    input: Box::new(input_node),
                     terms: transformed_terms,
                 },
                 pending,
@@ -723,12 +768,33 @@ fn transform_path_steps(
     // ancestor resolution should walk backward from.
     let mut resolved: Vec<PathStep> = Vec::with_capacity(steps.len());
     let mut own_pending: Vec<Vec<PendingAncestor>> = Vec::with_capacity(steps.len());
+    // `pred_pending[i]` holds the seeking `%` slots bubbled up from step i's
+    // own filter predicate(s) (`Stage::Filter`), transformed here so a `%`
+    // inside `Product[%.OrderID=...]` is resolved (was previously left
+    // untouched, since stages weren't recursed into). Transformed AFTER the
+    // step's node so the step's OWN `%`-ness (if any) claims a label first,
+    // matching jsonata-js's slot-creation order.
+    let mut pred_pending: Vec<Vec<PendingAncestor>> = Vec::with_capacity(steps.len());
     for step in steps {
         let (spliced, pending) = migrate_binding_markers(step, state)?;
         let last_idx = spliced.len().saturating_sub(1);
         let mut pending_opt = Some(pending);
-        for (i, s) in spliced.into_iter().enumerate() {
+        for (i, mut s) in spliced.into_iter().enumerate() {
+            let mut pp: Vec<PendingAncestor> = Vec::new();
+            let stages = std::mem::take(&mut s.stages);
+            let mut new_stages = Vec::with_capacity(stages.len());
+            for stage in stages {
+                match stage {
+                    Stage::Filter(expr) => {
+                        let t = transform_node(*expr, state)?;
+                        pp.extend(t.pending);
+                        new_stages.push(Stage::Filter(Box::new(t.node)));
+                    }
+                }
+            }
+            s.stages = new_stages;
             resolved.push(s);
+            pred_pending.push(pp);
             if i == last_idx {
                 own_pending.push(pending_opt.take().unwrap_or_default());
             } else {
@@ -737,12 +803,23 @@ fn transform_path_steps(
         }
     }
 
-    // Pass 2: for each step (in ascending/encounter order) with its own
-    // pending, walk backward through the steps BEFORE it, resolving each
-    // pending reference. Any reference that runs off the front of this path
-    // (never finding a target) bubbles up as this whole Path's own pending.
+    // Pass 2: for each step (in ascending/encounter order), resolve first its
+    // predicate slots (mirroring jsonata-js pushing predicate slots onto the
+    // step's seekingParent BEFORE the step's own slot), then its own pending.
+    // Any reference that runs off the front of this path (never finding a
+    // target) bubbles up as this whole Path's own pending.
     let mut path_pending: Vec<PendingAncestor> = Vec::new();
     for i in 0..resolved.len() {
+        for pending in std::mem::take(&mut pred_pending[i]) {
+            let remaining =
+                resolve_predicate_slot(&mut resolved, i, &pending.label, pending.level, state)?;
+            if remaining > 0 {
+                path_pending.push(PendingAncestor {
+                    label: pending.label,
+                    level: remaining,
+                });
+            }
+        }
         let pending_here = std::mem::take(&mut own_pending[i]);
         for pending in pending_here {
             let remaining =
@@ -757,6 +834,40 @@ fn transform_path_steps(
     }
 
     Ok((resolved, path_pending))
+}
+
+/// Resolve one seeking `%` slot that bubbled up out of a filter predicate
+/// attached to step `i`. Mirrors jsonata-js's `case '['` slot handling
+/// (parser.js ~L1119-1128):
+/// - a `level == 1` slot resolves against the attached step ITSELF first
+///   (`seekParent(step, slot)`): a `name`/`wildcard` step gets tagged; a `%`
+///   (parent) step instead bumps the level and the walk continues backward;
+/// - a `level > 1` slot is decremented (the attached step is skipped, never
+///   tagged) and resolved by walking backward through the steps BEFORE it.
+///
+/// Either way, whatever level remains unresolved is walked backward through
+/// `resolved[..i]`; the leftover (if the reference runs off the path front)
+/// is returned to bubble up as the enclosing path's own pending.
+fn resolve_predicate_slot(
+    resolved: &mut [PathStep],
+    i: usize,
+    label: &str,
+    level: usize,
+    state: &mut AncestryState,
+) -> Result<usize, AstTransformError> {
+    // Split so the attached step (`rest[0]`) and the steps before it
+    // (`prefix`) can be borrowed mutably at the same time.
+    let (prefix, rest) = resolved.split_at_mut(i);
+    let remaining = if level == 1 {
+        seek_parent_step(&mut rest[0], label, 1, state)?
+    } else {
+        level - 1
+    };
+    if remaining == 0 {
+        Ok(0)
+    } else {
+        walk_backward(prefix, label, remaining, state)
+    }
 }
 
 /// Walk backward through `steps` (from its last element) trying to resolve
@@ -919,7 +1030,252 @@ fn migrate_binding_markers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Stage;
+
+    // --- Task 6: `%` inside filter predicates and sort terms ---
+    //
+    // Mechanism ported from jsonata-js processAST (parser.js). Ground truth
+    // for every tag target below was dumped from jsonata-js's own `.ast()`
+    // (via `node -e 'jsonata(expr).ast()'` in tests/jsonata-js).
+    //
+    // PREDICATE (`case '['`, parser.js ~L1097-1130): each slot the predicate
+    // is still seeking is examined -- a level-1 slot resolves against the
+    // STEP the predicate is attached to (`seekParent(step, slot)`, which tags
+    // that step, or bumps the level if the step is itself a `%`); a level>N>1
+    // slot is decremented and then resolved by walking backward through the
+    // steps BEFORE the attached step. In our flat-path model this is: for a
+    // predicate slot on step i, level==1 -> seek_parent_step(resolved[i]);
+    // level>1 -> walk_backward(resolved[..i], level-1).
+    //
+    // SORT (`case '^'`, parser.js ~L1151-1170): jsonata appends a synthetic
+    // `sort` step to the input path, bubbles every term's own seeking slots
+    // onto it, then runs resolveAncestry -- which walks backward starting at
+    // the step BEFORE the sort step, i.e. the LAST real input step. So a
+    // level-1 sort-term slot resolves against the last input step (no
+    // predicate-style "attach to the step itself" special case is needed;
+    // it's a uniform backward walk over the input steps).
+
+    // Helper: locate the ancestor_label a resolved path assigns to a given
+    // step index, panicking with context if the shape is wrong.
+    fn resolve_path(expr: &str) -> Vec<PathStep> {
+        let ast = crate::parser::Parser::new(expr.to_string())
+            .unwrap()
+            .parse()
+            .unwrap();
+        match resolve_ancestry(ast).unwrap() {
+            AstNode::Path { steps } => steps,
+            other => panic!("expected Path, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parent_inside_predicate_resolves_against_enclosing_step() {
+        // Account.Order.Product[%.OrderID='order104'].SKU
+        // Ground truth (jsonata-js .ast()): the `%` inside the predicate
+        // tags the Product step (steps[2]) -- i.e. `%` resolves to Product's
+        // own input (Order), and Product itself carries the ancestor label.
+        let steps = resolve_path("Account.Order.Product[%.OrderID='order104'].SKU");
+        assert_eq!(steps.len(), 4);
+        assert!(matches!(steps[2].node, AstNode::Name(ref n) if n == "Product"));
+        let product_label = steps[2].ancestor_label.clone();
+        assert!(product_label.is_some(), "Product must be tagged");
+        assert!(steps[2].is_tuple);
+        assert!(
+            steps[1].ancestor_label.is_none(),
+            "Order must NOT be tagged"
+        );
+        // The `%` inside the predicate must carry Product's label.
+        match &steps[2].stages[0] {
+            Stage::Filter(expr) => match expr.as_ref() {
+                AstNode::Binary { lhs, .. } => match lhs.as_ref() {
+                    AstNode::Path { steps: inner } => match &inner[0].node {
+                        AstNode::Parent(label) => {
+                            assert_eq!(Some(label.clone()), product_label)
+                        }
+                        other => panic!("expected Parent, got {:?}", other),
+                    },
+                    other => panic!("expected inner Path, got {:?}", other),
+                },
+                other => panic!("expected Binary, got {:?}", other),
+            },
+        }
+    }
+
+    #[test]
+    fn test_parent_chain_inside_predicate_resolves_two_levels() {
+        // Account.Order.Product[%.%.`Account Name`='Firefly'].SKU
+        // Ground truth: first `%` tags Product (steps[2]), second `%` tags
+        // Order (steps[1]).
+        let steps = resolve_path("Account.Order.Product[%.%.`Account Name`='Firefly'].SKU");
+        assert_eq!(steps.len(), 4);
+        let product_label = steps[2].ancestor_label.clone();
+        let order_label = steps[1].ancestor_label.clone();
+        assert!(product_label.is_some(), "Product must be tagged");
+        assert!(order_label.is_some(), "Order must be tagged");
+        assert_ne!(product_label, order_label);
+        match &steps[2].stages[0] {
+            Stage::Filter(expr) => match expr.as_ref() {
+                AstNode::Binary { lhs, .. } => match lhs.as_ref() {
+                    AstNode::Path { steps: inner } => {
+                        // inner = [Parent, Parent, Name("Account Name")]
+                        match &inner[0].node {
+                            AstNode::Parent(l) => assert_eq!(Some(l.clone()), product_label),
+                            other => panic!("expected Parent, got {:?}", other),
+                        }
+                        match &inner[1].node {
+                            AstNode::Parent(l) => assert_eq!(Some(l.clone()), order_label),
+                            other => panic!("expected Parent, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected inner Path, got {:?}", other),
+                },
+                other => panic!("expected Binary, got {:?}", other),
+            },
+        }
+    }
+
+    #[test]
+    fn test_parent_predicate_on_parent_step_itself() {
+        // Account.Order.Product.Price.%[%.OrderID='order103'].SKU
+        // Ground truth: the trailing `.%` step's own reference tags Price
+        // (steps[3]); the predicate's `%` (attached to a `%` step, so bumped
+        // one level) tags Product (steps[2]).
+        let steps = resolve_path("Account.Order.Product.Price.%[%.OrderID='order103'].SKU");
+        // [Account, Order, Product, Price, %(stages), SKU]
+        assert_eq!(steps.len(), 6);
+        assert!(matches!(steps[4].node, AstNode::Parent(_)));
+        let price_label = steps[3].ancestor_label.clone();
+        let product_label = steps[2].ancestor_label.clone();
+        assert!(
+            price_label.is_some(),
+            "Price must be tagged (by the % step)"
+        );
+        assert!(
+            product_label.is_some(),
+            "Product must be tagged (by the predicate %)"
+        );
+        assert_ne!(price_label, product_label);
+    }
+
+    #[test]
+    fn test_two_predicates_share_and_differ_labels() {
+        // Account.Order.Product[%.OrderID='order104'][%.%.`Account Name`='Firefly'].SKU
+        // Ground truth: first predicate's `%` -> Product; second predicate's
+        // first `%` -> Product (REUSE same label); second `%` -> Order.
+        let steps = resolve_path(
+            "Account.Order.Product[%.OrderID='order104'][%.%.`Account Name`='Firefly'].SKU",
+        );
+        assert_eq!(steps.len(), 4);
+        assert_eq!(steps[2].stages.len(), 2);
+        let product_label = steps[2].ancestor_label.clone();
+        let order_label = steps[1].ancestor_label.clone();
+        assert!(product_label.is_some());
+        assert!(order_label.is_some());
+        assert_ne!(product_label, order_label);
+        // first predicate: %  -> Product
+        match &steps[2].stages[0] {
+            Stage::Filter(expr) => match expr.as_ref() {
+                AstNode::Binary { lhs, .. } => match lhs.as_ref() {
+                    AstNode::Path { steps: inner } => match &inner[0].node {
+                        AstNode::Parent(l) => assert_eq!(Some(l.clone()), product_label),
+                        other => panic!("{:?}", other),
+                    },
+                    other => panic!("{:?}", other),
+                },
+                other => panic!("{:?}", other),
+            },
+        }
+        // second predicate: %.% -> Product (reuse), Order
+        match &steps[2].stages[1] {
+            Stage::Filter(expr) => match expr.as_ref() {
+                AstNode::Binary { lhs, .. } => match lhs.as_ref() {
+                    AstNode::Path { steps: inner } => {
+                        match &inner[0].node {
+                            AstNode::Parent(l) => assert_eq!(Some(l.clone()), product_label),
+                            other => panic!("{:?}", other),
+                        }
+                        match &inner[1].node {
+                            AstNode::Parent(l) => assert_eq!(Some(l.clone()), order_label),
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                },
+                other => panic!("{:?}", other),
+            },
+        }
+    }
+
+    #[test]
+    fn test_parent_inside_sort_term_resolves_to_last_input_step() {
+        // Account.Order.Product.SKU^(%.Price)
+        // Ground truth: the sort term's `%` tags SKU (the last input step).
+        let ast = crate::parser::Parser::new("Account.Order.Product.SKU^(%.Price)".to_string())
+            .unwrap()
+            .parse()
+            .unwrap();
+        match resolve_ancestry(ast).unwrap() {
+            AstNode::Sort { input, terms } => {
+                let steps = match input.as_ref() {
+                    AstNode::Path { steps } => steps,
+                    other => panic!("expected Path input, got {:?}", other),
+                };
+                assert_eq!(steps.len(), 4);
+                assert!(matches!(steps[3].node, AstNode::Name(ref n) if n == "SKU"));
+                let sku_label = steps[3].ancestor_label.clone();
+                assert!(sku_label.is_some(), "SKU must be tagged");
+                // term = (Path[Parent, Name("Price")], asc)
+                match &terms[0].0 {
+                    AstNode::Path { steps: inner } => match &inner[0].node {
+                        AstNode::Parent(l) => assert_eq!(Some(l.clone()), sku_label),
+                        other => panic!("{:?}", other),
+                    },
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("expected Sort, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_two_sort_terms_share_and_differ_labels() {
+        // Account.Order.Product.SKU^(%.Price, >%.%.OrderID)
+        // Ground truth: term1 `%` -> SKU; term2 `%.%` -> SKU (reuse), Product.
+        let ast = crate::parser::Parser::new(
+            "Account.Order.Product.SKU^(%.Price, >%.%.OrderID)".to_string(),
+        )
+        .unwrap()
+        .parse()
+        .unwrap();
+        match resolve_ancestry(ast).unwrap() {
+            AstNode::Sort { input, terms } => {
+                let steps = match input.as_ref() {
+                    AstNode::Path { steps } => steps,
+                    other => panic!("{:?}", other),
+                };
+                let sku_label = steps[3].ancestor_label.clone();
+                let product_label = steps[2].ancestor_label.clone();
+                assert!(sku_label.is_some());
+                assert!(product_label.is_some());
+                assert_ne!(sku_label, product_label);
+                assert_eq!(terms.len(), 2);
+                // term2 = %.%.OrderID
+                match &terms[1].0 {
+                    AstNode::Path { steps: inner } => {
+                        match &inner[0].node {
+                            AstNode::Parent(l) => assert_eq!(Some(l.clone()), sku_label),
+                            other => panic!("{:?}", other),
+                        }
+                        match &inner[1].node {
+                            AstNode::Parent(l) => assert_eq!(Some(l.clone()), product_label),
+                            other => panic!("{:?}", other),
+                        }
+                    }
+                    other => panic!("{:?}", other),
+                }
+            }
+            other => panic!("expected Sort, got {:?}", other),
+        }
+    }
 
     #[test]
     fn test_focus_bind_becomes_step_flag() {
