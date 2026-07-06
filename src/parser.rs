@@ -1512,13 +1512,16 @@ impl Parser {
                     // Binds the current array index to the specified variable
                     self.advance()?; // skip '#'
 
-                    // Expect a variable name
+                    // Expect a variable name. A bare `#` without a `$var` (e.g.
+                    // `Account.Order@$o#i.Product`) is S0214, mirroring jsonata-js's
+                    // inline check for `@`/`#` (parser.js ~L834-847).
                     let var_name = match &self.current_token {
                         Token::Variable(name) => name.clone(),
                         _ => {
-                            return Err(ParserError::InvalidSyntax(
-                                "Expected variable name after #".to_string(),
-                            ));
+                            return Err(ParserError::Coded {
+                                code: "S0214",
+                                message: "Expected a variable reference after #".to_string(),
+                            });
                         }
                     };
                     self.advance()?; // skip variable

@@ -4986,22 +4986,12 @@ impl Evaluator {
         // JSONata singleton unwrapping: singleton results are unwrapped when we did array operations
         // BUT NOT when there's an explicit array-keeping operation like [] (empty predicate)
 
-        // Check for explicit array-keeping operations
-        // Empty predicate [] can be represented as:
-        // 1. Predicate(Boolean(true)) as a path step node
-        // 2. Stage::Filter(Boolean(true)) as a stage
-        let has_explicit_array_keep = steps.iter().any(|step| {
-            // Check if the step itself is an empty predicate
-            if let AstNode::Predicate(pred) = &step.node {
-                if matches!(**pred, AstNode::Boolean(true)) {
-                    return true;
-                }
-            }
-            // Check if any stage is an empty predicate
-            step.stages.iter().any(|stage| {
-                matches!(stage, crate::ast::Stage::Filter(pred) if matches!(**pred, AstNode::Boolean(true)))
-            })
-        });
+        // Check for explicit array-keeping operations. Empty predicate `[]` can
+        // be a `Predicate(Boolean(true))` step node or a `Filter(Boolean(true))`
+        // stage; it also counts when it sits inside a `Sort` step's input path
+        // (e.g. `$#$pos[][$pos<3]^($)[-1]`), whose keep-array-ness must survive
+        // the sort and the trailing index so the singleton stays `[4]`.
+        let has_explicit_array_keep = Self::path_keeps_singleton_array(steps);
 
         // Unwrap when:
         // 1. Any step has stages (predicates, sorts, etc.) which are array operations, OR
@@ -5028,6 +5018,17 @@ impl Evaluator {
             _ => current,
         };
 
+        // An explicit `[]` keep-array forces the result to remain an array even
+        // after a later singleton index collapses it to a scalar (jsonata's
+        // keepSingleton), e.g. `$#$pos[][$pos<3]^($)[-1]` must yield `[4]`.
+        let result = if has_explicit_array_keep
+            && !matches!(result, JValue::Array(_) | JValue::Null | JValue::Undefined)
+        {
+            JValue::array(vec![result])
+        } else {
+            result
+        };
+
         Ok(result)
     }
 
@@ -5037,6 +5038,32 @@ impl Evaluator {
     ///
     fn step_creates_tuple(step: &PathStep) -> bool {
         step.focus.is_some() || step.index_var.is_some() || step.ancestor_label.is_some()
+    }
+
+    /// True when a path contains an explicit empty predicate `[]` (keep-array),
+    /// either directly as a step/stage or nested inside a `Sort` step's input
+    /// path. The keep-array-ness of an inner `[]` must survive an enclosing sort
+    /// and trailing index so a singleton result stays wrapped (`$#$pos[]...^()[-1]`
+    /// -> `[4]`).
+    fn path_keeps_singleton_array(steps: &[PathStep]) -> bool {
+        steps.iter().any(|step| {
+            if let AstNode::Predicate(pred) = &step.node {
+                if matches!(**pred, AstNode::Boolean(true)) {
+                    return true;
+                }
+            }
+            if step.stages.iter().any(
+                |s| matches!(s, Stage::Filter(pred) if matches!(**pred, AstNode::Boolean(true))),
+            ) {
+                return true;
+            }
+            if let AstNode::Sort { input, .. } = &step.node {
+                if let AstNode::Path { steps: inner } = input.as_ref() {
+                    return Self::path_keeps_singleton_array(inner);
+                }
+            }
+            false
+        })
     }
 
     /// Create or extend a tuple stream for a tuple-binding path step, mirroring
