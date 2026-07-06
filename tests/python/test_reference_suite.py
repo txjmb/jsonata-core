@@ -92,8 +92,7 @@ def _build_pytest_params(
     cases: list[tuple[str, str, dict[str, Any]]],
 ) -> list["pytest.mark.structures.ParameterSet"]:
     return [
-        pytest.param(test_id, group_name, spec, id=test_id)
-        for test_id, group_name, spec in cases
+        pytest.param(test_id, group_name, spec, id=test_id) for test_id, group_name, spec in cases
     ]
 
 
