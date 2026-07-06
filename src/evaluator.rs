@@ -5657,7 +5657,14 @@ impl Evaluator {
         // at least one, use the current context value (data) as the implicit first argument
         // This also applies when functions expecting N arguments receive N-1 arguments,
         // in which case the context value becomes the first argument
-        let context_functions_zero_arg = ["string", "number", "boolean", "uppercase", "lowercase"];
+        let context_functions_zero_arg = [
+            "string",
+            "number",
+            "boolean",
+            "uppercase",
+            "lowercase",
+            "fromMillis",
+        ];
         let context_functions_missing_first = [
             "substringBefore",
             "substringAfter",
@@ -7834,9 +7841,9 @@ impl Evaluator {
             }
 
             "fromMillis" => {
-                if evaluated_args.len() != 1 {
+                if evaluated_args.is_empty() || evaluated_args.len() > 3 {
                     return Err(EvaluatorError::EvaluationError(
-                        "fromMillis() requires exactly 1 argument".to_string(),
+                        "fromMillis() requires 1 to 3 arguments".to_string(),
                     ));
                 }
 
@@ -7852,7 +7859,31 @@ impl Evaluator {
                                 "fromMillis() requires an integer".to_string(),
                             )
                         })?;
-                        Ok(crate::datetime::from_millis(millis)?)
+
+                        let picture = match evaluated_args.get(1) {
+                            None | Some(JValue::Undefined) | Some(JValue::Null) => None,
+                            Some(JValue::String(s)) => Some(s.to_string()),
+                            Some(_) => {
+                                return Err(EvaluatorError::TypeError(
+                                    "fromMillis() second argument must be a string".to_string(),
+                                ))
+                            }
+                        };
+                        let timezone = match evaluated_args.get(2) {
+                            None | Some(JValue::Undefined) | Some(JValue::Null) => None,
+                            Some(JValue::String(s)) => Some(s.to_string()),
+                            Some(_) => {
+                                return Err(EvaluatorError::TypeError(
+                                    "fromMillis() third argument must be a string".to_string(),
+                                ))
+                            }
+                        };
+
+                        Ok(crate::datetime::from_millis_with_picture(
+                            millis,
+                            picture.as_deref(),
+                            timezone.as_deref(),
+                        )?)
                     }
                     JValue::Null => Ok(JValue::Null),
                     JValue::Undefined => Ok(JValue::Undefined),
