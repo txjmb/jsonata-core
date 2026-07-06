@@ -939,7 +939,9 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
         json_speedup = (js_per_iter / (t4 / iterations)) if js_per_iter else None
         if js_per_iter:
             js_equiv_ms = js_per_iter * iterations
-            print(f"  JavaScript (equivalent):    {js_equiv_ms:8.2f} ms ({js_per_iter:.4f} ms/iter)")
+            print(
+                f"  JavaScript (equivalent):    {js_equiv_ms:8.2f} ms ({js_per_iter:.4f} ms/iter)"
+            )
             print(f"    → evaluate_with_data is {handle_speedup:6.2f}x vs JS")
             print(f"    → evaluate_data_to_json is {json_speedup:6.2f}x vs JS")
 
