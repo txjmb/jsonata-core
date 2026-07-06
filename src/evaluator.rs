@@ -2483,6 +2483,15 @@ pub struct Evaluator {
     /// caller — keeps the vast majority of evaluations, which never touch
     /// `%`/`@`/`#`, at zero added cost.
     tuple_stream_created: bool,
+    /// When true, `evaluate_path` skips its end-of-path `@`-projection and returns
+    /// the raw `{@, $var, !label, __tuple__}` tuple wrappers. Set (saved/restored)
+    /// by the two consumers that read those carried bindings directly from the
+    /// wrappers: a `Sort` node evaluating its tuple-carrying input path (sort
+    /// terms reference `%`/`$focus`), and an `ObjectTransform` (group-by)
+    /// evaluating its input path (key/value expressions read `$focus` off the
+    /// wrapper). Mirrors jsonata-js keeping `path.tuple` for such a path instead
+    /// of projecting each tuple's `@`.
+    keep_tuple_stream: bool,
 }
 
 impl Evaluator {
@@ -2495,6 +2504,7 @@ impl Evaluator {
             max_recursion_depth: 302,
             next_lambda_id: 0,
             tuple_stream_created: false,
+            keep_tuple_stream: false,
         }
     }
 
@@ -2505,6 +2515,7 @@ impl Evaluator {
             max_recursion_depth: 302,
             next_lambda_id: 0,
             tuple_stream_created: false,
+            keep_tuple_stream: false,
         }
     }
 
@@ -3109,8 +3120,14 @@ impl Evaluator {
 
             // Object transform: group items by key, then evaluate value once per group
             AstNode::ObjectTransform { input, pattern } => {
-                // Evaluate the input expression
-                let input_value = self.evaluate_internal(input, data)?;
+                // Evaluate the input expression. Keep tuple wrappers alive so the
+                // group-by key/value expressions can read the carried `$focus`
+                // bindings off each wrapper (e.g. `...@$e...{ $e.FirstName: ... }`).
+                let saved_keep = self.keep_tuple_stream;
+                self.keep_tuple_stream = true;
+                let input_value = self.evaluate_internal(input, data);
+                self.keep_tuple_stream = saved_keep;
+                let input_value = input_value?;
 
                 // If input is undefined, return undefined (not empty object)
                 if input_value.is_undefined() {
@@ -3366,8 +3383,13 @@ impl Evaluator {
             )),
 
             AstNode::Sort { input, terms } => {
-                let value = self.evaluate_internal(input, data)?;
-                self.evaluate_sort(&value, terms)
+                // Keep the input path's tuple wrappers so the sort terms can read
+                // the carried `%`/`$focus`/`$index` bindings per element.
+                let saved = self.keep_tuple_stream;
+                self.keep_tuple_stream = true;
+                let value = self.evaluate_internal(input, data);
+                self.keep_tuple_stream = saved;
+                self.evaluate_sort(&value?, terms)
             }
 
             // Transform: |location|update[,delete]|
@@ -4067,8 +4089,19 @@ impl Evaluator {
                     self.evaluate_predicate(data, pred_expr)?
                 }
                 _ => {
-                    // Complex first step - evaluate it
-                    self.evaluate_path_step(&steps[0].node, data, data)?
+                    // Complex first step - evaluate it. When the step is
+                    // tuple-carrying (e.g. a parenthesized `(Account.Order.Product)`
+                    // whose `Product` is `%`-tagged, as in
+                    // `(Account.Order.Product)[%.OrderID='order104'].SKU`), keep the
+                    // inner path's tuple wrappers so the following predicate/step
+                    // can read the `!label` bindings.
+                    let saved_keep = self.keep_tuple_stream;
+                    if steps[0].is_tuple {
+                        self.keep_tuple_stream = true;
+                    }
+                    let v = self.evaluate_path_step(&steps[0].node, data, data);
+                    self.keep_tuple_stream = saved_keep;
+                    v?
                 }
             }
         };
@@ -4204,7 +4237,17 @@ impl Evaluator {
                                     // be used in path expressions".
                                     let saved_dollar = self.context.lookup("$").cloned();
                                     self.context.bind("$".to_string(), actual_data.clone());
+                                    // Keep tuple wrappers from the inner path alive:
+                                    // when `inner` is itself a tuple-carrying path
+                                    // (e.g. `(Order.Product)` whose `Product` is
+                                    // `%`-tagged), its `!label` wrappers must survive
+                                    // to be merged into this tuple by the rewrap below
+                                    // (they feed a later `%`/`%.%`). Without this the
+                                    // inner path projects to `@` and drops the labels.
+                                    let saved_keep = self.keep_tuple_stream;
+                                    self.keep_tuple_stream = true;
                                     let v = self.evaluate_internal(inner, &actual_data);
+                                    self.keep_tuple_stream = saved_keep;
                                     match saved_dollar {
                                         Some(s) => self.context.bind("$".to_string(), s),
                                         None => self.context.unbind("$"),
@@ -4659,7 +4702,17 @@ impl Evaluator {
                     // Function application: map expr over the current value
                     // .(expr) means evaluate expr for each element, with $ bound to that element
                     // Null/undefined results are filtered out
-                    match &current {
+                    //
+                    // When this parenthesized step is itself tuple-carrying (its
+                    // inner path has a `%`-tagged step, e.g. `Account.(Order.Product).{...}`),
+                    // keep the inner path's tuple wrappers so their `!label`
+                    // bindings survive to the following object/`%` step; the
+                    // end-of-path projection (or a later consumer) unwraps them.
+                    let saved_keep = self.keep_tuple_stream;
+                    if step.is_tuple {
+                        self.keep_tuple_stream = true;
+                    }
+                    let fa_result = match &current {
                         JValue::Array(arr) => {
                             // Produce the mapped result (compiled fast path or tree-walker fallback).
                             // Do NOT return early — singleton unwrapping is applied by the outer
@@ -4724,15 +4777,54 @@ impl Evaluator {
 
                             value
                         }
-                    }
+                    };
+                    self.keep_tuple_stream = saved_keep;
+                    fa_result
                 }
                 AstNode::Sort { terms, .. } => {
                     // Sort as a path step - sort 'current' by the terms
                     self.evaluate_sort(&current, terms)?
                 }
                 // Handle complex path steps (e.g., computed properties, object construction)
-                _ => self.evaluate_path_step(&step.node, &current, data)?,
+                _ => {
+                    let saved_keep = self.keep_tuple_stream;
+                    if step.is_tuple {
+                        self.keep_tuple_stream = true;
+                    }
+                    let v = self.evaluate_path_step(&step.node, &current, data);
+                    self.keep_tuple_stream = saved_keep;
+                    v?
+                }
             };
+        }
+
+        // End-of-path tuple projection, mirroring jsonata-js evaluatePath
+        // (jsonata.js ~L202-212): once the path is a tuple stream, its VISIBLE
+        // result is each tuple's `@` value; the `{@, $var, !label, __tuple__}`
+        // wrappers are internal bookkeeping and must not escape into an enclosing
+        // operator (e.g. `$#$pos[$pos<3] = $[[0..2]]`, where leaked wrappers make
+        // `=` compare wrapper objects and always yield false). Suppressed only for
+        // the two consumers that read the carried bindings directly off the
+        // wrappers (Sort input, ObjectTransform/group-by input), which set
+        // `keep_tuple_stream`. The top-level `evaluate()` still runs
+        // `unwrap_tuple_output` as a backstop for wrappers nested inside
+        // constructed output.
+        if !self.keep_tuple_stream {
+            if let JValue::Array(arr) = &current {
+                let is_tuple_stream = arr.first().is_some_and(|f| {
+                    matches!(f, JValue::Object(o) if o.get("__tuple__") == Some(&JValue::Bool(true)))
+                });
+                if is_tuple_stream {
+                    let projected: Vec<JValue> = arr
+                        .iter()
+                        .map(|t| match t {
+                            JValue::Object(o) => o.get("@").cloned().unwrap_or(JValue::Undefined),
+                            other => other.clone(),
+                        })
+                        .collect();
+                    current = JValue::array(projected);
+                }
+            }
         }
 
         // JSONata singleton unwrapping: singleton results are unwrapped when we did array operations
