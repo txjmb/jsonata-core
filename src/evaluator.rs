@@ -4243,6 +4243,21 @@ impl Evaluator {
                 return Ok(JValue::Undefined);
             }
 
+            // A lone tuple wrapper (e.g. from a numeric index predicate `[1]` over
+            // a tuple stream, which selects a single tuple and unwraps it out of
+            // the array) must stay a tuple stream so the following step keeps
+            // reading its carried `$focus`/`!label` bindings. Re-wrap it as a
+            // one-element array (e.g. `library.loans@$l.books@$b[...][1].{...}`).
+            if let JValue::Object(o) = &current {
+                if o.get("__tuple__") == Some(&JValue::Bool(true)) {
+                    current = JValue::array(vec![current.clone()]);
+                    // The lone wrapper came from a singleton index selection, so
+                    // the final result should unwrap back to a scalar (a following
+                    // object step must not leave a spurious 1-element array).
+                    did_array_mapping = true;
+                }
+            }
+
             // Check if current is a tuple array - if so, we need to bind tuple variables
             // to context so they're available in nested expressions (like predicates)
             let is_tuple_array = if let JValue::Array(arr) = &current {
