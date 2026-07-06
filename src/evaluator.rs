@@ -3302,37 +3302,6 @@ impl Evaluator {
                 self.evaluate_sort(&value, terms)
             }
 
-            // Index binding: evaluates input and creates tuple stream with index variable
-            AstNode::IndexBind { input, variable } => {
-                let value = self.evaluate_internal(input, data)?;
-
-                // Store the variable name and create indexed results
-                // This is a simplified implementation - full tuple stream would require more work
-                match value {
-                    JValue::Array(arr) => {
-                        // Store the index binding metadata in a special wrapper
-                        let mut result = Vec::new();
-                        for (idx, item) in arr.iter().enumerate() {
-                            // Create wrapper object with value and index
-                            let mut wrapper = IndexMap::new();
-                            wrapper.insert("@".to_string(), item.clone());
-                            wrapper.insert(format!("${}", variable), JValue::Number(idx as f64));
-                            wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
-                            result.push(JValue::object(wrapper));
-                        }
-                        Ok(JValue::array(result))
-                    }
-                    // Single value: just return as-is with index 0
-                    other => {
-                        let mut wrapper = IndexMap::new();
-                        wrapper.insert("@".to_string(), other);
-                        wrapper.insert(format!("${}", variable), JValue::from(0i64));
-                        wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
-                        Ok(JValue::object(wrapper))
-                    }
-                }
-            }
-
             // Transform: |location|update[,delete]|
             AstNode::Transform {
                 location,
@@ -3370,7 +3339,7 @@ impl Evaluator {
             }
 
             // Parent-reference operator: should be resolved by ast_transform pass (Task 2)
-            AstNode::Parent => Err(EvaluatorError::EvaluationError(
+            AstNode::Parent(_) => Err(EvaluatorError::EvaluationError(
                 "Parent operator (%) must be resolved by ast_transform pass".to_string(),
             )),
         }
@@ -3996,10 +3965,6 @@ impl Evaluator {
                 // Predicate as first step
                 self.evaluate_predicate(data, pred_expr)?
             }
-            AstNode::IndexBind { .. } => {
-                // Index binding as first step - evaluate the IndexBind to create tuple array
-                self.evaluate_internal(&steps[0].node, data)?
-            }
             _ => {
                 // Complex first step - evaluate it
                 self.evaluate_path_step(&steps[0].node, data, data)?
@@ -4503,32 +4468,6 @@ impl Evaluator {
                 AstNode::Sort { terms, .. } => {
                     // Sort as a path step - sort 'current' by the terms
                     self.evaluate_sort(&current, terms)?
-                }
-                AstNode::IndexBind { variable, .. } => {
-                    // Index binding as a path step - creates tuple stream from current
-                    // This wraps each element with an index binding
-                    match &current {
-                        JValue::Array(arr) => {
-                            let mut result = Vec::new();
-                            for (idx, item) in arr.iter().enumerate() {
-                                let mut wrapper = IndexMap::new();
-                                wrapper.insert("@".to_string(), item.clone());
-                                wrapper
-                                    .insert(format!("${}", variable), JValue::Number(idx as f64));
-                                wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
-                                result.push(JValue::object(wrapper));
-                            }
-                            JValue::array(result)
-                        }
-                        other => {
-                            // Single value: wrap with index 0
-                            let mut wrapper = IndexMap::new();
-                            wrapper.insert("@".to_string(), other.clone());
-                            wrapper.insert(format!("${}", variable), JValue::from(0i64));
-                            wrapper.insert("__tuple__".to_string(), JValue::Bool(true));
-                            JValue::object(wrapper)
-                        }
-                    }
                 }
                 // Handle complex path steps (e.g., computed properties, object construction)
                 _ => self.evaluate_path_step(&step.node, &current, data)?,
@@ -5288,6 +5227,13 @@ impl Evaluator {
             // Focus binding: should be resolved by ast_transform pass (Task 2)
             BinaryOp::FocusBind => Err(EvaluatorError::EvaluationError(
                 "Focus binding operator (@) must be resolved by ast_transform pass".to_string(),
+            )),
+
+            // Index binding: should be resolved by ast_transform pass (Task 4,
+            // which retired the dedicated AstNode::IndexBind variant in favor
+            // of this generic Binary marker, mirroring FocusBind above)
+            BinaryOp::IndexBind => Err(EvaluatorError::EvaluationError(
+                "Index binding operator (#) must be resolved by ast_transform pass".to_string(),
             )),
 
             // These operators are all handled as special cases earlier in evaluate_binary_op
@@ -9021,9 +8967,6 @@ impl Evaluator {
                     Self::collect_free_vars_walk(expr, bound, free);
                 }
             }
-            AstNode::IndexBind { input, .. } => {
-                Self::collect_free_vars_walk(input, bound, free);
-            }
             AstNode::Transform {
                 location,
                 update,
@@ -9046,7 +8989,7 @@ impl Evaluator {
             | AstNode::Regex { .. }
             | AstNode::Wildcard
             | AstNode::Descendant
-            | AstNode::Parent
+            | AstNode::Parent(_)
             | AstNode::ParentVariable(_) => {}
         }
     }

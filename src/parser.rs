@@ -993,10 +993,12 @@ impl Parser {
                 Ok(AstNode::Descendant)
             }
             Token::Percent => {
-                // Parent operator in primary position. Bare at parse time --
-                // ast_transform assigns the actual ancestor slot (label/level).
+                // Parent operator in primary position. Label is resolved by
+                // ast_transform -- this empty string is never observed by
+                // the evaluator (ast_transform fills every AstNode::Parent
+                // ("") with a real label or errors S0217).
                 self.advance()?;
-                Ok(AstNode::Parent)
+                Ok(AstNode::Parent(String::new()))
             }
             Token::Function => {
                 // Parse lambda: function($param1, $param2, ...) { body }
@@ -1503,9 +1505,16 @@ impl Parser {
                     };
                     self.advance()?; // skip variable
 
-                    lhs = AstNode::IndexBind {
-                        input: Box::new(lhs),
-                        variable: var_name,
+                    // Produces a generic Binary(IndexBind) marker -- ast_transform
+                    // resolves this into a PathStep.index_var flag, mirroring how
+                    // @$var/FocusBind is represented (see Token::At below). Using
+                    // the same generic Binary shape (rather than a dedicated
+                    // AstNode::IndexBind variant) lets that variant be retired
+                    // from ast.rs entirely.
+                    lhs = AstNode::Binary {
+                        op: BinaryOp::IndexBind,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(AstNode::Variable(var_name)),
                     };
                 }
                 Token::At => {
@@ -1693,10 +1702,18 @@ impl Parser {
 
 /// Parse a JSONata expression string into an AST
 ///
-/// This is the main entry point for parsing.
+/// This is the main entry point for parsing. Runs the post-parse
+/// ast_transform pass (ancestor-slot resolution, @/#/% unification)
+/// unconditionally, matching jsonata-js's processAST always running
+/// immediately after the raw Pratt parse.
 pub fn parse(expression: &str) -> Result<AstNode, ParserError> {
     let mut parser = Parser::new(expression.to_string())?;
-    parser.parse()
+    let raw_ast = parser.parse()?;
+    crate::ast_transform::resolve_ancestry(raw_ast).map_err(|e| match e {
+        crate::ast_transform::AstTransformError::Coded { code, message } => {
+            ParserError::Coded { code, message }
+        }
+    })
 }
 
 #[cfg(test)]
@@ -2255,12 +2272,20 @@ mod tests {
 
     #[test]
     fn test_parent_operator_parses_as_prefix() {
-        let ast = parse("%.OrderID").unwrap();
+        // Tests the RAW grammar rule (bare `%` in primary position) in
+        // isolation from ast_transform's ancestor resolution -- uses
+        // Parser::new(...).parse() directly rather than the free `parse()`
+        // function, since the free function now runs ast_transform
+        // unconditionally (Step 8), and `%.OrderID` alone has no preceding
+        // step for `%` to resolve against (that's covered by
+        // ast_transform's own S0217 tests).
+        let mut parser = Parser::new("%.OrderID".to_string()).unwrap();
+        let ast = parser.parse().unwrap();
         // %.OrderID should parse as a path with two steps: Parent, then Name("OrderID")
         match ast {
             AstNode::Path { steps } => {
                 assert_eq!(steps.len(), 2);
-                assert!(matches!(steps[0].node, AstNode::Parent));
+                assert!(matches!(steps[0].node, AstNode::Parent(_)));
                 assert!(matches!(steps[1].node, AstNode::Name(ref n) if n == "OrderID"));
             }
             other => panic!("expected Path, got {:?}", other),
@@ -2282,7 +2307,12 @@ mod tests {
 
     #[test]
     fn test_focus_bind_parses_as_binary_marker() {
-        let ast = parse("Order@$o").unwrap();
+        // Tests the RAW grammar rule in isolation from ast_transform (which
+        // now runs unconditionally in the free `parse()` and would rewrite
+        // this into a Path with a `focus` flag instead -- see
+        // ast_transform.rs's own real-parser-based tests for that).
+        let mut parser = Parser::new("Order@$o".to_string()).unwrap();
+        let ast = parser.parse().unwrap();
         match ast {
             AstNode::Binary {
                 op: BinaryOp::FocusBind,
@@ -2299,6 +2329,30 @@ mod tests {
                 assert!(matches!(*rhs, AstNode::Variable(ref n) if n == "o"));
             }
             other => panic!("expected Binary{{FocusBind}}, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_index_bind_parses_as_binary_marker() {
+        // #$var now reuses the same generic Binary marker shape as @$var
+        // (Task 4 retires the dedicated AstNode::IndexBind struct variant).
+        let mut parser = Parser::new("arr#$i".to_string()).unwrap();
+        let ast = parser.parse().unwrap();
+        match ast {
+            AstNode::Binary {
+                op: BinaryOp::IndexBind,
+                lhs,
+                rhs,
+            } => {
+                if let AstNode::Path { steps } = *lhs {
+                    assert_eq!(steps.len(), 1);
+                    assert!(matches!(steps[0].node, AstNode::Name(ref n) if n == "arr"));
+                } else {
+                    panic!("expected lhs to be Path, got {:?}", lhs);
+                }
+                assert!(matches!(*rhs, AstNode::Variable(ref n) if n == "i"));
+            }
+            other => panic!("expected Binary{{IndexBind}}, got {:?}", other),
         }
     }
 

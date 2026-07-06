@@ -155,10 +155,13 @@ pub enum AstNode {
     /// Descendant operator (**) in path expressions
     Descendant,
 
-    /// Parent-reference operator (%) in path expressions
-    /// Resolved to a specific ancestor slot by the post-parse ast_transform pass;
-    /// unit variant at parse time, matching jsonata-js's bare `{type: 'parent'}`.
-    Parent,
+    /// Parent-reference operator (%) in path expressions, resolved.
+    /// Carries the synthetic ancestor label ("!0", "!1", ...) assigned by
+    /// ast_transform -- looked up at runtime via the same tuple/scope
+    /// mechanism as $-variables. The parser produces `Parent(String::new())`
+    /// (an empty placeholder never observed by the evaluator); ast_transform
+    /// fills every occurrence with a real label or raises S0217.
+    Parent(String),
 
     /// Array filter/predicate [condition]
     /// Can be an index (number) or a predicate (boolean expression)
@@ -180,16 +183,6 @@ pub enum AstNode {
         input: Box<AstNode>,
         /// Sort terms - list of (expression, ascending) tuples
         terms: Vec<(AstNode, bool)>,
-    },
-
-    /// Index binding operator #$var
-    /// Binds the current array index to the specified variable during path traversal
-    /// For example: arr#$i.field binds the index to $i for each element
-    IndexBind {
-        /// The input expression being indexed
-        input: Box<AstNode>,
-        /// The variable name to bind the index to (without the $ prefix)
-        variable: String,
     },
 
     /// Transform operator |location|update[,delete]|
@@ -245,6 +238,14 @@ pub enum BinaryOp {
     // PathStep.focus flag by ast_transform, matching jsonata-js's own
     // parser.js:834-847, which also produces a generic binary node here)
     FocusBind,
+
+    // Index binding (raw parse-time marker for #$var; resolved into a
+    // PathStep.index_var flag by ast_transform). Reuses the same generic
+    // Binary-node representation as FocusBind (rather than a dedicated
+    // `AstNode::IndexBind` struct variant) so the retired `IndexBind`
+    // variant has zero remaining construction sites once removed from
+    // ast.rs -- see Task 4's ast_transform.rs migrate_binding_markers.
+    IndexBind,
 
     // Coalescing
     Coalesce, // ??
