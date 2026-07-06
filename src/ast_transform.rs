@@ -76,28 +76,49 @@ fn apply_marker_to_step(step: &mut PathStep, marker: BindingMarker) {
     step.is_tuple = true;
 }
 
-/// Handle a `@$var`/`#$var` marker reaching `transform_node` as the raw node
-/// itself (not already nested inside a `PathStep`) -- e.g. `Order@$o` or
-/// `Account.Order@$o` where the parser's flat infix loop has already merged
-/// any preceding `.` steps into a `Path` (or, for a single bare name, left a
-/// non-Path leaf) *before* wrapping the whole thing in the marker node.
+/// Core shared logic for both call sites that need to migrate a `@$var`/
+/// `#$var` marker: given the already-`transform_node`-recursed `lhs`/`input`
+/// that the marker was parsed against, produce the flat sequence of
+/// `PathStep`s the marker should resolve to.
 ///
-/// - If `transformed` is already a `Path`, the marker binds to its LAST step.
+/// Mirrors jsonata-js's `processAST` `case '@'`/`case '#'`:
+/// `result = processAST(expr.lhs); step = result; if (result.type ===
+/// 'path') { step = result.steps[result.steps.length - 1]; }` -- `result`
+/// (the possibly-multi-step path) is always what gets kept/spliced in, and
+/// only `step` (the thing that gets the marker's flags stamped onto it) is
+/// reassigned to the LAST step of that path when `result` is itself a path.
+///
+/// - If `transformed` is a multi-step `Path`, the marker's flags land on its
+///   LAST step, and ALL of its steps are returned to be spliced into the
+///   caller's flat steps list (never wrapped in a new outer step).
 /// - Otherwise (e.g. a bare `Name` with no `.` at all), wrap it into a new
 ///   single-step `Path` and stamp the marker onto that one step.
-fn wrap_marker_as_path(transformed: AstNode, marker: BindingMarker) -> AstNode {
+fn splice_marker_steps(transformed: AstNode, marker: BindingMarker) -> Vec<PathStep> {
     match transformed {
         AstNode::Path { mut steps } => {
             if let Some(last) = steps.last_mut() {
                 apply_marker_to_step(last, marker);
             }
-            AstNode::Path { steps }
+            steps
         }
         other => {
             let mut step = PathStep::new(other);
             apply_marker_to_step(&mut step, marker);
-            AstNode::Path { steps: vec![step] }
+            vec![step]
         }
+    }
+}
+
+/// Handle a `@$var`/`#$var` marker reaching `transform_node` as the raw node
+/// itself (not already nested inside a `PathStep`) -- e.g. `Order@$o` or
+/// `Account.Order@$o` where the parser's flat infix loop has already merged
+/// any preceding `.` steps into a `Path` (or, for a single bare name, left a
+/// non-Path leaf) *before* wrapping the whole thing in the marker node. At
+/// this (top-level) call site there's no outer steps list to splice into, so
+/// the spliced steps become the whole resulting `Path`.
+fn wrap_marker_as_path(transformed: AstNode, marker: BindingMarker) -> AstNode {
+    AstNode::Path {
+        steps: splice_marker_steps(transformed, marker),
     }
 }
 
@@ -307,20 +328,36 @@ fn transform_path_steps(
     // trailing `%` reference with no intervening predicates/sort terms.
     // Multi-level `%.%` chains and predicate/sort-term ancestor resolution
     // are Task 4.
+    //
+    // NOTE: this is a flat-map, not a 1:1 map -- a single input step whose
+    // node is a `@$var`/`#$var` marker over a multi-step `lhs`/`input` (e.g.
+    // `Account.Order@$o.Product`, where the parser wraps the ALREADY-BUILT
+    // 2-step `Path{Account,Order}` in a marker node and that whole marker
+    // node becomes ONE PathStep in the outer 2-step `[marker-step, Product]`
+    // list) must expand back into multiple output steps -- see
+    // `migrate_binding_markers`/`splice_marker_steps`. A single `.push()`
+    // per input step would leave the inner multi-step path nested inside a
+    // single wrapping step instead of flattened into the outer list.
     let mut resolved: Vec<PathStep> = Vec::with_capacity(steps.len());
     for step in steps {
-        resolved.push(migrate_binding_markers(step, labels)?);
+        resolved.extend(migrate_binding_markers(step, labels)?);
     }
     Ok(resolved)
 }
 
-/// Convert a step's raw-parse-time binding marker (if any) into the
-/// unified PathStep flags, recursing into the step's own node first (a
-/// step's node can itself be a Block/nested Path containing `%`/`@`/`#`).
+/// Convert a step's raw-parse-time binding marker (if any) into the unified
+/// PathStep flags, recursing into the step's own node first (a step's node
+/// can itself be a Block/nested Path containing `%`/`@`/`#`).
+///
+/// Returns a `Vec` (not a single `PathStep`) because a marker's `lhs`/`input`
+/// can itself turn out to be a multi-step `Path` -- see `splice_marker_steps`
+/// -- in which case ALL of those steps must be spliced into the caller's
+/// flat list in place of this one input step, with the marker's flags
+/// stamped onto the LAST of them (not onto a step wrapping the whole thing).
 fn migrate_binding_markers(
     mut step: PathStep,
     labels: &mut LabelGen,
-) -> Result<PathStep, AstTransformError> {
+) -> Result<Vec<PathStep>, AstTransformError> {
     match step.node {
         AstNode::Binary {
             op: BinaryOp::FocusBind,
@@ -331,18 +368,24 @@ fn migrate_binding_markers(
                 AstNode::Variable(name) => name,
                 _ => unreachable!("parser guarantees FocusBind's rhs is always Variable"),
             };
-            step.node = transform_node(*lhs, labels)?;
-            apply_marker_to_step(&mut step, BindingMarker::Focus(var_name));
+            let transformed_lhs = transform_node(*lhs, labels)?;
+            Ok(splice_marker_steps(
+                transformed_lhs,
+                BindingMarker::Focus(var_name),
+            ))
         }
         AstNode::IndexBind { input, variable } => {
-            step.node = transform_node(*input, labels)?;
-            apply_marker_to_step(&mut step, BindingMarker::Index(variable));
+            let transformed_input = transform_node(*input, labels)?;
+            Ok(splice_marker_steps(
+                transformed_input,
+                BindingMarker::Index(variable),
+            ))
         }
         other => {
             step.node = transform_node(other, labels)?;
+            Ok(vec![step])
         }
     }
-    Ok(step)
 }
 
 #[cfg(test)]
@@ -493,5 +536,59 @@ mod tests {
         let ast = crate::parser::parse("$count(%)").unwrap();
         let err = resolve_ancestry(ast).unwrap_err();
         assert!(err.to_string().starts_with("S0217"));
+    }
+
+    // --- Regression tests for the "nested Path from multi-step @/# marker"
+    // finding (second review round) ---
+    //
+    // `Account.Order@$o.Product` has >=2 path segments before the marker AND
+    // >=1 segment after. At parse time, `@$o` wraps the ALREADY-BUILT 2-step
+    // `Path{Account,Order}` in a `Binary{FocusBind,...}` node, and that whole
+    // node becomes step 0 of an outer 2-step list `[marker-step, Product]`.
+    // Previously `migrate_binding_markers` assigned the transformed lhs
+    // directly to `step.node` and stamped the marker onto that WRAPPING
+    // step, producing a corrupted nested shape instead of a flat path.
+
+    #[test]
+    fn test_real_parser_focus_bind_multistep_prefix_and_suffix_is_flat() {
+        // "Account.Order@$o.Product" must produce a FLAT 3-step path, not a
+        // 2-step path whose first step's node is itself a nested 2-step Path.
+        let ast = crate::parser::parse("Account.Order@$o.Product").unwrap();
+        let result = resolve_ancestry(ast).unwrap();
+        match result {
+            AstNode::Path { steps } => {
+                assert_eq!(steps.len(), 3, "expected a flat 3-step path");
+                assert!(matches!(steps[0].node, AstNode::Name(ref n) if n == "Account"));
+                assert!(steps[0].focus.is_none());
+                assert!(!steps[0].is_tuple);
+                assert!(matches!(steps[1].node, AstNode::Name(ref n) if n == "Order"));
+                assert_eq!(steps[1].focus, Some("o".to_string()));
+                assert!(steps[1].is_tuple);
+                assert!(matches!(steps[2].node, AstNode::Name(ref n) if n == "Product"));
+                assert!(steps[2].focus.is_none());
+            }
+            other => panic!("expected flat Path, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_real_parser_index_bind_multistep_prefix_and_suffix_is_flat() {
+        // Same shape as above but for `#$i` (IndexBind) instead of `@$o`.
+        let ast = crate::parser::parse("Account.Order#$i.Product").unwrap();
+        let result = resolve_ancestry(ast).unwrap();
+        match result {
+            AstNode::Path { steps } => {
+                assert_eq!(steps.len(), 3, "expected a flat 3-step path");
+                assert!(matches!(steps[0].node, AstNode::Name(ref n) if n == "Account"));
+                assert!(steps[0].index_var.is_none());
+                assert!(!steps[0].is_tuple);
+                assert!(matches!(steps[1].node, AstNode::Name(ref n) if n == "Order"));
+                assert_eq!(steps[1].index_var, Some("i".to_string()));
+                assert!(steps[1].is_tuple);
+                assert!(matches!(steps[2].node, AstNode::Name(ref n) if n == "Product"));
+                assert!(steps[2].index_var.is_none());
+            }
+            other => panic!("expected flat Path, got {:?}", other),
+        }
     }
 }
