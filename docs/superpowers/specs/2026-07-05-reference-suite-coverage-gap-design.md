@@ -81,6 +81,24 @@ new session shouldn't need to re-derive it, just verify and build on it.
   = 133 cases, the single largest chunk), triage each unique failing case individually — some of
   the `$toMillis` mismatches may be genuine spec edge cases (e.g. component-order/BCE-year
   handling) rather than one shared bug.
+
+  **Done (2026-07-05):** ported jsonata-js's `datetime.js` picture-string engine wholesale
+  into `src/datetime.rs` (shared integer-format machinery + date/time component analysis,
+  formatting, and parsing). 127 of the 133 candidate cases were real (87 fromMillis + 40
+  tomillis; 6 turned out to already pass pre-Phase-1 and weren't xfailed). 1490/1682 passing,
+  192 xfailed remaining.
+
+  **Known limitation (not fixed, intentionally out of scope):** jsonata-js pins a single
+  `environment.timestamp` per top-level `evaluate()` call so that `$now()` and a picture
+  string's "default unspecified date/time parts to now" behavior see the same instant. This
+  Rust port does not pin anything — `$now()` and the parse-time "now" default each call
+  `Utc::now()` independently. The one reference-suite case that depends on this
+  (`function-tomillis/parseDateTime`, "time only defaults to todays date") compares only the
+  *date* portion of two independent `Utc::now()` reads, so it can only flake across the
+  midnight-UTC boundary — reproducible only by chance, not by any input in this repo. If a
+  CI run ever fails this specific case with no code change nearby, this is why; fixing it
+  would mean threading a fixed "now" timestamp through `Evaluator` (a cross-cutting change,
+  not scoped to this effort).
 - **Phase 2 — `$formatInteger`/`$parseInteger`.** Implement both (they're inverses and likely
   share a picture-string mini-language, per jsonata-js's `functions.js`/spec: roman numerals,
   ordinal letters, grouping separators, etc.). 123 cases combined.
