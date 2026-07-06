@@ -1126,6 +1126,24 @@ impl Parser {
                         // Check for .(expr) syntax (function application)
                         self.advance()?;
 
+                        // Empty block `.()`: a parenthesised step with no
+                        // expression (e.g. `Account.Order.().%`). jsonata-js
+                        // treats `()` as an empty block that evaluates to
+                        // undefined; keep it as a `FunctionApplication` of an
+                        // empty `Block` so the ancestry pass can walk past it.
+                        if self.current_token == Token::RightParen {
+                            self.advance()?;
+                            let mut steps = match lhs {
+                                AstNode::Path { steps } => steps,
+                                _ => vec![PathStep::new(lhs)],
+                            };
+                            steps.push(PathStep::new(AstNode::FunctionApplication(Box::new(
+                                AstNode::Block(Vec::new()),
+                            ))));
+                            lhs = AstNode::Path { steps };
+                            continue;
+                        }
+
                         // Parse the expression(s) to apply - may be block with semicolons
                         let mut expressions = vec![self.parse_expression(0)?];
 

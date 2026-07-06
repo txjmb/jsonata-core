@@ -985,16 +985,18 @@ fn seek_parent_step(
         // leading `(Account.Order)` with no `.` before it, or a multi-
         // statement `(...)`) -- mirrors seekParent's 'block' case: recurse
         // into the LAST expression.
-        AstNode::Block(exprs) => {
-            step.is_tuple = true;
-            match exprs.last_mut() {
-                Some(last) => seek_parent_wrapped(last, label, level, state),
-                None => Err(coded(
-                    "S0217",
-                    "The parent operator % cannot derive an ancestor from an empty block",
-                )),
+        AstNode::Block(exprs) => match exprs.last_mut() {
+            Some(last) => {
+                step.is_tuple = true;
+                seek_parent_wrapped(last, label, level, state)
             }
-        }
+            // An empty block `()` produces no ancestor and no tuple; the walk
+            // simply steps over it with the level unchanged (mirrors jsonata-js
+            // seekParent's `if(node.expressions.length > 0)` guard, which leaves
+            // the slot untouched for an empty block). Lets `Account.Order.().%`
+            // resolve `%` against `Order` rather than raising S0217.
+            None => Ok(level),
+        },
         _ => Err(coded(
             "S0217",
             "The parent operator % cannot derive an ancestor from this kind of path step",
@@ -1017,6 +1019,13 @@ fn seek_parent_wrapped(
 ) -> Result<usize, AstTransformError> {
     match node {
         AstNode::Path { steps } => walk_backward(steps, label, level, state),
+        // A nested block (e.g. the inner `()` of `.()`, or `(a; b)`): recurse
+        // into its last expression, or -- for an empty block -- step over it
+        // leaving the level unchanged (jsonata-js seekParent's block guard).
+        AstNode::Block(exprs) => match exprs.last_mut() {
+            Some(last) => seek_parent_wrapped(last, label, level, state),
+            None => Ok(level),
+        },
         _ => Err(coded(
             "S0217",
             "The parent operator % cannot derive an ancestor from this kind of expression",
