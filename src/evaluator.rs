@@ -4398,6 +4398,17 @@ impl Evaluator {
                                 _ => unreachable!(), // We only match specific types above
                             };
 
+                            // Apply this step's own filter stages (e.g. the
+                            // `[$substring(title,0,3)='The']` on `.$[...]` in
+                            // `library.books#$pos.$[...].$pos`) while the tuple
+                            // bindings are still in scope, so the predicate can
+                            // reference them and non-matching tuples are dropped.
+                            let step_result = if step.stages.is_empty() {
+                                step_result
+                            } else {
+                                self.apply_stages(step_result, &step.stages)?
+                            };
+
                             // Restore previous bindings
                             for (name, saved_value) in &saved_bindings {
                                 if let Some(value) = saved_value {
