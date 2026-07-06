@@ -2446,6 +2446,46 @@ impl Default for Context {
 /// the top level. This recurses through both array elements and (non-tuple)
 /// object field values so both shapes are cleaned up, not just a bare
 /// top-level tuple array.
+/// Merge a group of tuple wrappers into a single tuple, appending each key's
+/// values across the group. Mirrors jsonata-js `reduceTupleStream`
+/// (`Object.assign(result, tuple[0]); result[prop] = append(result[prop], ...)`):
+/// a key present in one tuple stays a scalar; a key present in several becomes an
+/// array of the collected values (used by group-by value evaluation so a group
+/// of N tuples exposes `@` as the N collected `@` values and each `$focus` as the
+/// N collected focus values).
+fn reduce_tuple_stream(group: &[JValue]) -> IndexMap<String, JValue> {
+    fn append(acc: Option<JValue>, v: JValue) -> JValue {
+        match acc {
+            None => v,
+            Some(a) => {
+                let mut out: Vec<JValue> = match a {
+                    JValue::Array(arr) => arr.iter().cloned().collect(),
+                    other => vec![other],
+                };
+                match v {
+                    JValue::Array(arr) => out.extend(arr.iter().cloned()),
+                    other => out.push(other),
+                }
+                JValue::array(out)
+            }
+        }
+    }
+    let mut result: IndexMap<String, JValue> = IndexMap::new();
+    for tuple in group {
+        if let JValue::Object(obj) = tuple {
+            for (k, v) in obj.iter() {
+                if k == "__tuple__" {
+                    result.insert(k.clone(), v.clone());
+                    continue;
+                }
+                let merged = append(result.shift_remove(k), v.clone());
+                result.insert(k.clone(), merged);
+            }
+        }
+    }
+    result
+}
+
 fn unwrap_tuple_output(value: JValue) -> JValue {
     match value {
         JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)) => obj
@@ -3148,6 +3188,51 @@ impl Evaluator {
                     items
                 };
 
+                // Grouping over a tuple stream ("reduce" mode, mirroring
+                // jsonata-js evaluateGroupExpression): each item is a
+                // `{@, $var, !label, __tuple__}` wrapper. The key/value
+                // expressions are evaluated against the tuple's `@` value with the
+                // carried focus/index/ancestor keys bound into scope (so
+                // `...@$e...{ $e.FirstName: Phone[type='mobile'].number }` reads
+                // `$e` AND resolves the relative `Phone` against the Contact `@`),
+                // and grouped tuples are reduced (per-key values appended) before
+                // the value expression sees them.
+                let reduce = items.first().is_some_and(|it| {
+                    matches!(it, JValue::Object(o) if o.get("__tuple__") == Some(&JValue::Bool(true)))
+                });
+
+                // Bind a tuple wrapper's carried `$var`/`!label` keys into scope;
+                // returns the saved prior values so they can be restored.
+                let bind_tuple = |ev: &mut Self,
+                                  tuple: &IndexMap<String, JValue>|
+                 -> Vec<(String, Option<JValue>)> {
+                    let mut saved = Vec::new();
+                    for (k, v) in tuple.iter() {
+                        let name = if let Some(n) = k.strip_prefix('$') {
+                            if n.is_empty() {
+                                continue;
+                            } else {
+                                n.to_string()
+                            }
+                        } else if k.starts_with('!') {
+                            k.clone()
+                        } else {
+                            continue;
+                        };
+                        saved.push((name.clone(), ev.context.lookup(&name).cloned()));
+                        ev.context.bind(name, v.clone());
+                    }
+                    saved
+                };
+                let restore = |ev: &mut Self, saved: Vec<(String, Option<JValue>)>| {
+                    for (name, old) in saved.into_iter().rev() {
+                        match old {
+                            Some(v) => ev.context.bind(name, v),
+                            None => ev.context.unbind(&name),
+                        }
+                    }
+                };
+
                 // Phase 1: Group items by key expression
                 // groups maps key -> (grouped_data, expr_index)
                 // When multiple items have same key, their data is appended together
@@ -3157,18 +3242,32 @@ impl Evaluator {
                 let saved_dollar = self.context.lookup("$").cloned();
 
                 for item in &items {
-                    // Bind $ to the current item for key evaluation
-                    self.context.bind("$".to_string(), item.clone());
+                    // In reduce mode evaluate the key against `@` with tuple keys
+                    // bound; otherwise against the item itself.
+                    let (key_data, tuple_saved) = match (reduce, item) {
+                        (true, JValue::Object(o)) => {
+                            let saved = bind_tuple(self, o);
+                            (
+                                o.get("@").cloned().unwrap_or(JValue::Undefined),
+                                Some(saved),
+                            )
+                        }
+                        _ => (item.clone(), None),
+                    };
+                    self.context.bind("$".to_string(), key_data.clone());
 
                     for (pair_index, (key_node, _value_node)) in pattern.iter().enumerate() {
                         // Evaluate key with current item as context
-                        let key = match self.evaluate_internal(key_node, item)? {
+                        let key = match self.evaluate_internal(key_node, &key_data)? {
                             JValue::String(s) => s,
                             JValue::Null => continue, // Skip null keys
                             other => {
                                 // Skip undefined keys
                                 if other.is_undefined() {
                                     continue;
+                                }
+                                if let Some(saved) = tuple_saved {
+                                    restore(self, saved);
                                 }
                                 return Err(EvaluatorError::TypeError(format!(
                                     "T1003: Object key must be a string, got: {:?}",
@@ -3181,6 +3280,9 @@ impl Evaluator {
                         if let Some((existing_data, existing_idx)) = groups.get_mut(&*key) {
                             // Key already exists - check if from same expression index
                             if *existing_idx != pair_index {
+                                if let Some(saved) = tuple_saved {
+                                    restore(self, saved);
+                                }
                                 // D1009: multiple key expressions evaluate to same key
                                 return Err(EvaluatorError::EvaluationError(format!(
                                     "D1009: Multiple key expressions evaluate to same key: {}",
@@ -3194,6 +3296,10 @@ impl Evaluator {
                             groups.insert(key.to_string(), (vec![item.clone()], pair_index));
                         }
                     }
+
+                    if let Some(saved) = tuple_saved {
+                        restore(self, saved);
+                    }
                 }
 
                 // Phase 2: Evaluate value expression for each group
@@ -3202,6 +3308,26 @@ impl Evaluator {
                 for (key, (grouped_data, expr_index)) in groups {
                     // Get the value expression for this group
                     let (_key_node, value_node) = &pattern[expr_index];
+
+                    if reduce {
+                        // Reduce the grouped tuples into one (per-key values
+                        // appended), mirroring jsonata-js reduceTupleStream, then
+                        // evaluate the value against the merged `@` with the merged
+                        // focus/index/ancestor keys bound.
+                        let merged = reduce_tuple_stream(&grouped_data);
+                        let context = merged.get("@").cloned().unwrap_or(JValue::Undefined);
+                        let mut tuple_no_at = merged.clone();
+                        tuple_no_at.shift_remove("@");
+                        let saved = bind_tuple(self, &tuple_no_at);
+                        self.context.bind("$".to_string(), context.clone());
+                        let value = self.evaluate_internal(value_node, &context);
+                        restore(self, saved);
+                        let value = value?;
+                        if !value.is_undefined() {
+                            result.insert(key, value);
+                        }
+                        continue;
+                    }
 
                     // Determine the context for value evaluation:
                     // - If single item, use that item directly
