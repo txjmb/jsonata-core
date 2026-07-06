@@ -345,6 +345,26 @@ fn splice_marker_steps(
     let Transformed { node, pending } = transformed;
     let steps = match node {
         AstNode::Path { mut steps } => {
+            // Our parser encodes `$[[1..4]]` (and any `expr[pred]`) as a separate
+            // trailing `Predicate` step rather than a step carrying the predicate
+            // as a `stage` (as jsonata-js does). For an index marker, mirror
+            // jsonata's `#` case (parser.js ~L1206-1223: when the target step
+            // already has stages, PUSH an index stage) by folding those trailing
+            // predicate pseudo-steps into the preceding real step's stages, then
+            // stamping the index on that step. This makes `$[[1..4]]#$pos[$pos>=2]`
+            // apply the `[[1..4]]` filter, then number the survivors, then filter
+            // by `$pos` -- rather than crashing on a `Predicate` step node in
+            // create_tuple_stream.
+            if matches!(marker, BindingMarker::Index(_)) {
+                while steps.len() >= 2
+                    && matches!(steps.last().map(|s| &s.node), Some(AstNode::Predicate(_)))
+                {
+                    let pred = steps.pop().unwrap();
+                    if let AstNode::Predicate(inner) = pred.node {
+                        steps.last_mut().unwrap().stages.push(Stage::Filter(inner));
+                    }
+                }
+            }
             if let Some(last) = steps.last_mut() {
                 check_focus_bind_target(&marker, &last.stages, &last.node)?;
                 apply_marker_to_step(last, marker);
