@@ -30,6 +30,7 @@
 //! - `value` - JValue type (the runtime value representation)
 
 pub mod ast;
+pub mod ast_transform;
 mod compiler;
 mod datetime;
 pub mod evaluator;
