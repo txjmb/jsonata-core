@@ -23,6 +23,24 @@ pub struct PathStep {
     pub node: AstNode,
     /// Stages to apply during this step (e.g., predicates)
     pub stages: Vec<Stage>,
+    /// Set by `@$var` (focus binding): binds the step's per-element value to
+    /// this variable name (without the `$` prefix) during tuple-stream
+    /// evaluation. Mirrors jsonata-js's `step.focus`.
+    pub focus: Option<String>,
+    /// Set by `#$var` (index binding): binds the step's per-element index to
+    /// this variable name (without the `$` prefix). Mirrors jsonata-js's
+    /// `step.index`. Replaces the retired `AstNode::IndexBind` wrapping node.
+    pub index_var: Option<String>,
+    /// Set by ast_transform when a later `%` reference needs this step's
+    /// *input* value preserved. The label is synthetic (e.g. "!0", "!1", ...)
+    /// and used as a tuple-dict key at runtime. Mirrors jsonata-js's
+    /// `step.ancestor.label`.
+    pub ancestor_label: Option<String>,
+    /// True when this step must participate in tuple-stream evaluation
+    /// (because of its own `focus`/`index_var`/`ancestor_label`, or because
+    /// an earlier step in the same path already entered tuple-stream mode).
+    /// Mirrors jsonata-js's `step.tuple`.
+    pub is_tuple: bool,
 }
 
 /// AST Node types
@@ -254,12 +272,23 @@ impl PathStep {
         PathStep {
             node,
             stages: Vec::new(),
+            focus: None,
+            index_var: None,
+            ancestor_label: None,
+            is_tuple: false,
         }
     }
 
     /// Create a path step with stages
     pub fn with_stages(node: AstNode, stages: Vec<Stage>) -> Self {
-        PathStep { node, stages }
+        PathStep {
+            node,
+            stages,
+            focus: None,
+            index_var: None,
+            ancestor_label: None,
+            is_tuple: false,
+        }
     }
 }
 
@@ -322,5 +351,14 @@ mod tests {
             rhs: Box::new(AstNode::number(2.0)),
         };
         assert!(matches!(node, AstNode::Binary { .. }));
+    }
+
+    #[test]
+    fn test_path_step_new_defaults_new_fields_to_none() {
+        let step = PathStep::new(AstNode::Name("foo".to_string()));
+        assert_eq!(step.focus, None);
+        assert_eq!(step.index_var, None);
+        assert_eq!(step.ancestor_label, None);
+        assert!(!step.is_tuple);
     }
 }
