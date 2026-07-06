@@ -112,6 +112,45 @@ new session shouldn't need to re-derive it, just verify and build on it.
   `jsonata.js` tuple-stream handling (`evaluateStep`/sort/group code) to find where the existing,
   fairly extensive tuple-handling code in `evaluator.rs` (grep `"@"` — dozens of sites) misses the
   unwrap step. 37 cases.
+
+  **Correction (2026-07-05, before starting Phase 3):** the above two paragraphs understate the
+  work by roughly an order of magnitude. A pre-implementation investigation (grep-verified)
+  found that **both features are completely unimplemented at the lexer/AST level**, not
+  "partially working with some gaps":
+  - `@` is not tokenized at all — the lexer has no `'@'` arm and hits the catch-all
+    `UnexpectedToken` error on any input containing it. There is no `AstNode` variant for
+    focus/positional binding (the only existing binding node is `AstNode::IndexBind` for `#$var`).
+  - `%` only ever tokenizes as binary modulo (confirmed at `src/parser.rs:602-604`, `712`,
+    `1543` as the original spec said) — there is no prefix-position handling anywhere in
+    `parse_primary`, and no `AstNode::Parent`/ancestor-slot concept exists.
+  - Our parser is a single-pass Pratt/recursive-descent parser with **no post-parse AST
+    transformation pass** analogous to jsonata-js's `processAST`/`seekParent`/`resolveAncestry`
+    (`parser.js:937-1030`) — that machinery (compile-time "ancestor slot" assignment walking
+    back through path steps, blocks, predicates, and sort terms) would need to be built from
+    scratch, not adapted from an existing pass.
+  - The runtime tuple-wrapper convention that DOES exist (`__tuple__`/`@`/`$name` keys on an
+    `IndexMap`-backed `JValue::Object`, ~20 call sites in `evaluator.rs`) currently backs only
+    `#$var` (index binding). It propagates bindings by re-threading extra keys through the
+    `data` value itself rather than the real variable-scope stack (`self.context`), only
+    partially promotes them into `self.context` for three next-step node types, and has no
+    single "unwrap tuple wrapper before returning to caller" choke point — several of these are
+    themselves latent correctness gaps (e.g. a bare tuple-producing expression with no further
+    field access can leak the wrapper object straight into Python-visible output today, for the
+    one binding operator — `#` — that already works).
+  - `%` cannot simply piggyback on this wrapper either: the parent-operator test suite requires
+    `%` to work in plain paths with no `@`/`#` present at all (e.g. `Account.Order.Product.{
+    'Order': %.OrderID }` has no tuple binding anywhere), so `%` needs its own ancestor-tracking
+    side channel independent of the `@`/`#` wrapper, while also needing to compose with it for
+    the handful of test cases that use both together (`library.loans@$L.books@$B[...].{ ...,
+    'parent': $keys(%) }`).
+
+  **Decision:** given this is a ground-up, two-feature addition sharing fragile core-parser/
+  evaluator territory (flagged in project memory as a known-fragile area), rather than a
+  bounded bug fix, Phases 3 and 4 are combined into one future effort and deferred to their own
+  dedicated session/branch/PR — consistent with this spec's own "each phase is its own
+  branch/PR" rule, which anticipated needing to split out exactly this kind of unexpectedly
+  large phase. Phases 0-2 ship now as their own release; Phases 3+4 (combined) and 5 remain
+  open follow-up work with no landing date attached.
 - **Phase 5 — remaining stragglers.** `array-constructor` (2), `function-distinct` (1),
   `flattening` (1) — not yet triaged; likely quick once looked at individually.
 
