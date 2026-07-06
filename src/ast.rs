@@ -137,6 +137,11 @@ pub enum AstNode {
     /// Descendant operator (**) in path expressions
     Descendant,
 
+    /// Parent-reference operator (%) in path expressions
+    /// Resolved to a specific ancestor slot by the post-parse ast_transform pass;
+    /// unit variant at parse time, matching jsonata-js's bare `{type: 'parent'}`.
+    Parent,
+
     /// Array filter/predicate [condition]
     /// Can be an index (number) or a predicate (boolean expression)
     Predicate(Box<AstNode>),
@@ -217,6 +222,11 @@ pub enum BinaryOp {
 
     // Variable binding
     ColonEqual, // :=
+
+    // Focus binding (raw parse-time marker for @$var; resolved into a
+    // PathStep.focus flag by ast_transform, matching jsonata-js's own
+    // parser.js:834-847, which also produces a generic binary node here)
+    FocusBind,
 
     // Coalescing
     Coalesce, // ??

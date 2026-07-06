@@ -3368,6 +3368,11 @@ impl Evaluator {
                     Ok(JValue::string("<lambda>"))
                 }
             }
+
+            // Parent-reference operator: should be resolved by ast_transform pass (Task 2)
+            AstNode::Parent => Err(EvaluatorError::EvaluationError(
+                "Parent operator (%) must be resolved by ast_transform pass".to_string(),
+            )),
         }
     }
 
@@ -5279,6 +5284,11 @@ impl Evaluator {
             BinaryOp::Concatenate => self.concatenate(&left, &right),
             BinaryOp::Range => self.range(&left, &right),
             BinaryOp::In => self.in_operator(&left, &right),
+
+            // Focus binding: should be resolved by ast_transform pass (Task 2)
+            BinaryOp::FocusBind => Err(EvaluatorError::EvaluationError(
+                "Focus binding operator (@) must be resolved by ast_transform pass".to_string(),
+            )),
 
             // These operators are all handled as special cases earlier in evaluate_binary_op
             BinaryOp::ColonEqual | BinaryOp::Coalesce | BinaryOp::Default | BinaryOp::ChainPipe => {
@@ -9036,6 +9046,7 @@ impl Evaluator {
             | AstNode::Regex { .. }
             | AstNode::Wildcard
             | AstNode::Descendant
+            | AstNode::Parent
             | AstNode::ParentVariable(_) => {}
         }
     }
