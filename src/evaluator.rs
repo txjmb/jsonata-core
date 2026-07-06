@@ -4012,15 +4012,6 @@ impl Evaluator {
                 return Ok(JValue::Undefined);
             }
 
-            // Tuple-binding step (@ focus / # index / % parent): create/extend the
-            // tuple stream, mirroring jsonata-js's evaluateTupleStep. Downstream
-            // (non-binding) steps then consume the {@, $var, !label, __tuple__}
-            // wrappers via the existing tuple-aware handling below.
-            if Self::step_creates_tuple(step) {
-                current = JValue::array(self.create_tuple_stream(step, &current)?);
-                continue;
-            }
-
             // Check if current is a tuple array - if so, we need to bind tuple variables
             // to context so they're available in nested expressions (like predicates)
             let is_tuple_array = if let JValue::Array(arr) = &current {
@@ -4034,6 +4025,28 @@ impl Evaluator {
             } else {
                 false
             };
+
+            // Tuple-binding step (@ focus / # index / % parent): create/extend the
+            // tuple stream, mirroring jsonata-js's evaluateTupleStep. Downstream
+            // (non-binding) steps then consume the {@, $var, !label, __tuple__}
+            // wrappers via the existing tuple-aware handling below.
+            //
+            // A `%` reference used AS a path step (`AstNode::Parent`, e.g. the
+            // `.%` in `Account.Order.Product.Price.%[...]`) must also extend the
+            // stream, but ONLY when it is consuming an existing tuple stream:
+            // its ancestor label lives in those incoming tuples, so
+            // create_tuple_stream's per-tuple frame binding is what lets
+            // `evaluate_internal(Parent, ..)` resolve it (and any predicate
+            // stage on the `%` step then resolves in the same frame). A `%`
+            // that instead LEADS a fresh path (e.g. the `%.OrderID` inside a
+            // predicate, whose input is plain data, not a tuple stream) must
+            // NOT be routed here -- it's an ordinary scope lookup.
+            let is_parent_step_over_tuple =
+                matches!(step.node, AstNode::Parent(_)) && is_tuple_array;
+            if Self::step_creates_tuple(step) || is_parent_step_over_tuple {
+                current = JValue::array(self.create_tuple_stream(step, &current)?);
+                continue;
+            }
 
             // For tuple arrays with certain step types, we need special handling to bind
             // tuple variables to context so they're available in nested expressions.
@@ -4575,6 +4588,7 @@ impl Evaluator {
     /// True when a path step carries a tuple-binding flag (`@$var` focus,
     /// `#$var` index, or a resolved `%` ancestor label) and must therefore
     /// produce/extend a tuple stream rather than be evaluated as a plain step.
+    ///
     fn step_creates_tuple(step: &PathStep) -> bool {
         step.focus.is_some() || step.index_var.is_some() || step.ancestor_label.is_some()
     }
