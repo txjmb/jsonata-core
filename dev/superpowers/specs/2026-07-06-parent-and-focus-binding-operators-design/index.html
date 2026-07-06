@@ -12,29 +12,27 @@
         <meta name="author" content="jsonatapy contributors">
       
       
-        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/dev/">
+        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/dev/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design/">
       
       
-      
-        <link rel="next" href="installation/">
       
       
         
       
       
-      <link rel="icon" href="assets/images/favicon.png">
+      <link rel="icon" href="../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>jsonata-core + jsonatapy</title>
+        <title>% (parent reference) and @ (focus binding) operators - jsonata-core + jsonatapy</title>
       
     
     
-      <link rel="stylesheet" href="assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -53,9 +51,9 @@
       
     
     
-      <link rel="stylesheet" href="stylesheets/extra.css">
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
   
@@ -90,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#jsonata-core-jsonatapy" class="md-skip">
+        <a href="#parent-reference-and-focus-binding-operators" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +106,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -128,7 +126,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Home
+              % (parent reference) and @ (focus binding) operators
             
           </span>
         </div>
@@ -239,11 +237,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="." class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
         
   
   
@@ -264,7 +260,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="installation/" class="md-tabs__link">
+        <a href="../../../installation/" class="md-tabs__link">
           
   
   
@@ -284,7 +280,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="rust-crate/" class="md-tabs__link">
+        <a href="../../../rust-crate/" class="md-tabs__link">
           
   
   
@@ -304,7 +300,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="api/" class="md-tabs__link">
+        <a href="../../../api/" class="md-tabs__link">
           
   
   
@@ -324,7 +320,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="performance/" class="md-tabs__link">
+        <a href="../../../performance/" class="md-tabs__link">
           
   
   
@@ -344,7 +340,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="compatibility/" class="md-tabs__link">
+        <a href="../../../compatibility/" class="md-tabs__link">
           
   
   
@@ -364,7 +360,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="development/building/" class="md-tabs__link">
+        <a href="../../../development/building/" class="md-tabs__link">
           
   
   
@@ -384,7 +380,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="changelog/" class="md-tabs__link">
+        <a href="../../../changelog/" class="md-tabs__link">
           
   
   
@@ -418,7 +414,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -445,37 +441,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Home
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="." class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
         
   
   
@@ -491,81 +460,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#two-packages-one-implementation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Two packages, one implementation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#python-quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Python quick start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#rust-quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Rust quick start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#performance-highlights" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Performance highlights
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-is-jsonata" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What is JSONata?
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -631,7 +525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="installation/" class="md-nav__link">
+      <a href="../../../installation/" class="md-nav__link">
         
   
   
@@ -659,7 +553,7 @@
   
   
     <li class="md-nav__item">
-      <a href="usage/" class="md-nav__link">
+      <a href="../../../usage/" class="md-nav__link">
         
   
   
@@ -687,7 +581,7 @@
   
   
     <li class="md-nav__item">
-      <a href="examples/" class="md-nav__link">
+      <a href="../../../examples/" class="md-nav__link">
         
   
   
@@ -776,7 +670,7 @@
   
   
     <li class="md-nav__item">
-      <a href="rust-crate/" class="md-nav__link">
+      <a href="../../../rust-crate/" class="md-nav__link">
         
   
   
@@ -865,7 +759,7 @@
   
   
     <li class="md-nav__item">
-      <a href="api/" class="md-nav__link">
+      <a href="../../../api/" class="md-nav__link">
         
   
   
@@ -893,7 +787,7 @@
   
   
     <li class="md-nav__item">
-      <a href="jsonata-language/" class="md-nav__link">
+      <a href="../../../jsonata-language/" class="md-nav__link">
         
   
   
@@ -921,7 +815,7 @@
   
   
     <li class="md-nav__item">
-      <a href="error-handling/" class="md-nav__link">
+      <a href="../../../error-handling/" class="md-nav__link">
         
   
   
@@ -1010,7 +904,7 @@
   
   
     <li class="md-nav__item">
-      <a href="performance/" class="md-nav__link">
+      <a href="../../../performance/" class="md-nav__link">
         
   
   
@@ -1038,7 +932,7 @@
   
   
     <li class="md-nav__item">
-      <a href="benchmarks/" class="md-nav__link">
+      <a href="../../../benchmarks/" class="md-nav__link">
         
   
   
@@ -1066,7 +960,7 @@
   
   
     <li class="md-nav__item">
-      <a href="optimization-tips/" class="md-nav__link">
+      <a href="../../../optimization-tips/" class="md-nav__link">
         
   
   
@@ -1155,7 +1049,7 @@
   
   
     <li class="md-nav__item">
-      <a href="compatibility/" class="md-nav__link">
+      <a href="../../../compatibility/" class="md-nav__link">
         
   
   
@@ -1183,7 +1077,7 @@
   
   
     <li class="md-nav__item">
-      <a href="migration-from-js/" class="md-nav__link">
+      <a href="../../../migration-from-js/" class="md-nav__link">
         
   
   
@@ -1211,7 +1105,7 @@
   
   
     <li class="md-nav__item">
-      <a href="migration-from-jsonata-python/" class="md-nav__link">
+      <a href="../../../migration-from-jsonata-python/" class="md-nav__link">
         
   
   
@@ -1300,7 +1194,7 @@
   
   
     <li class="md-nav__item">
-      <a href="development/building/" class="md-nav__link">
+      <a href="../../../development/building/" class="md-nav__link">
         
   
   
@@ -1328,7 +1222,7 @@
   
   
     <li class="md-nav__item">
-      <a href="development/parser/" class="md-nav__link">
+      <a href="../../../development/parser/" class="md-nav__link">
         
   
   
@@ -1356,7 +1250,7 @@
   
   
     <li class="md-nav__item">
-      <a href="development/contributing/" class="md-nav__link">
+      <a href="../../../development/contributing/" class="md-nav__link">
         
   
   
@@ -1384,7 +1278,7 @@
   
   
     <li class="md-nav__item">
-      <a href="development/testing/" class="md-nav__link">
+      <a href="../../../development/testing/" class="md-nav__link">
         
   
   
@@ -1412,7 +1306,7 @@
   
   
     <li class="md-nav__item">
-      <a href="development/architecture/" class="md-nav__link">
+      <a href="../../../development/architecture/" class="md-nav__link">
         
   
   
@@ -1501,7 +1395,7 @@
   
   
     <li class="md-nav__item">
-      <a href="changelog/" class="md-nav__link">
+      <a href="../../../changelog/" class="md-nav__link">
         
   
   
@@ -1529,7 +1423,7 @@
   
   
     <li class="md-nav__item">
-      <a href="license/" class="md-nav__link">
+      <a href="../../../license/" class="md-nav__link">
         
   
   
@@ -1557,7 +1451,7 @@
   
   
     <li class="md-nav__item">
-      <a href="credits/" class="md-nav__link">
+      <a href="../../../credits/" class="md-nav__link">
         
   
   
@@ -1612,10 +1506,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#two-packages-one-implementation" class="md-nav__link">
+  <a href="#context" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two packages, one implementation
+        Context
       
     </span>
   </a>
@@ -1623,10 +1517,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#python-quick-start" class="md-nav__link">
+  <a href="#scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Python quick start
+        Scope
       
     </span>
   </a>
@@ -1634,10 +1528,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#rust-quick-start" class="md-nav__link">
+  <a href="#decisions-from-brainstorming-qa" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Rust quick start
+        Decisions (from brainstorming Q&amp;A)
       
     </span>
   </a>
@@ -1645,10 +1539,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#performance-highlights" class="md-nav__link">
+  <a href="#design" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Performance highlights
+        Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-ast-parser-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. AST &amp; parser changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-compile-time-ancestor-resolution-pass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Compile-time ancestor-resolution pass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-runtime-tuple-binding-unification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Runtime tuple-binding unification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Error handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-testing-plan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Testing plan
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#definition-of-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Definition of done
       
     </span>
   </a>
@@ -1656,10 +1622,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-is-jsonata" class="md-nav__link">
+  <a href="#release-line" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What is JSONata?
+        Release line
       
     </span>
   </a>
@@ -1686,90 +1652,191 @@
   
 
 
-<h1 id="jsonata-core-jsonatapy">jsonata-core + jsonatapy<a class="headerlink" href="#jsonata-core-jsonatapy" title="Permanent link">&para;</a></h1>
-<p>High-performance <a href="https://jsonata.org/">JSONata</a> implementation in Rust, with Python bindings.</p>
-<h2 id="two-packages-one-implementation">Two packages, one implementation<a class="headerlink" href="#two-packages-one-implementation" title="Permanent link">&para;</a></h2>
+<h1 id="parent-reference-and-focus-binding-operators"><code>%</code> (parent reference) and <code>@</code> (focus binding) operators<a class="headerlink" href="#parent-reference-and-focus-binding-operators" title="Permanent link">&para;</a></h1>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>This is the deferred Phase 3+4 of
+<a href="../2026-07-05-reference-suite-coverage-gap-design/"><code>docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md</code></a>.
+That spec's original estimate treated <code>%</code> (28 cases, <code>parent-operator</code> group) and <code>@</code>
+(37 cases, <code>joins</code> group) as bounded bug fixes ("some expression shapes don't parse",
+"a wrapper object leaks into output"). A pre-implementation investigation (recorded in
+memory as <code>project_parent_and_at_operators.md</code>) found instead that <strong>both are completely
+unimplemented at the lexer/AST level</strong>: <code>@</code> causes an immediate lexer error, <code>%</code> only ever
+tokenizes as binary modulo, and there is no post-parse AST transformation pass of any kind
+in this parser (unlike jsonata-js's <code>processAST</code>). That finding is why this was split out
+into its own combined effort rather than bundled into Phases 0-2 (which shipped as the
+<code>2.1.6</code> release prep).</p>
+<p>Phases 0-2 (reference-suite loader fix, datetime picture-string engine,
+<code>$formatInteger</code>/<code>$parseInteger</code>) are merged to <code>main</code>. The <code>2.1.6</code> release itself is on
+hold at the user's request until this effort (and Phase 5's remaining stragglers) also
+land — see Release Line below.</p>
+<p><strong>Reference implementation:</strong> <code>tests/jsonata-js/src/parser.js</code> (prefix/infix rules ~L616-847;
+the post-parse pass <code>processAST</code>/<code>seekParent</code>/<code>pushAncestry</code>/<code>resolveAncestry</code> ~L937-1235)
+and <code>tests/jsonata-js/src/jsonata.js</code> (<code>evaluate</code>'s <code>case 'parent'</code> ~L83-85;
+<code>evaluateTupleStep</code>/<code>createFrameFromTuple</code> ~L229-380). All line numbers confirmed by direct
+reading during this design's brainstorming session, not secondhand summary.</p>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
+<p>In scope:
+- <code>%</code> (parent-reference operator), including chained <code>%.%</code> (two-or-more levels up),
+  working inside plain paths, object-constructor group-by clauses, array constructors,
+  predicates/filters, and sort terms.
+- <code>@$var</code> (focus/positional binding), including chained joins (<code>Account.Order@$o.Product</code>)
+  and the <code>S0214</code>/<code>S0215</code>/<code>S0216</code> parse-time error cases in <code>joins/errors.json</code>.
+- Fixing the existing <code>#$var</code> (index-binding) tuple-propagation gap as part of the same
+  runtime mechanism unification (decided in this design; see "Decisions" below) — <code>#</code>'s
+  current passing tests must continue to pass unchanged.
+- The single unwrap-at-output-boundary fix that closes the "tuple wrapper leaks into
+  user-visible output" bug class (latent today for <code>#</code>, would otherwise be newly reachable
+  for <code>@</code>/<code>%</code>).</p>
+<p>Out of scope:
+- Phase 5 (<code>array-constructor</code>, <code>function-distinct</code>, <code>flattening</code> stragglers) — separate,
+  untriaged, tracked in the parent spec.
+- Any VM/bytecode-compiler support for <code>%</code>/<code>@</code>/<code>#</code> — these fall back to the tree-walker
+  only, matching how Phases 1-2 handled uncompilable constructs (e.g. named-variable
+  lookups already force tree-walker fallback; see <code>MEMORY.md</code>'s Phase 2 compiler notes).</p>
+<h2 id="decisions-from-brainstorming-qa">Decisions (from brainstorming Q&amp;A)<a class="headerlink" href="#decisions-from-brainstorming-qa" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Fix the <code>#</code> propagation gap as part of this work</strong>, rather than building <code>%</code>/<code>@</code> on
+   top of a known-buggy mechanism and leaving <code>#</code> as-is. The investigation found tuple
+   bindings currently propagate through the <code>data</code> value itself rather than the real
+   variable-scope stack (<code>self.context</code>), and only get promoted into <code>self.context</code> for
+   three specific next-step node types (<code>Object</code>/<code>FunctionApplication</code>/<code>Variable</code>).</li>
+<li><strong>Keep the existing <code>JValue::Object</code> tuple-wrapper convention</strong> (<code>__tuple__</code>/<code>@</code>/<code>$name</code>
+   reserved keys), rather than replacing it with a dedicated non-<code>JValue</code> Rust-native
+   context structure. This directly mirrors jsonata-js's own design — it also represents
+   tuple bindings as a plain object flowing through the pipeline (<code>{'@': item, ...}</code>) <em>and</em>
+   builds a real scope frame from that same object (<code>createFrameFromTuple</code>) before
+   evaluating each step. Chosen over a bigger refactor (threading a new parameter through
+   dozens of evaluator functions) because it's both lower-risk and more faithful to the
+   reference implementation.</li>
+<li><strong>Aim for full completion of all 69 currently-xfailed cases</strong> (28 <code>parent-operator</code> +
+   37 <code>joins</code> + 4 Phase-5 stragglers are explicitly <em>not</em> included in that 69 — Phase 5
+   stays separate scope) as the bar for this effort, not partial/best-effort coverage.</li>
+</ol>
+<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">&para;</a></h2>
+<h3 id="1-ast-parser-changes">1. AST &amp; parser changes<a class="headerlink" href="#1-ast-parser-changes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>New leaf node <code>AstNode::Parent(AncestorSlot)</code> for <code>%</code>, where <code>AncestorSlot</code> holds a
+  synthetic label (<code>!0</code>, <code>!1</code>, ...) assigned during the post-parse pass (Section 2) — the
+  node itself is inert at parse time, matching jsonata-js's trivial one-line prefix rule.</li>
+<li><strong>Step-level flags, not wrapping nodes.</strong> <code>#$i</code>, <code>@$v</code>, and <code>%</code>'s ancestor-capture are
+  all represented in jsonata-js as flags on the path step itself (<code>step.index</code>,
+  <code>step.focus</code>, <code>step.ancestor</code>, all alongside <code>step.tuple = true</code>) — not as nodes that
+  wrap what they bind. This port adds <code>focus: Option&lt;String&gt;</code>, <code>index_var: Option&lt;String&gt;</code>,
+  <code>ancestor_label: Option&lt;String&gt;</code>, and <code>is_tuple: bool</code> fields directly on <code>PathStep</code>, and
+  <strong>retires <code>AstNode::IndexBind</code></strong> in favor of setting <code>index_var</code> on the step it applies
+  to. This is the most invasive part of the design (it touches <code>#</code>'s existing, currently
+  passing representation) but is necessary: if <code>#</code> keeps a special wrapping node while
+  <code>@</code>/<code>%</code> use step-level flags, the three can't share one unified tuple mechanism, and
+  Decision 1's propagation fix can't land as a single change.</li>
+<li>Parser additions: <code>%</code> gets a one-line prefix rule (same shape as the existing
+  <code>Token::Star =&gt; AstNode::Wildcard</code> arm in <code>parse_primary</code>); <code>@</code> gets a one-line infix
+  rule validating its RHS is a bare variable reference (else <code>S0214</code>). Both produce
+  bare/unresolved nodes at this stage — all the real semantic work happens in Section 2,
+  matching jsonata-js's own two-pass split.</li>
+</ul>
+<h3 id="2-compile-time-ancestor-resolution-pass">2. Compile-time ancestor-resolution pass<a class="headerlink" href="#2-compile-time-ancestor-resolution-pass" title="Permanent link">&para;</a></h3>
+<p>A new pass (new module, e.g. <code>src/ast_transform.rs</code>) runs on the freshly-parsed tree
+before it reaches the evaluator. It is a faithful port of jsonata-js's
+<code>seekParent</code>/<code>pushAncestry</code>/<code>resolveAncestry</code>, adapted to Rust's ownership model: instead
+of mutating tree nodes in place (as the JS does), it <strong>consumes the raw tree and rebuilds
+an enriched one</strong> with Section 1's new fields filled in — same algorithm, immutable
+reconstruction instead of mutate-in-place, the natural Rust adaptation rather than a
+design compromise.</p>
+<p>For each path, walking backward from the last step: when a <code>%</code> (<code>AstNode::Parent</code>) is
+found, locate the step <code>level</code> positions back (chained <code>%.%</code> increments <code>level</code>) and stamp
+<em>that</em> step with a synthetic <code>ancestor_label</code> and <code>is_tuple = true</code> — walking through
+parenthesized <code>AstNode::Block</code>s (into their last expression, per the
+<code>parent000</code>-<code>parent006</code> test shapes, which deliberately wrap different path segments in
+parens to stress exactly this), through predicates and sort terms (mirroring
+<code>pushAncestry</code>'s predicate/sort-term entry points), and reusing an existing label when the
+same step already got one from an earlier <code>%</code> reference in the same expression (so
+<code>%.OrderID</code> and <code>%.%.\</code>Account Name`` sharing an ancestor step share one label, not two).</p>
+<p>Errors surface here: <code>S0217</code> ("can't derive ancestor") when <code>%</code> walks off the front of a
+path into something that isn't a name/wildcard/block/path. Note the
+<code>Account.Order.().%</code> test case (<code>"undefinedResult": true</code>, not an error) needs
+verification during implementation of exactly where jsonata-js draws this line — <code>()</code> is a
+syntactically valid empty step, so the ancestor slot likely still resolves at compile time,
+just evaluates to undefined at runtime because the slot's bound value was never populated
+by an empty step. Confirm against the reference implementation rather than assuming.</p>
+<h3 id="3-runtime-tuple-binding-unification">3. Runtime tuple-binding unification<a class="headerlink" href="#3-runtime-tuple-binding-unification" title="Permanent link">&para;</a></h3>
+<p>After Section 1's <code>IndexBind</code> migration, a step becomes tuple-producing whenever
+<code>PathStep.is_tuple</code> is set — by <code>@</code>, <code>#</code>, <em>or</em> a downstream <code>%</code> (Section 2) — so a plain
+<code>Account.Order.Product</code> step with no visible binding syntax can still enter the tuple path
+purely because something later needs its ancestor value, exactly matching jsonata-js.</p>
+<p>The wrapper stays the existing <code>JValue::Object</code> with <code>__tuple__</code>/<code>@</code>/<code>$name</code> keys
+(Decision 2), gaining one more reserved-key convention for ancestor labels (<code>!0</code>, <code>!1</code>,
+...). The fix (Decision 1): every tuple step unconditionally builds a real scope frame
+from the current tuple dict before evaluating that step's sub-expression — mirroring
+<code>createFrameFromTuple</code>, called unconditionally in jsonata-js — replacing the current
+partial promotion that only covers three next-step node types. <code>%</code> then resolves via
+ordinary scope lookup of its synthetic label; no special-casing needed at the lookup site
+beyond what <code>$name</code> resolution already does.</p>
+<p>The "leaks into output" bug closes as a side effect of touching every tuple-step call
+site: add a single unwrap-at-boundary check (top of <code>Evaluator::evaluate()</code> and/or the
+<code>json_to_python</code> boundary in <code>src/lib.rs</code>) that strips a lingering <code>__tuple__</code> wrapper
+before it reaches the caller.</p>
+<h3 id="4-error-handling">4. Error handling<a class="headerlink" href="#4-error-handling" title="Permanent link">&para;</a></h3>
+<p>Four parse/compile-time error codes must match jsonata-js exactly (<code>joins/errors.json</code>
+asserts on them directly):</p>
 <table>
 <thead>
 <tr>
-<th></th>
-<th><strong>jsonata-core</strong></th>
-<th><strong>jsonatapy</strong></th>
+<th>Code</th>
+<th>Condition</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Language</td>
-<td>Rust</td>
-<td>Python</td>
+<td>S0214</td>
+<td><code>@</code>'s RHS isn't a bare variable reference</td>
 </tr>
 <tr>
-<td>Published on</td>
-<td><a href="https://crates.io/crates/jsonata-core">crates.io</a></td>
-<td><a href="https://pypi.org/project/jsonatapy/">PyPI</a></td>
+<td>S0215</td>
+<td><code>@</code> applied to a step that already has predicates/stages defined</td>
 </tr>
 <tr>
-<td>Install</td>
-<td><code>cargo add jsonata-core</code></td>
-<td><code>pip install jsonatapy</code></td>
+<td>S0216</td>
+<td><code>@</code> applied after a sort (<code>^(...)</code>) clause</td>
 </tr>
 <tr>
-<td>Use when</td>
-<td>You're writing Rust</td>
-<td>You're writing Python</td>
+<td>S0217</td>
+<td><code>%</code> can't derive an ancestor</td>
 </tr>
 </tbody>
 </table>
-<p><code>jsonatapy</code> is a thin PyO3 wrapper around <code>jsonata-core</code>. Both live in the
-<a href="https://github.com/txjmb/jsonata-core">same repository</a>.</p>
-<hr />
-<h2 id="python-quick-start">Python quick start<a class="headerlink" href="#python-quick-start" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>jsonatapy
-</span></code></pre></div>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># One-off evaluation</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s1">&#39;&quot;Hello, &quot; &amp; name&#39;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;World&quot;</span><span class="p">})</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>  <span class="c1"># &quot;Hello, World&quot;</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Compile once, evaluate many times</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;orders[price &gt; 100].product&quot;</span><span class="p">)</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">({</span><span class="s2">&quot;orders&quot;</span><span class="p">:</span> <span class="p">[{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;Laptop&quot;</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mi">1200</span><span class="p">}]})</span>
-</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># Pre-convert data for maximum throughput (4–15x faster for repeated queries)</span>
-</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="n">data</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">JsonataData</span><span class="p">(</span><span class="n">large_dataset</span><span class="p">)</span>
-</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
-</span></code></pre></div>
-<h2 id="rust-quick-start">Rust quick start<a class="headerlink" href="#rust-quick-start" title="Permanent link">&para;</a></h2>
-<div class="language-rust highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">use</span><span class="w"> </span><span class="n">jsonata_core</span><span class="p">::</span><span class="n">evaluator</span><span class="p">::</span><span class="n">Evaluator</span><span class="p">;</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">use</span><span class="w"> </span><span class="n">jsonata_core</span><span class="p">::</span><span class="n">parser</span><span class="p">;</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">use</span><span class="w"> </span><span class="n">jsonata_core</span><span class="p">::</span><span class="n">value</span><span class="p">::</span><span class="n">JValue</span><span class="p">;</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="kd">let</span><span class="w"> </span><span class="n">ast</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parser</span><span class="p">::</span><span class="n">parse</span><span class="p">(</span><span class="s">&quot;orders[price &gt; 100].product&quot;</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="kd">let</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JValue</span><span class="p">::</span><span class="n">from_json_str</span><span class="p">(</span><span class="s">r#&quot;{&quot;orders&quot;:[{&quot;product&quot;:&quot;Laptop&quot;,&quot;price&quot;:1200}]}&quot;#</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="kd">let</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Evaluator</span><span class="p">::</span><span class="n">new</span><span class="p">().</span><span class="n">evaluate</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ast</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
-</span></code></pre></div>
-<hr />
-<h2 id="performance-highlights">Performance highlights<a class="headerlink" href="#performance-highlights" title="Permanent link">&para;</a></h2>
+<p>These map onto a coded error variant the same way Phase 1's <code>D3130</code>-<code>D3136</code> datetime codes
+did — message starts with the code, so <code>test_reference_suite.py</code>'s <code>extract_error_code</code>
+picks it up via its <code>^([TDUS]\d{4}):</code> prefix match.</p>
+<h3 id="5-testing-plan">5. Testing plan<a class="headerlink" href="#5-testing-plan" title="Permanent link">&para;</a></h3>
+<p>Following the Phase 1/2 pattern: a new cargo integration test file (e.g.
+<code>tests/parent_and_focus_binding_suite.rs</code>, sibling to <code>tests/datetime_picture_suite.rs</code>)
+runs every case in <code>parent-operator/parent.json</code> and every file under <code>joins/</code> through the
+full parser+evaluator pipeline, for fast (<code>cargo test</code>, seconds) iteration ahead of the
+slower <code>maturin develop</code> + <code>pytest</code> cycle. Given the "full completion" bar (Decision 3),
+also add targeted Rust unit tests for the ancestor-resolution pass itself (e.g. asserting
+exact label/level bookkeeping for a <code>%.%</code> chain through a nested block) — that pass is
+intricate enough to want coverage below the end-to-end/black-box level.</p>
+<h2 id="definition-of-done">Definition of done<a class="headerlink" href="#definition-of-done" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>1678/1682</strong> JSONata reference tests passing (4 xfailed pending Phase 5 stragglers
-  in <code>array-constructor</code>, <code>function-distinct</code>, and <code>flattening</code>)</li>
-<li><strong>up to 18x faster</strong> than the JavaScript reference implementation for pure expression workloads</li>
-<li><strong>~40x faster</strong> than jsonata-rs (the next pure-Rust JSONata implementation)</li>
-<li><strong>~10–65x faster</strong> than jsonata-python across all categories</li>
+<li>All 28 <code>parent-operator</code> + 37 <code>joins</code> xfail entries removed from
+  <code>tests/python/test_reference_suite.py</code> and passing for real.</li>
+<li><code>#$var</code> (index binding) continues to pass all its existing tests unchanged.</li>
+<li>No wrapper-leak regressions: a bare tuple-producing expression (any of <code>%</code>/<code>@</code>/<code>#</code>) at
+  the top level of an expression does not leak <code>__tuple__</code>/<code>@</code>/<code>$name</code>/<code>!N</code> keys into
+  Python-visible output.</li>
+<li><code>cargo test</code> (including the new integration suite + new unit tests), <code>cargo fmt --check</code>,
+  <code>cargo clippy --all-targets --all-features -- -D warnings</code> all clean.</li>
+<li><code>uv run pytest tests/python/test_reference_suite.py</code> shows only the 4 Phase-5-straggler
+  xfails remaining (69 → 4), full suite has no new failures elsewhere.</li>
+<li>README.md / docs/index.md pass-count claims updated to match.</li>
 </ul>
-<p>See <a href="performance/">Performance</a> for full benchmark results.</p>
-<hr />
-<h2 id="what-is-jsonata">What is JSONata?<a class="headerlink" href="#what-is-jsonata" title="Permanent link">&para;</a></h2>
-<p>JSONata is a query and transformation language for JSON data:</p>
-<ul>
-<li><strong>Query</strong> — <code>person.name</code></li>
-<li><strong>Filter</strong> — <code>products[price &gt; 50]</code></li>
-<li><strong>Transform</strong> — <code>items.{"name": title, "cost": price}</code></li>
-<li><strong>Aggregate</strong> — <code>$sum(orders.total)</code></li>
-<li><strong>Conditionals</strong> — <code>price &gt; 100 ? "expensive" : "affordable"</code></li>
-</ul>
-<p>See the <a href="https://docs.jsonata.org/">official JSONata docs</a> for the full language reference.</p>
+<h2 id="release-line">Release line<a class="headerlink" href="#release-line" title="Permanent link">&para;</a></h2>
+<p>Per the user's decision earlier in this session, the <code>2.1.6</code> release (Phases 0-2, already
+merged and CI-green) is held until this effort and Phase 5 both land, then ships together
+in one release rather than as separate point releases. If Phase 5 turns out to be
+significantly delayed relative to this effort once both are scoped, revisit whether to
+split them into <code>2.1.6</code>/<code>2.1.7</code> instead — not decided now, since Phase 5 hasn't been
+triaged yet.</p>
 
 
 
@@ -1858,10 +1925,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>

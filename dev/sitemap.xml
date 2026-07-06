@@ -101,6 +101,10 @@
          <lastmod>2026-07-06</lastmod>
     </url>
     <url>
+         <loc>https://txjmb.github.io/jsonata-core/dev/superpowers/plans/2026-07-06-parent-and-focus-binding-operators/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
          <loc>https://txjmb.github.io/jsonata-core/dev/superpowers/specs/2026-07-04-jsonata-2.2.1-design/</loc>
          <lastmod>2026-07-06</lastmod>
     </url>
@@ -114,6 +118,10 @@
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/dev/superpowers/specs/2026-07-05-versioned-docs-mike-design/</loc>
+         <lastmod>2026-07-06</lastmod>
+    </url>
+    <url>
+         <loc>https://txjmb.github.io/jsonata-core/dev/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design/</loc>
          <lastmod>2026-07-06</lastmod>
     </url>
 </urlset>
