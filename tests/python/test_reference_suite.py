@@ -2,12 +2,12 @@
 Test adapter for the JSONata reference test suite.
 
 This module loads and runs all 1682 test cases from the reference JavaScript JSONata
-implementation. 1678 currently pass; the remaining 4 are marked xfail pending fixes
-tracked by phase in docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md.
-Those 4 are Phase 5's untriaged stragglers (array-constructor, function-distinct,
-flattening). The full parent-operator and joins groups (the %/@/# parent-reference,
-focus-binding, and index-binding operators) now pass; see
-docs/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design.md.
+implementation. All 1682 pass. See
+docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md and
+docs/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design.md for the
+history of how the gap (widened test discovery, datetime picture-strings,
+formatInteger/parseInteger, the %/@/# parent-reference/focus-binding/index-binding
+operators, and the array-constructor/distinct stragglers) was closed.
 """
 
 import json
@@ -88,42 +88,13 @@ def extract_error_code(error_msg: str) -> str | None:
     return match.group(1) if match else None
 
 
-# Coverage gap remediation tracking (see
-# docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md).
-#
-# load_test_cases() used to only glob "case*.json", silently skipping 20 files / 408
-# cases under other naming conventions. Phase 0 widened the glob to pick up all of
-# them; of the 408, 325 fail against the current implementation for reasons owned by
-# later phases of that spec. Each entry below is xfailed with a pointer to the phase
-# that will fix it, so the suite stays green while the gap is tracked explicitly
-# instead of silently hidden again.
-_XFAIL_PHASE_BY_GROUP = {
-    "array-constructor": "Phase 5: untriaged straggler",
-    "function-distinct": "Phase 5: untriaged straggler",
-    "flattening": "Phase 5: untriaged straggler",
-}
-
-_XFAIL_TEST_IDS = {
-    "array-constructor/array-sequences[2]",
-    "array-constructor/array-sequences[4]",
-    "flattening/sequence-of-arrays[1]",
-    "function-distinct/distinct[4]",
-}
-
-
 def _build_pytest_params(
     cases: list[tuple[str, str, dict[str, Any]]],
 ) -> list["pytest.mark.structures.ParameterSet"]:
-    params = []
-    for test_id, group_name, spec in cases:
-        marks = []
-        if test_id in _XFAIL_TEST_IDS:
-            reason = _XFAIL_PHASE_BY_GROUP.get(
-                group_name, "unresolved reference-suite coverage gap"
-            )
-            marks.append(pytest.mark.xfail(reason=reason, strict=False))
-        params.append(pytest.param(test_id, group_name, spec, marks=marks, id=test_id))
-    return params
+    return [
+        pytest.param(test_id, group_name, spec, id=test_id)
+        for test_id, group_name, spec in cases
+    ]
 
 
 # Load all test cases
@@ -134,7 +105,7 @@ print(f"\n{'=' * 70}")
 print("JSONata Reference Suite Test Loader")
 print(f"{'=' * 70}")
 print(f"Loaded {len(DATASETS)} datasets from {DATASET_DIR}")
-print(f"Loaded {len(test_cases)} test cases ({len(_XFAIL_TEST_IDS)} xfailed pending later phases)")
+print(f"Loaded {len(test_cases)} test cases")
 print(f"{'=' * 70}\n")
 
 
