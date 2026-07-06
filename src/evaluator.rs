@@ -4843,17 +4843,22 @@ impl Evaluator {
             let items: Vec<JValue> = match input {
                 // Mirrors jsonata-js evaluatePath's inputSequence rule
                 // (`if (Array.isArray(input) && expr.steps[0].type !== 'variable')`):
-                // ONLY when the path's FIRST step is a variable reference (`$`/`$$`)
-                // is the input array taken as a SINGLE sequence value
-                // (`createSequence(input)`) rather than iterated per-element. This
-                // is what makes `$#$pos` bind `$pos` to each element's position
-                // within the whole array (one incoming tuple whose `@` is the
-                // array, then the inner `bb` counter walks its elements) instead of
-                // producing one singleton tuple per element (index always 0). The
-                // rule is scoped to step 0 so `$.$#$pos` (where `$#$pos` is a later
-                // step) still iterates per-element.
+                // when the path's FIRST step is a variable reference (`$`/`$$`) the
+                // input array is taken as a SINGLE sequence value
+                // (`createSequence(input)`) rather than iterated per-element. We
+                // only need this for a leading INDEX bind (`$#$pos`): the whole
+                // array becomes one incoming tuple whose `@` is the array, then
+                // the inner position counter walks its elements so `$pos` runs
+                // 0..n-1 (not 0 for every singleton). A leading FOCUS bind
+                // (`$@$i`) must instead iterate per-element -- focus keeps `@` as
+                // the step input, so a single binding would yield one copy of the
+                // whole array per element (`$@$i` on [1,2,3] must give [1,2,3],
+                // not [[1,2,3],[1,2,3],[1,2,3]]). The rule is scoped to step 0 so
+                // `$.$#$pos` (a later step) still iterates per-element.
                 JValue::Array(arr)
-                    if !(is_first_path_step && matches!(&step.node, AstNode::Variable(_))) =>
+                    if !(is_first_path_step
+                        && matches!(&step.node, AstNode::Variable(_))
+                        && step.index_var.is_some()) =>
                 {
                     arr.iter().cloned().collect()
                 }
