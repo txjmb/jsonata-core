@@ -3412,11 +3412,26 @@ impl Evaluator {
             // needs_tuple_context_binding), so resolving it is an ordinary scope
             // lookup, mirroring jsonata-js's
             // `case 'parent': result = environment.lookup(expr.slot.label);`.
-            AstNode::Parent(label) => Ok(self
-                .context
-                .lookup(label)
-                .cloned()
-                .unwrap_or(JValue::Undefined)),
+            AstNode::Parent(label) => {
+                if let Some(v) = self.context.lookup(label) {
+                    return Ok(v.clone());
+                }
+                // Fall back to the tuple wrapper carried as `data`: a `%` used
+                // inside a predicate/stage over a tuple stream -- e.g.
+                // `(Account.Order.Product)[%.OrderID='order104'].SKU`, where the
+                // predicate is evaluated per tuple with the wrapper as data --
+                // reads its ancestor from the tuple's `!label` key, which isn't
+                // separately bound into scope here (mirrors AstNode::Variable's
+                // tuple-binding fallback below).
+                if let JValue::Object(obj) = data {
+                    if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                        if let Some(v) = obj.get(label) {
+                            return Ok(v.clone());
+                        }
+                    }
+                }
+                Ok(JValue::Undefined)
+            }
         }
     }
 
@@ -4117,7 +4132,10 @@ impl Evaluator {
             let needs_tuple_context_binding = is_tuple_array
                 && matches!(
                     &step.node,
-                    AstNode::Object(_) | AstNode::FunctionApplication(_) | AstNode::Variable(_)
+                    AstNode::Object(_)
+                        | AstNode::FunctionApplication(_)
+                        | AstNode::Variable(_)
+                        | AstNode::ArrayGroup(_)
                 );
 
             if needs_tuple_context_binding {
@@ -4167,8 +4185,12 @@ impl Evaluator {
                                     // Variable lookup - check context (which now has bindings)
                                     self.evaluate_internal(&step.node, tuple)?
                                 }
-                                AstNode::Object(_) => {
-                                    // Object constructor - evaluate on actual data
+                                AstNode::Object(_) | AstNode::ArrayGroup(_) => {
+                                    // Object / array constructor step (e.g.
+                                    // `Product.[`Product Name`, %.OrderID]`) -
+                                    // evaluate on the tuple's `@` value with the
+                                    // carried `!label`/`$focus` bindings in scope
+                                    // so an embedded `%` resolves.
                                     self.evaluate_internal(&step.node, &actual_data)?
                                 }
                                 AstNode::FunctionApplication(inner) => {
