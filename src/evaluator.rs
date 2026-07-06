@@ -5112,6 +5112,44 @@ impl Evaluator {
                 .collect()
         };
 
+        // A sort step in a tuple stream orders the WHOLE stream (not per element)
+        // and re-tuples with the index = sorted position, mirroring jsonata-js
+        // evaluateTupleStep's `sort` case. `$^($)#$pos[$pos<3]` must sort the
+        // array, then number the sorted values, then filter by `$pos`.
+        if let AstNode::Sort { terms, .. } = &step.node {
+            let stream = JValue::array(
+                incoming
+                    .iter()
+                    .map(|t| JValue::object((**t).clone()))
+                    .collect(),
+            );
+            // evaluate_sort is tuple-aware (orders by each wrapper's `@`, with the
+            // carried keys bound), returning the wrappers in sorted order.
+            let sorted = self.evaluate_sort(&stream, terms)?;
+            let sorted_arr: Vec<JValue> = match sorted {
+                JValue::Array(a) => a.iter().cloned().collect(),
+                JValue::Null | JValue::Undefined => Vec::new(),
+                other => vec![other],
+            };
+            let mut result = Vec::new();
+            for (ss, elem) in sorted_arr.into_iter().enumerate() {
+                let mut new_tuple = match elem {
+                    JValue::Object(o) => (*o).clone(),
+                    other => {
+                        let mut m = IndexMap::new();
+                        m.insert("@".to_string(), other);
+                        m
+                    }
+                };
+                if let Some(index_var) = &step.index_var {
+                    new_tuple.insert(format!("${}", index_var), JValue::from(ss as i64));
+                }
+                new_tuple.insert("__tuple__".to_string(), JValue::Bool(true));
+                result.push(JValue::object(new_tuple));
+            }
+            return Ok(result);
+        }
+
         let mut result = Vec::new();
         for tuple_obj in incoming {
             // Bind every carried tuple key into a real scope frame so the step
