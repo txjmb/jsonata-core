@@ -299,8 +299,7 @@ impl JsonataExpression {
 #[cfg(feature = "python")]
 #[pyfunction]
 fn compile(expression: &str) -> PyResult<JsonataExpression> {
-    let ast = parser::parse(expression)
-        .map_err(|e| PyValueError::new_err(format!("Parse error: {}", e)))?;
+    let ast = parser::parse(expression).map_err(parser_error_to_py)?;
 
     Ok(JsonataExpression {
         ast,
@@ -544,6 +543,22 @@ fn evaluator_error_to_py(e: evaluator::EvaluatorError) -> PyErr {
     }
 }
 
+/// Convert a ParserError to a PyErr
+/// Coded errors (e.g., S0214) have their message formatted as "code: message",
+/// so they are passed through directly without an additional "Parse error: " prefix.
+/// Other errors get the "Parse error: " prefix for clarity.
+#[cfg(feature = "python")]
+fn parser_error_to_py(e: parser::ParserError) -> PyErr {
+    let msg = e.to_string();
+    if matches!(e, parser::ParserError::Coded { .. }) {
+        // Coded errors already have the format "code: message"
+        PyValueError::new_err(msg)
+    } else {
+        // Other errors get the "Parse error: " prefix
+        PyValueError::new_err(format!("Parse error: {}", msg))
+    }
+}
+
 /// JSONata Python module
 #[cfg(feature = "python")]
 #[pymodule]
@@ -566,5 +581,48 @@ mod tests {
     fn test_module_creation() {
         // Basic smoke test
         assert!(!env!("CARGO_PKG_VERSION").is_empty());
+    }
+
+    #[cfg(feature = "python")]
+    mod parser_error_handling {
+        use super::super::*;
+
+        #[test]
+        fn test_parser_error_to_py_coded_error_no_prefix() {
+            // Test that coded errors (like S0214) are passed through without "Parse error: " prefix
+            let coded_error = parser::ParserError::Coded {
+                code: "S0214",
+                message: "Expected a variable reference after @".to_string(),
+            };
+            let py_err = parser_error_to_py(coded_error);
+            let msg = py_err.to_string();
+
+            // The message should start with the code, not "Parse error: "
+            assert!(
+                msg.starts_with("S0214:"),
+                "Expected message to start with 'S0214:', got: {}",
+                msg
+            );
+            assert!(
+                !msg.starts_with("Parse error:"),
+                "Expected no 'Parse error:' prefix, got: {}",
+                msg
+            );
+        }
+
+        #[test]
+        fn test_parser_error_to_py_non_coded_error_with_prefix() {
+            // Test that non-coded errors still get the "Parse error: " prefix
+            let non_coded_error = parser::ParserError::UnexpectedToken("foo".to_string());
+            let py_err = parser_error_to_py(non_coded_error);
+            let msg = py_err.to_string();
+
+            // The message should have the "Parse error: " prefix
+            assert!(
+                msg.starts_with("Parse error:"),
+                "Expected message to start with 'Parse error:', got: {}",
+                msg
+            );
+        }
     }
 }
