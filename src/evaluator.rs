@@ -2505,6 +2505,37 @@ fn unwrap_tuple_output(value: JValue) -> JValue {
     }
 }
 
+/// Guard returned by [`Evaluator::bind_tuple_keys`]: remembers, for each
+/// tuple-carried `$name`/`!label` key that was just bound into scope, what
+/// (if anything) was bound under that name beforehand. `restore` puts the
+/// prior value back -- or removes the binding entirely if there wasn't
+/// one -- rather than unconditionally unbinding, so a tuple key that
+/// happens to share a name with a live outer `:=` binding in the same
+/// scope frame doesn't get permanently deleted once the tuple-row
+/// evaluation finishes.
+struct TupleKeyBindings {
+    saved: Vec<(String, Option<JValue>)>,
+}
+
+impl TupleKeyBindings {
+    /// True if `name` was one of the keys this guard bound (used by callers
+    /// that need to know whether a given tuple key is already in scope
+    /// before binding it a second time under a different role, e.g.
+    /// `create_tuple_stream`'s ancestor-label handling).
+    fn contains(&self, name: &str) -> bool {
+        self.saved.iter().any(|(n, _)| n == name)
+    }
+
+    fn restore(self, evaluator: &mut Evaluator) {
+        for (name, prior) in self.saved {
+            match prior {
+                Some(value) => evaluator.context.bind(name, value),
+                None => evaluator.context.unbind(&name),
+            }
+        }
+    }
+}
+
 /// Evaluator for JSONata expressions
 pub struct Evaluator {
     context: Context,
@@ -4326,33 +4357,10 @@ impl Evaluator {
                             // them: `$var` focus/index bindings (stored `$name`,
                             // bound as `name`) AND `!label` ancestor bindings for
                             // `%` (stored and bound under the full `!label` key).
-                            let bindings: Vec<(String, JValue)> = tuple_obj
-                                .iter()
-                                .filter_map(|(k, v)| {
-                                    if let Some(name) = k.strip_prefix('$') {
-                                        if name.is_empty() {
-                                            None
-                                        } else {
-                                            Some((name.to_string(), v.clone()))
-                                        }
-                                    } else if k.starts_with('!') {
-                                        Some((k.clone(), v.clone()))
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-
-                            // Save current bindings
-                            let saved_bindings: Vec<(String, Option<JValue>)> = bindings
-                                .iter()
-                                .map(|(name, _)| (name.clone(), self.context.lookup(name).cloned()))
-                                .collect();
-
-                            // Bind tuple variables to context
-                            for (name, value) in &bindings {
-                                self.context.bind(name.clone(), value.clone());
-                            }
+                            // Saves/restores rather than blindly unbinding, so a
+                            // tuple key that collides with a live outer `:=`
+                            // binding doesn't get deleted afterward.
+                            let tuple_bindings = self.bind_tuple_keys(tuple_obj);
 
                             // Get the actual value from the tuple (@ field)
                             let actual_data = tuple_obj.get("@").cloned().unwrap_or(JValue::Null);
@@ -4414,13 +4422,7 @@ impl Evaluator {
                             };
 
                             // Restore previous bindings
-                            for (name, saved_value) in &saved_bindings {
-                                if let Some(value) = saved_value {
-                                    self.context.bind(name.clone(), value.clone());
-                                } else {
-                                    self.context.unbind(name);
-                                }
-                            }
+                            tuple_bindings.restore(self);
 
                             // Rewrap results as tuples carrying this incoming
                             // tuple's focus/index/ancestor bindings, so that
@@ -5066,6 +5068,38 @@ impl Evaluator {
         })
     }
 
+    /// Bind a tuple wrapper's carried `$name`/`!label` keys into the current
+    /// scope, saving whatever was previously bound under each of those names
+    /// so [`TupleKeyBindings::restore`] can put it back afterward.
+    ///
+    /// This is the single shared implementation of the
+    /// "iterate a tuple wrapper's carried keys, bind, evaluate, then undo"
+    /// pattern that recurs across `create_tuple_stream`,
+    /// `needs_tuple_context_binding`'s handling in `evaluate_path`,
+    /// `apply_tuple_stages`, and `evaluate_sort` -- it exists specifically so
+    /// none of those call sites can regress to a blind `unbind` (which
+    /// deletes rather than restores a same-named outer `:=` binding that was
+    /// live in the same scope frame; see issue: chained `@`/`#`/sort-term
+    /// binding silently clobbering an outer variable of the same name).
+    fn bind_tuple_keys(&mut self, tuple_obj: &IndexMap<String, JValue>) -> TupleKeyBindings {
+        let mut saved = Vec::new();
+        for (key, value) in tuple_obj.iter() {
+            let name = if let Some(n) = key.strip_prefix('$') {
+                if n.is_empty() {
+                    continue;
+                }
+                n.to_string()
+            } else if key.starts_with('!') {
+                key.clone()
+            } else {
+                continue;
+            };
+            saved.push((name.clone(), self.context.lookup(&name).cloned()));
+            self.context.bind(name, value.clone());
+        }
+        TupleKeyBindings { saved }
+    }
+
     /// Create or extend a tuple stream for a tuple-binding path step, mirroring
     /// jsonata-js's `evaluateTupleStep` (jsonata.js ~L315-380). The returned
     /// vector holds `JValue::Object` tuple wrappers of the shape
@@ -5196,18 +5230,10 @@ impl Evaluator {
             // Bind every carried tuple key into a real scope frame so the step
             // expression can see prior focus/index/ancestor bindings, mirroring
             // createFrameFromTuple's "for every key in tuple, frame.bind(...)".
-            let mut bound_names: Vec<String> = Vec::new();
-            for (key, value) in tuple_obj.iter() {
-                if let Some(name) = key.strip_prefix('$') {
-                    if !name.is_empty() {
-                        self.context.bind(name.to_string(), value.clone());
-                        bound_names.push(name.to_string());
-                    }
-                } else if key.starts_with('!') {
-                    self.context.bind(key.clone(), value.clone());
-                    bound_names.push(key.clone());
-                }
-            }
+            // Saves/restores rather than blindly unbinding, so a tuple key
+            // whose name collides with a live outer `:=` binding doesn't get
+            // deleted once this tuple row's evaluation is done.
+            let tuple_bindings = self.bind_tuple_keys(&tuple_obj);
 
             let actual_data = tuple_obj.get("@").cloned().unwrap_or(JValue::Undefined);
             let step_value = self.evaluate_internal(&step.node, &actual_data);
@@ -5227,11 +5253,12 @@ impl Evaluator {
                 // with `ancestor_label`; bind it to the step's input so the
                 // level-1 `%` resolves. The `%.%` chain's deeper references use
                 // labels carried in the INCOMING tuple, so those bindings
-                // (`bound_names`) must stay live through `apply_stages` -- their
-                // unbind is deferred until after it (previously they were
-                // unbound first, which silently broke `%.%` inside predicates).
+                // (`tuple_bindings`) must stay live through `apply_stages` --
+                // their restore is deferred until after it (previously they
+                // were unbound first, which silently broke `%.%` inside
+                // predicates).
                 let own_label = match &step.ancestor_label {
-                    Some(label) if !bound_names.contains(label) => {
+                    Some(label) if !tuple_bindings.contains(label) => {
                         self.context.bind(label.clone(), actual_data.clone());
                         Some(label.clone())
                     }
@@ -5243,9 +5270,7 @@ impl Evaluator {
                 }
             }
 
-            for name in &bound_names {
-                self.context.unbind(name);
-            }
+            tuple_bindings.restore(self);
 
             let row: Vec<JValue> = match step_value {
                 JValue::Undefined => continue,
@@ -5315,30 +5340,12 @@ impl Evaluator {
                             continue;
                         };
                         // Bind this tuple's carried focus/index/ancestor keys so
-                        // the predicate can reference them.
-                        let mut saved: Vec<(String, Option<JValue>)> = Vec::new();
-                        for (k, v) in obj.iter() {
-                            let name = if let Some(n) = k.strip_prefix('$') {
-                                if n.is_empty() {
-                                    continue;
-                                }
-                                n.to_string()
-                            } else if k.starts_with('!') {
-                                k.clone()
-                            } else {
-                                continue;
-                            };
-                            saved.push((name.clone(), self.context.lookup(&name).cloned()));
-                            self.context.bind(name, v.clone());
-                        }
+                        // the predicate can reference them (save/restore rather
+                        // than blind unbind -- see bind_tuple_keys).
+                        let tuple_bindings = self.bind_tuple_keys(obj);
                         let at = obj.get("@").cloned().unwrap_or(JValue::Undefined);
                         let pred_res = self.evaluate_internal(pred, &at);
-                        for (name, old) in saved.into_iter().rev() {
-                            match old {
-                                Some(v) => self.context.bind(name, v),
-                                None => self.context.unbind(&name),
-                            }
-                        }
+                        tuple_bindings.restore(self);
                         if self.is_truthy(&pred_res?) {
                             kept.push(tup);
                         }
@@ -10434,22 +10441,15 @@ impl Evaluator {
             // create_tuple_stream's per-tuple frame binding. Sort terms attach
             // to a synthetic step after the last input step, so `%` refers to
             // the last input step's ancestry, carried under `!label` here.
-            let mut tuple_bound: Vec<String> = Vec::new();
-            if let JValue::Object(obj) = element {
-                if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                    for (key, value) in obj.iter() {
-                        if let Some(name) = key.strip_prefix('$') {
-                            if !name.is_empty() {
-                                self.context.bind(name.to_string(), value.clone());
-                                tuple_bound.push(name.to_string());
-                            }
-                        } else if key.starts_with('!') {
-                            self.context.bind(key.clone(), value.clone());
-                            tuple_bound.push(key.clone());
-                        }
-                    }
+            // Saves/restores rather than blindly unbinding, so a tuple key
+            // that collides with a live outer `:=` binding doesn't get
+            // deleted once this row's sort terms are evaluated.
+            let tuple_bindings = match element {
+                JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)) => {
+                    Some(self.bind_tuple_keys(obj))
                 }
-            }
+                _ => None,
+            };
 
             // When sorting a tuple stream, `$` and the term's data context are the
             // tuple's `@` value, not the `{@, $var, !label, __tuple__}` wrapper --
@@ -10484,8 +10484,8 @@ impl Evaluator {
                 sort_keys.push(sort_value);
             }
 
-            for name in &tuple_bound {
-                self.context.unbind(name);
+            if let Some(tuple_bindings) = tuple_bindings {
+                tuple_bindings.restore(self);
             }
 
             indexed_array.push((idx, sort_keys));
@@ -12287,5 +12287,48 @@ mod tests {
             result,
             serde_json::json!([{"name": "Hat", "order": "o1"}]).into()
         );
+    }
+
+    // Regression tests for a bug where create_tuple_stream/evaluate_sort bound
+    // a tuple-carried `$name`/`!label` key straight into the top scope and then
+    // UNCONDITIONALLY unbound it afterward, deleting (rather than restoring) a
+    // same-named outer `:=` binding that happened to be live in that scope
+    // frame. Expected values below are verified against jsonata-js (2.2.1
+    // reference, `tests/jsonata-js`).
+
+    #[test]
+    fn test_chained_focus_bind_does_not_clobber_outer_variable() {
+        let data: JValue = serde_json::json!({"a": {"b": {"c": 1}}}).into();
+        let ast = crate::parser::parse(r#"($x := "OUT"; a@$x.b@$y.c; $x)"#).unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(result, serde_json::json!("OUT").into());
+    }
+
+    #[test]
+    fn test_chained_index_bind_does_not_clobber_outer_variable() {
+        let data: JValue = serde_json::json!({"a": {"b": {"c": 1}}}).into();
+        let ast = crate::parser::parse(r#"($x := "OUT"; a#$x.b#$y.c; $x)"#).unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(result, serde_json::json!("OUT").into());
+    }
+
+    #[test]
+    fn test_mixed_focus_and_index_bind_does_not_clobber_outer_variable() {
+        let data: JValue = serde_json::json!({"a": {"b": {"c": 1}}}).into();
+        let ast = crate::parser::parse(r#"($x := "OUT"; a@$x.b#$y.c; $x)"#).unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(result, serde_json::json!("OUT").into());
+    }
+
+    #[test]
+    fn test_sort_term_tuple_binding_does_not_clobber_outer_variable() {
+        let data: JValue = serde_json::json!({"items": [{"v": 3}, {"v": 1}, {"v": 2}]}).into();
+        let ast = crate::parser::parse(r#"($x := "OUT"; items@$x.v^(%.v); $x)"#).unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_eq!(result, serde_json::json!("OUT").into());
     }
 }
