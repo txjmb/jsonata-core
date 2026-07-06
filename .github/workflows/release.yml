@@ -185,10 +185,25 @@ jobs:
           ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           submodules: true
 
+      # actions/setup-python needs sudo to run its .pkg installer, and the
+      # self-hosted macOS runner has no interactive terminal for that password
+      # prompt (confirmed broken: "sudo: a terminal is required to read the
+      # password"). Use uv there instead -- it installs standalone Python
+      # builds into a user-writable directory, no sudo required. See
+      # release-macos-backfill.yml, which already uses this working pattern.
       - name: Set up Python
+        if: matrix.platform.os != 'macOS'
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+
+      - name: Install uv (macOS)
+        if: matrix.platform.os == 'macOS'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python versions (macOS)
+        if: matrix.platform.os == 'macOS'
+        run: uv python install 3.10 3.11 3.12 3.13
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -207,12 +222,23 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build wheels
+        if: matrix.platform.os != 'macOS'
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --interpreter 3.10 3.11 3.12 3.13
           sccache: 'true'
           manylinux: auto
+
+      - name: Build wheels (macOS)
+        if: matrix.platform.os == 'macOS'
+        run: |
+          uvx maturin build --release --out dist \
+            --interpreter \
+            "$(uv python find 3.10)" \
+            "$(uv python find 3.11)" \
+            "$(uv python find 3.12)" \
+            "$(uv python find 3.13)"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v7
@@ -273,13 +299,23 @@ jobs:
         with:
           submodules: true
 
+      # Same sudo/no-terminal issue as build-wheels (see the comment there) --
+      # actions/setup-python doesn't work on the self-hosted macOS runner.
       - name: Set up Python
+        if: matrix.platform.os != 'macOS'
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
 
       - name: Install UV
         uses: astral-sh/setup-uv@v7
+
+      - name: Install Python (macOS)
+        if: matrix.platform.os == 'macOS'
+        run: |
+          uv python install ${{ matrix.python }}
+          uv venv --python ${{ matrix.python }} .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Download wheels
         uses: actions/download-artifact@v8
@@ -288,14 +324,27 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Install wheel
+      - name: Install wheel (Linux/Windows)
+        if: matrix.platform.os != 'macOS'
         shell: bash
         run: |
           uv pip install --system --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
-      - name: Install test dependencies
+      - name: Install wheel (macOS)
+        if: matrix.platform.os == 'macOS'
+        shell: bash
+        run: |
+          uv pip install --find-links dist jsonatapy
+          python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
+
+      - name: Install test dependencies (Linux/Windows)
+        if: matrix.platform.os != 'macOS'
         run: uv pip install --system pytest pytest-xdist
+
+      - name: Install test dependencies (macOS)
+        if: matrix.platform.os == 'macOS'
+        run: uv pip install pytest pytest-xdist
 
       - name: Run tests
         shell: bash
@@ -347,14 +396,16 @@ jobs:
           cat > changelog.md <<EOF
           ## Release $VERSION
 
-          This release implements JSONata 2.1.0 specification with full compatibility.
-
           ### Changes
 
           $COMMITS
 
           ### Test Suite Compatibility
-          - 1258/1258 reference tests passing (100%)
+
+          See the [README](https://github.com/${{ github.repository }}#readme) for the current
+          reference-suite pass count -- this changelog no longer hardcodes a number here, since a
+          stale hardcoded count is exactly the kind of bug this project has previously shipped
+          and had to correct.
 
           ### Installation
 
