@@ -33,7 +33,7 @@ print(result)  # "Hello, World"
 expr = jsonatapy.compile("orders[price > 100].product")
 result = expr.evaluate({"orders": [{"product": "Laptop", "price": 1200}]})
 
-# Pre-convert data for maximum throughput (6–15x faster for repeated queries)
+# Pre-convert data for maximum throughput (4–15x faster for repeated queries)
 data = jsonatapy.JsonataData(large_dataset)
 result = expr.evaluate_with_data(data)
 ```
@@ -54,8 +54,10 @@ let result = Evaluator::new().evaluate(&ast, &data)?;
 
 ## Performance highlights
 
-- **1258/1258** JSONata reference tests passing
-- **up to 17x faster** than the JavaScript reference implementation for pure expression workloads
+- **1363/1682** JSONata reference tests passing (319 xfailed pending datetime
+  picture-strings, `$formatInteger`/`$parseInteger`, the `%` parent operator, and `@`
+  tuple-stream binding)
+- **up to 18x faster** than the JavaScript reference implementation for pure expression workloads
 - **~40x faster** than jsonata-rs (the next pure-Rust JSONata implementation)
 - **~10–65x faster** than jsonata-python across all categories
 

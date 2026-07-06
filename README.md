@@ -79,7 +79,7 @@ print(result)  # 2450
 
 # Pre-convert data once for maximum throughput
 data = jsonatapy.JsonataData(large_dataset)
-result = expr.evaluate_with_data(data)   # 6–15x faster than evaluate(dict)
+result = expr.evaluate_with_data(data)   # 4–15x faster than evaluate(dict)
 ```
 
 Supports Python 3.10, 3.11, 3.12, 3.13 on Linux, macOS (Intel & ARM), and Windows.
@@ -102,8 +102,10 @@ See [official JSONata docs](https://docs.jsonata.org/) for the full language ref
 
 ## Performance
 
-`jsonata-core` passes **1258/1258** JSONata reference tests and is the fastest JSONata
-implementation available in either Rust or Python.
+`jsonata-core` passes **1363/1682** JSONata reference tests (319 xfailed pending known
+gaps in datetime picture-string formatting, `$formatInteger`/`$parseInteger`, the `%`
+parent operator, and `@` tuple-stream binding) and is the fastest JSONata implementation
+available in either Rust or Python.
 
 ### Pure Rust (Criterion benchmarks, no Python overhead)
 
@@ -129,12 +131,12 @@ the JavaScript reference implementation for most pure expression workloads:
 
 | Category | vs JavaScript (V8) | vs jsonata-python |
 |----------|--------------------|-------------------|
-| Simple paths | **2–14x faster** | ~20–40x faster |
-| Conditionals | **17x faster** | ~40x faster |
-| String operations | **4–9x faster** | ~30–45x faster |
-| Complex transformations | **3–17x faster** | ~20–40x faster |
-| Higher-order functions | ~1x (roughly equal) | ~50–70x faster |
-| Array-heavy workloads | varies | ~10–50x faster |
+| Simple paths | **5–8x faster** (array index access: roughly tied) | ~20–40x faster |
+| Conditionals | **15x faster** | ~40x faster |
+| String operations | **8–15x faster** | ~30–45x faster |
+| Complex transformations | **5–15x faster** | ~20–40x faster |
+| Higher-order functions | **12–19x faster** | ~50–70x faster |
+| Array-heavy workloads | **~1–3x slower to ~4x faster**, depending on access pattern | ~10–50x faster |
 
 ### The Python boundary
 
@@ -142,7 +144,7 @@ For large array workloads, the dominant cost is converting Python dicts to Rust 
 on each `evaluate()` call — not expression evaluation itself. Two API paths avoid this:
 
 ```python
-# Path 1: Pre-convert data once, reuse across many queries (6–15x faster)
+# Path 1: Pre-convert data once, reuse across many queries (4–15x faster than evaluate(dict))
 data = jsonatapy.JsonataData(large_dataset)
 result = expr.evaluate_with_data(data)
 
@@ -150,8 +152,9 @@ result = expr.evaluate_with_data(data)
 result_str = expr.evaluate_json(raw_json_string)
 ```
 
-With pre-converted data, array-heavy workloads run within 2–7x of V8 — the irreducible
-gap between a Rust interpreter and V8's JIT compiler.
+With pre-converted data, realistic workloads (filtering, transforming, aggregating over
+100-object arrays) run **~5–8x faster than V8**, not slower — even the raw `evaluate(dict)`
+path without pre-conversion is roughly at parity with V8 (0.5–2x either direction).
 
 See [Performance docs](docs/performance.md) for full benchmark results and methodology.
 
@@ -159,7 +162,9 @@ See [Performance docs](docs/performance.md) for full benchmark results and metho
 
 ## Features
 
-- **Full JSONata 2.1.0/2.2.0 compatibility** — 1258/1258 reference tests passing
+- **1363/1682 JSONata reference tests passing** — 319 xfailed pending datetime
+  picture-strings, `$formatInteger`/`$parseInteger`, the `%` parent operator, and `@`
+  tuple-stream binding
 - **Pure Rust core** — no JavaScript runtime, no Node.js dependency
 - **Optional Python bindings** — PyO3/maturin, zero-copy where possible
 - **Cross-platform** — Linux, macOS (Intel & ARM), Windows; Python 3.10–3.13

@@ -284,8 +284,16 @@ fn parse_with_components(
     let chars: Vec<char> = timestamp.chars().collect();
 
     for comp in components {
-        // Extract digits or characters based on component type
-        let end = (pos + comp.max_width).min(chars.len());
+        // Input exhausted before all picture components were consumed.
+        if pos > chars.len() {
+            return Err(DateTimeError::ParseError(
+                "input contains invalid characters".to_string(),
+            ));
+        }
+
+        // Extract digits or characters based on component type. `saturating_add`
+        // avoids overflow when max_width is usize::MAX (unspecified width).
+        let end = pos.saturating_add(comp.max_width).min(chars.len());
 
         // For numeric components, extract digits
         let value_str: String = chars[pos..end]
@@ -438,5 +446,15 @@ mod tests {
     fn test_from_millis() {
         let result = from_millis(1).unwrap();
         assert!(matches!(result, JValue::String(_)));
+    }
+
+    #[test]
+    fn test_to_millis_with_picture_no_panic_when_input_shorter_than_picture() {
+        // Regression: a second-or-later unbounded-width component (max_width ==
+        // usize::MAX from an unspecified width spec) overflowed `pos + max_width`
+        // in parse_with_components, wrapping (release) or panicking on overflow
+        // (debug) and producing a `chars[pos..end]` slice with pos > end.
+        let result = to_millis_with_picture("2018-22", "[Y]-[D]");
+        assert!(result.is_err());
     }
 }
