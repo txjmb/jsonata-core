@@ -1798,7 +1798,21 @@ new session shouldn't need to re-derive it, just verify and build on it.</p>
   large phase. Phases 0-2 ship now as their own release; Phases 3+4 (combined) and 5 remain
   open follow-up work with no landing date attached.
 - <strong>Phase 5 — remaining stragglers.</strong> <code>array-constructor</code> (2), <code>function-distinct</code> (1),
-  <code>flattening</code> (1) — not yet triaged; likely quick once looked at individually.</p>
+  <code>flattening</code> (1) — <strong>DONE (2026-07-06)</strong>. Three distinct root causes, all in
+  <code>src/evaluator.rs</code>: (1) the array-constructor step (<code>.[a,b]</code>) didn't implement
+  jsonata-js's <code>evaluateStep</code> special case where, when it's the path's last step and
+  maps over exactly one input item, the constructed sub-array becomes the whole path
+  result directly rather than being wrapped in an extra outer array (fixed by tracking
+  <code>is_last_step</code> in the path-step loop); (2) the compiled/VM fast path
+  (<code>try_compile_path</code>) folded the explicit <code>[]</code> keep-array marker
+  (<code>Predicate(Boolean(true))</code>) into an ordinary boolean filter, discarding its
+  keep-singleton semantics that the tree-walker's <code>evaluate_predicate</code> already handled
+  correctly — fixed by bailing out to the tree-walker for that marker, matching the
+  existing numeric-predicate bailout; (3) <code>$distinct</code> threw on non-array input instead
+  of jsonata-js's <code>functions.js</code> behavior of returning non-array (and length-&lt;=1 array)
+  input unchanged. All three verified against real jsonata-js and fixed at both
+  builtin-dispatch call sites (compiled and tree-walker). 1682/1682 passing, zero
+  xfails remain in the suite.</p>
 <p>Out of scope: the jsonata-js 2.2.1 signature-engine spec's Phase 2
 (<code>docs/superpowers/specs/2026-07-04-jsonata-2.2.1-design.md</code>) — porting jsonata-js's new
 <code>timeout</code>/<code>stack</code>/<code>sequence</code> guardrail <em>options</em>. That spec's Phase 1 (submodule bump to v2.2.1,
