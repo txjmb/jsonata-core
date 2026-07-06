@@ -2431,6 +2431,40 @@ impl Default for Context {
     }
 }
 
+/// Strip any lingering tuple-stream wrapper objects (`{"@":.., "__tuple__":true,
+/// ...}`) from a value about to leave the evaluator.
+///
+/// `%`/`@`/`#` are implemented internally by wrapping each element of a path
+/// step's result in a tuple object (see `create_tuple_stream`) so downstream
+/// steps can resolve ancestor/focus/index bindings. Ordinarily an intermediate
+/// path step consumes and re-wraps these as evaluation proceeds, but the
+/// *final* result of an `evaluate()` call can still be tuple-wrapped — either
+/// because the tuple-producing expression itself is the whole result (a bare
+/// `#`/`@`/`%` path), or because it's nested inside object/array construction
+/// (e.g. `{"skus": Product[%.OrderID=...].SKU}` or `[items#$i]`) where the
+/// wrapper ends up embedded in a field value or array element rather than at
+/// the top level. This recurses through both array elements and (non-tuple)
+/// object field values so both shapes are cleaned up, not just a bare
+/// top-level tuple array.
+fn unwrap_tuple_output(value: JValue) -> JValue {
+    match value {
+        JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)) => obj
+            .get("@")
+            .cloned()
+            .map(unwrap_tuple_output)
+            .unwrap_or(JValue::Undefined),
+        JValue::Object(obj) => {
+            let mut new_map = IndexMap::with_capacity(obj.len());
+            for (k, v) in obj.iter() {
+                new_map.insert(k.clone(), unwrap_tuple_output(v.clone()));
+            }
+            JValue::object(new_map)
+        }
+        JValue::Array(arr) => JValue::array(arr.iter().cloned().map(unwrap_tuple_output).collect()),
+        other => other,
+    }
+}
+
 /// Evaluator for JSONata expressions
 pub struct Evaluator {
     context: Context,
@@ -2442,6 +2476,13 @@ pub struct Evaluator {
     /// lambda expression was evaluated more than once (e.g. each level of Y-combinator
     /// or other repeated recursion), aliasing unrelated closures that shared an id.
     next_lambda_id: u64,
+    /// Set whenever `create_tuple_stream` builds a `{"@":.., "__tuple__":true}`
+    /// wrapper during this top-level `evaluate()` call. Reset at the start of
+    /// `evaluate()` and checked at the end to decide whether the (recursive,
+    /// O(result size)) tuple-unwrap pass is needed before returning to the
+    /// caller — keeps the vast majority of evaluations, which never touch
+    /// `%`/`@`/`#`, at zero added cost.
+    tuple_stream_created: bool,
 }
 
 impl Evaluator {
@@ -2453,6 +2494,7 @@ impl Evaluator {
             // True TCO would allow deeper recursion but requires parser-level thunk marking
             max_recursion_depth: 302,
             next_lambda_id: 0,
+            tuple_stream_created: false,
         }
     }
 
@@ -2462,6 +2504,7 @@ impl Evaluator {
             recursion_depth: 0,
             max_recursion_depth: 302,
             next_lambda_id: 0,
+            tuple_stream_created: false,
         }
     }
 
@@ -2717,13 +2760,27 @@ impl Evaluator {
     ///
     /// This is the main entry point for evaluation. It sets up the parent context
     /// to be the root data if not already set.
+    ///
+    /// Also the single choke point for stripping any lingering tuple-stream
+    /// wrapper objects (`{"@":.., "__tuple__":true, ...}`) from the result before
+    /// it reaches the caller — `%`/`@`/`#` are implemented internally via a
+    /// tuple-stream representation (see `create_tuple_stream`), and without this
+    /// a bare (or object/array-nested) tuple-producing expression would leak
+    /// that internal representation into user-visible output instead of the
+    /// plain value.
     pub fn evaluate(&mut self, node: &AstNode, data: &JValue) -> Result<JValue, EvaluatorError> {
         // Set parent context to root data if not already set
         if self.context.get_parent().is_none() {
             self.context.set_parent(data.clone());
         }
 
-        self.evaluate_internal(node, data)
+        self.tuple_stream_created = false;
+        let result = self.evaluate_internal(node, data)?;
+        Ok(if self.tuple_stream_created {
+            unwrap_tuple_output(result)
+        } else {
+            result
+        })
     }
 
     /// Fast evaluation for leaf nodes that don't need recursion tracking.
@@ -4604,12 +4661,26 @@ impl Evaluator {
     /// stream (each wrapper carried forward, per JS's `tupleBindings`) or a
     /// plain value/array entering tuple mode for the first time (each item
     /// wrapped as `{'@': item}`, per JS's `input.map(item => {'@': item})`).
+    ///
+    /// This is the sole *origin* of fresh `__tuple__` wrapper objects: the other
+    /// `"__tuple__".to_string()` insert sites in `evaluate_path`'s single-field
+    /// fast paths only *rebuild* a wrapper around a value pulled from an input
+    /// element that is already `__tuple__`-tagged, which can only be true if a
+    /// `create_tuple_stream` call already ran earlier in this evaluation and set
+    /// `tuple_stream_created`. If a future edit adds a wrapping site that can
+    /// fire on a value that did NOT come from an existing tuple stream, it must
+    /// also set `self.tuple_stream_created = true`, or `Evaluator::evaluate`'s
+    /// output-unwrap pass will be skipped and the wrapper will leak to callers.
     fn create_tuple_stream(
         &mut self,
         step: &PathStep,
         input: &JValue,
     ) -> Result<Vec<JValue>, EvaluatorError> {
         use std::rc::Rc;
+
+        // Mark that this evaluate() call produced tuple wrappers, so the
+        // top-level `evaluate()` knows to run the output-unwrap pass.
+        self.tuple_stream_created = true;
 
         // Gather the incoming tuple bindings.
         let is_tuple_input = matches!(
@@ -10727,6 +10798,128 @@ impl Default for Evaluator {
 mod tests {
     use super::*;
     use crate::ast::{BinaryOp, UnaryOp};
+
+    // --- Task 7: tuple-wrapper output leak -----------------------------------
+    //
+    // `%`/`@`/`#` are implemented internally via a tuple-stream representation
+    // (`create_tuple_stream`): each element gets wrapped as
+    // `{"@": value, "__tuple__": true, ...bindings}`. Intermediate path steps
+    // consume/re-wrap these, but the *final* evaluate() result can still carry
+    // a lingering wrapper -- confirmed for real by dumping actual output before
+    // this fix (see task-7-report.md for the raw before/after). These tests
+    // pin both the bare top-level case (Task 5's brief `#` example) and the
+    // object/array-construction-nested case (found while verifying the brief's
+    // illustrative fix against real output -- a plain per-element Array-only
+    // recursion does not reach into a constructed object's field values).
+
+    fn dataset5_for_tuple_tests() -> JValue {
+        let s = include_str!("../tests/jsonata-js/test/test-suite/datasets/dataset5.json");
+        serde_json::from_str::<serde_json::Value>(s).unwrap().into()
+    }
+
+    fn assert_no_tuple_wrapper(value: &JValue) {
+        match value {
+            JValue::Object(obj) => {
+                assert!(
+                    obj.get("__tuple__").is_none(),
+                    "tuple wrapper leaked into output: {:?}",
+                    value
+                );
+                for v in obj.values() {
+                    assert_no_tuple_wrapper(v);
+                }
+            }
+            JValue::Array(arr) => {
+                for item in arr.iter() {
+                    assert_no_tuple_wrapper(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn test_bare_index_bind_result_does_not_leak_tuple_wrapper() {
+        let data: JValue = serde_json::json!({"items": [1, 2, 3]}).into();
+        let ast = crate::parser::parse("items#$i").unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_no_tuple_wrapper(&result);
+        assert_eq!(
+            result,
+            JValue::array(vec![
+                JValue::from(1i64),
+                JValue::from(2i64),
+                JValue::from(3i64)
+            ])
+        );
+    }
+
+    #[test]
+    fn test_percent_predicate_result_does_not_leak_tuple_wrapper() {
+        // Confirmed by Task 6 to evaluate to the correct @-values but stay
+        // wrapped: Account.Order.Product[%.OrderID='order104'].SKU
+        let data = dataset5_for_tuple_tests();
+        let ast = crate::parser::parse("Account.Order.Product[%.OrderID='order104'].SKU").unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_no_tuple_wrapper(&result);
+        assert_eq!(
+            result,
+            JValue::array(vec![
+                JValue::string("040657863"),
+                JValue::string("0406654603"),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_percent_step_over_tuple_stream_does_not_leak_tuple_wrapper() {
+        // Confirmed by Task 6: Account.Order.Product.Price.%[%.OrderID='order103'].SKU
+        let data = dataset5_for_tuple_tests();
+        let ast = crate::parser::parse("Account.Order.Product.Price.%[%.OrderID='order103'].SKU")
+            .unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_no_tuple_wrapper(&result);
+        assert_eq!(
+            result,
+            JValue::array(vec![
+                JValue::string("0406654608"),
+                JValue::string("0406634348"),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_tuple_wrapper_does_not_leak_when_nested_in_object_construction() {
+        // A tuple-producing expression nested inside a constructed object's field
+        // value: the top-level result is a plain (non-tuple) Object, so a naive
+        // "unwrap only if the whole value is a tuple wrapper" check would miss
+        // this -- must recurse into field values too.
+        let data = dataset5_for_tuple_tests();
+        let ast =
+            crate::parser::parse(r#"{ "skus": Account.Order.Product[%.OrderID='order104'].SKU }"#)
+                .unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_no_tuple_wrapper(&result);
+        assert_eq!(
+            result,
+            JValue::from(serde_json::json!({
+                "skus": ["040657863", "0406654603"]
+            }))
+        );
+    }
+
+    #[test]
+    fn test_tuple_wrapper_does_not_leak_when_nested_in_array_construction() {
+        let data: JValue = serde_json::json!({"items": [1, 2, 3]}).into();
+        let ast = crate::parser::parse("[items#$i]").unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &data).unwrap();
+        assert_no_tuple_wrapper(&result);
+    }
 
     #[test]
     fn test_evaluate_literals() {
