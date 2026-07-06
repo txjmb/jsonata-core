@@ -5002,8 +5002,12 @@ impl Evaluator {
             && (steps.iter().any(|step| !step.stages.is_empty()) || did_array_mapping);
 
         let result = match &current {
-            // Empty arrays become null/undefined
-            JValue::Array(arr) if arr.is_empty() => JValue::Null,
+            // An empty result sequence is "no value" -> undefined (jsonata-js
+            // treats an empty sequence, e.g. from a filter that matched nothing,
+            // as undefined so a following `.field` and object/array construction
+            // drop it rather than keeping an explicit null). `[]` array-keep is
+            // handled separately above via has_explicit_array_keep.
+            JValue::Array(arr) if arr.is_empty() => JValue::Undefined,
             // Unwrap singleton arrays when appropriate
             JValue::Array(arr) if arr.len() == 1 && should_unwrap => arr[0].clone(),
             // Keep arrays otherwise
