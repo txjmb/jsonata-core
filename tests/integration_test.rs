@@ -613,3 +613,75 @@ fn test_recursive_lambda_ids_do_not_collide() {
         assert_eq!(result, JValue::from(json!(720.0)), "iteration {i}");
     }
 }
+
+// --- Task 6: `%` inside filter predicates and sort terms (runtime) ---
+//
+// Regression guard for the runtime half of Task 6. The `ast_transform` unit
+// tests only assert AST *tagging*; these assert the resolved VALUES end-to-end,
+// so the fragile runtime pieces (create_tuple_stream's deferred incoming-unbind
+// for `%.%` chains, the step's own-label bind before apply_stages, and routing
+// a `%` path-step over a tuple stream) fail loudly if broken. Expected values
+// are from tests/jsonata-js/.../parent-operator/parent.json (dataset5).
+//
+// The result is still a tuple stream (final output-unwrap is Task 7), so we
+// extract the `@` values recursively before comparing.
+fn tuple_at_values(v: &JValue) -> Vec<JValue> {
+    match v {
+        JValue::Array(arr) => arr.iter().flat_map(tuple_at_values).collect(),
+        JValue::Object(o) if o.get("__tuple__").and_then(|b| b.as_bool()) == Some(true) => {
+            match o.get("@") {
+                Some(inner) => tuple_at_values(inner),
+                None => vec![],
+            }
+        }
+        other => vec![other.clone()],
+    }
+}
+
+fn dataset5() -> JValue {
+    let s = include_str!("jsonata-js/test/test-suite/datasets/dataset5.json");
+    serde_json::from_str::<serde_json::Value>(s).unwrap().into()
+}
+
+fn eval_tuple_at(expr: &str) -> Vec<JValue> {
+    let ast = parse(expr).unwrap();
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.evaluate(&ast, &dataset5()).unwrap();
+    tuple_at_values(&result)
+}
+
+#[test]
+fn test_percent_in_predicate_on_parent_step() {
+    // parent.json: "...Price.%[%.OrderID='order103'].SKU" -> the % step over a
+    // tuple stream, with a predicate whose own % resolves to Product.
+    let got = eval_tuple_at("Account.Order.Product.Price.%[%.OrderID='order103'].SKU");
+    let want: Vec<JValue> = ["0406654608", "0406634348"]
+        .iter()
+        .map(|s| JValue::from(json!(s)))
+        .collect();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn test_percent_chain_in_predicate() {
+    // "...Product[%.%.`Account Name`='Firefly'].SKU" exercises the %.% chain
+    // inside a predicate (first % -> Product, second % -> Order/Account name).
+    let got = eval_tuple_at("Account.Order.Product[%.%.`Account Name`='Firefly'].SKU");
+    let want: Vec<JValue> = ["0406654608", "0406634348", "040657863", "0406654603"]
+        .iter()
+        .map(|s| JValue::from(json!(s)))
+        .collect();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn test_percent_in_two_sort_terms() {
+    // "...SKU^(%.Price, >%.%.OrderID)" -- both sort terms use %; ordering must
+    // match parent.json (primary %.Price asc, secondary %.%.OrderID desc).
+    let got = eval_tuple_at("Account.Order.Product.SKU^(%.Price, >%.%.OrderID)");
+    let want: Vec<JValue> = ["0406634348", "040657863", "0406654608", "0406654603"]
+        .iter()
+        .map(|s| JValue::from(json!(s)))
+        .collect();
+    assert_eq!(got, want);
+}
