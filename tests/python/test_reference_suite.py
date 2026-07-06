@@ -1,8 +1,9 @@
 """
 Test adapter for the JSONata reference test suite.
 
-This module loads and runs all 1,273+ test cases from the reference
-JavaScript JSONata implementation to ensure 100% spec compliance.
+This module loads and runs all 1682 test cases from the reference JavaScript JSONata
+implementation. 1613 currently pass; the remaining 69 are xfailed pending fixes tracked
+by phase in docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md.
 """
 
 import json
@@ -46,7 +47,7 @@ def load_test_cases() -> list[tuple[str, str, dict[str, Any]]]:
 
         group_name = group_dir.name
 
-        for case_file in sorted(group_dir.glob("case*.json")):
+        for case_file in sorted(group_dir.glob("*.json")):
             try:
                 with open(case_file, encoding="utf-8") as f:
                     test_spec = json.load(f)
@@ -83,19 +84,125 @@ def extract_error_code(error_msg: str) -> str | None:
     return match.group(1) if match else None
 
 
+# Coverage gap remediation tracking (see
+# docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md).
+#
+# load_test_cases() used to only glob "case*.json", silently skipping 20 files / 408
+# cases under other naming conventions. Phase 0 widened the glob to pick up all of
+# them; of the 408, 325 fail against the current implementation for reasons owned by
+# later phases of that spec. Each entry below is xfailed with a pointer to the phase
+# that will fix it, so the suite stays green while the gap is tracked explicitly
+# instead of silently hidden again.
+_XFAIL_PHASE_BY_GROUP = {
+    "parent-operator": "Phase 3: % parent-reference operator not parsed",
+    "joins": "Phase 4: @ tuple-stream binding parse gaps / tuple-wrapper leak",
+    "array-constructor": "Phase 5: untriaged straggler",
+    "function-distinct": "Phase 5: untriaged straggler",
+    "flattening": "Phase 5: untriaged straggler",
+}
+
+_XFAIL_TEST_IDS = {
+    "array-constructor/array-sequences[2]",
+    "array-constructor/array-sequences[4]",
+    "flattening/sequence-of-arrays[1]",
+    "function-distinct/distinct[4]",
+    "joins/employee-map-reduce[0]",
+    "joins/employee-map-reduce[10]",
+    "joins/employee-map-reduce[11]",
+    "joins/employee-map-reduce[1]",
+    "joins/employee-map-reduce[2]",
+    "joins/employee-map-reduce[3]",
+    "joins/employee-map-reduce[4]",
+    "joins/employee-map-reduce[5]",
+    "joins/employee-map-reduce[6]",
+    "joins/employee-map-reduce[7]",
+    "joins/employee-map-reduce[8]",
+    "joins/employee-map-reduce[9]",
+    "joins/index[0]",
+    "joins/index[10]",
+    "joins/index[11]",
+    "joins/index[12]",
+    "joins/index[15]",
+    "joins/index[1]",
+    "joins/index[2]",
+    "joins/index[3]",
+    "joins/index[4]",
+    "joins/index[5]",
+    "joins/index[6]",
+    "joins/index[7]",
+    "joins/index[8]",
+    "joins/index[9]",
+    "joins/library-joins[0]",
+    "joins/library-joins[10]",
+    "joins/library-joins[1]",
+    "joins/library-joins[2]",
+    "joins/library-joins[3]",
+    "joins/library-joins[4]",
+    "joins/library-joins[5]",
+    "joins/library-joins[6]",
+    "joins/library-joins[7]",
+    "joins/library-joins[8]",
+    "joins/library-joins[9]",
+    "parent-operator/parent[0]",
+    "parent-operator/parent[10]",
+    "parent-operator/parent[11]",
+    "parent-operator/parent[12]",
+    "parent-operator/parent[13]",
+    "parent-operator/parent[14]",
+    "parent-operator/parent[15]",
+    "parent-operator/parent[16]",
+    "parent-operator/parent[17]",
+    "parent-operator/parent[18]",
+    "parent-operator/parent[19]",
+    "parent-operator/parent[1]",
+    "parent-operator/parent[20]",
+    "parent-operator/parent[21]",
+    "parent-operator/parent[22]",
+    "parent-operator/parent[23]",
+    "parent-operator/parent[24]",
+    "parent-operator/parent[25]",
+    "parent-operator/parent[26]",
+    "parent-operator/parent[27]",
+    "parent-operator/parent[2]",
+    "parent-operator/parent[3]",
+    "parent-operator/parent[4]",
+    "parent-operator/parent[5]",
+    "parent-operator/parent[6]",
+    "parent-operator/parent[7]",
+    "parent-operator/parent[8]",
+    "parent-operator/parent[9]",
+}
+
+
+def _build_pytest_params(
+    cases: list[tuple[str, str, dict[str, Any]]],
+) -> list["pytest.mark.structures.ParameterSet"]:
+    params = []
+    for test_id, group_name, spec in cases:
+        marks = []
+        if test_id in _XFAIL_TEST_IDS:
+            reason = _XFAIL_PHASE_BY_GROUP.get(
+                group_name, "unresolved reference-suite coverage gap"
+            )
+            marks.append(pytest.mark.xfail(reason=reason, strict=False))
+        params.append(pytest.param(test_id, group_name, spec, marks=marks, id=test_id))
+    return params
+
+
 # Load all test cases
 test_cases = load_test_cases()
+test_params = _build_pytest_params(test_cases)
 
 print(f"\n{'=' * 70}")
 print("JSONata Reference Suite Test Loader")
 print(f"{'=' * 70}")
 print(f"Loaded {len(DATASETS)} datasets from {DATASET_DIR}")
-print(f"Loaded {len(test_cases)} test cases")
+print(f"Loaded {len(test_cases)} test cases ({len(_XFAIL_TEST_IDS)} xfailed pending later phases)")
 print(f"{'=' * 70}\n")
 
 
 @pytest.mark.reference
-@pytest.mark.parametrize("test_id,group_name,spec", test_cases, ids=[tc[0] for tc in test_cases])
+@pytest.mark.parametrize("test_id,group_name,spec", test_params)
 def test_reference_suite(test_id: str, group_name: str, spec: dict[str, Any]):
     """
     Run a single test case from the reference JSONata suite.
