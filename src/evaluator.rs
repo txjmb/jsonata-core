@@ -4652,12 +4652,32 @@ impl Evaluator {
             let actual_data = tuple_obj.get("@").cloned().unwrap_or(JValue::Undefined);
             let step_value = self.evaluate_internal(&step.node, &actual_data);
 
-            for name in &bound_names {
-                self.context.unbind(name);
-            }
             let mut step_value = step_value?;
             if !step.stages.is_empty() {
+                // A `%` inside a filter predicate refers to the ancestry of
+                // THIS step (its own input for a level-1 `%`, or an earlier
+                // step's input for a `%.%` chain). ast_transform tags this step
+                // with `ancestor_label`; bind it to the step's input so the
+                // level-1 `%` resolves. The `%.%` chain's deeper references use
+                // labels carried in the INCOMING tuple, so those bindings
+                // (`bound_names`) must stay live through `apply_stages` -- their
+                // unbind is deferred until after it (previously they were
+                // unbound first, which silently broke `%.%` inside predicates).
+                let own_label = match &step.ancestor_label {
+                    Some(label) if !bound_names.contains(label) => {
+                        self.context.bind(label.clone(), actual_data.clone());
+                        Some(label.clone())
+                    }
+                    _ => None,
+                };
                 step_value = self.apply_stages(step_value, &step.stages)?;
+                if let Some(label) = own_label {
+                    self.context.unbind(&label);
+                }
+            }
+
+            for name in &bound_names {
+                self.context.unbind(name);
             }
 
             let row: Vec<JValue> = match step_value {
@@ -9756,6 +9776,30 @@ impl Evaluator {
         for (idx, element) in array.iter().enumerate() {
             let mut sort_keys = Vec::new();
 
+            // When sorting a tuple stream (the input path had a `%`/`@`/`#`
+            // step, so each element is a `{@, !label, $var, __tuple__}`
+            // wrapper), bind its carried ancestor/focus/index keys into scope
+            // so a `%` (or `$focus`) inside a sort term resolves -- mirroring
+            // create_tuple_stream's per-tuple frame binding. Sort terms attach
+            // to a synthetic step after the last input step, so `%` refers to
+            // the last input step's ancestry, carried under `!label` here.
+            let mut tuple_bound: Vec<String> = Vec::new();
+            if let JValue::Object(obj) = element {
+                if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                    for (key, value) in obj.iter() {
+                        if let Some(name) = key.strip_prefix('$') {
+                            if !name.is_empty() {
+                                self.context.bind(name.to_string(), value.clone());
+                                tuple_bound.push(name.to_string());
+                            }
+                        } else if key.starts_with('!') {
+                            self.context.bind(key.clone(), value.clone());
+                            tuple_bound.push(key.clone());
+                        }
+                    }
+                }
+            }
+
             // Evaluate each sort term with $ bound to the element
             for (term_expr, _ascending) in terms {
                 // Save current $ binding
@@ -9775,6 +9819,10 @@ impl Evaluator {
                 }
 
                 sort_keys.push(sort_value);
+            }
+
+            for name in &tuple_bound {
+                self.context.unbind(name);
             }
 
             indexed_array.push((idx, sort_keys));
