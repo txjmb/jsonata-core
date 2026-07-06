@@ -21,7 +21,7 @@ process.stdin.on('data', (chunk) => {
     inputData += chunk;
 });
 
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
     try {
         const params = JSON.parse(inputData);
         const { expression, data, iterations } = params;
@@ -32,13 +32,18 @@ process.stdin.on('end', () => {
         // Warm up (10% of iterations, min 10, max 100)
         const warmupIterations = Math.min(100, Math.max(10, Math.floor(iterations / 10)));
         for (let i = 0; i < warmupIterations; i++) {
-            compiled.evaluate(data);
+            await compiled.evaluate(data);
         }
 
         // Measure
+        // NOTE: evaluate() is async (jsonata-js recurses via real `await` internally,
+        // including once per array element) — it MUST be awaited here, or the loop
+        // only runs each call up to its first internal suspension point and defers
+        // the rest of the real work to microtasks that drain after `end` is captured,
+        // making the measured time meaningless for anything but trivial expressions.
         const start = process.hrtime.bigint();
         for (let i = 0; i < iterations; i++) {
-            compiled.evaluate(data);
+            await compiled.evaluate(data);
         }
         const end = process.hrtime.bigint();
 
