@@ -35,6 +35,13 @@ pub enum ParserError {
 
     #[error("Expected {expected}, found {found}")]
     Expected { expected: String, found: String },
+
+    /// A JSONata-spec-coded parse error (S0214-S0217 for the %/@ operators).
+    /// Code is at the start of the message (matching the DateTimeError::Coded
+    /// convention from the datetime picture-string engine) so
+    /// test_reference_suite.py's extract_error_code() finds it.
+    #[error("{code}: {message}")]
+    Coded { code: &'static str, message: String },
 }
 
 /// Token types for the lexer
@@ -95,6 +102,7 @@ pub enum Token {
 
     // Special
     Hash, // # index binding operator
+    At,   // @ focus binding operator
     Eof,
 }
 
@@ -611,6 +619,10 @@ impl Lexer {
                     self.advance();
                     return Ok(Token::Hash);
                 }
+                Some('@') => {
+                    self.advance();
+                    return Ok(Token::At);
+                }
                 Some('=') => {
                     self.advance();
                     return Ok(Token::Equal);
@@ -716,6 +728,7 @@ impl Parser {
             Token::LeftBrace => Some((80, 81)), // Object constructor as postfix
             Token::Caret => Some((80, 81)),     // Sort operator as postfix
             Token::Hash => Some((80, 81)),      // Index binding operator as postfix
+            Token::At => Some((80, 81)),        // Focus binding operator as postfix
             Token::Question => Some((20, 21)),
             Token::QuestionQuestion => Some((15, 16)), // Coalescing operator
             Token::QuestionColon => Some((15, 16)),    // Default operator
@@ -979,6 +992,14 @@ impl Parser {
                 self.advance()?;
                 Ok(AstNode::Descendant)
             }
+            Token::Percent => {
+                // Parent operator in primary position. Label is resolved by
+                // ast_transform -- this empty string is never observed by
+                // the evaluator (ast_transform fills every AstNode::Parent
+                // ("") with a real label or errors S0217).
+                self.advance()?;
+                Ok(AstNode::Parent(String::new()))
+            }
             Token::Function => {
                 // Parse lambda: function($param1, $param2, ...) { body }
                 self.advance()?; // skip 'function'
@@ -1104,6 +1125,24 @@ impl Parser {
                     } else if self.current_token == Token::LeftParen {
                         // Check for .(expr) syntax (function application)
                         self.advance()?;
+
+                        // Empty block `.()`: a parenthesised step with no
+                        // expression (e.g. `Account.Order.().%`). jsonata-js
+                        // treats `()` as an empty block that evaluates to
+                        // undefined; keep it as a `FunctionApplication` of an
+                        // empty `Block` so the ancestry pass can walk past it.
+                        if self.current_token == Token::RightParen {
+                            self.advance()?;
+                            let mut steps = match lhs {
+                                AstNode::Path { steps } => steps,
+                                _ => vec![PathStep::new(lhs)],
+                            };
+                            steps.push(PathStep::new(AstNode::FunctionApplication(Box::new(
+                                AstNode::Block(Vec::new()),
+                            ))));
+                            lhs = AstNode::Path { steps };
+                            continue;
+                        }
 
                         // Parse the expression(s) to apply - may be block with semicolons
                         let mut expressions = vec![self.parse_expression(0)?];
@@ -1473,20 +1512,55 @@ impl Parser {
                     // Binds the current array index to the specified variable
                     self.advance()?; // skip '#'
 
-                    // Expect a variable name
+                    // Expect a variable name. A bare `#` without a `$var` (e.g.
+                    // `Account.Order@$o#i.Product`) is S0214, mirroring jsonata-js's
+                    // inline check for `@`/`#` (parser.js ~L834-847).
                     let var_name = match &self.current_token {
                         Token::Variable(name) => name.clone(),
                         _ => {
-                            return Err(ParserError::InvalidSyntax(
-                                "Expected variable name after #".to_string(),
-                            ));
+                            return Err(ParserError::Coded {
+                                code: "S0214",
+                                message: "Expected a variable reference after #".to_string(),
+                            });
                         }
                     };
                     self.advance()?; // skip variable
 
-                    lhs = AstNode::IndexBind {
-                        input: Box::new(lhs),
-                        variable: var_name,
+                    // Produces a generic Binary(IndexBind) marker -- ast_transform
+                    // resolves this into a PathStep.index_var flag, mirroring how
+                    // @$var/FocusBind is represented (see Token::At below). Using
+                    // the same generic Binary shape (rather than a dedicated
+                    // AstNode::IndexBind variant) lets that variant be retired
+                    // from ast.rs entirely.
+                    lhs = AstNode::Binary {
+                        op: BinaryOp::IndexBind,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(AstNode::Variable(var_name)),
+                    };
+                }
+                Token::At => {
+                    // Focus binding operator: @$var
+                    // Produces a generic Binary(FocusBind) marker -- ast_transform
+                    // resolves this into a PathStep.focus flag, matching
+                    // jsonata-js's parser.js:834-847 (which does the same S0214
+                    // check inline, deferring all other semantics to processAST).
+                    self.advance()?; // skip '@'
+
+                    let var_name = match &self.current_token {
+                        Token::Variable(name) => name.clone(),
+                        _ => {
+                            return Err(ParserError::Coded {
+                                code: "S0214",
+                                message: "Expected a variable reference after @".to_string(),
+                            });
+                        }
+                    };
+                    self.advance()?; // skip variable
+
+                    lhs = AstNode::Binary {
+                        op: BinaryOp::FocusBind,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(AstNode::Variable(var_name)),
                     };
                 }
                 Token::Caret => {
@@ -1649,10 +1723,18 @@ impl Parser {
 
 /// Parse a JSONata expression string into an AST
 ///
-/// This is the main entry point for parsing.
+/// This is the main entry point for parsing. Runs the post-parse
+/// ast_transform pass (ancestor-slot resolution, @/#/% unification)
+/// unconditionally, matching jsonata-js's processAST always running
+/// immediately after the raw Pratt parse.
 pub fn parse(expression: &str) -> Result<AstNode, ParserError> {
     let mut parser = Parser::new(expression.to_string())?;
-    parser.parse()
+    let raw_ast = parser.parse()?;
+    crate::ast_transform::resolve_ancestry(raw_ast).map_err(|e| match e {
+        crate::ast_transform::AstTransformError::Coded { code, message } => {
+            ParserError::Coded { code, message }
+        }
+    })
 }
 
 #[cfg(test)]
@@ -2207,5 +2289,98 @@ mod tests {
             "expected parse to succeed, got {:?}",
             result
         );
+    }
+
+    #[test]
+    fn test_parent_operator_parses_as_prefix() {
+        // Tests the RAW grammar rule (bare `%` in primary position) in
+        // isolation from ast_transform's ancestor resolution -- uses
+        // Parser::new(...).parse() directly rather than the free `parse()`
+        // function, since the free function now runs ast_transform
+        // unconditionally (Step 8), and `%.OrderID` alone has no preceding
+        // step for `%` to resolve against (that's covered by
+        // ast_transform's own S0217 tests).
+        let mut parser = Parser::new("%.OrderID".to_string()).unwrap();
+        let ast = parser.parse().unwrap();
+        // %.OrderID should parse as a path with two steps: Parent, then Name("OrderID")
+        match ast {
+            AstNode::Path { steps } => {
+                assert_eq!(steps.len(), 2);
+                assert!(matches!(steps[0].node, AstNode::Parent(_)));
+                assert!(matches!(steps[1].node, AstNode::Name(ref n) if n == "OrderID"));
+            }
+            other => panic!("expected Path, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_percent_still_parses_as_modulo_infix() {
+        // Regression: % must still work as binary modulo when NOT in prefix position
+        let ast = parse("10 % 3").unwrap();
+        assert!(matches!(
+            ast,
+            AstNode::Binary {
+                op: BinaryOp::Modulo,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_focus_bind_parses_as_binary_marker() {
+        // Tests the RAW grammar rule in isolation from ast_transform (which
+        // now runs unconditionally in the free `parse()` and would rewrite
+        // this into a Path with a `focus` flag instead -- see
+        // ast_transform.rs's own real-parser-based tests for that).
+        let mut parser = Parser::new("Order@$o".to_string()).unwrap();
+        let ast = parser.parse().unwrap();
+        match ast {
+            AstNode::Binary {
+                op: BinaryOp::FocusBind,
+                lhs,
+                rhs,
+            } => {
+                // Order is parsed as a Path with a Name step
+                if let AstNode::Path { steps } = *lhs {
+                    assert_eq!(steps.len(), 1);
+                    assert!(matches!(steps[0].node, AstNode::Name(ref n) if n == "Order"));
+                } else {
+                    panic!("expected lhs to be Path, got {:?}", lhs);
+                }
+                assert!(matches!(*rhs, AstNode::Variable(ref n) if n == "o"));
+            }
+            other => panic!("expected Binary{{FocusBind}}, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_index_bind_parses_as_binary_marker() {
+        // #$var now reuses the same generic Binary marker shape as @$var
+        // (Task 4 retires the dedicated AstNode::IndexBind struct variant).
+        let mut parser = Parser::new("arr#$i".to_string()).unwrap();
+        let ast = parser.parse().unwrap();
+        match ast {
+            AstNode::Binary {
+                op: BinaryOp::IndexBind,
+                lhs,
+                rhs,
+            } => {
+                if let AstNode::Path { steps } = *lhs {
+                    assert_eq!(steps.len(), 1);
+                    assert!(matches!(steps[0].node, AstNode::Name(ref n) if n == "arr"));
+                } else {
+                    panic!("expected lhs to be Path, got {:?}", lhs);
+                }
+                assert!(matches!(*rhs, AstNode::Variable(ref n) if n == "i"));
+            }
+            other => panic!("expected Binary{{IndexBind}}, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_focus_bind_requires_variable_rhs() {
+        // S0214: @'s RHS must be a bare variable reference
+        let err = parse("Order@foo").unwrap_err();
+        assert!(err.to_string().starts_with("S0214"));
     }
 }
