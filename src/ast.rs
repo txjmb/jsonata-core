@@ -11,6 +11,12 @@ use serde::{Deserialize, Serialize};
 pub enum Stage {
     /// Filter/predicate stage [expr]
     Filter(Box<AstNode>),
+    /// Positional index stage `#$var` that lands on a step already carrying an
+    /// index/stages (jsonata-js's `{type: 'index', value}` stage). Binds the
+    /// variable to each surviving tuple's position in the CURRENT (post-earlier-
+    /// stages) result, so e.g. `books@$b#$ib[$l.isbn=$b.isbn]#$ib2` gives `$ib`
+    /// the pre-filter book position and `$ib2` the post-filter position.
+    Index(String),
 }
 
 /// A step in a path expression with optional stages
@@ -23,6 +29,24 @@ pub struct PathStep {
     pub node: AstNode,
     /// Stages to apply during this step (e.g., predicates)
     pub stages: Vec<Stage>,
+    /// Set by `@$var` (focus binding): binds the step's per-element value to
+    /// this variable name (without the `$` prefix) during tuple-stream
+    /// evaluation. Mirrors jsonata-js's `step.focus`.
+    pub focus: Option<String>,
+    /// Set by `#$var` (index binding): binds the step's per-element index to
+    /// this variable name (without the `$` prefix). Mirrors jsonata-js's
+    /// `step.index`. Replaces the retired `AstNode::IndexBind` wrapping node.
+    pub index_var: Option<String>,
+    /// Set by ast_transform when a later `%` reference needs this step's
+    /// *input* value preserved. The label is synthetic (e.g. "!0", "!1", ...)
+    /// and used as a tuple-dict key at runtime. Mirrors jsonata-js's
+    /// `step.ancestor.label`.
+    pub ancestor_label: Option<String>,
+    /// True when this step must participate in tuple-stream evaluation
+    /// (because of its own `focus`/`index_var`/`ancestor_label`, or because
+    /// an earlier step in the same path already entered tuple-stream mode).
+    /// Mirrors jsonata-js's `step.tuple`.
+    pub is_tuple: bool,
 }
 
 /// AST Node types
@@ -137,6 +161,14 @@ pub enum AstNode {
     /// Descendant operator (**) in path expressions
     Descendant,
 
+    /// Parent-reference operator (%) in path expressions, resolved.
+    /// Carries the synthetic ancestor label ("!0", "!1", ...) assigned by
+    /// ast_transform -- looked up at runtime via the same tuple/scope
+    /// mechanism as $-variables. The parser produces `Parent(String::new())`
+    /// (an empty placeholder never observed by the evaluator); ast_transform
+    /// fills every occurrence with a real label or raises S0217.
+    Parent(String),
+
     /// Array filter/predicate [condition]
     /// Can be an index (number) or a predicate (boolean expression)
     Predicate(Box<AstNode>),
@@ -157,16 +189,6 @@ pub enum AstNode {
         input: Box<AstNode>,
         /// Sort terms - list of (expression, ascending) tuples
         terms: Vec<(AstNode, bool)>,
-    },
-
-    /// Index binding operator #$var
-    /// Binds the current array index to the specified variable during path traversal
-    /// For example: arr#$i.field binds the index to $i for each element
-    IndexBind {
-        /// The input expression being indexed
-        input: Box<AstNode>,
-        /// The variable name to bind the index to (without the $ prefix)
-        variable: String,
     },
 
     /// Transform operator |location|update[,delete]|
@@ -218,6 +240,19 @@ pub enum BinaryOp {
     // Variable binding
     ColonEqual, // :=
 
+    // Focus binding (raw parse-time marker for @$var; resolved into a
+    // PathStep.focus flag by ast_transform, matching jsonata-js's own
+    // parser.js:834-847, which also produces a generic binary node here)
+    FocusBind,
+
+    // Index binding (raw parse-time marker for #$var; resolved into a
+    // PathStep.index_var flag by ast_transform). Reuses the same generic
+    // Binary-node representation as FocusBind (rather than a dedicated
+    // `AstNode::IndexBind` struct variant) so the retired `IndexBind`
+    // variant has zero remaining construction sites once removed from
+    // ast.rs -- see Task 4's ast_transform.rs migrate_binding_markers.
+    IndexBind,
+
     // Coalescing
     Coalesce, // ??
 
@@ -244,12 +279,23 @@ impl PathStep {
         PathStep {
             node,
             stages: Vec::new(),
+            focus: None,
+            index_var: None,
+            ancestor_label: None,
+            is_tuple: false,
         }
     }
 
     /// Create a path step with stages
     pub fn with_stages(node: AstNode, stages: Vec<Stage>) -> Self {
-        PathStep { node, stages }
+        PathStep {
+            node,
+            stages,
+            focus: None,
+            index_var: None,
+            ancestor_label: None,
+            is_tuple: false,
+        }
     }
 }
 
@@ -312,5 +358,14 @@ mod tests {
             rhs: Box::new(AstNode::number(2.0)),
         };
         assert!(matches!(node, AstNode::Binary { .. }));
+    }
+
+    #[test]
+    fn test_path_step_new_defaults_new_fields_to_none() {
+        let step = PathStep::new(AstNode::Name("foo".to_string()));
+        assert_eq!(step.focus, None);
+        assert_eq!(step.index_var, None);
+        assert_eq!(step.ancestor_label, None);
+        assert!(!step.is_tuple);
     }
 }

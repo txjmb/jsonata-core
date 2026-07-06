@@ -21,6 +21,39 @@ class TestCompile:
         #     jsonatapy.compile("invalid [[[ syntax")
         pass
 
+    def test_compile_coded_error_s0214_no_prefix(self):
+        """Test that S0214 coded errors appear without 'Parse error:' prefix.
+
+        This test verifies that parser errors with JSONata spec codes (like S0214,
+        which is raised when @ is not followed by a variable) appear at the start
+        of the error message without an added 'Parse error:' prefix. The test suite
+        extracts error codes using a regex that expects the code at the very start.
+        """
+        with pytest.raises(ValueError) as exc_info:
+            jsonatapy.compile("Order@foo")
+
+        error_msg = str(exc_info.value)
+        # The error should start with S0214:, not "Parse error: S0214:"
+        assert error_msg.startswith("S0214:"), (
+            f"Expected error to start with 'S0214:', got: {error_msg}"
+        )
+        # Sanity check: should NOT have Parse error prefix
+        assert not error_msg.startswith("Parse error: S0214:"), (
+            f"Error should not have 'Parse error:' prefix, got: {error_msg}"
+        )
+
+    def test_compile_non_coded_error_with_prefix(self):
+        """Test that non-coded parse errors still get 'Parse error:' prefix."""
+        with pytest.raises(ValueError) as exc_info:
+            # An unclosed string is a non-coded error
+            jsonatapy.compile('"unclosed string')
+
+        error_msg = str(exc_info.value)
+        # Non-coded errors should have the "Parse error: " prefix
+        assert error_msg.startswith("Parse error:"), (
+            f"Expected error to start with 'Parse error:', got: {error_msg}"
+        )
+
 
 class TestEvaluate:
     """Tests for evaluate() function"""

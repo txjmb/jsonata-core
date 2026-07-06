@@ -54,8 +54,8 @@ let result = Evaluator::new().evaluate(&ast, &data)?;
 
 ## Performance highlights
 
-- **1613/1682** JSONata reference tests passing (69 xfailed pending the `%` parent
-  operator and `@` tuple-stream binding)
+- **1678/1682** JSONata reference tests passing (4 xfailed pending Phase 5 stragglers
+  in `array-constructor`, `function-distinct`, and `flattening`)
 - **up to 18x faster** than the JavaScript reference implementation for pure expression workloads
 - **~40x faster** than jsonata-rs (the next pure-Rust JSONata implementation)
 - **~10–65x faster** than jsonata-python across all categories
