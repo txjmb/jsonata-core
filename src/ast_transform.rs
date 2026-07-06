@@ -888,6 +888,51 @@ fn walk_backward(
             return Ok(level);
         }
         index -= 1;
+        // Skip filter-predicate pseudo-steps: our parser encodes `@$v[pred]`
+        // and standalone `foo[pred]` chained after a marker as a separate
+        // `Predicate` step, whereas jsonata-js carries the predicate as a
+        // `stage` on the owning step (so it never appears as a distinct step in
+        // resolveAncestry). A predicate is a filter, never an ancestor target,
+        // so the backward ancestry walk steps over it -- without this, a `%`
+        // after `books@$B[$L.isbn=$B.isbn]` hits the predicate step and wrongly
+        // reports S0217.
+        //
+        // Then skip over a run of contiguous focus-bound (`@$var`) steps,
+        // treating them as a SINGLE ancestor hop -- mirrors jsonata-js
+        // resolveAncestry (parser.js ~L1023-1025): `while(index >= 0 &&
+        // step.focus && path.steps[index].focus) { step = path.steps[index--] }`.
+        // Because our extra `Predicate` steps sit between the focus steps (which
+        // in jsonata are adjacent, the predicates being stages), the
+        // focus-contiguity test must look through those predicate steps to the
+        // previous REAL navigation step. So in
+        // `library.loans@$L.books@$B[...].customers@$C[...].{ $keys(%.%) }` all
+        // three focus steps collapse into one hop and `%.%` reaches the root.
+        loop {
+            while index > 0 && matches!(steps[index].node, AstNode::Predicate(_)) {
+                index -= 1;
+            }
+            // Locate the previous non-predicate step (if any) to test contiguity.
+            let mut prev = None;
+            if index > 0 {
+                let mut j = index - 1;
+                loop {
+                    if !matches!(steps[j].node, AstNode::Predicate(_)) {
+                        prev = Some(j);
+                        break;
+                    }
+                    if j == 0 {
+                        break;
+                    }
+                    j -= 1;
+                }
+            }
+            match prev {
+                Some(p) if steps[index].focus.is_some() && steps[p].focus.is_some() => {
+                    index = p;
+                }
+                _ => break,
+            }
+        }
         level = seek_parent_step(&mut steps[index], label, level, state)?;
     }
     Ok(0)
