@@ -4062,6 +4062,7 @@ impl Evaluator {
                             } else if result.len() == 1 {
                                 Ok(result.into_iter().next().unwrap())
                             } else {
+                                check_sequence_length(result.len(), &self.options)?;
                                 Ok(JValue::array(result))
                             }
                         } else {
@@ -4152,6 +4153,7 @@ impl Evaluator {
                             } else if result.len() == 1 {
                                 Ok(result.into_iter().next().unwrap())
                             } else {
+                                check_sequence_length(result.len(), &self.options)?;
                                 Ok(JValue::array(result))
                             }
                         } // end else (tuple path)
@@ -4193,7 +4195,10 @@ impl Evaluator {
                                 return match result.len() {
                                     0 => Ok(JValue::Null),
                                     1 => Ok(result.pop().unwrap()),
-                                    _ => Ok(JValue::array(result)),
+                                    _ => {
+                                        check_sequence_length(result.len(), &self.options)?;
+                                        Ok(JValue::array(result))
+                                    }
                                 };
                             }
                             _ => {} // Fall through to general path evaluation

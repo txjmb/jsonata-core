@@ -855,3 +855,52 @@ fn test_descendant_raises_d2015() {
     let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
     assert!(err.to_string().contains("D2015"), "got: {err}");
 }
+
+/// `evaluate_path`'s single-step fast path (`steps.len() == 1`, `AstNode::Name`,
+/// non-tuple `JValue::Array` branch, src/evaluator.rs ~4030-4066) is reached via
+/// its own internal recursion for a NESTED array element (`items` is an array
+/// containing one element that is itself a 1000-element array of `{name}`
+/// objects). This exercises and covers the fast path's own D2015 check (its
+/// `return` skips this `evaluate_path` invocation's shared final-return
+/// chokepoint). Note: for this specific construction the *outer* `items.name`
+/// call still separately hits the shared chokepoint too (its own `result`
+/// accumulates the same 1000 elements via the general per-step loop before
+/// returning), so this particular data shape doesn't prove the fast path's own
+/// check is independently load-bearing — every currently-reachable call into
+/// this fast path is itself a nested recursive call from a frame whose
+/// steps.len() >= 2, which always has an active chokepoint of its own. It is
+/// still correct and consistent (defense-in-depth parity with every other
+/// query-result-sequence exit point in this function) to check here directly.
+#[test]
+fn test_path_single_step_fast_path_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "items": [(0..1000).map(|i| serde_json::json!({"name": format!("item{i}")})).collect::<Vec<_>>()]
+    }).into();
+    let ast = parse("items.name").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// `evaluate_path`'s 2-step `$variable.field` fast path (src/evaluator.rs
+/// ~4181-4206) `return`s directly and bypasses the shared final-return
+/// chokepoint, so it needs its own independent D2015 check.
+#[test]
+fn test_path_variable_field_fast_path_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "items": (0..1000).map(|i| serde_json::json!({"name": format!("item{i}")})).collect::<Vec<_>>()
+    }).into();
+    let ast = parse("($v := items; $v.name)").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
