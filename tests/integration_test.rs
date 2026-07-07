@@ -1002,3 +1002,200 @@ fn test_filter_compiled_fast_path_raises_d2015() {
     let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
     assert!(err.to_string().contains("D2015"), "got: {err}");
 }
+
+// ── Task 8: eval_compiled_inner's CompiledExpr::MapCall/FilterCall/ReduceCall
+// and compiled_apply_filter guardrail coverage ──────────────────────────────
+//
+// The tests above (`test_map_compiled_fast_path_raises_d2015` /
+// `test_filter_compiled_fast_path_raises_d2015`) exercise a *different* fast
+// path: `evaluate_function_call`'s hand-rolled "map"/"filter" arms, which
+// compile only the lambda *body* and loop over the array in the tree walker
+// (already guarded by an earlier task's `check_sequence_length`). A bare
+// top-level `$map(...)`/`$filter(...)` call is dispatched there directly and
+// never reaches `eval_compiled_inner`'s `CompiledExpr::MapCall`/`FilterCall`/
+// `ReduceCall` arms.
+//
+// A naive zero-arg IIFE wrapper (`(function(){...})()`) does NOT reach them
+// either: the parser marks *any* lambda whose body's tail position is a
+// function call as a TCO "thunk" (`parser.rs::is_tail_call`), and thunks
+// unconditionally get `compiled_body: None` (both at `AstNode::Lambda`
+// definition time and via `extract_inline_lambda`'s `thunk: false` guard),
+// so they always fall back to the full tree-walker -- confirmed empirically
+// (a temporary `eprintln!` in each target arm showed zero hits, and the
+// "D2015" assertions were passing for the wrong reason: the tree-walker's
+// already-guarded path #2 above, not this task's target).
+//
+// The reliable way to reach `eval_compiled_inner`'s HOF arms is the pattern
+// the arms' own doc comment describes: nest the HOF/path call as a
+// *non-tail* expression inside another (already thunk:false) lambda body
+// compiled by path #2, e.g. `function($x){ (INNER_CALL; 1) }` -- wrapping in
+// a `Block` whose last expression is a plain literal keeps the outer
+// callback's tail position a non-function-call, so it stays thunk:false and
+// compiles via `try_compile_expr_with_allowed_vars`. That compiled `Block`
+// (`CompiledExpr::Block([inner_call_compiled, Literal(1)])`) is then run via
+// `eval_compiled_inner`, which evaluates `inner_call_compiled` first --
+// landing squarely in the target arm. Confirmed empirically the same way
+// (temporary `eprintln!`s in each target arm all fired for these exact
+// expressions, and all returned `is_err() == false` pre-implementation,
+// i.e. genuinely unguarded fast paths, not false negatives).
+//
+// `outer` is a single-element array purely to drive one iteration of the
+// (harmless, already-guarded) outer path #2 loop; all the guardrail action
+// happens in the untouched inner call.
+
+/// $map's CompiledExpr::MapCall arm must respect max_sequence_length.
+/// Distinct return point from `test_map_compiled_fast_path_raises_d2015` above.
+#[test]
+fn test_map_eval_compiled_inner_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "outer": [1],
+        "items": (0..1000).collect::<Vec<i32>>()
+    })
+    .into();
+    let ast = parse("$map(outer, function($x){($map(items, function($y){$y*2}); 1)})").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// A timeout must trip inside CompiledExpr::MapCall's per-element loop, even
+/// though it never passes through evaluate_internal's per-node checkpoint.
+///
+/// `timeout_ms: 200` + 2,000,000 items (not a tighter/smaller budget): reaching
+/// this arm first runs through `evaluate_function_call`'s generic "evaluate all
+/// args" preamble for the OUTER `$map`, which itself evaluates+compiles the
+/// callback `Lambda` -- setup that was empirically observed to occasionally
+/// take several ms under load. 200ms comfortably clears that, while the full
+/// uninstrumented loop reliably takes 700ms+, giving a wide, non-flaky margin.
+#[test]
+fn test_map_eval_compiled_inner_raises_d1012_timeout() {
+    let data: JValue = serde_json::json!({
+        "outer": [1],
+        "items": (0..2_000_000).collect::<Vec<i32>>()
+    })
+    .into();
+    let ast = parse("$map(outer, function($x){($map(items, function($y){$y*2}); 1)})").unwrap();
+    let options = EvaluatorOptions {
+        timeout_ms: Some(200),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D1012");
+    assert!(err.to_string().contains("D1012"), "got: {err}");
+}
+
+/// $filter's CompiledExpr::FilterCall arm must respect max_sequence_length.
+#[test]
+fn test_filter_eval_compiled_inner_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "outer": [1],
+        "items": (0..1000).collect::<Vec<i32>>()
+    })
+    .into();
+    let ast = parse("$map(outer, function($x){($filter(items, function($y){$y>=0}); 1)})").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// A timeout must trip inside CompiledExpr::FilterCall's per-element loop.
+/// See `test_map_eval_compiled_inner_raises_d1012_timeout` for why this uses
+/// a 200ms/2,000,000-item margin rather than a razor-thin budget.
+#[test]
+fn test_filter_eval_compiled_inner_raises_d1012_timeout() {
+    let data: JValue = serde_json::json!({
+        "outer": [1],
+        "items": (0..2_000_000).collect::<Vec<i32>>()
+    })
+    .into();
+    let ast = parse("$map(outer, function($x){($filter(items, function($y){$y>=0}); 1)})").unwrap();
+    let options = EvaluatorOptions {
+        timeout_ms: Some(200),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D1012");
+    assert!(err.to_string().contains("D1012"), "got: {err}");
+}
+
+/// A timeout must trip inside CompiledExpr::ReduceCall's per-element loop.
+/// No corresponding D2015 test: jsonata-js's own `reduce()` never calls
+/// `createSequence()`, so the accumulator is intentionally uncapped upstream
+/// too -- ReduceCall must NOT gain a check_sequence_length call. See
+/// `test_map_eval_compiled_inner_raises_d1012_timeout` for why this uses a
+/// 200ms/2,000,000-item margin rather than a razor-thin budget.
+#[test]
+fn test_reduce_eval_compiled_inner_raises_d1012_timeout() {
+    let data: JValue = serde_json::json!({
+        "outer": [1],
+        "items": (0..2_000_000).collect::<Vec<i32>>()
+    })
+    .into();
+    let ast = parse("$map(outer, function($x){($reduce(items, function($acc,$y){$acc+$y}); 1)})")
+        .unwrap();
+    let options = EvaluatorOptions {
+        timeout_ms: Some(200),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D1012");
+    assert!(err.to_string().contains("D1012"), "got: {err}");
+}
+
+/// A compiled path predicate (`items[val>=0]`, compiling to
+/// CompiledExpr::FieldPath with a filter step) must respect
+/// max_sequence_length via `compiled_apply_filter`.
+#[test]
+fn test_path_filter_eval_compiled_inner_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "outer": [1],
+        "items": (0..1000).map(|i| serde_json::json!({"val": i})).collect::<Vec<_>>()
+    })
+    .into();
+    let ast = parse("$map(outer, function($x){(items[val>=0]; 1)})").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// A timeout must trip inside `compiled_apply_filter`'s per-element loop.
+///
+/// Uses a much larger margin than the sibling MapCall/FilterCall/ReduceCall
+/// D1012 tests (`timeout_ms: 200` + 2,000,000 items, vs. their `1`ms +
+/// 500,000): empirically, reaching this specific arm first runs through
+/// `evaluate_function_call`'s generic "evaluate all args" preamble (which
+/// evaluates the whole callback `Lambda` node, compiling its body) before
+/// entering the fast path, and that setup alone was observed to occasionally
+/// take several ms under load -- enough to make a 1ms budget flaky (it could
+/// fire during setup, "passing" without ever exercising this arm's loop).
+/// 200ms comfortably exceeds worst-case observed setup while the full
+/// 2,000,000-element uninstrumented loop reliably takes 500-650ms, giving a
+/// wide, non-flaky margin either side.
+#[test]
+fn test_path_filter_eval_compiled_inner_raises_d1012_timeout() {
+    let data: JValue = serde_json::json!({
+        "outer": [1],
+        "items": (0..2_000_000).map(|i| serde_json::json!({"val": i})).collect::<Vec<_>>()
+    })
+    .into();
+    let ast = parse("$map(outer, function($x){(items[val>=0]; 1)})").unwrap();
+    let options = EvaluatorOptions {
+        timeout_ms: Some(200),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D1012");
+    assert!(err.to_string().contains("D1012"), "got: {err}");
+}

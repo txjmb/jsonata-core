@@ -1079,6 +1079,7 @@ fn eval_compiled_inner(
                 // 2-param lambda (element + index): build per-iteration because idx_val
                 // is loop-local and cannot outlive the iteration.
                 for (idx, item) in items.iter().enumerate() {
+                    check_loop_timeout(options, start_time)?;
                     let idx_val = JValue::Number(idx as f64);
                     let mut call_vars = clone_outer_vars(vars, 2);
                     if let Some(p) = p0 {
@@ -1102,6 +1103,7 @@ fn eval_compiled_inner(
                 // 1-param lambda (most common): build HashMap once, update element ref each iteration.
                 let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
+                    check_loop_timeout(options, start_time)?;
                     call_vars.insert(p0, item);
                     let mapped = eval_compiled_inner(
                         body,
@@ -1117,6 +1119,7 @@ fn eval_compiled_inner(
                     }
                 }
             }
+            check_sequence_length(result.len(), options)?;
             Ok(if result.is_empty() {
                 JValue::Undefined
             } else {
@@ -1146,6 +1149,7 @@ fn eval_compiled_inner(
 
             if let Some(p1) = params.get(1).map(|s| s.as_str()) {
                 for (idx, item) in items.iter().enumerate() {
+                    check_loop_timeout(options, start_time)?;
                     let idx_val = JValue::Number(idx as f64);
                     let mut call_vars = clone_outer_vars(vars, 2);
                     if let Some(p) = p0 {
@@ -1168,6 +1172,7 @@ fn eval_compiled_inner(
             } else if let Some(p0) = p0 {
                 let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
+                    check_loop_timeout(options, start_time)?;
                     call_vars.insert(p0, item);
                     let pred = eval_compiled_inner(
                         body,
@@ -1187,9 +1192,13 @@ fn eval_compiled_inner(
                 Ok(match result.len() {
                     0 => JValue::Undefined,
                     1 => result.remove(0),
-                    _ => JValue::array(result),
+                    _ => {
+                        check_sequence_length(result.len(), options)?;
+                        JValue::array(result)
+                    }
                 })
             } else {
+                check_sequence_length(result.len(), options)?;
                 Ok(JValue::array(result))
             }
         }
@@ -1227,6 +1236,7 @@ fn eval_compiled_inner(
             let acc_param = params[0].as_str();
             let item_param = params[1].as_str();
             for item in items[start_idx..].iter() {
+                check_loop_timeout(options, start_time)?;
                 // Per-iteration HashMap: &accumulator borrow must be released before we
                 // can reassign `accumulator`. `drop(call_vars)` ends the borrow.
                 let mut call_vars = clone_outer_vars(vars, 2);
@@ -1691,6 +1701,7 @@ fn compiled_apply_filter(
             };
             let effective_shape = shape.or(local_shape.as_ref());
             for item in arr.iter() {
+                check_loop_timeout(options, start_time)?;
                 let pred = eval_compiled_inner(
                     filter,
                     item,
@@ -1709,6 +1720,7 @@ fn compiled_apply_filter(
             } else if result.len() == 1 {
                 Ok(result.remove(0))
             } else {
+                check_sequence_length(result.len(), options)?;
                 Ok(JValue::array(result))
             }
         }
@@ -2643,6 +2655,27 @@ pub(crate) fn check_sequence_length(
                 "D2015: The maximum sequence length of {} was exceeded.",
                 max
             )));
+        }
+    }
+    Ok(())
+}
+
+/// Per-iteration D1012 check for loop-based compiled/VM constructs (map/filter/
+/// reduce element loops, FilterByBytecode) that don't pass through
+/// `evaluate_internal`'s per-node checkpoint and would otherwise run untimed.
+#[inline]
+pub(crate) fn check_loop_timeout(
+    options: &EvaluatorOptions,
+    start_time: Option<Instant>,
+) -> Result<(), EvaluatorError> {
+    if let Some(timeout_ms) = options.timeout_ms {
+        if let Some(start) = start_time {
+            if start.elapsed().as_millis() as u64 > timeout_ms {
+                return Err(EvaluatorError::EvaluationError(format!(
+                    "D1012: Evaluation timeout after {} milliseconds. Check for infinite loop",
+                    timeout_ms
+                )));
+            }
         }
     }
     Ok(())
