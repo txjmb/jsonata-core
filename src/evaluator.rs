@@ -2142,6 +2142,11 @@ fn call_pure_builtin(
                 JValue::Array(a) => a.to_vec(),
                 other => vec![other.clone()],
             };
+            let second_len = match second {
+                JValue::Array(a) => a.len(),
+                _ => 1,
+            };
+            check_sequence_length(arr.len() + second_len, options)?;
             Ok(functions::array::append(&arr, second)?)
         }
         "reverse" => match effective_args.first() {
@@ -2168,6 +2173,7 @@ fn call_pure_builtin(
                     Ok(JValue::Null)
                 } else {
                     let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
+                    check_sequence_length(keys.len(), options)?;
                     if keys.len() == 1 {
                         Ok(keys.into_iter().next().unwrap())
                     } else {
@@ -2192,6 +2198,7 @@ fn call_pure_builtin(
                 } else if all_keys.len() == 1 {
                     Ok(all_keys.into_iter().next().unwrap())
                 } else {
+                    check_sequence_length(all_keys.len(), options)?;
                     Ok(JValue::array(all_keys))
                 }
             }
@@ -10408,6 +10415,7 @@ impl Evaluator {
                     other => result.push(other.clone()),
                 }
 
+                check_sequence_length(result.len(), &self.options)?;
                 Ok(JValue::array(result))
             }
             "reverse" => match arg {
@@ -10424,6 +10432,7 @@ impl Evaluator {
             "keys" => match arg {
                 JValue::Object(obj) => {
                     let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
+                    check_sequence_length(keys.len(), &self.options)?;
                     Ok(JValue::array(keys))
                 }
                 JValue::Null => Ok(JValue::Null),

@@ -14,7 +14,10 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 
-use crate::evaluator::{eval_compiled, CompiledExpr, EvaluatorError, EvaluatorOptions};
+use crate::evaluator::{
+    check_loop_timeout, check_sequence_length, eval_compiled, CompiledExpr, EvaluatorError,
+    EvaluatorOptions,
+};
 use crate::value::JValue;
 
 // ---------------------------------------------------------------------------
@@ -167,13 +170,23 @@ pub(crate) struct Vm<'prog> {
     prog: &'prog BytecodeProgram,
     /// Operand stack.
     stack: Vec<JValue>,
+    options: EvaluatorOptions,
 }
 
 impl<'prog> Vm<'prog> {
     pub(crate) fn new(prog: &'prog BytecodeProgram) -> Self {
+        Self::with_options(prog, EvaluatorOptions::default())
+    }
+
+    /// Construct a `Vm` with guardrail options (timeout/sequence-length; stack
+    /// depth is not meaningful here — the VM is an iterative flat-instruction
+    /// loop, not native recursion, and self-recursive user lambdas can't
+    /// compile to bytecode in the first place, see design-spec Phase 2 notes).
+    pub(crate) fn with_options(prog: &'prog BytecodeProgram, options: EvaluatorOptions) -> Self {
         Vm {
             prog,
             stack: Vec::with_capacity(16),
+            options,
         }
     }
 
@@ -184,7 +197,19 @@ impl<'prog> Vm<'prog> {
         data: &JValue,
         vars: Option<&HashMap<&str, &JValue>>,
     ) -> Result<JValue, EvaluatorError> {
-        run_inner(self.prog, data, vars, &mut self.stack)
+        let start_time = if self.options.timeout_ms.is_some() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        run_inner(
+            self.prog,
+            data,
+            vars,
+            &mut self.stack,
+            &self.options,
+            start_time,
+        )
     }
 }
 
@@ -197,6 +222,8 @@ fn run_inner(
     data: &JValue,
     vars: Option<&HashMap<&str, &JValue>>,
     stack: &mut Vec<JValue>,
+    options: &EvaluatorOptions,
+    start_time: Option<std::time::Instant>,
 ) -> Result<JValue, EvaluatorError> {
     use crate::evaluator::{
         call_pure_builtin_by_name, compiled_arithmetic, compiled_concat, compiled_equal,
@@ -537,15 +564,7 @@ fn run_inner(
                 let n = *arg_count as usize;
                 let start = stack.len().saturating_sub(n);
                 let args: Vec<JValue> = stack.drain(start..).collect();
-                // TODO(Task 9): thread real EvaluatorOptions through run_inner/Vm instead of
-                // this unlimited default — Task 7 is plumbing-only for eval_compiled's call
-                // graph and must not change vm.rs's own behavior yet.
-                stack.push(call_pure_builtin_by_name(
-                    name,
-                    &args,
-                    data,
-                    &EvaluatorOptions::default(),
-                )?);
+                stack.push(call_pure_builtin_by_name(name, &args, data, options)?);
                 ip += 1;
             }
 
@@ -559,7 +578,15 @@ fn run_inner(
                     JValue::Array(arr) => {
                         let mut kept: Vec<JValue> = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
-                            let test = run_inner(sub_prog, item, vars, &mut sub_stack)?;
+                            check_loop_timeout(options, start_time)?;
+                            let test = run_inner(
+                                sub_prog,
+                                item,
+                                vars,
+                                &mut sub_stack,
+                                options,
+                                start_time,
+                            )?;
                             if compiled_is_truthy(&test) {
                                 kept.push(item.clone());
                             }
@@ -567,13 +594,17 @@ fn run_inner(
                         match kept.len() {
                             0 => JValue::Undefined,
                             1 => kept.pop().unwrap(),
-                            _ => JValue::array(kept),
+                            _ => {
+                                check_sequence_length(kept.len(), options)?;
+                                JValue::array(kept)
+                            }
                         }
                     }
                     JValue::Undefined => JValue::Undefined,
                     other => {
                         // Single value: apply predicate directly
-                        let test = run_inner(sub_prog, &other, vars, &mut sub_stack)?;
+                        let test =
+                            run_inner(sub_prog, &other, vars, &mut sub_stack, options, start_time)?;
                         if compiled_is_truthy(&test) {
                             other
                         } else {
@@ -588,14 +619,7 @@ fn run_inner(
             // ── Fallback ─────────────────────────────────────────────
             Instr::EvalFallback(idx) => {
                 let expr = &fallback_exprs[*idx as usize];
-                // TODO(Task 9): thread real EvaluatorOptions/start_time through here — see note above.
-                stack.push(eval_compiled(
-                    expr,
-                    data,
-                    vars,
-                    &EvaluatorOptions::default(),
-                    None,
-                )?);
+                stack.push(eval_compiled(expr, data, vars, options, start_time)?);
                 ip += 1;
             }
 
@@ -660,5 +684,90 @@ fn get_field_cached(val: &JValue, field: &str, cache: &Cell<Option<usize>>) -> J
             }
         }
         _ => JValue::Undefined,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 9: direct VM-path guardrail tests
+//
+// These live in-crate (rather than in `tests/integration_test.rs`) because
+// `Vm`, `Vm::with_options`, `try_compile_expr`, and `BytecodeCompiler::compile`
+// are all `pub(crate)` and not reachable from an external test crate, and the
+// only external hook (`_bench` facade in `src/lib.rs`, gated on `--features
+// bench`) hardcodes `EvaluatorOptions::default()` — extending it is Task 10's
+// territory. Constructing the pipeline directly here proves `FilterByBytecode`
+// itself (not `eval_compiled_inner`, which Task 8 already covers) enforces
+// D2015/D1012 once `EvaluatorOptions` reaches it.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::BytecodeCompiler;
+    use crate::evaluator::try_compile_expr;
+    use crate::parser::parse;
+
+    /// Compile `expr_src` and assert it produced at least one
+    /// `Instr::FilterByBytecode` — guards against the test silently exercising
+    /// `EvalFallback` instead (which would test nothing about this file).
+    fn compile_and_assert_uses_filter_by_bytecode(expr_src: &str) -> BytecodeProgram {
+        let ast = parse(expr_src).expect("parse");
+        let compiled = try_compile_expr(&ast).unwrap_or_else(|| {
+            panic!("expected `{expr_src}` to compile to a CompiledExpr, got None")
+        });
+        let prog = BytecodeCompiler::compile(&compiled);
+        assert!(
+            prog.instrs
+                .iter()
+                .any(|i| matches!(i, Instr::FilterByBytecode(_))),
+            "expected `{expr_src}` to compile to Instr::FilterByBytecode, got: {:?}",
+            prog.instrs
+        );
+        prog
+    }
+
+    #[test]
+    fn test_filter_by_bytecode_raises_d2015() {
+        let data: JValue = serde_json::json!({
+            "items": (0..1000).collect::<Vec<i32>>()
+        })
+        .into();
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ >= 0]");
+        let options = EvaluatorOptions {
+            max_sequence_length: Some(10),
+            ..Default::default()
+        };
+        let err = Vm::with_options(&prog, options)
+            .run(&data, None)
+            .expect_err("expected D2015");
+        assert!(err.to_string().contains("D2015"), "got: {err}");
+    }
+
+    #[test]
+    fn test_filter_by_bytecode_unlimited_options_does_not_raise() {
+        let data: JValue = serde_json::json!({
+            "items": (0..1000).collect::<Vec<i32>>()
+        })
+        .into();
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ >= 0]");
+        // Default (unlimited) options must not raise — proves the guardrail is
+        // opt-in and existing unlimited-usage behavior is unchanged.
+        let result = Vm::new(&prog).run(&data, None);
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+    }
+
+    #[test]
+    fn test_filter_by_bytecode_raises_d1012_timeout() {
+        let data: JValue = serde_json::json!({
+            "items": (0..2_000_000).collect::<Vec<i32>>()
+        })
+        .into();
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ >= 0]");
+        let options = EvaluatorOptions {
+            timeout_ms: Some(0),
+            ..Default::default()
+        };
+        let err = Vm::with_options(&prog, options)
+            .run(&data, None)
+            .expect_err("expected D1012");
+        assert!(err.to_string().contains("D1012"), "got: {err}");
     }
 }
