@@ -158,28 +158,38 @@ struct JsonataExpression {
     /// `Some(bc)` = fast VM path; `None` = must use tree-walker.
     /// `OnceCell` ensures compilation happens at most once per expression instance.
     bytecode: std::cell::OnceCell<Option<vm::BytecodeProgram>>,
+    /// Default guardrail options set at `compile()` time. Per-call `evaluate*()`
+    /// kwargs override these on a field-by-field basis (see the `.or(...)` merges
+    /// in the `#[pymethods]` impl below).
+    default_options: evaluator::EvaluatorOptions,
 }
 
 #[cfg(feature = "python")]
 impl JsonataExpression {
     /// Evaluate the compiled expression against pre-converted data.
     /// Uses bytecode VM when available, falls back to tree-walker.
-    fn run_eval(&self, py: Python, data: &JValue, bindings: Option<Py<PyAny>>) -> PyResult<JValue> {
+    fn run_eval(
+        &self,
+        py: Python,
+        data: &JValue,
+        bindings: Option<Py<PyAny>>,
+        options: evaluator::EvaluatorOptions,
+    ) -> PyResult<JValue> {
         if bindings.is_none() {
             let bytecode = self.bytecode.get_or_init(|| {
                 evaluator::try_compile_expr(&self.ast)
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
             });
             if let Some(bc) = bytecode {
-                vm::Vm::new(bc)
+                vm::Vm::with_options(bc, options.clone())
                     .run(data, None)
                     .map_err(evaluator_error_to_py)
             } else {
-                let mut ev = evaluator::Evaluator::new();
+                let mut ev = evaluator::Evaluator::with_options(evaluator::Context::new(), options);
                 ev.evaluate(&self.ast, data).map_err(evaluator_error_to_py)
             }
         } else {
-            let mut ev = create_evaluator(py, bindings)?;
+            let mut ev = create_evaluator(py, bindings, options)?;
             ev.evaluate(&self.ast, data).map_err(evaluator_error_to_py)
         }
     }
@@ -189,15 +199,24 @@ impl JsonataExpression {
 #[pymethods]
 impl JsonataExpression {
     /// Returns ValueError if evaluation fails
-    #[pyo3(signature = (data, bindings=None))]
+    #[pyo3(signature = (data, bindings=None, timeout=None, max_stack_depth=None, max_sequence_length=None))]
+    #[allow(clippy::too_many_arguments)]
     fn evaluate(
         &self,
         py: Python,
         data: Py<PyAny>,
         bindings: Option<Py<PyAny>>,
+        timeout: Option<u64>,
+        max_stack_depth: Option<usize>,
+        max_sequence_length: Option<usize>,
     ) -> PyResult<Py<PyAny>> {
         let json_data = python_to_json(py, &data)?;
-        json_to_python(py, &self.run_eval(py, &json_data, bindings)?)
+        let options = evaluator::EvaluatorOptions {
+            timeout_ms: timeout.or(self.default_options.timeout_ms),
+            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
+            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
+        };
+        json_to_python(py, &self.run_eval(py, &json_data, bindings, options)?)
     }
 
     /// Evaluate with a pre-converted data handle (fastest for repeated evaluation).
@@ -210,14 +229,23 @@ impl JsonataExpression {
     /// # Returns
     ///
     /// The result of evaluating the expression
-    #[pyo3(signature = (data, bindings=None))]
+    #[pyo3(signature = (data, bindings=None, timeout=None, max_stack_depth=None, max_sequence_length=None))]
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_with_data(
         &self,
         py: Python,
         data: &JsonataData,
         bindings: Option<Py<PyAny>>,
+        timeout: Option<u64>,
+        max_stack_depth: Option<usize>,
+        max_sequence_length: Option<usize>,
     ) -> PyResult<Py<PyAny>> {
-        json_to_python(py, &self.run_eval(py, &data.data, bindings)?)
+        let options = evaluator::EvaluatorOptions {
+            timeout_ms: timeout.or(self.default_options.timeout_ms),
+            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
+            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
+        };
+        json_to_python(py, &self.run_eval(py, &data.data, bindings, options)?)
     }
 
     /// Evaluate with a pre-converted data handle, return JSON string (zero-overhead output).
@@ -230,14 +258,23 @@ impl JsonataExpression {
     /// # Returns
     ///
     /// The result as a JSON string
-    #[pyo3(signature = (data, bindings=None))]
+    #[pyo3(signature = (data, bindings=None, timeout=None, max_stack_depth=None, max_sequence_length=None))]
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_data_to_json(
         &self,
         py: Python,
         data: &JsonataData,
         bindings: Option<Py<PyAny>>,
+        timeout: Option<u64>,
+        max_stack_depth: Option<usize>,
+        max_sequence_length: Option<usize>,
     ) -> PyResult<String> {
-        self.run_eval(py, &data.data, bindings)?
+        let options = evaluator::EvaluatorOptions {
+            timeout_ms: timeout.or(self.default_options.timeout_ms),
+            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
+            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
+        };
+        self.run_eval(py, &data.data, bindings, options)?
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
     }
@@ -259,16 +296,25 @@ impl JsonataExpression {
     /// # Errors
     ///
     /// Returns ValueError if JSON parsing or evaluation fails
-    #[pyo3(signature = (json_str, bindings=None))]
+    #[pyo3(signature = (json_str, bindings=None, timeout=None, max_stack_depth=None, max_sequence_length=None))]
+    #[allow(clippy::too_many_arguments)]
     fn evaluate_json(
         &self,
         py: Python,
         json_str: &str,
         bindings: Option<Py<PyAny>>,
+        timeout: Option<u64>,
+        max_stack_depth: Option<usize>,
+        max_sequence_length: Option<usize>,
     ) -> PyResult<String> {
         let json_data = JValue::from_json_str(json_str)
             .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
-        self.run_eval(py, &json_data, bindings)?
+        let options = evaluator::EvaluatorOptions {
+            timeout_ms: timeout.or(self.default_options.timeout_ms),
+            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
+            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
+        };
+        self.run_eval(py, &json_data, bindings, options)?
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
     }
@@ -299,12 +345,19 @@ impl JsonataExpression {
 /// ```
 #[cfg(feature = "python")]
 #[pyfunction]
-fn compile(expression: &str) -> PyResult<JsonataExpression> {
+#[pyo3(signature = (expression, timeout=None, max_stack_depth=None, max_sequence_length=None))]
+fn compile(
+    expression: &str,
+    timeout: Option<u64>,
+    max_stack_depth: Option<usize>,
+    max_sequence_length: Option<usize>,
+) -> PyResult<JsonataExpression> {
     let ast = parser::parse(expression).map_err(parser_error_to_py)?;
 
     Ok(JsonataExpression {
         ast,
         bytecode: std::cell::OnceCell::new(),
+        default_options: build_evaluator_options(timeout, max_stack_depth, max_sequence_length),
     })
 }
 
@@ -337,15 +390,26 @@ fn compile(expression: &str) -> PyResult<JsonataExpression> {
 /// ```
 #[cfg(feature = "python")]
 #[pyfunction]
-#[pyo3(signature = (expression, data, bindings=None))]
+#[pyo3(signature = (expression, data, bindings=None, timeout=None, max_stack_depth=None, max_sequence_length=None))]
+#[allow(clippy::too_many_arguments)]
 fn evaluate(
     py: Python,
     expression: &str,
     data: Py<PyAny>,
     bindings: Option<Py<PyAny>>,
+    timeout: Option<u64>,
+    max_stack_depth: Option<usize>,
+    max_sequence_length: Option<usize>,
 ) -> PyResult<Py<PyAny>> {
-    let expr = compile(expression)?;
-    expr.evaluate(py, data, bindings)
+    let expr = compile(expression, None, None, None)?;
+    expr.evaluate(
+        py,
+        data,
+        bindings,
+        timeout,
+        max_stack_depth,
+        max_sequence_length,
+    )
 }
 
 /// Convert a Python object to a JValue.
@@ -514,13 +578,31 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<Py<PyAny>> {
     }
 }
 
+/// Build an `EvaluatorOptions` from the Python-facing `timeout`/`max_stack_depth`/
+/// `max_sequence_length` kwargs used by `compile()` and the free-standing `evaluate()`.
+#[cfg(feature = "python")]
+fn build_evaluator_options(
+    timeout: Option<u64>,
+    max_stack_depth: Option<usize>,
+    max_sequence_length: Option<usize>,
+) -> evaluator::EvaluatorOptions {
+    evaluator::EvaluatorOptions {
+        timeout_ms: timeout,
+        max_stack_depth,
+        max_sequence_length,
+    }
+}
+
 /// Create an evaluator, optionally configured with Python bindings
 #[cfg(feature = "python")]
-fn create_evaluator(py: Python, bindings: Option<Py<PyAny>>) -> PyResult<evaluator::Evaluator> {
+fn create_evaluator(
+    py: Python,
+    bindings: Option<Py<PyAny>>,
+    options: evaluator::EvaluatorOptions,
+) -> PyResult<evaluator::Evaluator> {
+    let mut context = evaluator::Context::new();
     if let Some(bindings_obj) = bindings {
         let bindings_json = python_to_json(py, &bindings_obj)?;
-
-        let mut context = evaluator::Context::new();
         if let JValue::Object(map) = bindings_json {
             for (key, value) in map.iter() {
                 context.bind(key.clone(), value.clone());
@@ -528,10 +610,8 @@ fn create_evaluator(py: Python, bindings: Option<Py<PyAny>>) -> PyResult<evaluat
         } else {
             return Err(PyTypeError::new_err("bindings must be a dictionary"));
         }
-        Ok(evaluator::Evaluator::with_context(context))
-    } else {
-        Ok(evaluator::Evaluator::new())
     }
+    Ok(evaluator::Evaluator::with_options(context, options))
 }
 
 /// Convert an EvaluatorError to a PyErr
