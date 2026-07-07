@@ -1736,7 +1736,7 @@
 </span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;orders[price &gt; 100].product&quot;</span><span class="p">)</span>
 </span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">({</span><span class="s2">&quot;orders&quot;</span><span class="p">:</span> <span class="p">[{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;Laptop&quot;</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mi">1200</span><span class="p">}]})</span>
 </span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># Pre-convert data for maximum throughput (3–16x faster for repeated queries)</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># Pre-convert data for maximum throughput (3–15x faster for repeated queries)</span>
 </span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="n">data</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">JsonataData</span><span class="p">(</span><span class="n">large_dataset</span><span class="p">)</span>
 </span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
 </span></code></pre></div>
@@ -1753,11 +1753,11 @@
 <h2 id="performance-highlights">Performance highlights<a class="headerlink" href="#performance-highlights" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>1682/1682</strong> JSONata reference tests passing</li>
-<li><strong>up to 19x faster</strong> than the JavaScript reference implementation for pure expression workloads</li>
+<li><strong>~6x faster on average</strong> than the JavaScript reference implementation — up to ~16x for pure
+  expression workloads (strings, conditionals)</li>
 <li><strong>~40x faster</strong> than jsonata-rs on pure-Rust Criterion benchmarks (no Python overhead)</li>
-<li><strong>dramatically faster</strong> than jsonata-python across all categories — its one-off <code>transform()</code>
-  call re-bootstraps an embedded Duktape engine every time; reusing its <code>Context</code> object narrows
-  the gap substantially but jsonatapy still wins clearly</li>
+<li><strong>hundreds of times faster</strong> than jsonata-python, even when it reuses its fastest
+  (<code>Context</code>-based) repeated-evaluation path</li>
 </ul>
 <p>See <a href="performance/">Performance</a> for full benchmark results.</p>
 <hr />
