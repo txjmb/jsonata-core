@@ -780,6 +780,16 @@ fn eval_compiled_inner(
     options: &EvaluatorOptions,
     start_time: Option<Instant>,
 ) -> Result<JValue, EvaluatorError> {
+    // Single, structurally-unbypassable D1012 checkpoint for the entire compiled fast
+    // path. Every route into compiled evaluation -- the VM's EvalFallback, this task's
+    // MapCall/FilterCall/ReduceCall loop bodies, invoke_stored_lambda's compiled fast
+    // path, evaluate_function_call's inline $map/$filter fast-path loops, and any future
+    // caller -- funnels through this one function (both eval_compiled and
+    // eval_compiled_shaped delegate here), so checking once at entry covers all of them
+    // without having to enumerate call sites. Deliberately timeout-only, no depth check:
+    // self-recursive lambdas cannot compile to CompiledExpr, so genuine recursion always
+    // routes through evaluate_internal's own (already guarded) recursion-depth counter.
+    check_loop_timeout(options, start_time)?;
     match expr {
         // ── Leaves ──────────────────────────────────────────────────────
         CompiledExpr::Literal(v) => Ok(v.clone()),

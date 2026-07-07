@@ -1199,3 +1199,41 @@ fn test_path_filter_eval_compiled_inner_raises_d1012_timeout() {
     let err = evaluator.evaluate(&ast, &data).expect_err("expected D1012");
     assert!(err.to_string().contains("D1012"), "got: {err}");
 }
+
+/// A named/stored lambda (`$storedFn := function($x){$x*2}`) used as the
+/// callback of a top-level `$map(...)` takes an entirely different bypass
+/// than the CompiledExpr::MapCall/FilterCall/ReduceCall arms above: either
+/// `evaluate_function_call`'s own "map" arm's dedicated "stored lambda
+/// variable" fast path (a separate per-item loop calling `eval_compiled`
+/// directly), or -- for other call shapes -- `invoke_stored_lambda`'s
+/// compiled fast path (`src/evaluator.rs`, a single `eval_compiled` call per
+/// invocation, reachable from any tree-walker per-element loop that resolves
+/// a callback to a stored lambda). Neither of those loops is one of this
+/// task's instrumented MapCall/FilterCall/ReduceCall/compiled_apply_filter
+/// arms, so per-loop checks alone do not cover them.
+///
+/// This is closed structurally, not by enumerating more call sites: a single
+/// `check_loop_timeout` at the top of `eval_compiled_inner` itself (before
+/// its `match`) covers every route into compiled evaluation, since both
+/// `eval_compiled` and `eval_compiled_shaped` -- and therefore every caller
+/// of either -- funnel through that one function.
+///
+/// 2,000,000 elements / `timeout_ms: 50`: with the entry-point check firing
+/// on literally every element (not just at loop boundaries), this trips far
+/// more reliably/quickly than the coarser per-loop-only tests above -- a much
+/// smaller timeout budget is safe here.
+#[test]
+fn test_map_stored_lambda_bypass_raises_d1012_timeout() {
+    let data: JValue = serde_json::json!({
+        "bigArray": (0..2_000_000).collect::<Vec<i32>>()
+    })
+    .into();
+    let ast = parse("($storedFn := function($x){$x*2}; $map(bigArray, $storedFn))").unwrap();
+    let options = EvaluatorOptions {
+        timeout_ms: Some(50),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D1012");
+    assert!(err.to_string().contains("D1012"), "got: {err}");
+}
