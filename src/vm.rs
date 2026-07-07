@@ -263,12 +263,12 @@ fn run_inner(
             Instr::GetField(idx) => {
                 let val = stack.pop().unwrap_or(JValue::Undefined);
                 let field = &string_pool[*idx as usize];
-                stack.push(get_field_cached(&val, field, &shape_cache[ip]));
+                stack.push(get_field_cached(&val, field, &shape_cache[ip], options)?);
                 ip += 1;
             }
             Instr::GetDataField(idx) => {
                 let field = &string_pool[*idx as usize];
-                stack.push(get_field_cached(data, field, &shape_cache[ip]));
+                stack.push(get_field_cached(data, field, &shape_cache[ip], options)?);
                 ip += 1;
             }
             Instr::GetVar(idx) => {
@@ -289,7 +289,7 @@ fn run_inner(
                 }
                 .unwrap_or(JValue::Undefined);
                 let field = &string_pool[*field_idx as usize];
-                stack.push(get_field_cached(&obj, field, &shape_cache[ip]));
+                stack.push(get_field_cached(&obj, field, &shape_cache[ip], options)?);
                 ip += 1;
             }
 
@@ -642,14 +642,19 @@ fn run_inner(
 /// On objects with IndexMap storage, caches the positional index so subsequent
 /// accesses (for the same object schema) are O(1) positional lookups.
 #[inline]
-fn get_field_cached(val: &JValue, field: &str, cache: &Cell<Option<usize>>) -> JValue {
+fn get_field_cached(
+    val: &JValue,
+    field: &str,
+    cache: &Cell<Option<usize>>,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
     match val {
         JValue::Object(obj) => {
             // Try cached positional index first
             if let Some(idx) = cache.get() {
                 if let Some(v) = obj.get_index(idx) {
                     if v.0 == field {
-                        return v.1.clone();
+                        return Ok(v.1.clone());
                     }
                     // Cache miss (schema changed) — fall through
                 }
@@ -660,30 +665,33 @@ fn get_field_cached(val: &JValue, field: &str, cache: &Cell<Option<usize>>) -> J
                 if let Some(idx) = obj.get_index_of(field) {
                     cache.set(Some(idx));
                 }
-                v.clone()
+                Ok(v.clone())
             } else {
-                JValue::Undefined
+                Ok(JValue::Undefined)
             }
         }
         JValue::Array(arr) => {
             // Array: map field access over elements (implicit array mapping).
             // Mirrors `compiled_field_step`: flatten nested arrays one level.
+            // This is a query-result sequence (D2015 applies, matching
+            // `evaluate_path`'s array-mapping check in evaluator.rs).
             let mut results: Vec<JValue> = Vec::with_capacity(arr.len());
             for item in arr.iter() {
-                let v = get_field_cached(item, field, cache);
+                let v = get_field_cached(item, field, cache, options)?;
                 match v {
                     JValue::Undefined => {}
                     JValue::Array(inner) => results.extend(inner.iter().cloned()),
                     other => results.push(other),
                 }
             }
-            match results.len() {
+            check_sequence_length(results.len(), options)?;
+            Ok(match results.len() {
                 0 => JValue::Undefined,
                 1 => results.pop().unwrap(),
                 _ => JValue::array(results),
-            }
+            })
         }
-        _ => JValue::Undefined,
+        _ => Ok(JValue::Undefined),
     }
 }
 

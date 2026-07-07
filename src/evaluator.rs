@@ -1593,7 +1593,7 @@ fn compiled_eval_field_path(
         // Determine if this step will do array mapping before we overwrite `current`
         let is_array = matches!(current, JValue::Array(_));
         // Field access with implicit array mapping
-        current = compiled_field_step(&step.field, &current);
+        current = compiled_field_step(&step.field, &current, options)?;
         if is_array {
             did_array_mapping = true;
         } else {
@@ -1623,19 +1623,25 @@ fn compiled_eval_field_path(
 ///
 /// - Object: look up `field`, return its value or Undefined
 /// - Array: map field extraction over each element, flatten nested arrays, skip Undefined
+///   (this is a query-result sequence, so D2015 applies — mirrors `evaluate_path`'s
+///   array-mapping check and `vm.rs`'s `get_field_cached`)
 /// - Tuple objects (`__tuple__: true`): look up in the `@` inner object
 /// - Other: Undefined
-fn compiled_field_step(field: &str, value: &JValue) -> JValue {
+fn compiled_field_step(
+    field: &str,
+    value: &JValue,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
     match value {
         JValue::Object(obj) => {
             // Check for tuple: extract from "@" inner object
             if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
                 if let Some(JValue::Object(inner)) = obj.get("@") {
-                    return inner.get(field).cloned().unwrap_or(JValue::Undefined);
+                    return Ok(inner.get(field).cloned().unwrap_or(JValue::Undefined));
                 }
-                return JValue::Undefined;
+                return Ok(JValue::Undefined);
             }
-            obj.get(field).cloned().unwrap_or(JValue::Undefined)
+            Ok(obj.get(field).cloned().unwrap_or(JValue::Undefined))
         }
         JValue::Array(arr) => {
             // Build shape cache from first plain (non-tuple) object for O(1) positional access.
@@ -1652,7 +1658,7 @@ fn compiled_field_step(field: &str, value: &JValue) -> JValue {
                 let extracted = if let (Some(ref sh), JValue::Object(obj)) = (&shape, item) {
                     // Tuple objects need the recursive path for "@" inner lookup.
                     if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                        compiled_field_step(field, item)
+                        compiled_field_step(field, item, options)?
                     } else if let Some(&pos) = sh.get(field) {
                         // Positional access with key verification: guards against heterogeneous
                         // schemas (objects where the same field is at a different index).
@@ -1667,7 +1673,7 @@ fn compiled_field_step(field: &str, value: &JValue) -> JValue {
                         obj.get(field).cloned().unwrap_or(JValue::Undefined)
                     }
                 } else {
-                    compiled_field_step(field, item)
+                    compiled_field_step(field, item, options)?
                 };
                 match extracted {
                     JValue::Undefined => {}
@@ -1675,13 +1681,14 @@ fn compiled_field_step(field: &str, value: &JValue) -> JValue {
                     other => result.push(other),
                 }
             }
-            if result.is_empty() {
+            check_sequence_length(result.len(), options)?;
+            Ok(if result.is_empty() {
                 JValue::Undefined
             } else {
                 JValue::array(result)
-            }
+            })
         }
-        _ => JValue::Undefined,
+        _ => Ok(JValue::Undefined),
     }
 }
 
