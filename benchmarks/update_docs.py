@@ -8,6 +8,7 @@ Usage:
 
 import json
 import subprocess
+import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -264,6 +265,20 @@ def generate_markdown(data, versions):
             md.append("")
 
     # Data handle optimization note
+    dict_speedups = [
+        r["jsonatapy_dict_ms"] / r["jsonatapy_ms"]
+        for r in results
+        if r["category"] == "Path Comparison"
+        and r.get("jsonatapy_dict_ms")
+        and r.get("jsonatapy_ms")
+    ]
+    if dict_speedups:
+        dict_speedup_note = (
+            f"{min(dict_speedups):.0f}-{max(dict_speedups):.0f}x faster than evaluate(dict)"
+        )
+    else:
+        dict_speedup_note = "faster than evaluate(dict)"
+
     md.append("### Optimizing Array Workloads\n")
     md.append(
         "For array-heavy workloads, the dominant cost is converting Python dicts to Rust values on every call. "
@@ -278,15 +293,15 @@ def generate_markdown(data, versions):
     md.append("# Pre-convert once")
     md.append("jdata = jsonatapy.JsonataData(data)")
     md.append("")
-    md.append("# Reuse many times (6-15x faster than evaluate(dict))")
+    md.append(f"# Reuse many times ({dict_speedup_note})")
     md.append("result = expr.evaluate_with_data(jdata)")
     md.append("```\n")
 
     # Notes
     md.append("## Methodology\n")
     md.append(f"- **Date:** {date}")
-    md.append("- **Platform:** Linux (WSL2) on x86_64")
-    md.append("- **Python:** 3.13")
+    md.append(f"- **Platform:** {data.get('platform', 'unknown (older results file)')}")
+    md.append(f"- **Python:** {data.get('python_version', sys.version.split()[0])}")
     md.append(f"- **Node.js:** {versions.get('nodejs', 'unknown')}")
     md.append("- All times are total wall-clock time for the stated number of iterations")
     md.append("- Each benchmark includes a warmup phase before measurement")

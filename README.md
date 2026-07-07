@@ -79,7 +79,7 @@ print(result)  # 2450
 
 # Pre-convert data once for maximum throughput
 data = jsonatapy.JsonataData(large_dataset)
-result = expr.evaluate_with_data(data)   # 4–15x faster than evaluate(dict)
+result = expr.evaluate_with_data(data)   # 3–16x faster than evaluate(dict)
 ```
 
 Supports Python 3.10, 3.11, 3.12, 3.13 on Linux, macOS (Intel & ARM), and Windows.
@@ -129,12 +129,19 @@ the JavaScript reference implementation for most pure expression workloads:
 
 | Category | vs JavaScript (V8) | vs jsonata-python |
 |----------|--------------------|-------------------|
-| Simple paths | **5–8x faster** (array index access: roughly tied) | ~20–40x faster |
-| Conditionals | **15x faster** | ~40x faster |
-| String operations | **8–15x faster** | ~30–45x faster |
-| Complex transformations | **5–15x faster** | ~20–40x faster |
-| Higher-order functions | **12–19x faster** | ~50–70x faster |
-| Array-heavy workloads | **~1–3x slower to ~4x faster**, depending on access pattern | ~10–50x faster |
+| Simple paths | **2.6–9.7x faster** | ~10,000–50,000x faster |
+| Complex transformations | **6.7–17.6x faster** | ~11,000–59,000x faster |
+| String operations | **10.5–17.0x faster** | ~23,000–50,000x faster |
+| Higher-order functions | **13.0–18.7x faster** | ~2,900–4,000x faster |
+| Deep nesting | 3.6x faster – 1.6x slower | ~1,300–8,100x faster |
+| Array operations | **1.5–7.0x faster**, mapping ~2–2.4x slower | ~180–10,500x faster |
+| Realistic workloads (raw dict) | Mixed: 2.0x slower – 2.4x faster | ~170–380x faster |
+
+`jsonata-python` (the `jsonata` PyPI package) wraps the real `jsonata.js` library in an embedded
+Duktape engine and offers no pre-compilation API; the consistent ~12–18ms floor per call
+regardless of expression complexity suggests it effectively re-parses and recompiles the
+library from scratch on every call, with no caching between calls — which would explain the
+multiple-orders-of-magnitude gap.
 
 ### The Python boundary
 
@@ -142,7 +149,7 @@ For large array workloads, the dominant cost is converting Python dicts to Rust 
 on each `evaluate()` call — not expression evaluation itself. Two API paths avoid this:
 
 ```python
-# Path 1: Pre-convert data once, reuse across many queries (4–15x faster than evaluate(dict))
+# Path 1: Pre-convert data once, reuse across many queries (3–16x faster than evaluate(dict))
 data = jsonatapy.JsonataData(large_dataset)
 result = expr.evaluate_with_data(data)
 
@@ -151,8 +158,8 @@ result_str = expr.evaluate_json(raw_json_string)
 ```
 
 With pre-converted data, realistic workloads (filtering, transforming, aggregating over
-100-object arrays) run **~5–8x faster than V8**, not slower — even the raw `evaluate(dict)`
-path without pre-conversion is roughly at parity with V8 (0.5–2x either direction).
+100-object arrays) run **4.4–9.9x faster than V8** — the raw `evaluate(dict)` path without
+pre-conversion is mixed (2.0x slower to 2.4x faster, depending on the operation).
 
 See [Performance docs](docs/performance.md) for full benchmark results and methodology.
 
