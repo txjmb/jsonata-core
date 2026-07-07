@@ -3600,6 +3600,7 @@ impl Evaluator {
                                 _ => result.push(value.clone()),
                             }
                         }
+                        check_sequence_length(result.len(), &self.options)?;
                         Ok(JValue::array(result))
                     }
                     JValue::Array(arr) => {
@@ -3616,6 +3617,7 @@ impl Evaluator {
                 if descendants.is_empty() {
                     Ok(JValue::Null) // No descendants means undefined
                 } else {
+                    check_sequence_length(descendants.len(), &self.options)?;
                     Ok(JValue::array(descendants))
                 }
             }
@@ -5140,6 +5142,10 @@ impl Evaluator {
         } else {
             result
         };
+
+        if let JValue::Array(arr) = &result {
+            check_sequence_length(arr.len(), &self.options)?;
+        }
 
         Ok(result)
     }

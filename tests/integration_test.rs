@@ -802,3 +802,56 @@ fn test_range_operator_unaffected_without_max_sequence_length() {
         other => panic!("expected array, got {other:?}"),
     }
 }
+
+/// Plain field-path mapping over an array (e.g. `items.name`) is a
+/// query-result sequence per jsonata-js's `evaluatePath`/`evaluateStep` and
+/// must respect `max_sequence_length`.
+#[test]
+fn test_path_mapping_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "items": (0..1000).map(|i| serde_json::json!({"name": format!("item{i}")})).collect::<Vec<_>>()
+    }).into();
+    let ast = parse("items.name").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// Top-level wildcard `*` over a large object must respect max_sequence_length.
+#[test]
+fn test_wildcard_raises_d2015() {
+    let mut obj = serde_json::Map::new();
+    for i in 0..1000 {
+        obj.insert(format!("k{i}"), serde_json::json!(i));
+    }
+    let data: JValue = serde_json::Value::Object(obj).into();
+    let ast = parse("*").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// Top-level descendant `**` over a deeply-nested structure must respect
+/// max_sequence_length.
+#[test]
+fn test_descendant_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "items": (0..1000).map(|i| serde_json::json!({"v": i})).collect::<Vec<_>>()
+    }).into();
+    let ast = parse("**").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
