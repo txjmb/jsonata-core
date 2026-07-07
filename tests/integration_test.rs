@@ -550,6 +550,52 @@ fn test_deep_recursion_does_not_overflow_native_stack() {
     );
 }
 
+/// A user-configured `max_stack_depth` tighter than the hardcoded native-stack
+/// ceiling (302) must trip D1011, not U1001 — the tree-walker's own guardrail,
+/// not the Rust-specific native-stack safety net.
+#[test]
+fn test_max_stack_depth_raises_d1011_not_u1001() {
+    let data = JValue::Null;
+    let ast = parse("($inf := function($n){$n+$inf($n-1)}; $inf(5))").unwrap();
+    let context = Context::new();
+    let options = jsonata_core::evaluator::EvaluatorOptions {
+        max_stack_depth: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(context, options);
+    let result = evaluator.evaluate(&ast, &data);
+    let err = result.expect_err("expected a D1011 stack-overflow error");
+    assert!(
+        err.to_string().contains("D1011"),
+        "expected D1011, got: {err}"
+    );
+}
+
+/// A `max_stack_depth` at or above the hardcoded ceiling changes nothing — the
+/// hardcoded 302 ceiling (and its U1001 error) remains the effective, always-on
+/// backstop (GitHub issue #34).
+#[test]
+fn test_max_stack_depth_above_hardcoded_ceiling_still_raises_u1001() {
+    let handle = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let data = JValue::Null;
+            let ast = parse("($inf := function($n){$n+$inf($n-1)}; $inf(5))").unwrap();
+            let options = jsonata_core::evaluator::EvaluatorOptions {
+                max_stack_depth: Some(100_000),
+                ..Default::default()
+            };
+            let mut evaluator = Evaluator::with_options(Context::new(), options);
+            match evaluator.evaluate(&ast, &data) {
+                Ok(v) => format!("Ok({v:?})"),
+                Err(e) => format!("Err({e})"),
+            }
+        })
+        .unwrap();
+    let outcome = handle.join().unwrap();
+    assert!(outcome.contains("U1001"), "expected U1001, got: {outcome}");
+}
+
 /// Object construction must drop keys whose value is an undefined (no-match)
 /// path, matching reference JSONata and this crate's own VM backend - not
 /// keep them as an explicit `null` (see GitHub issue #32).

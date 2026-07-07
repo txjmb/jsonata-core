@@ -2983,14 +2983,30 @@ impl Evaluator {
             return result;
         }
 
-        // Check recursion depth to prevent stack overflow
+        // Check recursion depth to prevent stack overflow. `effective_limit` is
+        // whichever is tighter: the user's `max_stack_depth` guardrail or the
+        // hardcoded native-stack-safety ceiling (`max_recursion_depth`, always
+        // 302, GitHub issue #34). The hardcoded ceiling is an always-on backstop
+        // regardless of user options — only a user limit BELOW it can produce
+        // D1011; hitting the hardcoded ceiling itself (no option set, or an
+        // option set at/above 302) still produces U1001.
         self.recursion_depth += 1;
-        if self.recursion_depth > self.max_recursion_depth {
+        let effective_limit = match self.options.max_stack_depth {
+            Some(limit) => limit.min(self.max_recursion_depth),
+            None => self.max_recursion_depth,
+        };
+        if self.recursion_depth > effective_limit {
             self.recursion_depth -= 1;
-            return Err(EvaluatorError::EvaluationError(format!(
-                "U1001: Stack overflow - maximum recursion depth ({}) exceeded",
-                self.max_recursion_depth
-            )));
+            return Err(EvaluatorError::EvaluationError(
+                if effective_limit < self.max_recursion_depth {
+                    "D1011: Stack overflow. Check for non-terminating recursive function. Consider rewriting as tail-recursive".to_string()
+                } else {
+                    format!(
+                        "U1001: Stack overflow - maximum recursion depth ({}) exceeded",
+                        effective_limit
+                    )
+                },
+            ));
         }
 
         // The soft depth counter above is calibrated against a comfortably
