@@ -57,8 +57,9 @@ let result = Evaluator::new().evaluate(&ast, &data)?;
 - **1682/1682** JSONata reference tests passing
 - **up to 19x faster** than the JavaScript reference implementation for pure expression workloads
 - **~40x faster** than jsonata-rs on pure-Rust Criterion benchmarks (no Python overhead)
-- **thousands of times faster** than jsonata-python across all categories — it re-parses and
-  bytecode-compiles the entire `jsonata.js` library from scratch on every call
+- **dramatically faster** than jsonata-python across all categories — its one-off `transform()`
+  call re-bootstraps an embedded Duktape engine every time; reusing its `Context` object narrows
+  the gap substantially but jsonatapy still wins clearly
 
 See [Performance](performance.md) for full benchmark results.
 

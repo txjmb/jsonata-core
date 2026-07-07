@@ -247,19 +247,31 @@ class BenchmarkSuite:
     def _run_jsonata_python_benchmark(self, expression: str, data: Any, iterations: int) -> float:
         """Run benchmark using jsonata-python (rayokota) implementation.
 
-        jsonata-python doesn't support pre-compilation - jsonata.transform()
-        parses and evaluates in one call each time, so this includes parsing
-        overhead on every iteration (unlike jsonatapy's compile-once,
-        evaluate-many path).
+        jsonata-python doesn't support pre-compiling an *expression*, but its
+        `Context` class explicitly documents itself as a "reusable JSONata
+        context for more efficient repeated transforms" - reusing one avoids
+        re-bootstrapping the underlying Duktape engine (and re-loading the
+        jsonata.js library into it) on every call, which the module-level
+        `transform()` convenience function does each time. Measured locally:
+        reusing a Context is ~50x faster than transform() for a trivial path
+        expression, and still ~1.6x faster even for a 100-element array
+        filter (where JSON-string marshalling dominates instead). Using
+        Context here matches every other implementation in this suite, which
+        all compile/warm once and evaluate many times in the timed loop.
         """
         if not JSONATA_PYTHON_AVAILABLE:
             return -1.0
+
+        if hasattr(jsonata_python, "Context"):
+            call = jsonata_python.Context()
+        else:
+            call = jsonata_python.transform
 
         # Warm up
         warmup_iters = min(100, max(10, iterations // 10))
         for _ in range(warmup_iters):
             try:
-                jsonata_python.transform(expression, data)
+                call(expression, data)
             except Exception as e:
                 print(f"⚠ jsonata-python warmup failed: {e}")
                 return -1.0
@@ -268,7 +280,7 @@ class BenchmarkSuite:
         start = time.perf_counter()
         for _ in range(iterations):
             try:
-                jsonata_python.transform(expression, data)
+                call(expression, data)
             except Exception as e:
                 print(f"⚠ jsonata-python evaluation failed: {e}")
                 return -1.0
