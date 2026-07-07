@@ -166,17 +166,31 @@ def generate_markdown(data, versions):
         )
     md.append("")
 
+    md.append("### Methodology: compile-once, evaluate-many\n")
+    md.append(
+        "Every implementation below is measured the way a real caller who evaluates the same "
+        "expression repeatedly would use it, not its slowest possible one-off call:\n"
+    )
+    md.append(
+        "- **jsonatapy** — `jsonatapy.compile(expr)` once, then `.evaluate(data)` in the timed "
+        "loop. No further reuse is available; the compiled bytecode is already cached on the "
+        "expression object.\n"
+        "- **jsonata-js** — `jsonata(expr)` once, then `.evaluate(data)` in the timed loop. "
+        "Same story: this is already the library's fastest repeated-call path.\n"
+    )
     if implementations.get("jsonata_python"):
         md.append(
-            "> **Note on jsonata-python:** the `jsonata-python` column below reflects its "
-            "`Context`-reused call path, not its one-off `transform()` convenience function. "
-            "`transform()` re-bootstraps an embedded Duktape engine (and reloads the "
-            "`jsonata.js` library into it) on every call, which is dramatically slower and not "
-            "representative of how a real caller would use it repeatedly; reusing a `Context` "
-            "is the library's own documented path for repeated evaluation and is the fair "
-            "comparison to jsonatapy's and jsonata-js's own compile-once-evaluate-many "
-            "measurement.\n"
+            "- **jsonata-python** — uses its documented `Context` object "
+            "(`ctx = jsonata.Context()`, then `ctx(expr, data)` in the loop) rather than the "
+            "one-off `transform()` convenience function. `transform()` re-bootstraps an "
+            "embedded Duktape engine — reloading the `jsonata.js` library into it — on every "
+            "single call; reusing a `Context` keeps that engine warm and is the library's own "
+            "documented path for repeated evaluation. It is *not* a true compile-once "
+            "equivalent, since `Context.__call__` still re-parses the expression string on "
+            "every call, so some of the remaining gap to jsonatapy/jsonata-js is real parsing "
+            "cost this library doesn't let a caller amortize away.\n"
         )
+    md.append("")
 
     md.append(f"Benchmarks run on {date}.\n")
 
