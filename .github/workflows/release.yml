@@ -361,14 +361,31 @@ jobs:
         if: matrix.platform.os != 'macOS'
         shell: bash
         run: |
-          uv pip install --system --find-links dist jsonatapy
+          # --reinstall (implies --refresh) forces uv to re-read this exact
+          # file instead of trusting its cache, which is keyed by filename
+          # only for --find-links sources -- see the macOS comment below,
+          # which is where this actually bit us (issue #45).
+          uv pip install --system --reinstall --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install wheel (macOS)
         if: matrix.platform.os == 'macOS'
         shell: bash
         run: |
-          uv pip install --find-links dist jsonatapy
+          # --reinstall is required here, not just belt-and-suspenders: uv's
+          # cache for --find-links (flat index) sources is keyed by filename
+          # alone, not content. jsonatapy-<version>-<abi>-<platform>.whl is
+          # the same filename every time this version/interpreter/platform
+          # combo is built. GitHub-hosted Linux/Windows runners get a fresh
+          # uv cache every job so this never bit them, but this self-hosted
+          # Mac Mini's ~/.cache/uv persists across every job (and any local
+          # dev/testing on the same machine) forever. Without --reinstall, a
+          # wheel rebuilt with new code silently loses to a stale
+          # same-version cache entry from an earlier build/dev session --
+          # this is exactly what caused issue #45 (verified: the built wheel
+          # was correct, `uv pip install` resolved and "installed" it in
+          # ~1ms, but the parser behaved like the pre-%/@-operator code).
+          uv pip install --reinstall --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install test dependencies (Linux/Windows)
@@ -686,7 +703,7 @@ jobs:
       - name: Build jsonatapy (optimized)
         run: |
           maturin build --release --out dist
-          uv pip install --system --find-links dist jsonatapy
+          uv pip install --system --reinstall --find-links dist jsonatapy
 
       - name: Verify installation
         run: |
