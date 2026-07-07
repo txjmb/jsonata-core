@@ -865,12 +865,12 @@ fn test_descendant_raises_d2015() {
 /// chokepoint). Note: for this specific construction the *outer* `items.name`
 /// call still separately hits the shared chokepoint too (its own `result`
 /// accumulates the same 1000 elements via the general per-step loop before
-/// returning), so this particular data shape doesn't prove the fast path's own
-/// check is independently load-bearing — every currently-reachable call into
-/// this fast path is itself a nested recursive call from a frame whose
-/// steps.len() >= 2, which always has an active chokepoint of its own. It is
-/// still correct and consistent (defense-in-depth parity with every other
-/// query-result-sequence exit point in this function) to check here directly.
+/// returning), so this particular data shape alone doesn't prove the fast
+/// path's own check is independently load-bearing — see
+/// `test_bare_single_step_path_over_root_array_raises_d2015` below for the
+/// top-level, no-enclosing-frame construction that does prove it. Both tests
+/// are kept: this one covers the nested-recursion route into the fast path,
+/// the other covers the top-level route.
 #[test]
 fn test_path_single_step_fast_path_raises_d2015() {
     let data: JValue = serde_json::json!({
