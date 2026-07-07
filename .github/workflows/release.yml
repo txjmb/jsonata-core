@@ -150,12 +150,38 @@ jobs:
             git push origin HEAD:${{ github.ref_name }}
           fi
 
-          # Create tag only if it doesn't already exist
-          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q "v$VERSION"; then
-            echo "Tag v$VERSION already exists, skipping"
-          else
+          # Create the tag if it doesn't exist yet. If it already exists, verify it points at
+          # the commit this run is actually releasing before treating that as a no-op --
+          # silently reusing a tag that predates this run's commit is exactly how three
+          # separate release-benchmark runs ended up measuring stale code in the past: the
+          # workflow's job graph and matrix come from whatever ref triggered this dispatch, but
+          # every build/test/benchmark job checks out `refs/tags/v$VERSION` explicitly, so a
+          # stale tag silently overrides the intent of the dispatch.
+          CURRENT_SHA=$(git rev-parse HEAD)
+          REMOTE_REFS=$(git ls-remote origin "refs/tags/v$VERSION" "refs/tags/v$VERSION^{}" || true)
+
+          if [ -z "$REMOTE_REFS" ]; then
+            echo "Tag v$VERSION does not exist yet on origin - creating it"
             git tag -a "v$VERSION" -m "Release v$VERSION"
             git push origin "v$VERSION"
+          else
+            # Prefer the peeled (^{}) line for annotated tags -- it's the actual commit the tag
+            # points at, not the tag object's own SHA.
+            REMOTE_TAG_SHA=$(echo "$REMOTE_REFS" | awk '$2 ~ /\^\{\}$/ {print $1}')
+            if [ -z "$REMOTE_TAG_SHA" ]; then
+              REMOTE_TAG_SHA=$(echo "$REMOTE_REFS" | awk '{print $1}' | head -1)
+            fi
+
+            if [ "$REMOTE_TAG_SHA" = "$CURRENT_SHA" ]; then
+              echo "Tag v$VERSION already exists and already points at the current commit ($CURRENT_SHA) - nothing to do"
+            else
+              echo "::error::Tag v$VERSION already exists but points at $REMOTE_TAG_SHA, not the commit this run is releasing ($CURRENT_SHA)."
+              echo "::error::Building, testing, publishing, or benchmarking would silently use the stale commit instead of $CURRENT_SHA -- this has happened before."
+              echo "::error::If you deliberately want to re-point v$VERSION at $CURRENT_SHA (e.g. re-running a release-time job after merging a fix on the same version), delete and recreate the tag yourself first, then re-dispatch this workflow:"
+              echo "::error::  git tag -d v$VERSION && git push origin :refs/tags/v$VERSION && git tag -a v$VERSION -m 'Release v$VERSION' $CURRENT_SHA && git push origin v$VERSION"
+              echo "::error::Otherwise, use a new version number for this release."
+              exit 1
+            fi
           fi
 
           echo "tag=v$VERSION" >> $GITHUB_ENV
