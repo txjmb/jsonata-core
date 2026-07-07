@@ -175,8 +175,15 @@ jobs:
           - { os: 'Linux', runner: ubuntu-latest, target: aarch64-unknown-linux-gnu }
           # Windows
           - { os: 'Windows', runner: windows-latest, target: x86_64-pc-windows-msvc }
-          # macOS (self-hosted Mac Mini, native ARM64 build)
-          - { os: 'macOS', runner: [self-hosted, macOS, ARM64], target: aarch64-apple-darwin }
+          # macOS temporarily removed from the main release matrix: the
+          # self-hosted Mac Mini runner's Test-wheels step has been failing
+          # deterministically (not flaky) with a stale-environment symptom
+          # despite the built wheel itself verified correct -- see issue #45.
+          # Once fixed, add macOS back here. Until then, ship Linux/Windows
+          # from this workflow and backfill macOS separately with
+          # release-macos-backfill.yml (`gh workflow run
+          # release-macos-backfill.yml -f version=X.Y.Z` after this release
+          # publishes).
 
     steps:
       - name: Checkout
@@ -290,7 +297,7 @@ jobs:
         platform:
           - { os: 'ubuntu-latest', runner: ubuntu-latest }
           - { os: 'windows-latest', runner: windows-latest }
-          - { os: 'macOS', runner: [self-hosted, macOS, ARM64] }
+          # macOS removed -- see the matching comment in build-wheels above (issue #45).
         python: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
