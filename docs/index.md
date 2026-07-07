@@ -33,7 +33,7 @@ print(result)  # "Hello, World"
 expr = jsonatapy.compile("orders[price > 100].product")
 result = expr.evaluate({"orders": [{"product": "Laptop", "price": 1200}]})
 
-# Pre-convert data for maximum throughput (3–16x faster for repeated queries)
+# Pre-convert data for maximum throughput (3–15x faster for repeated queries)
 data = jsonatapy.JsonataData(large_dataset)
 result = expr.evaluate_with_data(data)
 ```
@@ -55,11 +55,11 @@ let result = Evaluator::new().evaluate(&ast, &data)?;
 ## Performance highlights
 
 - **1682/1682** JSONata reference tests passing
-- **up to 19x faster** than the JavaScript reference implementation for pure expression workloads
+- **~6x faster on average** than the JavaScript reference implementation — up to ~16x for pure
+  expression workloads (strings, conditionals)
 - **~40x faster** than jsonata-rs on pure-Rust Criterion benchmarks (no Python overhead)
-- **dramatically faster** than jsonata-python across all categories — its one-off `transform()`
-  call re-bootstraps an embedded Duktape engine every time; reusing its `Context` object narrows
-  the gap substantially but jsonatapy still wins clearly
+- **hundreds of times faster** than jsonata-python, even when it reuses its fastest
+  (`Context`-based) repeated-evaluation path
 
 See [Performance](performance.md) for full benchmark results.
 

@@ -79,7 +79,7 @@ print(result)  # 2450
 
 # Pre-convert data once for maximum throughput
 data = jsonatapy.JsonataData(large_dataset)
-result = expr.evaluate_with_data(data)   # 3–16x faster than evaluate(dict)
+result = expr.evaluate_with_data(data)   # 3–15x faster than evaluate(dict)
 ```
 
 Supports Python 3.10, 3.11, 3.12, 3.13 on Linux, macOS (Intel & ARM), and Windows.
@@ -103,66 +103,25 @@ See [official JSONata docs](https://docs.jsonata.org/) for the full language ref
 ## Performance
 
 `jsonata-core` passes **1682/1682** JSONata reference tests and is the fastest JSONata
-implementation available in either Rust or Python.
+implementation available in either Rust or Python:
 
-### Pure Rust (Criterion benchmarks, no Python overhead)
+- **~6x faster on average** than the JavaScript reference implementation (V8), across all
+  benchmark categories — up to ~16x for complex transformations and string operations
+- **~40x faster** than jsonata-rs (the next pure-Rust JSONata implementation) on pure-Rust
+  Criterion benchmarks with no Python overhead on either side (`cargo bench`)
+- **hundreds of times faster** than jsonata-python, even when it reuses its fastest
+  (`Context`-based) repeated-evaluation path
 
-| Category | jsonata-core | vs jsonata-rs |
-|----------|-------------|----------------|
-| Simple path lookup | 81 ns | ~40x faster |
-| Arithmetic expression | 140 ns | ~40x faster |
-| Conditional | 106 ns | ~30x faster |
-| String operations | 126–284 ns | ~30x faster |
-| $sum (100 elements) | 287 ns | ~70x faster |
-| Filter predicate (100 objects) | 7.9 µs | ~50x faster |
-| Realistic workload (100 products) | 9–44 µs | ~40x faster |
-
-Run the benchmarks yourself:
-```bash
-cargo bench --no-default-features --features simd
-```
-
-### Python path (`jsonatapy`)
-
-`jsonatapy` is the fastest Python JSONata implementation by a large margin, and faster than
-the JavaScript reference implementation for most pure expression workloads:
-
-| Category | vs JavaScript (V8) |
-|----------|--------------------|
-| Simple paths | **2.6–9.7x faster** |
-| Complex transformations | **6.7–17.6x faster** |
-| String operations | **10.5–17.0x faster** |
-| Higher-order functions | **13.0–18.7x faster** |
-| Deep nesting | 3.6x faster – 1.6x slower |
-| Array operations | **1.5–7.0x faster**, mapping ~2–2.4x slower |
-| Realistic workloads (raw dict) | Mixed: 2.0x slower – 2.4x faster |
-
-`jsonatapy` is also dramatically faster than `jsonata-python` (the `jsonata` PyPI package) across
-every category — by multiple orders of magnitude for one-off calls via its `transform()`
-convenience function, since that re-bootstraps an embedded Duktape JS engine (and re-loads the
-`jsonata.js` library into it) on every call with no caching. Reusing its documented `Context`
-object instead substantially narrows the gap, though jsonatapy still wins clearly. See
-[Performance docs](docs/performance.md) for measured numbers.
-
-### The Python boundary
-
-For large array workloads, the dominant cost is converting Python dicts to Rust values
-on each `evaluate()` call — not expression evaluation itself. Two API paths avoid this:
+For large array workloads, pre-convert data once with `jsonatapy.JsonataData` and reuse it
+across queries — this avoids the Python↔Rust conversion cost that otherwise dominates:
 
 ```python
-# Path 1: Pre-convert data once, reuse across many queries (3–16x faster than evaluate(dict))
 data = jsonatapy.JsonataData(large_dataset)
-result = expr.evaluate_with_data(data)
-
-# Path 2: Data arrives as a raw JSON string — pass it directly
-result_str = expr.evaluate_json(raw_json_string)
+result = expr.evaluate_with_data(data)   # 3–15x faster than evaluate(dict)
 ```
 
-With pre-converted data, realistic workloads (filtering, transforming, aggregating over
-100-object arrays) run **4.4–9.9x faster than V8** — the raw `evaluate(dict)` path without
-pre-conversion is mixed (2.0x slower to 2.4x faster, depending on the operation).
-
-See [Performance docs](docs/performance.md) for full benchmark results and methodology.
+See [Performance docs](docs/performance.md) for the full category-by-category breakdown and
+benchmark methodology.
 
 ---
 
