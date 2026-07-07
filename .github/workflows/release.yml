@@ -201,15 +201,8 @@ jobs:
           - { os: 'Linux', runner: ubuntu-latest, target: aarch64-unknown-linux-gnu }
           # Windows
           - { os: 'Windows', runner: windows-latest, target: x86_64-pc-windows-msvc }
-          # macOS temporarily removed from the main release matrix: the
-          # self-hosted Mac Mini runner's Test-wheels step has been failing
-          # deterministically (not flaky) with a stale-environment symptom
-          # despite the built wheel itself verified correct -- see issue #45.
-          # Once fixed, add macOS back here. Until then, ship Linux/Windows
-          # from this workflow and backfill macOS separately with
-          # release-macos-backfill.yml (`gh workflow run
-          # release-macos-backfill.yml -f version=X.Y.Z` after this release
-          # publishes).
+          # macOS (self-hosted Mac Mini, native ARM64 build)
+          - { os: 'macOS', runner: [self-hosted, macOS, ARM64], target: aarch64-apple-darwin }
 
     steps:
       - name: Checkout
@@ -323,7 +316,7 @@ jobs:
         platform:
           - { os: 'ubuntu-latest', runner: ubuntu-latest }
           - { os: 'windows-latest', runner: windows-latest }
-          # macOS removed -- see the matching comment in build-wheels above (issue #45).
+          - { os: 'macOS', runner: [self-hosted, macOS, ARM64] }
         python: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
@@ -361,14 +354,31 @@ jobs:
         if: matrix.platform.os != 'macOS'
         shell: bash
         run: |
-          uv pip install --system --find-links dist jsonatapy
+          # --reinstall (implies --refresh) forces uv to re-read this exact
+          # file instead of trusting its cache, which is keyed by filename
+          # only for --find-links sources -- see the macOS comment below,
+          # which is where this actually bit us (issue #45).
+          uv pip install --system --reinstall --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install wheel (macOS)
         if: matrix.platform.os == 'macOS'
         shell: bash
         run: |
-          uv pip install --find-links dist jsonatapy
+          # --reinstall is required here, not just belt-and-suspenders: uv's
+          # cache for --find-links (flat index) sources is keyed by filename
+          # alone, not content. jsonatapy-<version>-<abi>-<platform>.whl is
+          # the same filename every time this version/interpreter/platform
+          # combo is built. GitHub-hosted Linux/Windows runners get a fresh
+          # uv cache every job so this never bit them, but this self-hosted
+          # Mac Mini's ~/.cache/uv persists across every job (and any local
+          # dev/testing on the same machine) forever. Without --reinstall, a
+          # wheel rebuilt with new code silently loses to a stale
+          # same-version cache entry from an earlier build/dev session --
+          # this is exactly what caused issue #45 (verified: the built wheel
+          # was correct, `uv pip install` resolved and "installed" it in
+          # ~1ms, but the parser behaved like the pre-%/@-operator code).
+          uv pip install --reinstall --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install test dependencies (Linux/Windows)
@@ -686,7 +696,7 @@ jobs:
       - name: Build jsonatapy (optimized)
         run: |
           maturin build --release --out dist
-          uv pip install --system --find-links dist jsonatapy
+          uv pip install --system --reinstall --find-links dist jsonatapy
 
       - name: Verify installation
         run: |
@@ -714,7 +724,25 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p benchmarks/baseline
+          VERSION="${{ needs.validate-version.outputs.version }}"
           git fetch origin benchmark-data
+
+          # If results/v$VERSION.json already exists on benchmark-data, this
+          # version was already benchmarked and recorded by an earlier run -
+          # i.e. this run is a `gh run rerun` (or similar retry) of a release
+          # that already completed, not a genuinely new release. latest.json
+          # at this point holds that earlier run's numbers for the SAME
+          # version/commit, so comparing against it would be v$VERSION vs
+          # v$VERSION on a shared runner: pure noise, not a real signal. This
+          # happened 3 times for v2.1.6 in one session and produced two bogus
+          # "regression" issues (txjmb/jsonata-core#48, #51) before this guard
+          # existed.
+          if git show FETCH_HEAD:results/v${VERSION}.json > /dev/null 2>&1; then
+            echo "already_recorded=true" >> $GITHUB_OUTPUT
+            echo "v${VERSION} was already recorded to benchmark-data by an earlier run - skipping comparison to avoid comparing this version against itself"
+          else
+            echo "already_recorded=false" >> $GITHUB_OUTPUT
+          fi
 
           if git show FETCH_HEAD:results/latest.json > benchmarks/baseline/baseline.json.tmp; then
             mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
@@ -728,7 +756,7 @@ jobs:
 
       - name: Compare with previous release
         id: compare
-        if: steps.baseline.outputs.has_baseline == 'true'
+        if: steps.baseline.outputs.has_baseline == 'true' && steps.baseline.outputs.already_recorded != 'true'
         run: |
           cd benchmarks
           python python/compare.py baseline/baseline.json "${{ steps.run_benchmark.outputs.results_file }}"
