@@ -4,7 +4,7 @@
 // to process complete JSONata expressions.
 
 use jsonata_core::{
-    evaluator::{Context, Evaluator},
+    evaluator::{Context, Evaluator, EvaluatorOptions},
     parser::parse,
     value::JValue,
 };
@@ -769,4 +769,36 @@ fn test_no_timeout_configured_never_raises_d1012() {
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data);
     assert!(result.is_ok(), "expected Ok, got: {result:?}");
+}
+
+/// The range operator must respect `max_sequence_length` (D2015) in addition
+/// to its existing hardcoded 10-million-element cap (D2014) — mirrors
+/// jsonata-js's `evaluateRangeExpression`, which checks D2014 then D2015.
+#[test]
+fn test_range_operator_raises_d2015_when_configured() {
+    let data = JValue::Null;
+    let ast = parse("[1..1000]").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator
+        .evaluate(&ast, &data)
+        .expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// Without `max_sequence_length` set, ranges up to the existing 10M hardcoded
+/// cap are unaffected.
+#[test]
+fn test_range_operator_unaffected_without_max_sequence_length() {
+    let data = JValue::Null;
+    let ast = parse("[1..1000]").unwrap();
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.evaluate(&ast, &data).unwrap();
+    match result {
+        JValue::Array(arr) => assert_eq!(arr.len(), 1000),
+        other => panic!("expected array, got {other:?}"),
+    }
 }

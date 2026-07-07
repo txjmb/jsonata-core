@@ -11273,6 +11273,7 @@ impl Evaluator {
                 "D2014: Range operator results in too many elements (> 10,000,000)".to_string(),
             ));
         }
+        check_sequence_length(size, &self.options)?;
 
         let mut result = Vec::with_capacity(size);
         if start <= end {
