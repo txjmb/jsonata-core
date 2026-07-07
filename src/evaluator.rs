@@ -8,6 +8,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
 use crate::parser;
@@ -2540,6 +2541,42 @@ impl TupleKeyBindings {
     }
 }
 
+/// Resource-limit guardrails, mirroring jsonata-js 2.2.1's `timeout`/`stack`/`sequence`
+/// evaluator options. All fields default to `None` = unlimited (current behavior).
+#[derive(Default, Clone, Debug)]
+pub struct EvaluatorOptions {
+    /// Maximum wall-clock evaluation time in milliseconds. Exceeding it raises D1012.
+    pub timeout_ms: Option<u64>,
+    /// Maximum AST-recursion stack depth. Exceeding it raises D1011 if this is the
+    /// tighter of this value and the hardcoded native-stack safety ceiling (302);
+    /// otherwise the hardcoded ceiling still raises U1001 (see GitHub issue #34).
+    pub max_stack_depth: Option<usize>,
+    /// Maximum length of a query-result sequence (map/filter/wildcard/descendants/
+    /// keys/lookup/append/spread/each/range/path-mapping). Exceeding it raises D2015.
+    /// Does NOT apply to literal array construction.
+    pub max_sequence_length: Option<usize>,
+}
+
+/// Checks a constructed query-result sequence's length against the configured
+/// `max_sequence_length` guardrail. Call this ONLY at sites that build a
+/// query-result sequence (map/filter/wildcard/descendants/keys/lookup/append/
+/// spread/each/range/path-mapping) — never at literal array construction
+/// (`[1,2,3]`), matching jsonata-js's `createSequence()` scoping.
+pub(crate) fn check_sequence_length(
+    len: usize,
+    options: &EvaluatorOptions,
+) -> Result<(), EvaluatorError> {
+    if let Some(max) = options.max_sequence_length {
+        if len > max {
+            return Err(EvaluatorError::EvaluationError(format!(
+                "D2015: The maximum sequence length of {} was exceeded.",
+                max
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Evaluator for JSONata expressions
 pub struct Evaluator {
     context: Context,
@@ -2567,6 +2604,10 @@ pub struct Evaluator {
     /// wrapper). Mirrors jsonata-js keeping `path.tuple` for such a path instead
     /// of projecting each tuple's `@`.
     keep_tuple_stream: bool,
+    options: EvaluatorOptions,
+    /// Set in `evaluate()` (only when `options.timeout_ms` is configured) and
+    /// checked in `evaluate_internal`'s per-node checkpoint for D1012.
+    start_time: Option<Instant>,
 }
 
 impl Evaluator {
@@ -2580,6 +2621,8 @@ impl Evaluator {
             next_lambda_id: 0,
             tuple_stream_created: false,
             keep_tuple_stream: false,
+            options: EvaluatorOptions::default(),
+            start_time: None,
         }
     }
 
@@ -2591,6 +2634,23 @@ impl Evaluator {
             next_lambda_id: 0,
             tuple_stream_created: false,
             keep_tuple_stream: false,
+            options: EvaluatorOptions::default(),
+            start_time: None,
+        }
+    }
+
+    /// Construct an `Evaluator` with guardrail options. `Evaluator::new()`/
+    /// `with_context()` remain unchanged (unlimited options) for existing callers.
+    pub fn with_options(context: Context, options: EvaluatorOptions) -> Self {
+        Evaluator {
+            context,
+            recursion_depth: 0,
+            max_recursion_depth: 302,
+            next_lambda_id: 0,
+            tuple_stream_created: false,
+            keep_tuple_stream: false,
+            options,
+            start_time: None,
         }
     }
 
