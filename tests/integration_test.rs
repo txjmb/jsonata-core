@@ -904,3 +904,23 @@ fn test_path_variable_field_fast_path_raises_d2015() {
     assert!(err.to_string().contains("D2015"), "got: {err}");
 }
 
+/// Bare single-segment field access (`name`, no dots) over root data that IS
+/// itself a large array is a genuine top-level call into evaluate_path's
+/// steps.len()==1 fast path, with no enclosing evaluate_path frame to
+/// backstop it via the shared final-exit chokepoint — this is the case that
+/// makes the check at src/evaluator.rs's single-step fast path (non-tuple
+/// array branch) load-bearing, not redundant.
+#[test]
+fn test_bare_single_step_path_over_root_array_raises_d2015() {
+    let data: JValue = serde_json::json!(
+        (0..1000).map(|i| serde_json::json!({"name": format!("item{i}")})).collect::<Vec<_>>()
+    ).into();
+    let ast = parse("name").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
