@@ -731,3 +731,42 @@ fn test_percent_in_two_sort_terms() {
         .collect();
     assert_eq!(got, want);
 }
+
+/// A configured timeout must trip D1012 on a pathologically slow (but
+/// terminating) expression. Note: the brief's originally proposed shape (a
+/// 200,000-term chained-addition string, "1+1+1+...+1") was tried first and
+/// rejected — see the task report for why (it overflows the native stack
+/// inside the recursive-descent *parser* itself, before evaluation even
+/// starts, regardless of any timeout). `$map` over a large range with cheap
+/// per-element work is expensive to evaluate node-by-node (~200,000 lambda
+/// invocations) without producing a deeply-nested AST, so it exercises the
+/// D1012 checkpoint without tripping D1011/U1001 or a parser stack overflow.
+#[test]
+fn test_timeout_raises_d1012() {
+    let data = JValue::Null;
+    let expr_str = "$map([1..200000], function($x){$x*2})";
+    let ast = parse(expr_str).unwrap();
+    let options = jsonata_core::evaluator::EvaluatorOptions {
+        timeout_ms: Some(1), // 1ms — must expire before 200k lambda invocations finish
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let result = evaluator.evaluate(&ast, &data);
+    let err = result.expect_err("expected a D1012 timeout error");
+    assert!(
+        err.to_string().contains("D1012"),
+        "expected D1012, got: {err}"
+    );
+}
+
+/// No timeout configured (the default) must never raise D1012, however long
+/// evaluation takes.
+#[test]
+fn test_no_timeout_configured_never_raises_d1012() {
+    let data = JValue::Null;
+    let expr_str = "$map([1..200000], function($x){$x*2})";
+    let ast = parse(expr_str).unwrap();
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.evaluate(&ast, &data);
+    assert!(result.is_ok(), "expected Ok, got: {result:?}");
+}

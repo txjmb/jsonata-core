@@ -2920,6 +2920,10 @@ impl Evaluator {
             self.context.set_parent(data.clone());
         }
 
+        if self.options.timeout_ms.is_some() {
+            self.start_time = Some(Instant::now());
+        }
+
         self.tuple_stream_created = false;
         let result = self.evaluate_internal(node, data)?;
         Ok(if self.tuple_stream_created {
@@ -3007,6 +3011,21 @@ impl Evaluator {
                     )
                 },
             ));
+        }
+
+        // Check evaluation timeout (D1012). `start_time` is only set (in
+        // `evaluate()`) when `options.timeout_ms` is configured, so this is a
+        // single `is_none()` branch of overhead when no timeout is set.
+        if let Some(timeout_ms) = self.options.timeout_ms {
+            if let Some(start) = self.start_time {
+                if start.elapsed().as_millis() as u64 > timeout_ms {
+                    self.recursion_depth -= 1;
+                    return Err(EvaluatorError::EvaluationError(format!(
+                        "D1012: Evaluation timeout after {} milliseconds. Check for infinite loop",
+                        timeout_ms
+                    )));
+                }
+            }
         }
 
         // The soft depth counter above is calibrated against a comfortably
