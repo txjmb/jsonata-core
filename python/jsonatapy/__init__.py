@@ -141,19 +141,35 @@ class JsonataExpression:
         """
         self._expr = expr
 
-    def evaluate(self, data: Any, bindings: dict[str, Any] | None = None) -> Any:
+    def evaluate(
+        self,
+        data: Any,
+        bindings: dict[str, Any] | None = None,
+        *,
+        timeout: int | None = None,
+        max_stack_depth: int | None = None,
+        max_sequence_length: int | None = None,
+    ) -> Any:
         """
         Evaluate this expression against data.
 
         Args:
             data: The data to query/transform (typically a dict or list)
             bindings: Optional additional variable bindings
+            timeout: Maximum evaluation time in milliseconds (raises ValueError
+                with a D1012 code on timeout). Overrides any default set via
+                `compile(timeout=...)` for this call only.
+            max_stack_depth: Maximum recursion stack depth (raises ValueError
+                with a D1011 code when exceeded). Overrides any compile-time default.
+            max_sequence_length: Maximum length of a query-result sequence
+                (map/filter/wildcard/descendants/etc; raises ValueError with a
+                D2015 code when exceeded). Overrides any compile-time default.
 
         Returns:
             The result of evaluating the expression
 
         Raises:
-            ValueError: If evaluation fails
+            ValueError: If evaluation fails, or a guardrail is exceeded
 
         Example:
             >>> expr = compile("orders[price > 100]")
@@ -162,9 +178,19 @@ class JsonataExpression:
             >>> print(len(result))
             1
         """
-        return self._expr.evaluate(data, bindings)
+        return self._expr.evaluate(
+            data, bindings, timeout, max_stack_depth, max_sequence_length
+        )
 
-    def evaluate_json(self, json_str: str, bindings: dict[str, Any] | None = None) -> str:
+    def evaluate_json(
+        self,
+        json_str: str,
+        bindings: dict[str, Any] | None = None,
+        *,
+        timeout: int | None = None,
+        max_stack_depth: int | None = None,
+        max_sequence_length: int | None = None,
+    ) -> str:
         """
         Evaluate this expression with JSON string input/output (faster for large data).
 
@@ -174,12 +200,20 @@ class JsonataExpression:
         Args:
             json_str: Input data as a JSON string
             bindings: Optional additional variable bindings
+            timeout: Maximum evaluation time in milliseconds (raises ValueError
+                with a D1012 code on timeout). Overrides any default set via
+                `compile(timeout=...)` for this call only.
+            max_stack_depth: Maximum recursion stack depth (raises ValueError
+                with a D1011 code when exceeded). Overrides any compile-time default.
+            max_sequence_length: Maximum length of a query-result sequence
+                (map/filter/wildcard/descendants/etc; raises ValueError with a
+                D2015 code when exceeded). Overrides any compile-time default.
 
         Returns:
             The result as a JSON string
 
         Raises:
-            ValueError: If JSON parsing or evaluation fails
+            ValueError: If JSON parsing or evaluation fails, or a guardrail is exceeded
 
         Example:
             >>> import json
@@ -194,10 +228,18 @@ class JsonataExpression:
             For large datasets (1000+ items), this can be 10-50x faster than evaluate()
             due to avoiding the Python↔Rust object conversion overhead.
         """
-        return self._expr.evaluate_json(json_str, bindings)
+        return self._expr.evaluate_json(
+            json_str, bindings, timeout, max_stack_depth, max_sequence_length
+        )
 
     def evaluate_with_data(
-        self, data: "JsonataData", bindings: dict[str, Any] | None = None
+        self,
+        data: "JsonataData",
+        bindings: dict[str, Any] | None = None,
+        *,
+        timeout: int | None = None,
+        max_stack_depth: int | None = None,
+        max_sequence_length: int | None = None,
     ) -> Any:
         """
         Evaluate with pre-converted data (fastest for repeated evaluation).
@@ -205,22 +247,38 @@ class JsonataExpression:
         Args:
             data: A JsonataData handle (pre-converted data)
             bindings: Optional additional variable bindings
+            timeout: Maximum evaluation time in milliseconds (raises ValueError
+                with a D1012 code on timeout). Overrides any default set via
+                `compile(timeout=...)` for this call only.
+            max_stack_depth: Maximum recursion stack depth (raises ValueError
+                with a D1011 code when exceeded). Overrides any compile-time default.
+            max_sequence_length: Maximum length of a query-result sequence
+                (map/filter/wildcard/descendants/etc; raises ValueError with a
+                D2015 code when exceeded). Overrides any compile-time default.
 
         Returns:
             The result of evaluating the expression
 
         Raises:
-            ValueError: If evaluation fails
+            ValueError: If evaluation fails, or a guardrail is exceeded
 
         Example:
             >>> data = JsonataData({"orders": [{"price": 150}, {"price": 50}]})
             >>> expr = compile("orders[price > 100]")
             >>> result = expr.evaluate_with_data(data)
         """
-        return self._expr.evaluate_with_data(data._data, bindings)
+        return self._expr.evaluate_with_data(
+            data._data, bindings, timeout, max_stack_depth, max_sequence_length
+        )
 
     def evaluate_data_to_json(
-        self, data: "JsonataData", bindings: dict[str, Any] | None = None
+        self,
+        data: "JsonataData",
+        bindings: dict[str, Any] | None = None,
+        *,
+        timeout: int | None = None,
+        max_stack_depth: int | None = None,
+        max_sequence_length: int | None = None,
     ) -> str:
         """
         Evaluate with pre-converted data, return JSON string (zero-overhead output).
@@ -232,12 +290,20 @@ class JsonataExpression:
         Args:
             data: A JsonataData handle (pre-converted data)
             bindings: Optional additional variable bindings
+            timeout: Maximum evaluation time in milliseconds (raises ValueError
+                with a D1012 code on timeout). Overrides any default set via
+                `compile(timeout=...)` for this call only.
+            max_stack_depth: Maximum recursion stack depth (raises ValueError
+                with a D1011 code when exceeded). Overrides any compile-time default.
+            max_sequence_length: Maximum length of a query-result sequence
+                (map/filter/wildcard/descendants/etc; raises ValueError with a
+                D2015 code when exceeded). Overrides any compile-time default.
 
         Returns:
             The result as a JSON string
 
         Raises:
-            ValueError: If evaluation fails
+            ValueError: If evaluation fails, or a guardrail is exceeded
 
         Example:
             >>> import json
@@ -246,10 +312,19 @@ class JsonataExpression:
             >>> result_str = expr.evaluate_data_to_json(data)
             >>> result = json.loads(result_str)
         """
-        return self._expr.evaluate_data_to_json(data._data, bindings)
+        return self._expr.evaluate_data_to_json(
+            data._data, bindings, timeout, max_stack_depth, max_sequence_length
+        )
 
     @classmethod
-    def compile(cls, expression: str) -> "JsonataExpression":
+    def compile(
+        cls,
+        expression: str,
+        *,
+        timeout: int | None = None,
+        max_stack_depth: int | None = None,
+        max_sequence_length: int | None = None,
+    ) -> "JsonataExpression":
         """
         Compile a JSONata expression.
 
@@ -257,6 +332,11 @@ class JsonataExpression:
 
         Args:
             expression: A JSONata expression string
+            timeout: Default max evaluation time in milliseconds for all
+                evaluate*() calls on this expression (can be overridden per-call).
+            max_stack_depth: Default max recursion stack depth (can be overridden per-call).
+            max_sequence_length: Default max query-result sequence length
+                (can be overridden per-call).
 
         Returns:
             A compiled JsonataExpression
@@ -266,16 +346,28 @@ class JsonataExpression:
 
         Example:
             >>> expr = JsonataExpression.compile("$.name")
+            >>> expr = JsonataExpression.compile("$.name", timeout=5000)
         """
-        return cls(_compile(expression))
+        return cls(_compile(expression, timeout, max_stack_depth, max_sequence_length))
 
 
-def compile(expression: str) -> JsonataExpression:
+def compile(
+    expression: str,
+    *,
+    timeout: int | None = None,
+    max_stack_depth: int | None = None,
+    max_sequence_length: int | None = None,
+) -> JsonataExpression:
     """
     Compile a JSONata expression into an executable form.
 
     Args:
         expression: A JSONata query/transformation expression string
+        timeout: Default max evaluation time in milliseconds for all
+            evaluate*() calls on this expression (can be overridden per-call).
+        max_stack_depth: Default max recursion stack depth (can be overridden per-call).
+        max_sequence_length: Default max query-result sequence length
+            (can be overridden per-call).
 
     Returns:
         A compiled JsonataExpression that can be evaluated multiple times
@@ -286,16 +378,25 @@ def compile(expression: str) -> JsonataExpression:
     Example:
         >>> expr = compile("orders[price > 100].product")
         >>> result = expr.evaluate(data)
+        >>> expr = compile("$sum(items.price)", timeout=5000)
 
     Note:
         Compiling an expression once and evaluating it multiple times
         is more efficient than calling `evaluate()` repeatedly with
         the same expression string.
     """
-    return JsonataExpression(_compile(expression))
+    return JsonataExpression(_compile(expression, timeout, max_stack_depth, max_sequence_length))
 
 
-def evaluate(expression: str, data: Any, bindings: dict[str, Any] | None = None) -> Any:
+def evaluate(
+    expression: str,
+    data: Any,
+    bindings: dict[str, Any] | None = None,
+    *,
+    timeout: int | None = None,
+    max_stack_depth: int | None = None,
+    max_sequence_length: int | None = None,
+) -> Any:
     """
     Compile and evaluate a JSONata expression in one step.
 
@@ -306,12 +407,18 @@ def evaluate(expression: str, data: Any, bindings: dict[str, Any] | None = None)
         expression: A JSONata query/transformation expression string
         data: The data to query/transform (typically a dict or list)
         bindings: Optional additional variable bindings
+        timeout: Maximum evaluation time in milliseconds (raises ValueError
+            with a D1012 code on timeout).
+        max_stack_depth: Maximum recursion stack depth (raises ValueError
+            with a D1011 code when exceeded).
+        max_sequence_length: Maximum length of a query-result sequence
+            (raises ValueError with a D2015 code when exceeded).
 
     Returns:
         The result of evaluating the expression
 
     Raises:
-        ValueError: If parsing or evaluation fails
+        ValueError: If parsing or evaluation fails, or a guardrail is exceeded
 
     Example:
         >>> data = {"name": "alice"}
@@ -323,5 +430,11 @@ def evaluate(expression: str, data: Any, bindings: dict[str, Any] | None = None)
         >>> result = evaluate("name & suffix", {"name": "Hello"}, {"suffix": "!"})
         >>> print(result)
         "Hello!"
+
+        >>> # With a timeout guardrail
+        >>> evaluate("$map([1..200000], function($x){$x*2})", None, timeout=1)
+        Traceback (most recent call last):
+            ...
+        ValueError: D1012: Evaluation timeout after 1 milliseconds. Check for infinite loop
     """
-    return _evaluate(expression, data, bindings)
+    return _evaluate(expression, data, bindings, timeout, max_stack_depth, max_sequence_length)
