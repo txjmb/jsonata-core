@@ -158,12 +158,29 @@ class TestSequenceLengthD2015:
         # previously had no D2015 check at all (fixed alongside `vm.rs`'s
         # `get_field_cached`, which had the same gap for the simpler
         # `items.name`-shaped case covered above).
+        #
+        # IMPORTANT: the filter predicate must itself be *compilable*
+        # (`try_compile_expr_inner` handles simple comparisons/arithmetic/
+        # literals, but has no arm for function calls like `$exists(...)`).
+        # A non-compilable predicate makes `try_compile_path` return None for
+        # the *whole* path expression, so the entire thing falls straight to
+        # the tree-walker's `evaluate_path` (already correct from an earlier
+        # task) and never reaches `compiled_eval_field_path`/
+        # `compiled_field_step` at all -- silently defeating this regression
+        # test (confirmed via revert-oracle: with `$exists(sub)` as the
+        # filter, this test kept passing even with the `compiled_field_step`
+        # fix reverted). `flag=true` is a plain equality comparison, which
+        # *does* compile (`CompiledExpr::Compare`), so this correctly routes
+        # through `EvalFallback`/`compiled_field_step`.
         data = {
-            "items": [{"sub": [{"v": i} for i in range(1000)]} for _ in range(3)]
+            "items": [
+                {"flag": True, "sub": [{"v": i} for i in range(1000)]}
+                for _ in range(3)
+            ]
         }
         with pytest.raises(ValueError, match="D2015"):
             jsonatapy.evaluate(
-                "items[$exists(sub)].sub.v", data, max_sequence_length=10
+                "items[flag=true].sub.v", data, max_sequence_length=10
             )
 
     def test_filter_raises_d2015(self):
