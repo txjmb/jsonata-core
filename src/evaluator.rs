@@ -9542,11 +9542,26 @@ impl Evaluator {
         // Trampoline loop - keeps evaluating until we get a final value
         let result = loop {
             iterations += 1;
-            if iterations > MAX_TCO_ITERATIONS {
+            // The hardcoded iteration cap is a backstop for when no timeout is
+            // configured; it must not preempt a configured timeout (which is the
+            // more specific, user-controlled guardrail). Without this gate, an
+            // infinite tail-recursive loop with a cheap per-iteration body hits
+            // this cap in single-digit-to-tens of milliseconds and reports the
+            // misleading "U1001: Stack overflow" (TCO does not grow the stack;
+            // there is no depth-500 stack here) instead of D1012, for *any*
+            // realistic `timeout_ms` (100ms, 1s, the docs' own 5000ms default) -
+            // defeating the purpose of the timeout guardrail for exactly the
+            // scenario it exists to catch (see jsonata-js's own `$inf := function
+            // (){$inf()}; $inf()` guardrails-documentation example).
+            if self.options.timeout_ms.is_none() && iterations > MAX_TCO_ITERATIONS {
                 self.context.pop_scope();
                 return Err(EvaluatorError::EvaluationError(
                     "U1001: Stack overflow - maximum recursion depth (500) exceeded".to_string(),
                 ));
+            }
+            if let Err(e) = check_loop_timeout(&self.options, self.start_time) {
+                self.context.pop_scope();
+                return Err(e);
             }
 
             // Evaluate the lambda body within the persistent scope

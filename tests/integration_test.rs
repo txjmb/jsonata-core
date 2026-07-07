@@ -771,6 +771,72 @@ fn test_no_timeout_configured_never_raises_d1012() {
     assert!(result.is_ok(), "expected Ok, got: {result:?}");
 }
 
+/// jsonata-js's own canonical guardrails-documentation example: an infinite
+/// tail-recursive call. `invoke_lambda_with_tco`'s trampoline loop previously
+/// had no timeout check at all -- only the hardcoded `MAX_TCO_ITERATIONS`
+/// iteration cap -- so this expression ran up to 100,000 iterations
+/// completely ignoring `timeout_ms` and failed with U1001 instead of D1012.
+#[test]
+fn test_tco_trampoline_infinite_recursion_raises_d1012_timeout() {
+    let data = JValue::Null;
+    let expr_str = "($inf := function(){$inf()}; $inf())";
+    let ast = parse(expr_str).unwrap();
+    let options = jsonata_core::evaluator::EvaluatorOptions {
+        timeout_ms: Some(5),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator
+        .evaluate(&ast, &data)
+        .expect_err("expected a D1012 timeout error");
+    assert!(
+        err.to_string().contains("D1012"),
+        "expected D1012, got: {err}"
+    );
+}
+
+/// Without a configured timeout, the new per-iteration `check_loop_timeout`
+/// call in the TCO trampoline must remain a no-op (it early-returns when
+/// `options.timeout_ms` is `None`), so a bounded tail-recursive loop still
+/// completes normally and produces the correct result. Uses a moderate bound
+/// (not 100,000 iterations) to keep the test suite fast; the pre-existing
+/// U1001-at-100k-iterations behavior is unchanged and not the target of this
+/// regression guard.
+#[test]
+fn test_tco_trampoline_no_timeout_configured_completes_normally() {
+    let data = JValue::Null;
+    let expr_str = "(\
+        $count := function($n, $acc){$n <= 0 ? $acc : $count($n - 1, $acc + 1)};\
+        $count(1000, 0)\
+    )";
+    let ast = parse(expr_str).unwrap();
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.evaluate(&ast, &data).unwrap();
+    assert_eq!(result, JValue::from(json!(1000.0)));
+}
+
+/// Without a configured timeout, the `MAX_TCO_ITERATIONS` hardcoded backstop
+/// must still apply to genuinely infinite tail recursion -- the timeout gate
+/// added to `invoke_lambda_with_tco` (`timeout_ms.is_none() && iterations >
+/// MAX_TCO_ITERATIONS`) must not disable the cap when there is no timeout to
+/// take over as the exit condition, or this would hang forever. Takes on the
+/// order of tens of milliseconds (100,000 trivial trampoline iterations); not
+/// a bounded/fast variant, since the whole point is exercising the cap itself.
+#[test]
+fn test_tco_trampoline_no_timeout_configured_still_hits_iteration_cap() {
+    let data = JValue::Null;
+    let expr_str = "($inf := function(){$inf()}; $inf())";
+    let ast = parse(expr_str).unwrap();
+    let mut evaluator = Evaluator::new();
+    let err = evaluator
+        .evaluate(&ast, &data)
+        .expect_err("expected U1001 at the iteration cap");
+    assert!(
+        err.to_string().contains("U1001"),
+        "expected U1001, got: {err}"
+    );
+}
+
 /// The range operator must respect `max_sequence_length` (D2015) in addition
 /// to its existing hardcoded 10-million-element cap (D2014) — mirrors
 /// jsonata-js's `evaluateRangeExpression`, which checks D2014 then D2015.
