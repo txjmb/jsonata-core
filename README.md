@@ -7,6 +7,8 @@ High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Py
 > for Python) and see how fast it could go. The answer: faster than V8 for most expression
 > workloads, and faster than the next pure-Rust implementation.
 
+Many, many thanks to the incredible work of all the maintainers of the Jsonata-js reference library.  Jsonata is a very powerful, well-designed, and useful language that has made an impact on many projects.  This work leverages their work.  The implementation in Rust was strongly influenced by their implementation.  The 1600+ tests they've created provided the scaffolding and validation for all of this project.  This project will continue to follow and be a derivative of the reference project.
+
 [![Crates.io](https://img.shields.io/crates/v/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
 [![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
 [![Python versions](https://img.shields.io/pypi/pyversions/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
