@@ -270,66 +270,19 @@ suite.benchmark(
 
 ## Performance
 
-Current results (2026-07-07, full benchmark run against jsonata-js 2.1.0 on Node.js v24.14,
-recorded by the release CI job on a clean GitHub Actions runner):
+Full category-by-category results, methodology (including why jsonata-python is measured via
+its reusable `Context` rather than one-off `transform()`), and historical notes on benchmark
+fixes all live in one place: **[docs/performance.md](../docs/performance.md)**.
 
-> **Note:** results before 2026-07-07 came from either an unawaited JS harness or a stale
-> release git tag. `benchmarks/javascript/benchmark.js` previously called
-> `compiled.evaluate(data)` without `await`, and jsonata-js's `evaluate()` is `async` with a
-> genuine `await` per recursion step (including once per array element) — without awaiting, the
-> timed loop only ran each call up to its first internal suspension point, making JS look
-> implausibly fast on anything that iterates arrays. Separately, the `v2.1.6` release tag was
-> initially left pointing at a commit that predated this fix, so the first release-time
-> benchmark run re-measured the same stale numbers. Both are fixed; the table below is from a
-> run against the corrected tag.
-
-| Category | jsonatapy vs JS | Notes |
-|----------|----------------|-------|
-| Simple Paths | **2.6–9.7x faster** | Array index access lowest (2.6x); arithmetic highest (9.7x) |
-| Array Operations (100–1,000 elements) | **2.2–7.0x faster** | $sum/$max/$count/filter all faster |
-| Array Operations (10,000 elements) | **1.5x faster** | |
-| Array Mapping (100 objects) | ~2–2.4x slower | Python↔Rust dict conversion cost per field |
-| Complex Transformations | **6.7–17.6x faster** | Conditional 17.6x, object construction 6.7–7.9x |
-| Deep Nesting | 3.6x faster – 1.6x slower | Deep field path faster; nested array access slower |
-| String Operations | **10.5–17.0x faster** | Native Rust string handling |
-| Higher-Order Functions | **13.0–18.7x faster** | $map, $filter, $reduce all faster than V8 |
-| Realistic Workload (dict input) | Mixed: 2.0x slower – 2.4x faster | Filter/aggregate slightly slower; transform/group-by/sort faster |
-| Realistic Workload (JsonataData) | **4.4–9.9x faster** | Pre-converted data beats V8 across the board |
-
-**Key Insights:**
-- jsonatapy is the fastest Python JSONata implementation by a wide margin
-- For pure expression evaluation (paths, arithmetic, conditionals, strings, HOFs), jsonatapy consistently beats V8
-- Per-element object-field mapping over Python dicts is the main category where V8 still wins outright
-- Use `jsonatapy.JsonataData` to pre-convert data once and amortize Python↔Rust conversion cost across repeated queries — this turns the mixed raw-dict realistic-workload results into a clear win
-
-## Performance Analysis
-
-### Where jsonatapy excels
-- Simple path navigation and field access (2.6–9.7x faster than JS)
-- String operations — uppercase, lowercase, substring, contains (10.5–17.0x faster)
-- Arithmetic and conditionals (up to 17.6x faster)
-- Complex object transformations (6.7–17.6x faster)
-- Higher-order functions — $map/$filter/$reduce (13.0–18.7x faster)
-- Realistic workloads with pre-converted data (4.4–9.9x faster)
-
-### Where JavaScript is faster
-- Per-element object-field mapping over Python dict arrays (~2–2.4x) — Python↔Rust conversion cost dominates
-- Two of five raw-dict realistic-workload operations (filter, aggregate) are ~1.7–2.0x slower — use `JsonataData` to pull ahead
-
-### The Python boundary
-For large array workloads, the dominant remaining cost is converting Python objects to Rust
-values on each `evaluate()` call. Two API paths avoid this:
+Quick summary: jsonatapy averages ~6x faster than the JavaScript reference implementation
+across all categories (up to ~16x for complex transformations and strings), and is faster than
+jsonata-rs and dramatically faster than jsonata-python. For large array workloads, pre-convert
+data once with `jsonatapy.JsonataData` and reuse it across queries:
 
 ```python
-# Pre-convert once, reuse many times (3–16x faster than evaluate(dict))
 data = jsonatapy.JsonataData(large_dataset)
-result = expr.evaluate_with_data(data)
-
-# Or pass raw JSON string directly
-result = expr.evaluate_json(raw_json_string)
+result = expr.evaluate_with_data(data)   # 3–15x faster than evaluate(dict)
 ```
-
-See [docs/performance.md](../docs/performance.md) for the full table of results.
 
 ## Troubleshooting
 
