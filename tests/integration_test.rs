@@ -783,9 +783,7 @@ fn test_range_operator_raises_d2015_when_configured() {
         ..Default::default()
     };
     let mut evaluator = Evaluator::with_options(Context::new(), options);
-    let err = evaluator
-        .evaluate(&ast, &data)
-        .expect_err("expected D2015");
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
     assert!(err.to_string().contains("D2015"), "got: {err}");
 }
 
@@ -845,7 +843,8 @@ fn test_wildcard_raises_d2015() {
 fn test_descendant_raises_d2015() {
     let data: JValue = serde_json::json!({
         "items": (0..1000).map(|i| serde_json::json!({"v": i})).collect::<Vec<_>>()
-    }).into();
+    })
+    .into();
     let ast = parse("**").unwrap();
     let options = EvaluatorOptions {
         max_sequence_length: Some(10),
@@ -912,9 +911,10 @@ fn test_path_variable_field_fast_path_raises_d2015() {
 /// array branch) load-bearing, not redundant.
 #[test]
 fn test_bare_single_step_path_over_root_array_raises_d2015() {
-    let data: JValue = serde_json::json!(
-        (0..1000).map(|i| serde_json::json!({"name": format!("item{i}")})).collect::<Vec<_>>()
-    ).into();
+    let data: JValue = serde_json::json!((0..1000)
+        .map(|i| serde_json::json!({"name": format!("item{i}")}))
+        .collect::<Vec<_>>())
+    .into();
     let ast = parse("name").unwrap();
     let options = EvaluatorOptions {
         max_sequence_length: Some(10),
@@ -933,7 +933,8 @@ fn test_bare_single_step_path_over_root_array_raises_d2015() {
 fn test_map_generic_path_raises_d2015() {
     let data: JValue = serde_json::json!({
         "items": (0..1000).map(|i| serde_json::json!({"a": i})).collect::<Vec<_>>()
-    }).into();
+    })
+    .into();
     let ast = parse("$map(items, function($x){$x.*})").unwrap();
     let options = EvaluatorOptions {
         max_sequence_length: Some(10),
@@ -953,7 +954,8 @@ fn test_map_generic_path_raises_d2015() {
 fn test_map_compiled_fast_path_raises_d2015() {
     let data: JValue = serde_json::json!({
         "items": (0..1000).map(|i| serde_json::json!(i)).collect::<Vec<_>>()
-    }).into();
+    })
+    .into();
     let ast = parse("$map(items, function($x){$x*2})").unwrap();
     let options = EvaluatorOptions {
         max_sequence_length: Some(10),
@@ -970,7 +972,8 @@ fn test_map_compiled_fast_path_raises_d2015() {
 fn test_filter_generic_path_raises_d2015() {
     let data: JValue = serde_json::json!({
         "items": (0..1000).map(|i| serde_json::json!({"a": i})).collect::<Vec<_>>()
-    }).into();
+    })
+    .into();
     let ast = parse("$filter(items, function($x){$x.* != null})").unwrap();
     let options = EvaluatorOptions {
         max_sequence_length: Some(10),
@@ -988,7 +991,8 @@ fn test_filter_generic_path_raises_d2015() {
 fn test_filter_compiled_fast_path_raises_d2015() {
     let data: JValue = serde_json::json!({
         "items": (0..1000).map(|i| serde_json::json!(i)).collect::<Vec<_>>()
-    }).into();
+    })
+    .into();
     let ast = parse("$filter(items, function($x){$x >= 0})").unwrap();
     let options = EvaluatorOptions {
         max_sequence_length: Some(10),

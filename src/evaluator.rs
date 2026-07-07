@@ -974,7 +974,8 @@ fn eval_compiled_inner(
         CompiledExpr::ArrayConstruct(elems) => {
             let mut result = Vec::new();
             for (elem_expr, is_nested) in elems {
-                let value = eval_compiled_inner(elem_expr, data, vars, ctx, shape, options, start_time)?;
+                let value =
+                    eval_compiled_inner(elem_expr, data, vars, ctx, shape, options, start_time)?;
                 // Undefined values are excluded from array constructors (tree-walker parity)
                 if value.is_undefined() {
                     continue;
@@ -1023,7 +1024,9 @@ fn eval_compiled_inner(
         CompiledExpr::BuiltinCall { name, args } => {
             let mut evaled_args = Vec::with_capacity(args.len());
             for arg in args.iter() {
-                evaled_args.push(eval_compiled_inner(arg, data, vars, ctx, shape, options, start_time)?);
+                evaled_args.push(eval_compiled_inner(
+                    arg, data, vars, ctx, shape, options, start_time,
+                )?);
             }
             call_pure_builtin(name, &evaled_args, data, options)
         }
@@ -1082,7 +1085,15 @@ fn eval_compiled_inner(
                         call_vars.insert(p, item);
                     }
                     call_vars.insert(p1, &idx_val);
-                    let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape, options, start_time)?;
+                    let mapped = eval_compiled_inner(
+                        body,
+                        data,
+                        Some(&call_vars),
+                        ctx,
+                        shape,
+                        options,
+                        start_time,
+                    )?;
                     if !mapped.is_undefined() {
                         result.push(mapped);
                     }
@@ -1092,7 +1103,15 @@ fn eval_compiled_inner(
                 let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
                     call_vars.insert(p0, item);
-                    let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape, options, start_time)?;
+                    let mapped = eval_compiled_inner(
+                        body,
+                        data,
+                        Some(&call_vars),
+                        ctx,
+                        shape,
+                        options,
+                        start_time,
+                    )?;
                     if !mapped.is_undefined() {
                         result.push(mapped);
                     }
@@ -1133,7 +1152,15 @@ fn eval_compiled_inner(
                         call_vars.insert(p, item);
                     }
                     call_vars.insert(p1, &idx_val);
-                    let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape, options, start_time)?;
+                    let pred = eval_compiled_inner(
+                        body,
+                        data,
+                        Some(&call_vars),
+                        ctx,
+                        shape,
+                        options,
+                        start_time,
+                    )?;
                     if compiled_is_truthy(&pred) {
                         result.push(item.clone());
                     }
@@ -1142,7 +1169,15 @@ fn eval_compiled_inner(
                 let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
                     call_vars.insert(p0, item);
-                    let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape, options, start_time)?;
+                    let pred = eval_compiled_inner(
+                        body,
+                        data,
+                        Some(&call_vars),
+                        ctx,
+                        shape,
+                        options,
+                        start_time,
+                    )?;
                     if compiled_is_truthy(&pred) {
                         result.push(item.clone());
                     }
@@ -1177,7 +1212,8 @@ fn eval_compiled_inner(
                 }
             };
             let (start_idx, mut accumulator) = if let Some(init_expr) = initial {
-                let init_val = eval_compiled_inner(init_expr, data, vars, ctx, shape, options, start_time)?;
+                let init_val =
+                    eval_compiled_inner(init_expr, data, vars, ctx, shape, options, start_time)?;
                 if items.is_empty() {
                     return Ok(init_val);
                 }
@@ -1196,7 +1232,15 @@ fn eval_compiled_inner(
                 let mut call_vars = clone_outer_vars(vars, 2);
                 call_vars.insert(acc_param, &accumulator);
                 call_vars.insert(item_param, item);
-                let new_acc = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape, options, start_time)?;
+                let new_acc = eval_compiled_inner(
+                    body,
+                    data,
+                    Some(&call_vars),
+                    ctx,
+                    shape,
+                    options,
+                    start_time,
+                )?;
                 drop(call_vars);
                 accumulator = new_acc;
             }
@@ -1538,7 +1582,8 @@ fn compiled_eval_field_path(
         }
         // Apply filter if present (filter is an array operation — keep the flag set)
         if let Some(filter) = &step.filter {
-            current = compiled_apply_filter(filter, &current, vars, ctx, shape, options, start_time)?;
+            current =
+                compiled_apply_filter(filter, &current, vars, ctx, shape, options, start_time)?;
             // Filter always implies we operated on an array
             did_array_mapping = true;
         }
@@ -1646,8 +1691,15 @@ fn compiled_apply_filter(
             };
             let effective_shape = shape.or(local_shape.as_ref());
             for item in arr.iter() {
-                let pred =
-                    eval_compiled_inner(filter, item, vars, ctx, effective_shape, options, start_time)?;
+                let pred = eval_compiled_inner(
+                    filter,
+                    item,
+                    vars,
+                    ctx,
+                    effective_shape,
+                    options,
+                    start_time,
+                )?;
                 if compiled_is_truthy(&pred) {
                     result.push(item.clone());
                 }
@@ -3846,9 +3898,22 @@ impl Evaluator {
                         let mut filtered = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
                             let result = if let Some(ref s) = shape {
-                                eval_compiled_shaped(&compiled, item, None, s, &self.options, self.start_time)?
+                                eval_compiled_shaped(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    s,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             } else {
-                                eval_compiled(&compiled, item, None, &self.options, self.start_time)?
+                                eval_compiled(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             };
                             if compiled_is_truthy(&result) {
                                 filtered.push(item.clone());
@@ -5017,9 +5082,22 @@ impl Evaluator {
                                 let mut result = Vec::with_capacity(arr.len());
                                 for item in arr.iter() {
                                     let value = if let Some(ref s) = shape {
-                                        eval_compiled_shaped(&compiled, item, None, s, &self.options, self.start_time)?
+                                        eval_compiled_shaped(
+                                            &compiled,
+                                            item,
+                                            None,
+                                            s,
+                                            &self.options,
+                                            self.start_time,
+                                        )?
                                     } else {
-                                        eval_compiled(&compiled, item, None, &self.options, self.start_time)?
+                                        eval_compiled(
+                                            &compiled,
+                                            item,
+                                            None,
+                                            &self.options,
+                                            self.start_time,
+                                        )?
                                     };
                                     if !value.is_null() && !value.is_undefined() {
                                         result.push(value);
@@ -5524,9 +5602,22 @@ impl Evaluator {
                         let mut mapped = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
                             let result = if let Some(ref s) = shape {
-                                eval_compiled_shaped(&compiled, item, None, s, &self.options, self.start_time)?
+                                eval_compiled_shaped(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    s,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             } else {
-                                eval_compiled(&compiled, item, None, &self.options, self.start_time)?
+                                eval_compiled(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             };
                             if !result.is_undefined() {
                                 mapped.push(result);
@@ -8024,7 +8115,13 @@ impl Evaluator {
                                     let mut vars = HashMap::new();
                                     for item in arr.iter() {
                                         vars.insert(param_name, item);
-                                        let mapped = eval_compiled(&compiled, data, Some(&vars), &self.options, self.start_time)?;
+                                        let mapped = eval_compiled(
+                                            &compiled,
+                                            data,
+                                            Some(&vars),
+                                            &self.options,
+                                            self.start_time,
+                                        )?;
                                         if !mapped.is_undefined() {
                                             result.push(mapped);
                                         }
@@ -8165,7 +8262,13 @@ impl Evaluator {
                             let mut vars = HashMap::new();
                             for item in items.iter() {
                                 vars.insert(param_name, item);
-                                let pred_result = eval_compiled(&compiled, data, Some(&vars), &self.options, self.start_time)?;
+                                let pred_result = eval_compiled(
+                                    &compiled,
+                                    data,
+                                    Some(&vars),
+                                    &self.options,
+                                    self.start_time,
+                                )?;
                                 if compiled_is_truthy(&pred_result) {
                                     result.push(item.clone());
                                 }
@@ -8200,8 +8303,13 @@ impl Evaluator {
                                         .collect();
                                     for item in items.iter() {
                                         vars.insert(param_name.as_str(), item);
-                                        let pred_result =
-                                            eval_compiled(&ce_clone, call_data, Some(&vars), &self.options, self.start_time)?;
+                                        let pred_result = eval_compiled(
+                                            &ce_clone,
+                                            call_data,
+                                            Some(&vars),
+                                            &self.options,
+                                            self.start_time,
+                                        )?;
                                         if compiled_is_truthy(&pred_result) {
                                             result.push(item.clone());
                                         }
@@ -8335,7 +8443,13 @@ impl Evaluator {
                             for item in items[start_idx..].iter() {
                                 let vars: HashMap<&str, &JValue> =
                                     HashMap::from([(acc_name, &accumulator), (item_name, item)]);
-                                accumulator = eval_compiled(&compiled, data, Some(&vars), &self.options, self.start_time)?;
+                                accumulator = eval_compiled(
+                                    &compiled,
+                                    data,
+                                    Some(&vars),
+                                    &self.options,
+                                    self.start_time,
+                                )?;
                             }
                             return Ok(accumulator);
                         }
@@ -8364,8 +8478,13 @@ impl Evaluator {
                                             vars.insert(item_param.as_str(), item);
                                             // Evaluate and drop vars before assigning accumulator
                                             // to satisfy borrow checker (vars borrows accumulator)
-                                            let new_acc =
-                                                eval_compiled(&ce_clone, call_data, Some(&vars), &self.options, self.start_time)?;
+                                            let new_acc = eval_compiled(
+                                                &ce_clone,
+                                                call_data,
+                                                Some(&vars),
+                                                &self.options,
+                                                self.start_time,
+                                            )?;
                                             drop(vars);
                                             accumulator = new_acc;
                                         }
@@ -10348,9 +10467,22 @@ impl Evaluator {
                         let mut filtered = Vec::with_capacity(_arr.len());
                         for item in _arr.iter() {
                             let result = if let Some(ref s) = shape {
-                                eval_compiled_shaped(&compiled, item, None, s, &self.options, self.start_time)?
+                                eval_compiled_shaped(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    s,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             } else {
-                                eval_compiled(&compiled, item, None, &self.options, self.start_time)?
+                                eval_compiled(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             };
                             if compiled_is_truthy(&result) {
                                 filtered.push(item.clone());
@@ -10438,7 +10570,14 @@ impl Evaluator {
                     let mut filtered = Vec::with_capacity(_arr.len());
                     for item in _arr.iter() {
                         let result = if let Some(ref s) = shape {
-                            eval_compiled_shaped(&compiled, item, None, s, &self.options, self.start_time)?
+                            eval_compiled_shaped(
+                                &compiled,
+                                item,
+                                None,
+                                s,
+                                &self.options,
+                                self.start_time,
+                            )?
                         } else {
                             eval_compiled(&compiled, item, None, &self.options, self.start_time)?
                         };
