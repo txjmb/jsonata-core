@@ -431,10 +431,10 @@ def evaluate(
         >>> print(result)
         "Hello!"
 
-        >>> # With a timeout guardrail
-        >>> evaluate("$map([1..200000], function($x){$x*2})", None, timeout=1)
+        >>> # With a timeout guardrail (protects against non-terminating expressions)
+        >>> evaluate("($inf := function(){$inf()}; $inf())", None, timeout=100)
         Traceback (most recent call last):
             ...
-        ValueError: D1012: Evaluation timeout after 1 milliseconds. Check for infinite loop
+        ValueError: D1012: Evaluation timeout after 100 milliseconds. Check for infinite loop
     """
     return _evaluate(expression, data, bindings, timeout, max_stack_depth, max_sequence_length)
