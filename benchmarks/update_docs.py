@@ -166,6 +166,18 @@ def generate_markdown(data, versions):
         )
     md.append("")
 
+    if implementations.get("jsonata_python"):
+        md.append(
+            "> **Note on jsonata-python:** the `jsonata-python` column below reflects its "
+            "`Context`-reused call path, not its one-off `transform()` convenience function. "
+            "`transform()` re-bootstraps an embedded Duktape engine (and reloads the "
+            "`jsonata.js` library into it) on every call, which is dramatically slower and not "
+            "representative of how a real caller would use it repeatedly; reusing a `Context` "
+            "is the library's own documented path for repeated evaluation and is the fair "
+            "comparison to jsonatapy's and jsonata-js's own compile-once-evaluate-many "
+            "measurement.\n"
+        )
+
     md.append(f"Benchmarks run on {date}.\n")
 
     # Summary table
