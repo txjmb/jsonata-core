@@ -14,7 +14,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 
-use crate::evaluator::{eval_compiled, CompiledExpr, EvaluatorError};
+use crate::evaluator::{eval_compiled, CompiledExpr, EvaluatorError, EvaluatorOptions};
 use crate::value::JValue;
 
 // ---------------------------------------------------------------------------
@@ -537,7 +537,15 @@ fn run_inner(
                 let n = *arg_count as usize;
                 let start = stack.len().saturating_sub(n);
                 let args: Vec<JValue> = stack.drain(start..).collect();
-                stack.push(call_pure_builtin_by_name(name, &args, data)?);
+                // TODO(Task 9): thread real EvaluatorOptions through run_inner/Vm instead of
+                // this unlimited default — Task 7 is plumbing-only for eval_compiled's call
+                // graph and must not change vm.rs's own behavior yet.
+                stack.push(call_pure_builtin_by_name(
+                    name,
+                    &args,
+                    data,
+                    &EvaluatorOptions::default(),
+                )?);
                 ip += 1;
             }
 
@@ -580,7 +588,14 @@ fn run_inner(
             // ── Fallback ─────────────────────────────────────────────
             Instr::EvalFallback(idx) => {
                 let expr = &fallback_exprs[*idx as usize];
-                stack.push(eval_compiled(expr, data, vars)?);
+                // TODO(Task 9): thread real EvaluatorOptions/start_time through here — see note above.
+                stack.push(eval_compiled(
+                    expr,
+                    data,
+                    vars,
+                    &EvaluatorOptions::default(),
+                    None,
+                )?);
                 ip += 1;
             }
 
