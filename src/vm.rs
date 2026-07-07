@@ -174,10 +174,6 @@ pub(crate) struct Vm<'prog> {
 }
 
 impl<'prog> Vm<'prog> {
-    pub(crate) fn new(prog: &'prog BytecodeProgram) -> Self {
-        Self::with_options(prog, EvaluatorOptions::default())
-    }
-
     /// Construct a `Vm` with guardrail options (timeout/sequence-length; stack
     /// depth is not meaningful here — the VM is an iterative flat-instruction
     /// loop, not native recursion, and self-recursive user lambdas can't
@@ -593,7 +589,10 @@ fn run_inner(
                         }
                         match kept.len() {
                             0 => JValue::Undefined,
-                            1 => kept.pop().unwrap(),
+                            1 => {
+                                check_sequence_length(1, options)?;
+                                kept.pop().unwrap()
+                            }
                             _ => {
                                 check_sequence_length(kept.len(), options)?;
                                 JValue::array(kept)
@@ -749,6 +748,33 @@ mod tests {
         assert!(err.to_string().contains("D2015"), "got: {err}");
     }
 
+    /// Boundary check: `max_sequence_length=0` must raise D2015 even when the
+    /// filtered result is a single element, not just when it has 2+. Before this
+    /// fix, the `1 => kept.pop().unwrap()` singleton-unwrap arm skipped the
+    /// `check_sequence_length` call entirely, so a 1-element result silently
+    /// bypassed a `sequence: 0` cap — inconsistent with the 2+ arm and with the
+    /// range operator / `MapCall`, which already check unconditionally. Mirrors
+    /// upstream: a single-element push against `sequence: 0` still throws there
+    /// too, since `0 + 1 > 0`.
+    #[test]
+    fn test_filter_by_bytecode_raises_d2015_at_zero_with_single_result() {
+        let data: JValue = serde_json::json!({
+            "items": [1, 2, 3]
+        })
+        .into();
+        // Only one item matches `$ = 2`, so `kept.len() == 1` at the point the
+        // guardrail must fire.
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ = 2]");
+        let options = EvaluatorOptions {
+            max_sequence_length: Some(0),
+            ..Default::default()
+        };
+        let err = Vm::with_options(&prog, options)
+            .run(&data, None)
+            .expect_err("expected D2015 for a single-element result against sequence: 0");
+        assert!(err.to_string().contains("D2015"), "got: {err}");
+    }
+
     #[test]
     fn test_filter_by_bytecode_unlimited_options_does_not_raise() {
         let data: JValue = serde_json::json!({
@@ -758,7 +784,7 @@ mod tests {
         let prog = compile_and_assert_uses_filter_by_bytecode("items[$ >= 0]");
         // Default (unlimited) options must not raise — proves the guardrail is
         // opt-in and existing unlimited-usage behavior is unchanged.
-        let result = Vm::new(&prog).run(&data, None);
+        let result = Vm::with_options(&prog, EvaluatorOptions::default()).run(&data, None);
         assert!(result.is_ok(), "expected Ok, got: {result:?}");
     }
 

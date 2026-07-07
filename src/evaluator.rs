@@ -1201,7 +1201,10 @@ fn eval_compiled_inner(
             if was_single {
                 Ok(match result.len() {
                     0 => JValue::Undefined,
-                    1 => result.remove(0),
+                    1 => {
+                        check_sequence_length(1, options)?;
+                        result.remove(0)
+                    }
                     _ => {
                         check_sequence_length(result.len(), options)?;
                         JValue::array(result)
@@ -1735,6 +1738,7 @@ fn compiled_apply_filter(
             if result.is_empty() {
                 Ok(JValue::Undefined)
             } else if result.len() == 1 {
+                check_sequence_length(1, options)?;
                 Ok(result.remove(0))
             } else {
                 check_sequence_length(result.len(), options)?;
@@ -2660,15 +2664,22 @@ pub struct EvaluatorOptions {
     pub max_stack_depth: Option<usize>,
     /// Maximum length of a query-result sequence (map/filter/wildcard/descendants/
     /// keys/lookup/append/spread/each/range/path-mapping). Exceeding it raises D2015.
-    /// Does NOT apply to literal array construction.
+    /// Does NOT currently apply to literal array construction (`MakeArray`/
+    /// `ArrayConstruct`) — NOTE this is a deliberate, temporary divergence from
+    /// upstream, not a match: jsonata-js DOES cap flat/non-nested array literals
+    /// (via `fn.append`'s `createSequence` hook in `evaluateUnary`'s `[` case).
+    /// Deferred until the separate `MakeArray(u16)` truncation bug is fixed (see
+    /// the design spec's "Sequence length → D2015" section).
     pub max_sequence_length: Option<usize>,
 }
 
 /// Checks a constructed query-result sequence's length against the configured
-/// `max_sequence_length` guardrail. Call this ONLY at sites that build a
-/// query-result sequence (map/filter/wildcard/descendants/keys/lookup/append/
-/// spread/each/range/path-mapping) — never at literal array construction
-/// (`[1,2,3]`), matching jsonata-js's `createSequence()` scoping.
+/// `max_sequence_length` guardrail. Call this at sites that build a query-result
+/// sequence (map/filter/wildcard/descendants/keys/lookup/append/spread/each/range/
+/// path-mapping). NOT currently called at literal array construction (`[1,2,3]`) —
+/// unlike upstream jsonata-js, which caps flat/non-nested literals too via
+/// `fn.append`'s `createSequence()` hook. See `EvaluatorOptions::max_sequence_length`
+/// doc comment above for why this is a deliberate, temporary gap.
 pub(crate) fn check_sequence_length(
     len: usize,
     options: &EvaluatorOptions,

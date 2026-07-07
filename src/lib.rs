@@ -70,7 +70,8 @@ pub mod _bench {
 
     /// Execute a compiled program against `data`.
     pub fn run(prog: &CompiledProgram, data: &JValue) -> Result<JValue, EvaluatorError> {
-        crate::vm::Vm::new(&prog.0).run(data, None)
+        crate::vm::Vm::with_options(&prog.0, crate::evaluator::EvaluatorOptions::default())
+            .run(data, None)
     }
 }
 
