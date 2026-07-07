@@ -714,7 +714,25 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p benchmarks/baseline
+          VERSION="${{ needs.validate-version.outputs.version }}"
           git fetch origin benchmark-data
+
+          # If results/v$VERSION.json already exists on benchmark-data, this
+          # version was already benchmarked and recorded by an earlier run -
+          # i.e. this run is a `gh run rerun` (or similar retry) of a release
+          # that already completed, not a genuinely new release. latest.json
+          # at this point holds that earlier run's numbers for the SAME
+          # version/commit, so comparing against it would be v$VERSION vs
+          # v$VERSION on a shared runner: pure noise, not a real signal. This
+          # happened 3 times for v2.1.6 in one session and produced two bogus
+          # "regression" issues (txjmb/jsonata-core#48, #51) before this guard
+          # existed.
+          if git show FETCH_HEAD:results/v${VERSION}.json > /dev/null 2>&1; then
+            echo "already_recorded=true" >> $GITHUB_OUTPUT
+            echo "v${VERSION} was already recorded to benchmark-data by an earlier run - skipping comparison to avoid comparing this version against itself"
+          else
+            echo "already_recorded=false" >> $GITHUB_OUTPUT
+          fi
 
           if git show FETCH_HEAD:results/latest.json > benchmarks/baseline/baseline.json.tmp; then
             mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
@@ -728,7 +746,7 @@ jobs:
 
       - name: Compare with previous release
         id: compare
-        if: steps.baseline.outputs.has_baseline == 'true'
+        if: steps.baseline.outputs.has_baseline == 'true' && steps.baseline.outputs.already_recorded != 'true'
         run: |
           cd benchmarks
           python python/compare.py baseline/baseline.json "${{ steps.run_benchmark.outputs.results_file }}"
