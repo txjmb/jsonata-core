@@ -874,6 +874,17 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
     data_handle = jsonatapy.JsonataData(ecommerce_data)
     data_handle_json = jsonatapy.JsonataData.from_json(json_str)
 
+    # Reuse the JS timing already measured for the identical expression in the
+    # "Realistic Workload" category (same expression text, same 100-product
+    # data) so the pre-converted-data paths get a real "vs JS" speedup instead
+    # of leaving it unsubstantiated. Iteration counts differ between the two
+    # categories, so compare per-iteration rates, not raw totals.
+    js_ms_per_iter_by_expr = {
+        r.expression: r.js_ms / r.iterations
+        for r in suite.results
+        if r.category == "Realistic Workload" and r.js_ms
+    }
+
     for name, expression in expressions:
         compiled = jsonatapy.compile(expression)
 
@@ -923,6 +934,17 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
             f"  evaluate_data_to_json():    {t4:8.2f} ms ({t4 / iterations:.4f} ms/iter)  [{t1 / t4:.1f}x vs dict]"
         )
 
+        js_per_iter = js_ms_per_iter_by_expr.get(expression)
+        handle_speedup = (js_per_iter / (t3 / iterations)) if js_per_iter else None
+        json_speedup = (js_per_iter / (t4 / iterations)) if js_per_iter else None
+        if js_per_iter:
+            js_equiv_ms = js_per_iter * iterations
+            print(
+                f"  JavaScript (equivalent):    {js_equiv_ms:8.2f} ms ({js_per_iter:.4f} ms/iter)"
+            )
+            print(f"    → evaluate_with_data is {handle_speedup:6.2f}x vs JS")
+            print(f"    → evaluate_data_to_json is {json_speedup:6.2f}x vs JS")
+
         # Record as benchmark results for the summary
         suite.results.append(
             BenchmarkResult(
@@ -932,6 +954,8 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
                 data_size="100 products",
                 iterations=iterations,
                 jsonatapy_ms=t3,
+                js_ms=(js_per_iter * iterations) if js_per_iter else None,
+                jsonatapy_speedup=handle_speedup,
             )
         )
         suite.results.append(
@@ -942,6 +966,8 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
                 data_size="100 products",
                 iterations=iterations,
                 jsonatapy_ms=t4,
+                js_ms=(js_per_iter * iterations) if js_per_iter else None,
+                jsonatapy_speedup=json_speedup,
             )
         )
 
