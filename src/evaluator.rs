@@ -7543,6 +7543,14 @@ impl Evaluator {
                     other => vec![other.clone()], // Wrap non-array in array
                 };
 
+                // Pre-check combined size before concatenating, mirroring
+                // jsonata-js's append() (`arg1.length + arg2.length > options.sequence`).
+                let second_len = match second {
+                    JValue::Array(a) => a.len(),
+                    _ => 1,
+                };
+                check_sequence_length(arr.len() + second_len, &self.options)?;
+
                 Ok(functions::array::append(&arr, second)?)
             }
             "reverse" => {
@@ -7804,6 +7812,7 @@ impl Evaluator {
                         } else {
                             let keys: Vec<JValue> =
                                 obj.keys().map(|k| JValue::string(k.clone())).collect();
+                            check_sequence_length(keys.len(), &self.options)?;
                             Ok(unwrap_single(keys))
                         }
                     }
@@ -7826,6 +7835,7 @@ impl Evaluator {
                         if all_keys.is_empty() {
                             Ok(JValue::Null)
                         } else {
+                            check_sequence_length(all_keys.len(), &self.options)?;
                             Ok(unwrap_single(all_keys))
                         }
                     }
@@ -7883,6 +7893,7 @@ impl Evaluator {
                 } else if results.len() == 1 {
                     Ok(results[0].clone())
                 } else {
+                    check_sequence_length(results.len(), &self.options)?;
                     Ok(JValue::array(results))
                 }
             }
@@ -7897,7 +7908,15 @@ impl Evaluator {
                     // Not a container - pass through unchanged (e.g. so $string() still
                     // sees the function value and applies its own function->"" rule).
                     lambda @ (JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(lambda.clone()),
-                    JValue::Object(obj) => Ok(functions::object::spread(obj)?),
+                    JValue::Object(obj) => {
+                        // functions::object::spread() always returns an array with one
+                        // element per key (mirrors jsonata-js's push-per-key loop through
+                        // this.createSequence()), so it needs the same cap as the
+                        // array-fanout branch below and as the "keys" arm's single-object
+                        // branch.
+                        check_sequence_length(obj.len(), &self.options)?;
+                        Ok(functions::object::spread(obj)?)
+                    }
                     JValue::Array(arr) => {
                         // Spread each object in the array
                         let mut result = Vec::new();
@@ -7919,6 +7938,7 @@ impl Evaluator {
                                 other => result.push(other.clone()),
                             }
                         }
+                        check_sequence_length(result.len(), &self.options)?;
                         Ok(JValue::array(result))
                     }
                     // Non-objects are returned unchanged
@@ -7990,6 +8010,7 @@ impl Evaluator {
                                             result.push(mapped);
                                         }
                                     }
+                                    check_sequence_length(result.len(), &self.options)?;
                                     return Ok(JValue::array(result));
                                 }
                             }
@@ -8025,6 +8046,7 @@ impl Evaluator {
                                                     result.push(mapped);
                                                 }
                                             }
+                                            check_sequence_length(result.len(), &self.options)?;
                                             return Ok(JValue::array(result));
                                         }
                                     }
@@ -8059,6 +8081,7 @@ impl Evaluator {
                                 result.push(mapped);
                             }
                         }
+                        check_sequence_length(result.len(), &self.options)?;
                         Ok(JValue::array(result))
                     }
                     JValue::Null => Ok(JValue::Null),
@@ -8133,6 +8156,7 @@ impl Evaluator {
                                     return Ok(JValue::Undefined);
                                 }
                             }
+                            check_sequence_length(result.len(), &self.options)?;
                             return Ok(JValue::array(result));
                         }
                     }
@@ -8168,6 +8192,7 @@ impl Evaluator {
                                             return Ok(JValue::Undefined);
                                         }
                                     }
+                                    check_sequence_length(result.len(), &self.options)?;
                                     return Ok(JValue::array(result));
                                 }
                             }
@@ -8212,6 +8237,7 @@ impl Evaluator {
                     }
                 }
 
+                check_sequence_length(result.len(), &self.options)?;
                 Ok(JValue::array(result))
             }
 
@@ -8465,6 +8491,7 @@ impl Evaluator {
                                 result.push(fn_result);
                             }
                         }
+                        check_sequence_length(result.len(), &self.options)?;
                         Ok(JValue::array(result))
                     }
                     JValue::Null => Ok(JValue::Null),

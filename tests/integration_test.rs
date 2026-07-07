@@ -924,3 +924,77 @@ fn test_bare_single_step_path_over_root_array_raises_d2015() {
     let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
     assert!(err.to_string().contains("D2015"), "got: {err}");
 }
+
+/// $map's generic (non-compiled-fast-path) construction must respect
+/// max_sequence_length. Using `$x.*` as the lambda body (not compilable, per
+/// try_compile_expr_with_allowed_vars's lack of a Wildcard arm) forces this
+/// through the generic per-element loop, not the CompiledExpr fast path.
+#[test]
+fn test_map_generic_path_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "items": (0..1000).map(|i| serde_json::json!({"a": i})).collect::<Vec<_>>()
+    }).into();
+    let ast = parse("$map(items, function($x){$x.*})").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// $map's CompiledExpr fast path (inline lambda, single param, compilable
+/// arithmetic body) must ALSO respect max_sequence_length -- this is a
+/// distinct return point from the generic loop above, and a prior task
+/// (Task 5) found a real bug where only one of several return points was
+/// instrumented. `$x*2` is compilable per try_compile_expr_with_allowed_vars.
+#[test]
+fn test_map_compiled_fast_path_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "items": (0..1000).map(|i| serde_json::json!(i)).collect::<Vec<_>>()
+    }).into();
+    let ast = parse("$map(items, function($x){$x*2})").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// $filter's generic (non-compiled-fast-path) loop must respect
+/// max_sequence_length. `$x.*` is not compilable, forcing the generic path.
+#[test]
+fn test_filter_generic_path_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "items": (0..1000).map(|i| serde_json::json!({"a": i})).collect::<Vec<_>>()
+    }).into();
+    let ast = parse("$filter(items, function($x){$x.* != null})").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
+
+/// $filter's CompiledExpr fast path (inline lambda, single param, compilable
+/// comparison body) must ALSO respect max_sequence_length -- a distinct
+/// return point from the generic loop above.
+#[test]
+fn test_filter_compiled_fast_path_raises_d2015() {
+    let data: JValue = serde_json::json!({
+        "items": (0..1000).map(|i| serde_json::json!(i)).collect::<Vec<_>>()
+    }).into();
+    let ast = parse("$filter(items, function($x){$x >= 0})").unwrap();
+    let options = EvaluatorOptions {
+        max_sequence_length: Some(10),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    let err = evaluator.evaluate(&ast, &data).expect_err("expected D2015");
+    assert!(err.to_string().contains("D2015"), "got: {err}");
+}
