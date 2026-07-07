@@ -20,13 +20,27 @@ Includes test categories:
 
 import gc
 import json
+import os
+import platform
 import subprocess
+import sys
 import time
 import tracemalloc
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+
+def _describe_platform() -> str:
+    """Describe the environment actually running the benchmark, not wherever
+    a later doc-regeneration script happens to be invoked from."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        runner_os = os.environ.get("RUNNER_OS", platform.system())
+        runner_arch = os.environ.get("RUNNER_ARCH", platform.machine())
+        return f"GitHub Actions ({runner_os}, {runner_arch})"
+    return f"{platform.system()} {platform.release()} on {platform.machine()}"
+
 
 # Try to import all available implementations
 try:
@@ -56,6 +70,7 @@ class BenchmarkResult:
     iterations: int
     jsonatapy_ms: float | None = None
     jsonatapy_json_ms: float | None = None
+    jsonatapy_dict_ms: float | None = None
     js_ms: float | None = None
     jsonata_python_ms: float | None = None
     jsonata_rs_ms: float | None = None
@@ -681,6 +696,8 @@ class BenchmarkSuite:
 
         data = {
             "timestamp": datetime.now().isoformat(),
+            "platform": _describe_platform(),
+            "python_version": sys.version.split()[0],
             "implementations": {
                 "jsonatapy": JSONATAPY_AVAILABLE,
                 "javascript": self.node_available,
@@ -954,6 +971,7 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
                 data_size="100 products",
                 iterations=iterations,
                 jsonatapy_ms=t3,
+                jsonatapy_dict_ms=t1,
                 js_ms=(js_per_iter * iterations) if js_per_iter else None,
                 jsonatapy_speedup=handle_speedup,
             )
@@ -966,6 +984,7 @@ def _run_path_comparison(ecommerce_data: dict, suite: BenchmarkSuite):
                 data_size="100 products",
                 iterations=iterations,
                 jsonatapy_ms=t4,
+                jsonatapy_dict_ms=t1,
                 js_ms=(js_per_iter * iterations) if js_per_iter else None,
                 jsonatapy_speedup=json_speedup,
             )
