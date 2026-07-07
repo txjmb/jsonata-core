@@ -127,21 +127,22 @@ cargo bench --no-default-features --features simd
 `jsonatapy` is the fastest Python JSONata implementation by a large margin, and faster than
 the JavaScript reference implementation for most pure expression workloads:
 
-| Category | vs JavaScript (V8) | vs jsonata-python |
-|----------|--------------------|-------------------|
-| Simple paths | **2.6–9.7x faster** | ~10,000–50,000x faster |
-| Complex transformations | **6.7–17.6x faster** | ~11,000–59,000x faster |
-| String operations | **10.5–17.0x faster** | ~23,000–50,000x faster |
-| Higher-order functions | **13.0–18.7x faster** | ~2,900–4,000x faster |
-| Deep nesting | 3.6x faster – 1.6x slower | ~1,300–8,100x faster |
-| Array operations | **1.5–7.0x faster**, mapping ~2–2.4x slower | ~180–10,500x faster |
-| Realistic workloads (raw dict) | Mixed: 2.0x slower – 2.4x faster | ~170–380x faster |
+| Category | vs JavaScript (V8) |
+|----------|--------------------|
+| Simple paths | **2.6–9.7x faster** |
+| Complex transformations | **6.7–17.6x faster** |
+| String operations | **10.5–17.0x faster** |
+| Higher-order functions | **13.0–18.7x faster** |
+| Deep nesting | 3.6x faster – 1.6x slower |
+| Array operations | **1.5–7.0x faster**, mapping ~2–2.4x slower |
+| Realistic workloads (raw dict) | Mixed: 2.0x slower – 2.4x faster |
 
-`jsonata-python` (the `jsonata` PyPI package) wraps the real `jsonata.js` library in an embedded
-Duktape engine and offers no pre-compilation API; the consistent ~12–18ms floor per call
-regardless of expression complexity suggests it effectively re-parses and recompiles the
-library from scratch on every call, with no caching between calls — which would explain the
-multiple-orders-of-magnitude gap.
+`jsonatapy` is also dramatically faster than `jsonata-python` (the `jsonata` PyPI package) across
+every category — by multiple orders of magnitude for one-off calls via its `transform()`
+convenience function, since that re-bootstraps an embedded Duktape JS engine (and re-loads the
+`jsonata.js` library into it) on every call with no caching. Reusing its documented `Context`
+object instead substantially narrows the gap, though jsonatapy still wins clearly. See
+[Performance docs](docs/performance.md) for measured numbers.
 
 ### The Python boundary
 
