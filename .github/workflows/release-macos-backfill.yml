@@ -97,7 +97,13 @@ jobs:
       - name: Create venv and install wheel
         run: |
           uv venv --python ${{ matrix.python }} .venv
-          uv pip install --python .venv/bin/python --find-links dist jsonatapy pytest pytest-xdist
+          # --reinstall (implies --refresh): this runner's uv cache persists
+          # across jobs and is keyed by filename only for --find-links
+          # sources, so without this flag a wheel rebuilt under the same
+          # version/interpreter/platform can silently lose to a stale cache
+          # entry from an earlier run -- see the matching comment in
+          # release.yml (issue #45).
+          uv pip install --python .venv/bin/python --reinstall --find-links dist jsonatapy pytest pytest-xdist
           .venv/bin/python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Run tests
