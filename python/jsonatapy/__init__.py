@@ -178,9 +178,7 @@ class JsonataExpression:
             >>> print(len(result))
             1
         """
-        return self._expr.evaluate(
-            data, bindings, timeout, max_stack_depth, max_sequence_length
-        )
+        return self._expr.evaluate(data, bindings, timeout, max_stack_depth, max_sequence_length)
 
     def evaluate_json(
         self,

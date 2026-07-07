@@ -135,16 +135,12 @@ class TestSequenceLengthD2015:
         data = {"items": list(range(1000))}
         # Compilable lambda body -> CompiledExpr::MapCall fast path
         with pytest.raises(ValueError, match="D2015"):
-            jsonatapy.evaluate(
-                "$map(items, function($x){$x*2})", data, max_sequence_length=10
-            )
+            jsonatapy.evaluate("$map(items, function($x){$x*2})", data, max_sequence_length=10)
         # Non-compilable lambda body (`$x.*` has no CompiledExpr::Wildcard arm)
         # -> generic tree-walker loop
         data2 = {"items": [{"a": i} for i in range(1000)]}
         with pytest.raises(ValueError, match="D2015"):
-            jsonatapy.evaluate(
-                "$map(items, function($x){$x.*})", data2, max_sequence_length=10
-            )
+            jsonatapy.evaluate("$map(items, function($x){$x.*})", data2, max_sequence_length=10)
 
     def test_multistep_filtered_path_raises_d2015_eval_fallback(self):
         # `items[filter].sub.v` has >1 field-path step AND a filter on the
@@ -172,16 +168,9 @@ class TestSequenceLengthD2015:
         # fix reverted). `flag=true` is a plain equality comparison, which
         # *does* compile (`CompiledExpr::Compare`), so this correctly routes
         # through `EvalFallback`/`compiled_field_step`.
-        data = {
-            "items": [
-                {"flag": True, "sub": [{"v": i} for i in range(1000)]}
-                for _ in range(3)
-            ]
-        }
+        data = {"items": [{"flag": True, "sub": [{"v": i} for i in range(1000)]} for _ in range(3)]}
         with pytest.raises(ValueError, match="D2015"):
-            jsonatapy.evaluate(
-                "items[flag=true].sub.v", data, max_sequence_length=10
-            )
+            jsonatapy.evaluate("items[flag=true].sub.v", data, max_sequence_length=10)
 
     def test_filter_raises_d2015(self):
         data = {"items": list(range(1000))}
