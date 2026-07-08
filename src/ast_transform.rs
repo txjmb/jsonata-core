@@ -184,10 +184,44 @@ fn coded(code: &'static str, message: impl Into<String>) -> AstTransformError {
 // tests/integration_test.rs) to be comfortably safe on a 1MB-stack thread
 // (matching Windows' default, the same constraint `evaluate_internal`'s
 // analogous guard in evaluator.rs was built for). `stacker::maybe_grow`
-// below is the actual backstop against a real native-stack overflow; this
-// ceiling exists so pathological input fails gracefully well before that
-// backstop would ever need to trigger.
+// below helps DURING this file's own guarded traversal, but it is NOT the
+// only thing keeping this ceiling load-bearing:
+//
+// A tree that successfully passes this guard (returns `Ok` all the way out
+// of `parser::parse()`) is handed to whatever caller holds it next (the
+// evaluator, the Python `JsonataExpression`, a test's local variable) and
+// is eventually dropped there via Rust's ORDINARY recursive `Drop` glue --
+// NOT the iterative teardown this file uses on its own bail-out path (see
+// `push_ast_node_children`'s doc comment below). Confirmed empirically this
+// session: simply constructing then normally-dropping a `Box<AstNode>`
+// chain somewhere between ~5,000 and ~20,000 levels deep overflows a
+// 1MB-stack thread, with ZERO ast_transform code involved. This ceiling
+// (1000, i.e. at most ~1000 levels of ACTUAL AST nesting, since cycle 1
+// costs >=1 depth unit per level) stays far enough below that downstream
+// threshold that any successfully-returned tree is safe for a caller to
+// drop normally. RAISING this ceiling without separately re-verifying the
+// downstream-drop threshold would silently reintroduce a native-stack
+// crash on the SUCCESS path -- a different crash than the one this task
+// fixes, and not exercised by either test above (one only exercises the
+// bail path at n=200,000; the other only exercises a SHALLOW successful
+// tree, not a near-ceiling one).
 const MAX_TRANSFORM_DEPTH: usize = 1000;
+// Same ceiling as MAX_TRANSFORM_DEPTH, for a DIFFERENT reason than "2x
+// headroom" might suggest: cycle 1 costs >=1 depth unit per level of ACTUAL
+// AST nesting (2 units for a Binary/Unary/etc. level via the
+// transform_node+transform_children pair, but exactly 1 unit for a level
+// that's pure nested blocks/parens, e.g. `((((...))))`, which only ever
+// enters transform_node's Block arm -- no transform_children hop). For
+// THAT shape, this counter and MAX_TRANSFORM_DEPTH are checking the exact
+// same per-level cost, so a tree that just barely passes cycle 1 (depth
+// ~1000) can arrive at substitute_labels already ~1000 deep too -- zero
+// margin, not 2x. It's still safe (substitute_labels's own bail-out lets
+// its `node` drop normally, unlike cycle 1/3's iterative-teardown bail
+// path, but by the time cycle 2 runs, cycle 1 already guaranteed the tree
+// is <= this same ceiling deep, well below the ~5,000-20,000-level
+// downstream-drop threshold noted above) -- just not defended by a margin,
+// so don't raise this independently of MAX_TRANSFORM_DEPTH without
+// re-checking this reasoning.
 const MAX_LABEL_SUBSTITUTION_DEPTH: usize = 1000;
 
 // Same constants `evaluate_internal` (src/evaluator.rs) uses for its
