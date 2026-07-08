@@ -4,6 +4,150 @@
 // model: instead of mutating tree nodes in place, this consumes the raw
 // tree and rebuilds an enriched one with ancestor/tuple metadata resolved.
 
+// Recursion-depth safety (added: see docs/superpowers/plans/2026-07-07-parser-depth-and-u16-truncation-fixes-plan.md):
+// `parser::parse()` (src/parser.rs:1730) unconditionally pipes every parse
+// through `resolve_ancestry` below, so a deeply-nested input expression can
+// overflow the native stack here even though the raw Pratt parse itself
+// completed successfully -- confirmed empirically: a 200,000-term
+// left-nested arithmetic chain (`1+1+1+...`) SIGABRTs ("stack overflow")
+// via the full `parser::parse()` entry point, in this file, not the parser.
+//
+// There are THREE recursive pieces in this file, but only TWO independent
+// stack budgets: data flows one-way from resolve_ancestry into
+// transform_node/transform_children/transform_path_steps/
+// migrate_binding_markers ("cycle 1"), and separately into substitute_labels
+// ("cycle 2", a second full-tree walk that only starts after cycle 1 has
+// fully unwound -- see resolve_ancestry). walk_backward/seek_parent_step/
+// seek_parent_wrapped ("cycle 3") is reached FROM cycle 1 (transform_path_
+// steps's predicate/own-pending resolution, and transform_children's Sort
+// arm) while cycle 1's frames are still LIVE on the native stack -- it nests
+// ON TOP of cycle 1's depth rather than running after it -- so cycle 1 and
+// cycle 3 share one stack budget and their depths ADD, not two independent
+// caps. A depth guard that gives cycle 1 and cycle 3 each their own
+// independent counter capped at the native-safe limit would still allow
+// cap1 + cap3 frames live simultaneously and overflow; Task 2 needs ONE
+// counter threaded through cycle 1 AND cycle 3 together, and a SEPARATE
+// counter (reset to 0) for cycle 2 (substitute_labels), which only runs
+// after cycle 1/3's frames are gone. Guard all of the functions listed
+// below regardless of which cycle they're in -- checking depth in only one
+// cycle's functions is the exact "Task 5 pattern" (a check added at only
+// one of several recursive entry points) this task exists to avoid.
+//
+// (1) Main tree-transform mutual recursion -- depth scales with the general
+//     AST's nesting depth (binary op chains, block/array/function-arg
+//     nesting, parenthesized sub-paths used as a path step's node, etc.):
+//   - transform_node (:558) -- recurses directly (Path -> transform_path_steps;
+//     Block -> transform_node per element, a loop, but each iteration's call
+//     itself recurses; Binary{FocusBind/IndexBind} -> transform_node(lhs));
+//     for every other node kind, delegates to transform_children (still the
+//     same cycle). This is the actual site hit by the confirmed arithmetic-
+//     chain repro (`1+1+1+...` has no Path/`%` at all -- it's pure nested
+//     Binary, handled by transform_node's `other => transform_children(...)`
+//     fallback).
+//   - transform_children (:653) -- recurses via transform_node on every
+//     child of every composite node type (Binary lhs/rhs, Unary operand,
+//     Array/Function/Call-args/Object/ObjectTransform/Sort/Transform/
+//     ArrayGroup elements, Conditional branches, Lambda body, Predicate/
+//     FunctionApplication inner). This is the other function actually hit
+//     by the arithmetic-chain repro (Binary's lhs/rhs recursion).
+//   - transform_path_steps (:933) -- does NOT recurse on the flat
+//     `Vec<PathStep>` itself (that's a `for` loop over the steps -- bounded
+//     iteration, not stack depth; confirmed empirically in Step 3 below: a
+//     50,000-step flat dot-path parses fine). It DOES feed back into the
+//     cycle per-step: calls `migrate_binding_markers(step, ...)` for every
+//     step, and separately calls `transform_node` on each filter-stage
+//     expression. Depth here scales with how deeply a single step's OWN
+//     node is nested (e.g. a parenthesized sub-path `(Order.Product)` used
+//     as one step, itself containing another Path), not with the number of
+//     steps in the flat list.
+//   - migrate_binding_markers (:1224) -- not itself self-recursive (one
+//     match, each arm calls transform_node/splice_marker_steps once), but
+//     it's the edge that closes the transform_path_steps -> transform_node
+//     cycle, so it needs to participate in whatever depth-counter scheme
+//     Task 2 uses (thread it through, even if it never increments/checks
+//     independently of the transform_node call it makes).
+//
+// (2) substitute_labels (:273) -- self-recursive only (never calls
+//     transform_node/transform_children/transform_path_steps), structurally
+//     mirroring transform_children's per-node-type dispatch (every
+//     composite node type recurses into every child). Runs as a SECOND,
+//     separate full-tree walk after transform_node returns (see
+//     resolve_ancestry), so it needs its own depth counter/reset -- reusing
+//     a counter left over (at whatever depth) from pass (1) would be wrong.
+//
+// (3) Ancestor-seek recursion, reached from pass (1) (transform_path_steps's
+//     predicate/own-pending resolution loop calling resolve_predicate_slot/
+//     walk_backward, and transform_children's Sort arm calling
+//     walk_backward directly) while pass (1)'s own frames are still live --
+//     it never calls back into transform_node/transform_children/
+//     transform_path_steps (a one-way bridge, not a mutual cycle with (1)),
+//     but because it nests ON TOP of (1)'s live stack rather than running
+//     after it unwinds, (1) and (3) share ONE stack budget (see the note
+//     above the fold -- their depths add). Depth here scales with how many
+//     levels of parenthesized sub-path nesting (`(...)` wrapping another
+//     `(...)`) a `%` reference has to walk through, not with path step
+//     count or general AST depth:
+//   - walk_backward (:1056) -- its own "while level > 0" loop walking
+//     backward through one `&mut [PathStep]` is bounded iteration (not a
+//     stack risk regardless of the slice's length), but it calls
+//     seek_parent_step per candidate step, which can call back into
+//     walk_backward (via seek_parent_wrapped's Path case) -- indirect
+//     recursion.
+//   - seek_parent_step (:1121) -- recurses via seek_parent_wrapped for the
+//     FunctionApplication and Block step-node cases (a parenthesized
+//     sub-path used as a step).
+//   - seek_parent_wrapped (:1191) -- recurses via walk_backward (Path case)
+//     AND directly calls itself (Block case, recursing into the block's
+//     last expression) -- e.g. doubly (or N-ly) nested parens.
+//   - resolve_predicate_slot (:1028) -- NOT part of this cycle itself (no
+//     self-loop; called once per predicate slot from transform_path_steps's
+//     loop over a bounded number of stages), but forwards into it
+//     (seek_parent_step / walk_backward), so its own frame sits at the
+//     base of chain (3) each time -- no guard needed in this function
+//     itself, but Task 2 should not assume the chain "starts" at
+//     walk_backward/seek_parent_step without going through here first in
+//     the predicate case.
+//
+// Functions confirmed NOT to need guarding (either non-recursive, or their
+// only "recursion" is bounded iteration over a Vec/HashMap-chain, not stack
+// depth):
+//   - coded (:161), AncestryState::new (:207), AncestryState::fresh_label
+//     (:214), Transformed::leaf (:243) -- trivial constructors/helpers, no
+//     recursive or child-node-walking calls at all.
+//   - AncestryState::canonical (:224) -- a `while let Some(...)` loop
+//     following an alias chain in a HashMap; iteration, not recursion, and
+//     the doc comment right above it already notes chains longer than one
+//     hop shouldn't arise in practice regardless.
+//   - apply_marker_to_step (:419), check_focus_bind_target (:454) -- single
+//     match/if-chain over already-computed values, no calls back into any
+//     tree-walking function.
+//   - splice_marker_steps (:486) -- loops over a `Vec<PathStep>` produced by
+//     an already-fully-transformed `Transformed` (its `steps`/`pending`
+//     inputs were recursed into by the CALLER before this runs), and over a
+//     small fixed-shape `while` popping trailing `Predicate` pseudo-steps;
+//     calls only check_focus_bind_target/apply_marker_to_step, never
+//     transform_node or itself.
+//   - wrap_marker_as_path (:545) -- calls splice_marker_steps once; no
+//     recursion, no self-loop.
+//   - resolve_ancestry (:252) -- the pass's entry point: calls
+//     transform_node exactly once, then substitute_labels exactly once.
+//     Not itself part of either cycle (never re-entered from within the
+//     tree walk it kicks off), so it doesn't need a depth CHECK, but Task 2
+//     should initialize/reset each of the three counters above here (one
+//     for cycle (1)+(shared edge into (3)), one for substitute_labels).
+//
+// Step 3 sanity check performed (throwaway test, not committed): a
+// 200,000-step flat dot-path (`a.a.a...a`) -- same N as the crashing
+// arithmetic chain, for a clean apples-to-apples Ok-vs-crash comparison --
+// parsed via the FULL `parser::parse()` entry point returns `Ok`
+// immediately (iteration in transform_path_steps's `for step in steps`
+// loop, not recursion), while the 200,000-term arithmetic chain (`1+1+1+
+// ...`) still SIGABRTs ("stack overflow") via the same full `parser::
+// parse()` entry point in the same run -- confirming the root cause
+// identified in the prior session is still live in current code, and that
+// it's specifically recursion-on-nesting-depth (transform_children's
+// Binary arm), not merely "large input," that triggers it.
+
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
 use std::collections::HashMap;
 use thiserror::Error;
