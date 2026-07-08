@@ -851,10 +851,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#evaluateexpression-data-bindingsnone" class="md-nav__link">
+  <a href="#evaluateexpression-data-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        evaluate(expression, data, bindings=None)
+        evaluate(expression, data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)
       
     </span>
   </a>
@@ -862,10 +862,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#compileexpression" class="md-nav__link">
+  <a href="#compileexpression-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        compile(expression)
+        compile(expression, *, timeout=None, max_stack_depth=None, max_sequence_length=None)
       
     </span>
   </a>
@@ -890,10 +890,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#evaluatedata-bindingsnone" class="md-nav__link">
+  <a href="#evaluatedata-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        evaluate(data, bindings=None)
+        evaluate(data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)
       
     </span>
   </a>
@@ -901,10 +901,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#evaluate_jsonjson_str-bindingsnone" class="md-nav__link">
+  <a href="#evaluate_jsonjson_str-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        evaluate_json(json_str, bindings=None)
+        evaluate_json(json_str, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)
       
     </span>
   </a>
@@ -952,6 +952,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guardrails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guardrails
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1555,6 +1566,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1757,10 +1796,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#evaluateexpression-data-bindingsnone" class="md-nav__link">
+  <a href="#evaluateexpression-data-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        evaluate(expression, data, bindings=None)
+        evaluate(expression, data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)
       
     </span>
   </a>
@@ -1768,10 +1807,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#compileexpression" class="md-nav__link">
+  <a href="#compileexpression-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        compile(expression)
+        compile(expression, *, timeout=None, max_stack_depth=None, max_sequence_length=None)
       
     </span>
   </a>
@@ -1796,10 +1835,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#evaluatedata-bindingsnone" class="md-nav__link">
+  <a href="#evaluatedata-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        evaluate(data, bindings=None)
+        evaluate(data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)
       
     </span>
   </a>
@@ -1807,10 +1846,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#evaluate_jsonjson_str-bindingsnone" class="md-nav__link">
+  <a href="#evaluate_jsonjson_str-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" class="md-nav__link">
     <span class="md-ellipsis">
       
-        evaluate_json(json_str, bindings=None)
+        evaluate_json(json_str, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)
       
     </span>
   </a>
@@ -1858,6 +1897,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guardrails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guardrails
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1938,14 +1988,21 @@
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">bindings</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
-<h3 id="evaluateexpression-data-bindingsnone"><code>evaluate(expression, data, bindings=None)</code><a class="headerlink" href="#evaluateexpression-data-bindingsnone" title="Permanent link">&para;</a></h3>
+<h3 id="evaluateexpression-data-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone"><code>evaluate(expression, data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)</code><a class="headerlink" href="#evaluateexpression-data-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" title="Permanent link">&para;</a></h3>
 <p>Compile and evaluate a JSONata expression in one step.</p>
 <p><strong>Parameters:</strong>
 - <code>expression</code> (str): JSONata query/transformation expression
 - <code>data</code> (Any): Data to query (typically dict or list)
-- <code>bindings</code> (Optional[Dict[str, Any]]): Optional variable bindings</p>
+- <code>bindings</code> (Optional[Dict[str, Any]]): Optional variable bindings
+- <code>timeout</code> (Optional[int]): Maximum evaluation time in milliseconds. Raises <code>ValueError</code>
+  with a <code>D1012</code> code on timeout. Default <code>None</code> (unlimited). See <a href="#guardrails">Guardrails</a>.
+- <code>max_stack_depth</code> (Optional[int]): Maximum recursion stack depth. Raises <code>ValueError</code>
+  with a <code>D1011</code> code when exceeded. Default <code>None</code> (unlimited).
+- <code>max_sequence_length</code> (Optional[int]): Maximum length of a query-result sequence
+  (<code>$map</code>/<code>$filter</code>/wildcards/descendants/etc). Raises <code>ValueError</code> with a <code>D2015</code> code
+  when exceeded. Default <code>None</code> (unlimited).</p>
 <p><strong>Returns:</strong> <code>Any</code> - Result of evaluating the expression</p>
-<p><strong>Raises:</strong> <code>ValueError</code> - If parsing or evaluation fails</p>
+<p><strong>Raises:</strong> <code>ValueError</code> - If parsing or evaluation fails, or a guardrail is exceeded</p>
 <p><strong>Example:</strong>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;Alice&quot;</span><span class="p">,</span> <span class="s2">&quot;age&quot;</span><span class="p">:</span> <span class="mi">30</span><span class="p">}</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
@@ -1960,10 +2017,15 @@
 </span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># &quot;Hello!&quot;</span>
 </span></code></pre></div></p>
 <p><strong>Note:</strong> For repeated evaluations with the same expression, use <code>compile()</code> for better performance.</p>
-<h3 id="compileexpression"><code>compile(expression)</code><a class="headerlink" href="#compileexpression" title="Permanent link">&para;</a></h3>
+<h3 id="compileexpression-timeoutnone-max_stack_depthnone-max_sequence_lengthnone"><code>compile(expression, *, timeout=None, max_stack_depth=None, max_sequence_length=None)</code><a class="headerlink" href="#compileexpression-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" title="Permanent link">&para;</a></h3>
 <p>Compile a JSONata expression for repeated evaluation.</p>
 <p><strong>Parameters:</strong>
-- <code>expression</code> (str): JSONata query/transformation expression</p>
+- <code>expression</code> (str): JSONata query/transformation expression
+- <code>timeout</code> (Optional[int]): Default max evaluation time in milliseconds for all
+  <code>evaluate*()</code> calls on this expression (can be overridden per-call). See <a href="#guardrails">Guardrails</a>.
+- <code>max_stack_depth</code> (Optional[int]): Default max recursion stack depth (can be overridden per-call).
+- <code>max_sequence_length</code> (Optional[int]): Default max query-result sequence length
+  (can be overridden per-call).</p>
 <p><strong>Returns:</strong> <code>JsonataExpression</code> - Compiled expression object</p>
 <p><strong>Raises:</strong> <code>ValueError</code> - If expression cannot be parsed</p>
 <p><strong>Example:</strong>
@@ -1974,16 +2036,22 @@
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">data2</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;orders&quot;</span><span class="p">:</span> <span class="p">[{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;B&quot;</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mi">50</span><span class="p">}]}</span>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">result2</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data2</span><span class="p">)</span>  <span class="c1"># []</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># With a compile-time default guardrail</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$sum(items.price)&quot;</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span>
 </span></code></pre></div></p>
 <h2 id="jsonataexpression-class">JsonataExpression Class<a class="headerlink" href="#jsonataexpression-class" title="Permanent link">&para;</a></h2>
 <p>Compiled JSONata expression that can be evaluated multiple times.</p>
-<h3 id="evaluatedata-bindingsnone"><code>evaluate(data, bindings=None)</code><a class="headerlink" href="#evaluatedata-bindingsnone" title="Permanent link">&para;</a></h3>
+<h3 id="evaluatedata-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone"><code>evaluate(data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)</code><a class="headerlink" href="#evaluatedata-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" title="Permanent link">&para;</a></h3>
 <p>Evaluate the compiled expression against data.</p>
 <p><strong>Parameters:</strong>
 - <code>data</code> (Any): Data to query (typically dict or list)
-- <code>bindings</code> (Optional[Dict[str, Any]]): Optional variable bindings</p>
+- <code>bindings</code> (Optional[Dict[str, Any]]): Optional variable bindings
+- <code>timeout</code>, <code>max_stack_depth</code>, <code>max_sequence_length</code> (Optional[int]): Per-call guardrail
+  overrides — see <code>compile()</code> above and <a href="#guardrails">Guardrails</a>. Each overrides any
+  default set at compile time, for this call only.</p>
 <p><strong>Returns:</strong> <code>Any</code> - Result of evaluation</p>
-<p><strong>Raises:</strong> <code>ValueError</code> - If evaluation fails</p>
+<p><strong>Raises:</strong> <code>ValueError</code> - If evaluation fails, or a guardrail is exceeded</p>
 <p><strong>Example:</strong>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$uppercase(name)&quot;</span><span class="p">)</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
@@ -2005,13 +2073,15 @@
 - string → <code>str</code>
 - array → <code>list</code>
 - object → <code>dict</code></p>
-<h3 id="evaluate_jsonjson_str-bindingsnone"><code>evaluate_json(json_str, bindings=None)</code><a class="headerlink" href="#evaluate_jsonjson_str-bindingsnone" title="Permanent link">&para;</a></h3>
+<h3 id="evaluate_jsonjson_str-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone"><code>evaluate_json(json_str, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)</code><a class="headerlink" href="#evaluate_jsonjson_str-bindingsnone-timeoutnone-max_stack_depthnone-max_sequence_lengthnone" title="Permanent link">&para;</a></h3>
 <p>Evaluate with JSON string input/output for maximum performance.</p>
 <p><strong>Parameters:</strong>
 - <code>json_str</code> (str): Input data as JSON string
-- <code>bindings</code> (Optional[Dict[str, Any]]): Optional variable bindings</p>
+- <code>bindings</code> (Optional[Dict[str, Any]]): Optional variable bindings
+- <code>timeout</code>, <code>max_stack_depth</code>, <code>max_sequence_length</code> (Optional[int]): Per-call guardrail
+  overrides — see <a href="#guardrails">Guardrails</a>.</p>
 <p><strong>Returns:</strong> <code>str</code> - Result as JSON string</p>
-<p><strong>Raises:</strong> <code>ValueError</code> - If JSON parsing or evaluation fails</p>
+<p><strong>Raises:</strong> <code>ValueError</code> - If JSON parsing or evaluation fails, or a guardrail is exceeded</p>
 <p><strong>Example:</strong>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
@@ -2036,27 +2106,75 @@
 <p>JSONata specification version supported.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">print</span><span class="p">(</span><span class="n">jsonatapy</span><span class="o">.</span><span class="n">__jsonata_version__</span><span class="p">)</span>  <span class="c1"># &quot;2.1.0&quot;</span>
 </span></code></pre></div>
+<h2 id="guardrails">Guardrails<a class="headerlink" href="#guardrails" title="Permanent link">&para;</a></h2>
+<p><code>compile()</code>, <code>JsonataExpression.compile()</code>, and every <code>evaluate*()</code> method accept three optional
+keyword-only arguments that protect against runaway or adversarial expressions:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Limits</th>
+<th>Error code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>timeout</code></td>
+<td>Max evaluation time, in milliseconds</td>
+<td><code>D1012</code></td>
+</tr>
+<tr>
+<td><code>max_stack_depth</code></td>
+<td>Max recursion depth (e.g. recursive lambdas)</td>
+<td><code>D1011</code></td>
+</tr>
+<tr>
+<td><code>max_sequence_length</code></td>
+<td>Max length of a query-result sequence (<code>$map</code>/<code>$filter</code>/wildcards/descendants/etc)</td>
+<td><code>D2015</code></td>
+</tr>
+</tbody>
+</table>
+<p>All three default to <code>None</code> (unlimited), matching behavior with no guardrails configured. Set
+them at <code>compile()</code> time as defaults for every subsequent <code>evaluate*()</code> call, or pass them to an
+individual <code>evaluate*()</code> call to override the compile-time default for that call only:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Compile-time default</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;$sum(items.price)&quot;</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">max_sequence_length</span><span class="o">=</span><span class="mi">1_000_000</span><span class="p">)</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># Per-call override</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">5000</span><span class="p">)</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># Raised on violation</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="k">try</span><span class="p">:</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;($inf := function(){$inf()}; $inf())&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">100</span><span class="p">)</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>  <span class="c1"># D1012: Evaluation timeout after 100 milliseconds. Check for infinite loop</span>
+</span></code></pre></div>
+<p>See <a href="../error-handling/#guardrail-errors">Guardrail Errors</a> for the full list of error codes and
+messages.</p>
 <h2 id="error-handling">Error Handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h2>
 <p>All functions raise <code>ValueError</code> with descriptive messages on errors.</p>
 <p><strong>Parse Error:</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">try</span><span class="p">:</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;invalid [[ syntax&quot;</span><span class="p">)</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Parse error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">try</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;invalid [[ syntax&quot;</span><span class="p">)</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Parse error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div></p>
 <p><strong>Evaluation Error:</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">try</span><span class="p">:</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$undefined_func()&quot;</span><span class="p">,</span> <span class="p">{})</span>
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Evaluation error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">try</span><span class="p">:</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$undefined_func()&quot;</span><span class="p">,</span> <span class="p">{})</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Evaluation error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div></p>
 <p><strong>Safe Evaluation:</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">safe_evaluate</span><span class="p">(</span><span class="n">expression</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="k">try</span><span class="p">:</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>        <span class="k">return</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">expression</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>        <span class="k">return</span> <span class="n">default</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">safe_evaluate</span><span class="p">(</span><span class="n">expression</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="k">try</span><span class="p">:</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>        <span class="k">return</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">expression</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>        <span class="k">return</span> <span class="n">default</span>
 </span></code></pre></div></p>
 <h2 id="thread-safety">Thread Safety<a class="headerlink" href="#thread-safety" title="Permanent link">&para;</a></h2>
 <p>jsonatapy is thread-safe:
@@ -2064,66 +2182,66 @@
 - <code>JsonataExpression</code> objects can be shared across threads
 - Evaluation is stateless (except for bindings)</p>
 <p><strong>Example:</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">concurrent.futures</span><span class="w"> </span><span class="kn">import</span> <span class="n">ThreadPoolExecutor</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100].name&quot;</span><span class="p">)</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="k">return</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
-</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
-</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
-</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">results</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">process</span><span class="p">,</span> <span class="n">data_list</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">concurrent.futures</span><span class="w"> </span><span class="kn">import</span> <span class="n">ThreadPoolExecutor</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100].name&quot;</span><span class="p">)</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="k">return</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="n">results</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">process</span><span class="p">,</span> <span class="n">data_list</span><span class="p">)</span>
 </span></code></pre></div></p>
 <h2 id="performance-tips">Performance Tips<a class="headerlink" href="#performance-tips" title="Permanent link">&para;</a></h2>
 <p><strong>Compile once, evaluate many times:</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Slow</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">for</span> <span class="n">data</span> <span class="ow">in</span> <span class="n">dataset</span><span class="p">:</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># Fast</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="k">for</span> <span class="n">data</span> <span class="ow">in</span> <span class="n">dataset</span><span class="p">:</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Slow</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="k">for</span> <span class="n">data</span> <span class="ow">in</span> <span class="n">dataset</span><span class="p">:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="c1"># Fast</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="k">for</span> <span class="n">data</span> <span class="ow">in</span> <span class="n">dataset</span><span class="p">:</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
 </span></code></pre></div></p>
 <p><strong>Use JSON string API for large data:</strong>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">large_data</span><span class="p">)</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">result_str</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">json_str</span><span class="p">)</span>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="n">result</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result_str</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;items[price &gt; 100]&quot;</span><span class="p">)</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">json_str</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">large_data</span><span class="p">)</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">result_str</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_json</span><span class="p">(</span><span class="n">json_str</span><span class="p">)</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">result</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">result_str</span><span class="p">)</span>
 </span></code></pre></div></p>
 <h2 id="complete-example">Complete Example<a class="headerlink" href="#complete-example" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">data</span> <span class="o">=</span> <span class="p">{</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="s2">&quot;invoice&quot;</span><span class="p">:</span> <span class="p">{</span>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>        <span class="s2">&quot;number&quot;</span><span class="p">:</span> <span class="s2">&quot;INV-001&quot;</span><span class="p">,</span>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>        <span class="s2">&quot;items&quot;</span><span class="p">:</span> <span class="p">[</span>
-</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>            <span class="p">{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;Widget&quot;</span><span class="p">,</span> <span class="s2">&quot;quantity&quot;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mf">12.50</span><span class="p">},</span>
-</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>            <span class="p">{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;Gadget&quot;</span><span class="p">,</span> <span class="s2">&quot;quantity&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mf">45.00</span><span class="p">},</span>
-</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>            <span class="p">{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;Doohickey&quot;</span><span class="p">,</span> <span class="s2">&quot;quantity&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mf">3.25</span><span class="p">}</span>
-</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>        <span class="p">]</span>
-</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    <span class="p">}</span>
-</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="p">}</span>
-</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>
-</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="c1"># Simple query</span>
-</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="n">invoice_num</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;invoice.number&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
-</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>
-</span><span id="__span-13-18"><a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="c1"># Filtering and mapping</span>
-</span><span id="__span-13-19"><a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span>
-</span><span id="__span-13-20"><a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="s1">    invoice.items[price &gt; 10].{</span>
-</span><span id="__span-13-21"><a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="s1">        &quot;product&quot;: product,</span>
-</span><span id="__span-13-22"><a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="s1">        &quot;total&quot;: quantity * price</span>
-</span><span id="__span-13-23"><a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="s1">    }</span>
-</span><span id="__span-13-24"><a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a><span class="s1">&#39;&#39;&#39;</span><span class="p">)</span>
-</span><span id="__span-13-25"><a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a><span class="n">expensive_items</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
-</span><span id="__span-13-26"><a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a>
-</span><span id="__span-13-27"><a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a><span class="c1"># Aggregation</span>
-</span><span id="__span-13-28"><a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a><span class="n">total</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$sum(invoice.items.(quantity * price))&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
-</span><span id="__span-13-29"><a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a>
-</span><span id="__span-13-30"><a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a><span class="c1"># With bindings</span>
-</span><span id="__span-13-31"><a id="__codelineno-13-31" name="__codelineno-13-31" href="#__codelineno-13-31"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;invoice.items[price &gt; $threshold].product&quot;</span><span class="p">)</span>
-</span><span id="__span-13-32"><a id="__codelineno-13-32" name="__codelineno-13-32" href="#__codelineno-13-32"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;threshold&quot;</span><span class="p">:</span> <span class="mi">20</span><span class="p">})</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">data</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="s2">&quot;invoice&quot;</span><span class="p">:</span> <span class="p">{</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>        <span class="s2">&quot;number&quot;</span><span class="p">:</span> <span class="s2">&quot;INV-001&quot;</span><span class="p">,</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>        <span class="s2">&quot;items&quot;</span><span class="p">:</span> <span class="p">[</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>            <span class="p">{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;Widget&quot;</span><span class="p">,</span> <span class="s2">&quot;quantity&quot;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mf">12.50</span><span class="p">},</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>            <span class="p">{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;Gadget&quot;</span><span class="p">,</span> <span class="s2">&quot;quantity&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mf">45.00</span><span class="p">},</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>            <span class="p">{</span><span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="s2">&quot;Doohickey&quot;</span><span class="p">,</span> <span class="s2">&quot;quantity&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">&quot;price&quot;</span><span class="p">:</span> <span class="mf">3.25</span><span class="p">}</span>
+</span><span id="__span-14-11"><a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>        <span class="p">]</span>
+</span><span id="__span-14-12"><a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>    <span class="p">}</span>
+</span><span id="__span-14-13"><a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="p">}</span>
+</span><span id="__span-14-14"><a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>
+</span><span id="__span-14-15"><a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="c1"># Simple query</span>
+</span><span id="__span-14-16"><a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="n">invoice_num</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;invoice.number&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+</span><span id="__span-14-17"><a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a>
+</span><span id="__span-14-18"><a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a><span class="c1"># Filtering and mapping</span>
+</span><span id="__span-14-19"><a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s1">&#39;&#39;&#39;</span>
+</span><span id="__span-14-20"><a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a><span class="s1">    invoice.items[price &gt; 10].{</span>
+</span><span id="__span-14-21"><a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a><span class="s1">        &quot;product&quot;: product,</span>
+</span><span id="__span-14-22"><a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a><span class="s1">        &quot;total&quot;: quantity * price</span>
+</span><span id="__span-14-23"><a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a><span class="s1">    }</span>
+</span><span id="__span-14-24"><a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a><span class="s1">&#39;&#39;&#39;</span><span class="p">)</span>
+</span><span id="__span-14-25"><a id="__codelineno-14-25" name="__codelineno-14-25" href="#__codelineno-14-25"></a><span class="n">expensive_items</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+</span><span id="__span-14-26"><a id="__codelineno-14-26" name="__codelineno-14-26" href="#__codelineno-14-26"></a>
+</span><span id="__span-14-27"><a id="__codelineno-14-27" name="__codelineno-14-27" href="#__codelineno-14-27"></a><span class="c1"># Aggregation</span>
+</span><span id="__span-14-28"><a id="__codelineno-14-28" name="__codelineno-14-28" href="#__codelineno-14-28"></a><span class="n">total</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="s2">&quot;$sum(invoice.items.(quantity * price))&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+</span><span id="__span-14-29"><a id="__codelineno-14-29" name="__codelineno-14-29" href="#__codelineno-14-29"></a>
+</span><span id="__span-14-30"><a id="__codelineno-14-30" name="__codelineno-14-30" href="#__codelineno-14-30"></a><span class="c1"># With bindings</span>
+</span><span id="__span-14-31"><a id="__codelineno-14-31" name="__codelineno-14-31" href="#__codelineno-14-31"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;invoice.items[price &gt; $threshold].product&quot;</span><span class="p">)</span>
+</span><span id="__span-14-32"><a id="__codelineno-14-32" name="__codelineno-14-32" href="#__codelineno-14-32"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;threshold&quot;</span><span class="p">:</span> <span class="mi">20</span><span class="p">})</span>
 </span></code></pre></div>
 
 

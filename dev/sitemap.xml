@@ -85,6 +85,10 @@
          <lastmod>2026-07-08</lastmod>
     </url>
     <url>
+         <loc>https://txjmb.github.io/jsonata-core/dev/development/releasing/</loc>
+         <lastmod>2026-07-08</lastmod>
+    </url>
+    <url>
          <loc>https://txjmb.github.io/jsonata-core/dev/development/testing/</loc>
          <lastmod>2026-07-08</lastmod>
     </url>
@@ -106,6 +110,10 @@
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/dev/superpowers/plans/2026-07-07-jsonata-2.2.1-phase2-guardrails-plan/</loc>
+         <lastmod>2026-07-08</lastmod>
+    </url>
+    <url>
+         <loc>https://txjmb.github.io/jsonata-core/dev/superpowers/plans/2026-07-07-parser-depth-and-u16-truncation-fixes-plan/</loc>
          <lastmod>2026-07-08</lastmod>
     </url>
     <url>

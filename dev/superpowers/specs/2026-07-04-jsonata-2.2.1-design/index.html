@@ -1327,6 +1327,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1682,19 +1710,44 @@ placed at the entry of <code>eval_compiled_inner</code> (the compiled-expression
 point) plus one inside the TCO trampoline (<code>invoke_lambda_with_tco</code>) — these are the two execution
 loops that are genuinely independent of each other and of <code>evaluate_internal</code>'s own per-node
 checkpoint, so no other site needed its own separate check.</p>
-<p>Two pre-existing bugs were found along the way. Both are <strong>out of scope for this plan and were
-NOT fixed</strong> — they're recorded here for future work, not claimed as resolved:
-- The parser has no recursion-depth guard and can crash the whole process (SIGSEGV) on deeply
-  left-nested arithmetic expressions (roughly 4000+ terms) — independent of, and prior to, the
-  evaluator's own <code>D1011</code>/<code>U1001</code> guards, which never get a chance to run since the crash happens
-  during parsing, before evaluation starts.
-- <code>Instr::MakeArray(u16)</code> (<code>src/compiler.rs</code>) silently produces <strong>wrong, truncated</strong> results — not
+<p>Two pre-existing bugs were found along the way. Both are now <strong>fixed</strong>, per
+<code>docs/superpowers/plans/2026-07-07-parser-depth-and-u16-truncation-fixes-plan.md</code> (branch
+<code>worktree-jsonata-parser-depth-u16-fixes</code>) — a third, previously-unknown crash surfaced during that
+work and was closed too:
+- The originally-reported crash (whole-process SIGSEGV on deeply left-nested arithmetic
+  expressions) was root-caused to <code>src/ast_transform.rs</code>'s post-parse AST-rebuild pass, which ran
+  unconditionally after every parse with no recursion-depth guard — <strong>not</strong> the raw Pratt parser's
+  own recursion for that specific shape, which stays O(1) for flat left-associative chains (the
+  original framing above was imprecise about <em>why</em>, though the observed crash was real). Fixed
+  first by adding a depth-counter + <code>stacker::maybe_grow</code> guard to <code>ast_transform.rs</code>'s recursive
+  functions (new error code <code>U1002</code>, no jsonata-js equivalent — a Rust-specific safety net, like
+  <code>U1001</code>). Validating that fix surfaced a <strong>second, more directly reachable crash</strong>: deeply
+  parenthesized/grouped expressions (<code>(((...)))</code>) recurse for real inside the parser's own
+  <code>parse_primary</code>/<code>parse_expression</code> (<code>src/parser.rs</code>) and crash independently of
+  <code>ast_transform.rs</code> — a genuinely different shape than the flat-chain case, since any
+  recursive-descent parser needs real recursion to handle grouping. Both shapes are now closed by
+  one depth guard added directly in <code>parser.rs</code>'s <code>parse_expression</code> (a single shared counter
+  bounding both loop-driven left-nesting and genuine recursive descent), reusing the <code>U1002</code> code,
+  turning either shape into a graceful coded error before <code>ast_transform.rs</code> ever sees the tree.
+  <code>ast_transform.rs</code>'s own guard remains in place as defense-in-depth (still load-bearing for
+  mid-depth flat chains, which trip its lower effective ceiling before the parser's own limit
+  would) rather than being removed.
+- <code>Instr::MakeArray(u16)</code> (<code>src/compiler.rs</code>) silently produced <strong>wrong, truncated</strong> results — not
   even an error — for JSONata array literals with more than 65,536 elements, because the element
-  count is cast to <code>u16</code> and overflows silently. This is more severe than the parser crash (silent
-  data corruption vs. a loud failure) and should be prioritized in any follow-up. Fixing this would
-  also unblock adding a literal-array <code>D2015</code> check (<code>MakeArray</code>/<code>ArrayConstruct</code> are currently
-  unguarded — see the "Sequence length → D2015" section below) for full upstream parity, since a
-  length cap can't safely be layered on top of a length computation that already overflows.</p>
+  count is cast to <code>u16</code> and overflows silently. This turned out to be one instance of a broader
+  pattern: <code>MakeObject</code>, <code>BlockEnd</code>, and <code>CallBuiltin</code>'s <code>u8</code> arg count share the same
+  unguarded-cast shape, plus four pool-interning <code>u16</code> casts in the bytecode compiler that can
+  overflow <strong>cumulatively across independently-compiled sibling expressions</strong> even when no single
+  expression is oversized (e.g. many small blocks sharing one compiler's constant pool). All are
+  now fixed the same way: the affected <code>try_compile_*</code> path returns <code>None</code> (declines to compile)
+  instead of truncating, falling back to the tree-walker (which has no such limit and is
+  unconditionally correct) — including a genuinely new finding along the way: <code>CallBuiltin</code>'s
+  arg-count guard was <strong>not</strong> already provably safe below 256 as this document's design assumed,
+  because <code>$merge</code> is the one compilable builtin with an unbounded (variadic) arg count. This also
+  unblocks a follow-up literal-array <code>D2015</code> check for full upstream parity (<code>MakeArray</code>/
+  <code>ArrayConstruct</code> are still unguarded for length — see the "Sequence length → D2015" section
+  below), since a length cap can now safely be layered on top of a length computation that no
+  longer overflows.</p>
 <p>Per this document's Scope section below, Phase 2 is the first behavioral reason a <code>2.2.0</code>
 jsonatapy release would make sense — a version bump/release is a separate follow-up decision, not
 part of this implementation.</p>
@@ -1812,11 +1865,13 @@ non-nested element through <code>fn.append</code>, which itself calls the <code>
 passed to <code>append</code>, not fanned out.</p>
 <p><strong>This Rust port currently caps only the query-result sites, not literal array construction —</strong>
 <code>Instr::MakeArray</code>/<code>CompiledExpr::ArrayConstruct</code> are unguarded, a deliberate, temporary
-divergence from upstream (see the Status section's bug list: capping <code>MakeArray</code> safely is
-entangled with the pre-existing, unfixed <code>MakeArray(u16)</code> truncation bug, so a length check can't
-be safely added on top of code whose length computation already overflows silently for arrays over
-65,536 elements). The Rust port's nested-array-literals-escape-the-cap behavior already matches
-upstream correctly; only the flat-literal case is a known gap. The implementation plan enumerates
+divergence from upstream. This was originally entangled with the (now-fixed, per the Status
+section's bug list) <code>MakeArray(u16)</code> truncation bug — a length check couldn't safely be layered on
+top of a length computation that itself overflowed silently for arrays over 65,536 elements. That
+truncation bug is fixed now, which unblocks adding this literal-array <code>D2015</code> cap safely — but the
+cap itself has not been added yet; it remains a known gap and a candidate for its own follow-up.
+The Rust port's nested-array-literals-escape-the-cap behavior already matches upstream correctly;
+only the flat-literal case is a known gap. The implementation plan enumerates
 every query-result call site that IS guarded in both the tree-walker (<code>evaluator.rs</code>) and the
 bytecode VM (<code>vm.rs</code>) — since compiled expressions run through the VM by default, the same cap
 must be enforced at the equivalent instructions there (map/filter opcodes, etc.) or the VM path
