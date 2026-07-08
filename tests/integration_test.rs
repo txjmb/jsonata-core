@@ -1509,3 +1509,138 @@ fn test_large_literal_object_does_not_silently_truncate() {
         other => panic!("expected object, got {other:?}"),
     }
 }
+
+/// A `(...; ...; ...)` block with more than u16::MAX sub-expressions must not
+/// silently truncate via `Instr::BlockEnd`'s `u16` operand.
+///
+/// NOTE ON TEST SHAPE: a naive "does the block's OWN returned value survive"
+/// test does not detect this bug. `Instr::BlockEnd` always `stack.pop()`s the
+/// real top-of-stack first (the true last-evaluated element) regardless of
+/// the (possibly truncated) `n` - so a bare block whose value is returned
+/// directly always reports the correct last value even when truncated; the
+/// only observable effect of a truncated `n` is that `BlockEnd` *under-drains*
+/// the stack, leaving `(true_n - truncated_n)` stale elements buried
+/// underneath. Those stale elements are invisible unless a LATER instruction's
+/// own "top N" window reaches down far enough to swallow one of them instead
+/// of the value that should logically be there.
+///
+/// So this test wraps the giant block as the *middle* element of a 3-element
+/// array literal `[0, (5;5;...;5), 9]`, with the block body a single REPEATED
+/// constant (not 70,000 distinct values) so that only `BlockEnd`'s `u16` is
+/// exercised - distinct block values would additionally overflow
+/// `const_pool`'s own `u16` index (a different truncation site), conflating
+/// two bugs. Traced pre-fix (n = 70_000, truncated to 70_000 mod 65_536 =
+/// 4_464): `BlockEnd` pops the true last `5` correctly but only removes
+/// `4_463` of the `70_000` pushed copies, leaving the `0` canary buried more
+/// than 3 slots below the top of stack. The subsequent `MakeArray(3)` then
+/// takes the top 3 stack slots - which are two leftover `5`s and the `9` -
+/// silently producing `[5, 5, 9]` instead of `[0, 5, 9]`. The `0` canary is
+/// gone (and permanently leaked below, never popped). Post-fix, the new
+/// `AstNode::Block` compiler guard makes the whole array literal decline to
+/// compile (`?` propagates the `None`), so it falls back to the tree-walker,
+/// which has no such limit and returns the correct `[0, 5, 9]`.
+///
+/// NOTE ON API CHOICE: like the two large-literal tests above, this must go
+/// through `jsonata_core::_bench` (compile-to-bytecode + VM run), not bare
+/// `Evaluator::evaluate` - `evaluate_internal_impl`'s `AstNode::Block` arm
+/// (and `AstNode::Array`'s) is pure tree-walker code with no compiler
+/// involvement, so a test built on bare `evaluate()` would pass identically
+/// whether or not the guard exists, proving nothing.
+#[cfg(feature = "bench")]
+#[test]
+fn test_large_block_does_not_silently_truncate() {
+    use jsonata_core::_bench;
+    let n = 70_000;
+    let block_body = vec!["5"; n].join(";");
+    let expr_str = format!("[0, ({block_body}), 9]");
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+    let result = match _bench::compile(&ast) {
+        Some(prog) => _bench::run(&prog, &data).unwrap(),
+        None => Evaluator::new().evaluate(&ast, &data).unwrap(),
+    };
+    assert_eq!(
+        result,
+        JValue::array(vec![
+            JValue::from(0i64),
+            JValue::from(5i64),
+            JValue::from(9i64)
+        ]),
+        "large block silently corrupted a sibling array element via BlockEnd's truncated u16 operand"
+    );
+}
+
+/// Two *sibling* blocks, each individually within every existing per-node
+/// arity guard (`AstNode::Block`'s own `u16::MAX` element-count guard from
+/// this same task, and `AstNode::Object`'s 2-pair count), can still overflow
+/// `BytecodeCompiler`'s shared `const_pool` **cumulatively**: both blocks'
+/// distinct literals are interned into the *same* `const_pool` by the *same`
+/// `BytecodeCompiler` instance compiling the whole object literal.
+///
+/// NOTE ON WHY THIS SHAPE (not a single oversized construct, and not a
+/// dotted field path): every "flat and wide" AST shape capable of holding
+/// tens of thousands of *direct* children (`Block`, `Array`, `Object`,
+/// builtin-call argument lists) is already bounded by its own per-node arity
+/// guard (`AstNode::Array`/`AstNode::Object`'s guards from the prior task,
+/// this task's own `AstNode::Block` guard, and the `CallBuiltin` arg-count
+/// guard below) - so no *single* node can any longer overflow a pool by
+/// itself. What those per-node guards cannot see is *cross-sibling*
+/// accumulation: two children that are each individually small enough to
+/// pass their own guard, compiled by the same `BytecodeCompiler` instance,
+/// whose *combined* distinct-literal count overflows the shared pool. A
+/// dotted path (`a.b.c...`) was tried first to reach a single oversized
+/// `string_pool`, but the parser's own recursive-descent depth guard
+/// (`MAX_PARSE_DEPTH = 1000`, unrelated to this task) rejects any path with
+/// more than ~1000 steps long before it could reach 65,536 - so a
+/// same-pool-different-siblings construction (which stays only 2-3 AST
+/// levels deep: `Object -> Block -> literal`, well under that limit) is the
+/// only reachable shape for this bug class.
+///
+/// Concretely: object `{"a": (0;1;...;39999), "b": (200000;200001;...;239999)}`.
+/// Block "a" contributes ~40,000 distinct consts (plus its own object key),
+/// block "b" another ~40,000 distinct consts (offset by 200,000 so no value
+/// coincidentally dedups with block "a"'s), for roughly 80,002 total distinct
+/// entries - comfortably over the `u16` pool's 65,536-slot capacity. Traced
+/// pre-fix: `intern_const`'s `self.const_pool.len() as u16` wraps once the
+/// pool passes 65,536 entries, and this wraparound region falls late enough
+/// in block "b"'s 40,000 elements to include its own *last* (kept) literal -
+/// so block "b"'s result silently aliases an earlier, wrong constant (some
+/// value less than 240000) instead of its true last value `239999`. Block
+/// "a" (whose own last element sits entirely before the wraparound) is
+/// unaffected, so this also demonstrates the bug is real per-entry
+/// corruption, not a coincidental total-count mismatch.
+///
+/// NOTE ON API CHOICE: same reasoning as the two tests above - bare
+/// `Evaluator::evaluate` never reaches the compiled path for a top-level
+/// `AstNode::Object`, so this must go through `jsonata_core::_bench`.
+#[cfg(feature = "bench")]
+#[test]
+fn test_sibling_blocks_do_not_cumulatively_overflow_shared_const_pool() {
+    use jsonata_core::_bench;
+    let m = 40_000;
+    let n = 40_000;
+    let block_a = (0..m).map(|i| i.to_string()).collect::<Vec<_>>().join(";");
+    let block_b = (0..n)
+        .map(|i| (200_000 + i).to_string())
+        .collect::<Vec<_>>()
+        .join(";");
+    let expr_str = format!("{{\"a\": ({block_a}), \"b\": ({block_b})}}");
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+    let result = match _bench::compile(&ast) {
+        Some(prog) => _bench::run(&prog, &data).unwrap(),
+        None => Evaluator::new().evaluate(&ast, &data).unwrap(),
+    };
+    match result {
+        JValue::Object(obj) => {
+            assert_eq!(obj.get("a"), Some(&JValue::from((m - 1) as i64)));
+            assert_eq!(
+                obj.get("b"),
+                Some(&JValue::from((200_000 + n - 1) as i64)),
+                "sibling block's last value was cumulatively corrupted via const_pool's \
+                 wrapped u16 index"
+            );
+        }
+        other => panic!("expected object, got {other:?}"),
+    }
+}
