@@ -42,10 +42,28 @@ REPEAT_TRIALS = 5
 
 def _describe_platform() -> str:
     """Describe the environment actually running the benchmark, not wherever
-    a later doc-regeneration script happens to be invoked from."""
+    a later doc-regeneration script happens to be invoked from.
+
+    Explicitly distinguishes a self-hosted runner from a GitHub-hosted one
+    (RUNNER_ENVIRONMENT, set by Actions itself) rather than just saying
+    "GitHub Actions (macOS, ARM64)" for both - that phrasing alone reads as
+    a generic, shared macos-14 runner, hiding the one property that actually
+    matters for trusting these numbers: dedicated, single-tenant, physical
+    hardware, not shared/virtualized cloud infrastructure. Confirmed
+    empirically (this project's own benchmark-data history) that the
+    difference is not cosmetic - identical code measured twice on a shared
+    runner swung -66% to +120%.
+    """
     if os.environ.get("GITHUB_ACTIONS") == "true":
         runner_os = os.environ.get("RUNNER_OS", platform.system())
         runner_arch = os.environ.get("RUNNER_ARCH", platform.machine())
+        runner_env = os.environ.get("RUNNER_ENVIRONMENT", "")
+        runner_name = os.environ.get("RUNNER_NAME", "")
+        if runner_env == "self-hosted":
+            label = f"self-hosted {runner_name}" if runner_name else "self-hosted"
+            return (
+                f"GitHub Actions ({label}, physical/dedicated hardware, {runner_os} {runner_arch})"
+            )
         return f"GitHub Actions ({runner_os}, {runner_arch})"
     return f"{platform.system()} {platform.release()} on {platform.machine()}"
 
@@ -157,8 +175,17 @@ class BenchmarkSuite:
             print("  Run 'cd benchmarks && cargo build --release' to build it")
             return False
 
-    def _run_js_benchmark(self, expression: str, data: Any, iterations: int) -> float:
-        """Run benchmark using JavaScript reference implementation."""
+    def _run_js_benchmark(
+        self, expression: str, data: Any, iterations: int, repeats: int = REPEAT_TRIALS
+    ) -> float:
+        """Run benchmark using JavaScript reference implementation.
+
+        Takes the minimum elapsed time across `repeats` independent
+        subprocess invocations - see _run_jsonatapy_benchmark's docstring
+        for why min, not mean/median. Each invocation is a fresh `node`
+        process (the script itself does its own warmup internally), so this
+        also filters out process-startup noise, not just measurement noise.
+        """
         if not self.node_available:
             return -1.0
 
@@ -172,19 +199,25 @@ class BenchmarkSuite:
         benchmark_data = {"expression": expression, "data": data, "iterations": iterations}
 
         try:
-            result = subprocess.run(
-                ["node", str(js_script)],
-                input=json.dumps(benchmark_data),
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            best_elapsed = None
+            for _ in range(repeats):
+                result = subprocess.run(
+                    ["node", str(js_script)],
+                    input=json.dumps(benchmark_data),
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
 
-            if result.returncode != 0:
-                print(f"⚠ JavaScript benchmark failed: {result.stderr}")
-                return -1.0
+                if result.returncode != 0:
+                    print(f"⚠ JavaScript benchmark failed: {result.stderr}")
+                    return -1.0
 
-            return float(result.stdout.strip())
+                elapsed = float(result.stdout.strip())
+                if best_elapsed is None or elapsed < best_elapsed:
+                    best_elapsed = elapsed
+
+            return best_elapsed
         except Exception as e:
             print(f"⚠ Error running JavaScript benchmark: {e}")
             return -1.0
@@ -279,7 +312,9 @@ class BenchmarkSuite:
 
         return best_elapsed * 1000  # Convert to milliseconds
 
-    def _run_jsonata_python_benchmark(self, expression: str, data: Any, iterations: int) -> float:
+    def _run_jsonata_python_benchmark(
+        self, expression: str, data: Any, iterations: int, repeats: int = REPEAT_TRIALS
+    ) -> float:
         """Run benchmark using jsonata-python (rayokota) implementation.
 
         jsonata-python doesn't support pre-compiling an *expression*, but its
@@ -293,6 +328,15 @@ class BenchmarkSuite:
         filter (where JSON-string marshalling dominates instead). Using
         Context here matches every other implementation in this suite, which
         all compile/warm once and evaluate many times in the timed loop.
+
+        Takes the minimum elapsed time across `repeats` independent
+        measurement trials (after one shared warmup) - see
+        _run_jsonatapy_benchmark's docstring for why min, not mean/median.
+        Note this multiplies this already-slow implementation's runtime by
+        `repeats` - deliberate, since this function is only used by the
+        release-triggered benchmark job (on the fast Mac Mini runner), never
+        the PR-triggered benchmark.yml (which skips jsonata-python entirely
+        for exactly this cost reason).
         """
         if not JSONATA_PYTHON_AVAILABLE:
             return -1.0
@@ -302,7 +346,7 @@ class BenchmarkSuite:
         else:
             call = jsonata_python.transform
 
-        # Warm up
+        # Warm up (once - shared across all measurement trials below)
         warmup_iters = min(100, max(10, iterations // 10))
         for _ in range(warmup_iters):
             try:
@@ -311,20 +355,33 @@ class BenchmarkSuite:
                 print(f"⚠ jsonata-python warmup failed: {e}")
                 return -1.0
 
-        # Measure
-        start = time.perf_counter()
-        for _ in range(iterations):
-            try:
-                call(expression, data)
-            except Exception as e:
-                print(f"⚠ jsonata-python evaluation failed: {e}")
-                return -1.0
-        elapsed = time.perf_counter() - start
+        # Measure: `repeats` independent trials, keep the minimum
+        best_elapsed = None
+        for _ in range(repeats):
+            start = time.perf_counter()
+            for _ in range(iterations):
+                try:
+                    call(expression, data)
+                except Exception as e:
+                    print(f"⚠ jsonata-python evaluation failed: {e}")
+                    return -1.0
+            elapsed = time.perf_counter() - start
+            if best_elapsed is None or elapsed < best_elapsed:
+                best_elapsed = elapsed
 
-        return elapsed * 1000  # Convert to milliseconds
+        return best_elapsed * 1000  # Convert to milliseconds
 
-    def _run_jsonata_rs_benchmark(self, expression: str, data: Any, iterations: int) -> float:
-        """Run benchmark using jsonata-rs (pure Rust) implementation."""
+    def _run_jsonata_rs_benchmark(
+        self, expression: str, data: Any, iterations: int, repeats: int = REPEAT_TRIALS
+    ) -> float:
+        """Run benchmark using jsonata-rs (pure Rust) implementation.
+
+        Takes the minimum elapsed time across `repeats` independent
+        subprocess invocations - see _run_jsonatapy_benchmark's docstring
+        for why min, not mean/median. Each invocation is a fresh process
+        (warmup happens inside the binary itself, per the "warmup" field
+        below), so this also filters out process-startup noise.
+        """
         if not self.jsonata_rs_available:
             return -1.0
 
@@ -341,17 +398,26 @@ class BenchmarkSuite:
         input_json = json.dumps(input_data)
 
         try:
-            result = subprocess.run(
-                [str(binary_path)], input=input_json, capture_output=True, text=True, timeout=60
-            )
+            best_elapsed = None
+            for _ in range(repeats):
+                result = subprocess.run(
+                    [str(binary_path)],
+                    input=input_json,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
 
-            if result.returncode != 0:
-                print(f"⚠ jsonata-rs failed: {result.stderr}")
-                return -1.0
+                if result.returncode != 0:
+                    print(f"⚠ jsonata-rs failed: {result.stderr}")
+                    return -1.0
 
-            # Parse output JSON
-            output = json.loads(result.stdout)
-            return output["elapsed_ms"]
+                output = json.loads(result.stdout)
+                elapsed = output["elapsed_ms"]
+                if best_elapsed is None or elapsed < best_elapsed:
+                    best_elapsed = elapsed
+
+            return best_elapsed
 
         except subprocess.TimeoutExpired:
             print("⚠ jsonata-rs benchmark timeout")
@@ -745,6 +811,7 @@ class BenchmarkSuite:
             "timestamp": datetime.now().isoformat(),
             "platform": _describe_platform(),
             "python_version": sys.version.split()[0],
+            "repeat_trials": REPEAT_TRIALS,
             "implementations": {
                 "jsonatapy": JSONATAPY_AVAILABLE,
                 "javascript": self.node_available,
