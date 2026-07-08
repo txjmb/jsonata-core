@@ -8,6 +8,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
 use crate::parser;
@@ -737,8 +738,10 @@ pub(crate) fn eval_compiled(
     expr: &CompiledExpr,
     data: &JValue,
     vars: Option<&HashMap<&str, &JValue>>,
+    options: &EvaluatorOptions,
+    start_time: Option<Instant>,
 ) -> Result<JValue, EvaluatorError> {
-    eval_compiled_inner(expr, data, vars, None, None)
+    eval_compiled_inner(expr, data, vars, None, None, options, start_time)
 }
 
 /// Like `eval_compiled` but with an optional shape cache for O(1) positional
@@ -750,8 +753,10 @@ fn eval_compiled_shaped(
     data: &JValue,
     vars: Option<&HashMap<&str, &JValue>>,
     shape: &ShapeCache,
+    options: &EvaluatorOptions,
+    start_time: Option<Instant>,
 ) -> Result<JValue, EvaluatorError> {
-    eval_compiled_inner(expr, data, vars, None, Some(shape))
+    eval_compiled_inner(expr, data, vars, None, Some(shape), options, start_time)
 }
 
 /// Clone the outer variable bindings into a new HashMap with the given capacity hint.
@@ -772,7 +777,19 @@ fn eval_compiled_inner(
     vars: Option<&HashMap<&str, &JValue>>,
     ctx: Option<&Context>,
     shape: Option<&ShapeCache>,
+    options: &EvaluatorOptions,
+    start_time: Option<Instant>,
 ) -> Result<JValue, EvaluatorError> {
+    // Single, structurally-unbypassable D1012 checkpoint for the entire compiled fast
+    // path. Every route into compiled evaluation -- the VM's EvalFallback, this task's
+    // MapCall/FilterCall/ReduceCall loop bodies, invoke_stored_lambda's compiled fast
+    // path, evaluate_function_call's inline $map/$filter fast-path loops, and any future
+    // caller -- funnels through this one function (both eval_compiled and
+    // eval_compiled_shaped delegate here), so checking once at entry covers all of them
+    // without having to enumerate call sites. Deliberately timeout-only, no depth check:
+    // self-recursive lambdas cannot compile to CompiledExpr, so genuine recursion always
+    // routes through evaluate_internal's own (already guarded) recursion-depth counter.
+    check_loop_timeout(options, start_time)?;
     match expr {
         // ── Leaves ──────────────────────────────────────────────────────
         CompiledExpr::Literal(v) => Ok(v.clone()),
@@ -839,8 +856,8 @@ fn eval_compiled_inner(
         CompiledExpr::Compare { op, lhs, rhs } => {
             let lhs_explicit_null = is_compiled_explicit_null(lhs);
             let rhs_explicit_null = is_compiled_explicit_null(rhs);
-            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
-            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             match op {
                 CompiledCmp::Eq => Ok(JValue::Bool(crate::functions::array::values_equal(
                     &left, &right,
@@ -887,15 +904,15 @@ fn eval_compiled_inner(
         CompiledExpr::Arithmetic { op, lhs, rhs } => {
             let lhs_explicit_null = is_compiled_explicit_null(lhs);
             let rhs_explicit_null = is_compiled_explicit_null(rhs);
-            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
-            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             compiled_arithmetic(*op, &left, &right, lhs_explicit_null, rhs_explicit_null)
         }
 
         // ── String concat ───────────────────────────────────────────────
         CompiledExpr::Concat(lhs, rhs) => {
-            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
-            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             let ls = compiled_to_concat_string(&left)?;
             let rs = compiled_to_concat_string(&right)?;
             Ok(JValue::string(format!("{}{}", ls, rs)))
@@ -903,27 +920,27 @@ fn eval_compiled_inner(
 
         // ── Logical ─────────────────────────────────────────────────────
         CompiledExpr::And(lhs, rhs) => {
-            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
             if !compiled_is_truthy(&left) {
                 return Ok(JValue::Bool(false));
             }
-            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             Ok(JValue::Bool(compiled_is_truthy(&right)))
         }
         CompiledExpr::Or(lhs, rhs) => {
-            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
             if compiled_is_truthy(&left) {
                 return Ok(JValue::Bool(true));
             }
-            let right = eval_compiled_inner(rhs, data, vars, ctx, shape)?;
+            let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             Ok(JValue::Bool(compiled_is_truthy(&right)))
         }
         CompiledExpr::Not(inner) => {
-            let val = eval_compiled_inner(inner, data, vars, ctx, shape)?;
+            let val = eval_compiled_inner(inner, data, vars, ctx, shape, options, start_time)?;
             Ok(JValue::Bool(!compiled_is_truthy(&val)))
         }
         CompiledExpr::Negate(inner) => {
-            let val = eval_compiled_inner(inner, data, vars, ctx, shape)?;
+            let val = eval_compiled_inner(inner, data, vars, ctx, shape, options, start_time)?;
             match val {
                 JValue::Number(n) => Ok(JValue::Number(-n)),
                 JValue::Null => Ok(JValue::Null),
@@ -941,11 +958,11 @@ fn eval_compiled_inner(
             then_expr,
             else_expr,
         } => {
-            let cond = eval_compiled_inner(condition, data, vars, ctx, shape)?;
+            let cond = eval_compiled_inner(condition, data, vars, ctx, shape, options, start_time)?;
             if compiled_is_truthy(&cond) {
-                eval_compiled_inner(then_expr, data, vars, ctx, shape)
+                eval_compiled_inner(then_expr, data, vars, ctx, shape, options, start_time)
             } else if let Some(else_e) = else_expr {
-                eval_compiled_inner(else_e, data, vars, ctx, shape)
+                eval_compiled_inner(else_e, data, vars, ctx, shape, options, start_time)
             } else {
                 Ok(JValue::Undefined)
             }
@@ -955,7 +972,7 @@ fn eval_compiled_inner(
         CompiledExpr::ObjectConstruct(fields) => {
             let mut result = IndexMap::with_capacity(fields.len());
             for (key, expr) in fields {
-                let value = eval_compiled_inner(expr, data, vars, ctx, shape)?;
+                let value = eval_compiled_inner(expr, data, vars, ctx, shape, options, start_time)?;
                 if !value.is_undefined() {
                     result.insert(key.clone(), value);
                 }
@@ -967,7 +984,8 @@ fn eval_compiled_inner(
         CompiledExpr::ArrayConstruct(elems) => {
             let mut result = Vec::new();
             for (elem_expr, is_nested) in elems {
-                let value = eval_compiled_inner(elem_expr, data, vars, ctx, shape)?;
+                let value =
+                    eval_compiled_inner(elem_expr, data, vars, ctx, shape, options, start_time)?;
                 // Undefined values are excluded from array constructors (tree-walker parity)
                 if value.is_undefined() {
                     continue;
@@ -1008,22 +1026,26 @@ fn eval_compiled_inner(
         }
 
         // FieldPath: multi-step field access with implicit array mapping.
-        CompiledExpr::FieldPath(steps) => compiled_eval_field_path(steps, data, vars, ctx, shape),
+        CompiledExpr::FieldPath(steps) => {
+            compiled_eval_field_path(steps, data, vars, ctx, shape, options, start_time)
+        }
 
         // BuiltinCall: evaluate all args, dispatch to pure builtin.
         CompiledExpr::BuiltinCall { name, args } => {
             let mut evaled_args = Vec::with_capacity(args.len());
             for arg in args.iter() {
-                evaled_args.push(eval_compiled_inner(arg, data, vars, ctx, shape)?);
+                evaled_args.push(eval_compiled_inner(
+                    arg, data, vars, ctx, shape, options, start_time,
+                )?);
             }
-            call_pure_builtin(name, &evaled_args, data)
+            call_pure_builtin(name, &evaled_args, data, options)
         }
 
         // Block: evaluate each expression in sequence, return the last value.
         CompiledExpr::Block(exprs) => {
             let mut result = JValue::Undefined;
             for expr in exprs.iter() {
-                result = eval_compiled_inner(expr, data, vars, ctx, shape)?;
+                result = eval_compiled_inner(expr, data, vars, ctx, shape, options, start_time)?;
             }
             Ok(result)
         }
@@ -1031,9 +1053,9 @@ fn eval_compiled_inner(
         // Coalesce (`??`): return lhs unless it is Undefined; null IS a valid value.
         // JSONata spec: "returns the RHS operand if the LHS operand evaluates to undefined".
         CompiledExpr::Coalesce(lhs, rhs) => {
-            let left = eval_compiled_inner(lhs, data, vars, ctx, shape)?;
+            let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
             if left.is_undefined() {
-                eval_compiled_inner(rhs, data, vars, ctx, shape)
+                eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)
             } else {
                 Ok(left)
             }
@@ -1050,7 +1072,7 @@ fn eval_compiled_inner(
             params,
             body,
         } => {
-            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
+            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape, options, start_time)?;
             let single_holder;
             let items: &[JValue] = match &arr_val {
                 JValue::Array(a) => a.as_slice(),
@@ -1067,13 +1089,22 @@ fn eval_compiled_inner(
                 // 2-param lambda (element + index): build per-iteration because idx_val
                 // is loop-local and cannot outlive the iteration.
                 for (idx, item) in items.iter().enumerate() {
+                    check_loop_timeout(options, start_time)?;
                     let idx_val = JValue::Number(idx as f64);
                     let mut call_vars = clone_outer_vars(vars, 2);
                     if let Some(p) = p0 {
                         call_vars.insert(p, item);
                     }
                     call_vars.insert(p1, &idx_val);
-                    let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                    let mapped = eval_compiled_inner(
+                        body,
+                        data,
+                        Some(&call_vars),
+                        ctx,
+                        shape,
+                        options,
+                        start_time,
+                    )?;
                     if !mapped.is_undefined() {
                         result.push(mapped);
                     }
@@ -1082,13 +1113,23 @@ fn eval_compiled_inner(
                 // 1-param lambda (most common): build HashMap once, update element ref each iteration.
                 let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
+                    check_loop_timeout(options, start_time)?;
                     call_vars.insert(p0, item);
-                    let mapped = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                    let mapped = eval_compiled_inner(
+                        body,
+                        data,
+                        Some(&call_vars),
+                        ctx,
+                        shape,
+                        options,
+                        start_time,
+                    )?;
                     if !mapped.is_undefined() {
                         result.push(mapped);
                     }
                 }
             }
+            check_sequence_length(result.len(), options)?;
             Ok(if result.is_empty() {
                 JValue::Undefined
             } else {
@@ -1101,7 +1142,7 @@ fn eval_compiled_inner(
             params,
             body,
         } => {
-            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
+            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape, options, start_time)?;
             if arr_val.is_undefined() || arr_val.is_null() {
                 return Ok(JValue::Undefined);
             }
@@ -1118,13 +1159,22 @@ fn eval_compiled_inner(
 
             if let Some(p1) = params.get(1).map(|s| s.as_str()) {
                 for (idx, item) in items.iter().enumerate() {
+                    check_loop_timeout(options, start_time)?;
                     let idx_val = JValue::Number(idx as f64);
                     let mut call_vars = clone_outer_vars(vars, 2);
                     if let Some(p) = p0 {
                         call_vars.insert(p, item);
                     }
                     call_vars.insert(p1, &idx_val);
-                    let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                    let pred = eval_compiled_inner(
+                        body,
+                        data,
+                        Some(&call_vars),
+                        ctx,
+                        shape,
+                        options,
+                        start_time,
+                    )?;
                     if compiled_is_truthy(&pred) {
                         result.push(item.clone());
                     }
@@ -1132,8 +1182,17 @@ fn eval_compiled_inner(
             } else if let Some(p0) = p0 {
                 let mut call_vars = clone_outer_vars(vars, 1);
                 for item in items.iter() {
+                    check_loop_timeout(options, start_time)?;
                     call_vars.insert(p0, item);
-                    let pred = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                    let pred = eval_compiled_inner(
+                        body,
+                        data,
+                        Some(&call_vars),
+                        ctx,
+                        shape,
+                        options,
+                        start_time,
+                    )?;
                     if compiled_is_truthy(&pred) {
                         result.push(item.clone());
                     }
@@ -1142,10 +1201,17 @@ fn eval_compiled_inner(
             if was_single {
                 Ok(match result.len() {
                     0 => JValue::Undefined,
-                    1 => result.remove(0),
-                    _ => JValue::array(result),
+                    1 => {
+                        check_sequence_length(1, options)?;
+                        result.remove(0)
+                    }
+                    _ => {
+                        check_sequence_length(result.len(), options)?;
+                        JValue::array(result)
+                    }
                 })
             } else {
+                check_sequence_length(result.len(), options)?;
                 Ok(JValue::array(result))
             }
         }
@@ -1156,7 +1222,7 @@ fn eval_compiled_inner(
             body,
             initial,
         } => {
-            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape)?;
+            let arr_val = eval_compiled_inner(array, data, vars, ctx, shape, options, start_time)?;
             let single_holder;
             let items: &[JValue] = match &arr_val {
                 JValue::Array(a) => a.as_slice(),
@@ -1168,7 +1234,8 @@ fn eval_compiled_inner(
                 }
             };
             let (start_idx, mut accumulator) = if let Some(init_expr) = initial {
-                let init_val = eval_compiled_inner(init_expr, data, vars, ctx, shape)?;
+                let init_val =
+                    eval_compiled_inner(init_expr, data, vars, ctx, shape, options, start_time)?;
                 if items.is_empty() {
                     return Ok(init_val);
                 }
@@ -1182,12 +1249,21 @@ fn eval_compiled_inner(
             let acc_param = params[0].as_str();
             let item_param = params[1].as_str();
             for item in items[start_idx..].iter() {
+                check_loop_timeout(options, start_time)?;
                 // Per-iteration HashMap: &accumulator borrow must be released before we
                 // can reassign `accumulator`. `drop(call_vars)` ends the borrow.
                 let mut call_vars = clone_outer_vars(vars, 2);
                 call_vars.insert(acc_param, &accumulator);
                 call_vars.insert(item_param, item);
-                let new_acc = eval_compiled_inner(body, data, Some(&call_vars), ctx, shape)?;
+                let new_acc = eval_compiled_inner(
+                    body,
+                    data,
+                    Some(&call_vars),
+                    ctx,
+                    shape,
+                    options,
+                    start_time,
+                )?;
                 drop(call_vars);
                 accumulator = new_acc;
             }
@@ -1377,8 +1453,9 @@ pub(crate) fn call_pure_builtin_by_name(
     name: &str,
     args: &[JValue],
     data: &JValue,
+    options: &EvaluatorOptions,
 ) -> Result<JValue, EvaluatorError> {
-    call_pure_builtin(name, args, data)
+    call_pure_builtin(name, args, data, options)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1508,6 +1585,8 @@ fn compiled_eval_field_path(
     vars: Option<&HashMap<&str, &JValue>>,
     ctx: Option<&Context>,
     shape: Option<&ShapeCache>,
+    options: &EvaluatorOptions,
+    start_time: Option<Instant>,
 ) -> Result<JValue, EvaluatorError> {
     let mut current = data.clone();
     // Track whether the most recent field step mapped over an array (like the tree-walker's
@@ -1517,7 +1596,7 @@ fn compiled_eval_field_path(
         // Determine if this step will do array mapping before we overwrite `current`
         let is_array = matches!(current, JValue::Array(_));
         // Field access with implicit array mapping
-        current = compiled_field_step(&step.field, &current);
+        current = compiled_field_step(&step.field, &current, options)?;
         if is_array {
             did_array_mapping = true;
         } else {
@@ -1526,7 +1605,8 @@ fn compiled_eval_field_path(
         }
         // Apply filter if present (filter is an array operation — keep the flag set)
         if let Some(filter) = &step.filter {
-            current = compiled_apply_filter(filter, &current, vars, ctx, shape)?;
+            current =
+                compiled_apply_filter(filter, &current, vars, ctx, shape, options, start_time)?;
             // Filter always implies we operated on an array
             did_array_mapping = true;
         }
@@ -1546,19 +1626,25 @@ fn compiled_eval_field_path(
 ///
 /// - Object: look up `field`, return its value or Undefined
 /// - Array: map field extraction over each element, flatten nested arrays, skip Undefined
+///   (this is a query-result sequence, so D2015 applies — mirrors `evaluate_path`'s
+///   array-mapping check and `vm.rs`'s `get_field_cached`)
 /// - Tuple objects (`__tuple__: true`): look up in the `@` inner object
 /// - Other: Undefined
-fn compiled_field_step(field: &str, value: &JValue) -> JValue {
+fn compiled_field_step(
+    field: &str,
+    value: &JValue,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
     match value {
         JValue::Object(obj) => {
             // Check for tuple: extract from "@" inner object
             if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
                 if let Some(JValue::Object(inner)) = obj.get("@") {
-                    return inner.get(field).cloned().unwrap_or(JValue::Undefined);
+                    return Ok(inner.get(field).cloned().unwrap_or(JValue::Undefined));
                 }
-                return JValue::Undefined;
+                return Ok(JValue::Undefined);
             }
-            obj.get(field).cloned().unwrap_or(JValue::Undefined)
+            Ok(obj.get(field).cloned().unwrap_or(JValue::Undefined))
         }
         JValue::Array(arr) => {
             // Build shape cache from first plain (non-tuple) object for O(1) positional access.
@@ -1575,7 +1661,7 @@ fn compiled_field_step(field: &str, value: &JValue) -> JValue {
                 let extracted = if let (Some(ref sh), JValue::Object(obj)) = (&shape, item) {
                     // Tuple objects need the recursive path for "@" inner lookup.
                     if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                        compiled_field_step(field, item)
+                        compiled_field_step(field, item, options)?
                     } else if let Some(&pos) = sh.get(field) {
                         // Positional access with key verification: guards against heterogeneous
                         // schemas (objects where the same field is at a different index).
@@ -1590,7 +1676,7 @@ fn compiled_field_step(field: &str, value: &JValue) -> JValue {
                         obj.get(field).cloned().unwrap_or(JValue::Undefined)
                     }
                 } else {
-                    compiled_field_step(field, item)
+                    compiled_field_step(field, item, options)?
                 };
                 match extracted {
                     JValue::Undefined => {}
@@ -1598,13 +1684,14 @@ fn compiled_field_step(field: &str, value: &JValue) -> JValue {
                     other => result.push(other),
                 }
             }
-            if result.is_empty() {
+            check_sequence_length(result.len(), options)?;
+            Ok(if result.is_empty() {
                 JValue::Undefined
             } else {
                 JValue::array(result)
-            }
+            })
         }
-        _ => JValue::Undefined,
+        _ => Ok(JValue::Undefined),
     }
 }
 
@@ -1619,6 +1706,8 @@ fn compiled_apply_filter(
     vars: Option<&HashMap<&str, &JValue>>,
     ctx: Option<&Context>,
     shape: Option<&ShapeCache>,
+    options: &EvaluatorOptions,
+    start_time: Option<Instant>,
 ) -> Result<JValue, EvaluatorError> {
     match value {
         JValue::Array(arr) => {
@@ -1632,7 +1721,16 @@ fn compiled_apply_filter(
             };
             let effective_shape = shape.or(local_shape.as_ref());
             for item in arr.iter() {
-                let pred = eval_compiled_inner(filter, item, vars, ctx, effective_shape)?;
+                check_loop_timeout(options, start_time)?;
+                let pred = eval_compiled_inner(
+                    filter,
+                    item,
+                    vars,
+                    ctx,
+                    effective_shape,
+                    options,
+                    start_time,
+                )?;
                 if compiled_is_truthy(&pred) {
                     result.push(item.clone());
                 }
@@ -1640,14 +1738,16 @@ fn compiled_apply_filter(
             if result.is_empty() {
                 Ok(JValue::Undefined)
             } else if result.len() == 1 {
+                check_sequence_length(1, options)?;
                 Ok(result.remove(0))
             } else {
+                check_sequence_length(result.len(), options)?;
                 Ok(JValue::array(result))
             }
         }
         JValue::Undefined => Ok(JValue::Undefined),
         _ => {
-            let pred = eval_compiled_inner(filter, value, vars, ctx, shape)?;
+            let pred = eval_compiled_inner(filter, value, vars, ctx, shape, options, start_time)?;
             if compiled_is_truthy(&pred) {
                 Ok(value.clone())
             } else {
@@ -1662,7 +1762,12 @@ fn compiled_apply_filter(
 /// Replicates the tree-walker's evaluation for the subset of builtins in
 /// `COMPILABLE_BUILTINS`: no side effects, no lambdas, no context mutations.
 /// `data` is the current context value for implicit-argument insertion.
-fn call_pure_builtin(name: &str, args: &[JValue], data: &JValue) -> Result<JValue, EvaluatorError> {
+fn call_pure_builtin(
+    name: &str,
+    args: &[JValue],
+    data: &JValue,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
     use crate::functions;
 
     // Apply implicit context insertion matching the tree-walker
@@ -2048,6 +2153,11 @@ fn call_pure_builtin(name: &str, args: &[JValue], data: &JValue) -> Result<JValu
                 JValue::Array(a) => a.to_vec(),
                 other => vec![other.clone()],
             };
+            let second_len = match second {
+                JValue::Array(a) => a.len(),
+                _ => 1,
+            };
+            check_sequence_length(arr.len() + second_len, options)?;
             Ok(functions::array::append(&arr, second)?)
         }
         "reverse" => match effective_args.first() {
@@ -2074,6 +2184,7 @@ fn call_pure_builtin(name: &str, args: &[JValue], data: &JValue) -> Result<JValu
                     Ok(JValue::Null)
                 } else {
                     let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
+                    check_sequence_length(keys.len(), options)?;
                     if keys.len() == 1 {
                         Ok(keys.into_iter().next().unwrap())
                     } else {
@@ -2098,6 +2209,7 @@ fn call_pure_builtin(name: &str, args: &[JValue], data: &JValue) -> Result<JValu
                 } else if all_keys.len() == 1 {
                     Ok(all_keys.into_iter().next().unwrap())
                 } else {
+                    check_sequence_length(all_keys.len(), options)?;
                     Ok(JValue::array(all_keys))
                 }
             }
@@ -2540,6 +2652,70 @@ impl TupleKeyBindings {
     }
 }
 
+/// Resource-limit guardrails, mirroring jsonata-js 2.2.1's `timeout`/`stack`/`sequence`
+/// evaluator options. All fields default to `None` = unlimited (current behavior).
+#[derive(Default, Clone, Debug)]
+pub struct EvaluatorOptions {
+    /// Maximum wall-clock evaluation time in milliseconds. Exceeding it raises D1012.
+    pub timeout_ms: Option<u64>,
+    /// Maximum AST-recursion stack depth. Exceeding it raises D1011 if this is the
+    /// tighter of this value and the hardcoded native-stack safety ceiling (302);
+    /// otherwise the hardcoded ceiling still raises U1001 (see GitHub issue #34).
+    pub max_stack_depth: Option<usize>,
+    /// Maximum length of a query-result sequence (map/filter/wildcard/descendants/
+    /// keys/lookup/append/spread/each/range/path-mapping). Exceeding it raises D2015.
+    /// Does NOT currently apply to literal array construction (`MakeArray`/
+    /// `ArrayConstruct`) — NOTE this is a deliberate, temporary divergence from
+    /// upstream, not a match: jsonata-js DOES cap flat/non-nested array literals
+    /// (via `fn.append`'s `createSequence` hook in `evaluateUnary`'s `[` case).
+    /// Deferred until the separate `MakeArray(u16)` truncation bug is fixed (see
+    /// the design spec's "Sequence length → D2015" section).
+    pub max_sequence_length: Option<usize>,
+}
+
+/// Checks a constructed query-result sequence's length against the configured
+/// `max_sequence_length` guardrail. Call this at sites that build a query-result
+/// sequence (map/filter/wildcard/descendants/keys/lookup/append/spread/each/range/
+/// path-mapping). NOT currently called at literal array construction (`[1,2,3]`) —
+/// unlike upstream jsonata-js, which caps flat/non-nested literals too via
+/// `fn.append`'s `createSequence()` hook. See `EvaluatorOptions::max_sequence_length`
+/// doc comment above for why this is a deliberate, temporary gap.
+pub(crate) fn check_sequence_length(
+    len: usize,
+    options: &EvaluatorOptions,
+) -> Result<(), EvaluatorError> {
+    if let Some(max) = options.max_sequence_length {
+        if len > max {
+            return Err(EvaluatorError::EvaluationError(format!(
+                "D2015: The maximum sequence length of {} was exceeded.",
+                max
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Per-iteration D1012 check for loop-based compiled/VM constructs (map/filter/
+/// reduce element loops, FilterByBytecode) that don't pass through
+/// `evaluate_internal`'s per-node checkpoint and would otherwise run untimed.
+#[inline]
+pub(crate) fn check_loop_timeout(
+    options: &EvaluatorOptions,
+    start_time: Option<Instant>,
+) -> Result<(), EvaluatorError> {
+    if let Some(timeout_ms) = options.timeout_ms {
+        if let Some(start) = start_time {
+            if start.elapsed().as_millis() as u64 > timeout_ms {
+                return Err(EvaluatorError::EvaluationError(format!(
+                    "D1012: Evaluation timeout after {} milliseconds. Check for infinite loop",
+                    timeout_ms
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Evaluator for JSONata expressions
 pub struct Evaluator {
     context: Context,
@@ -2567,6 +2743,10 @@ pub struct Evaluator {
     /// wrapper). Mirrors jsonata-js keeping `path.tuple` for such a path instead
     /// of projecting each tuple's `@`.
     keep_tuple_stream: bool,
+    options: EvaluatorOptions,
+    /// Set in `evaluate()` (only when `options.timeout_ms` is configured) and
+    /// checked in `evaluate_internal`'s per-node checkpoint for D1012.
+    start_time: Option<Instant>,
 }
 
 impl Evaluator {
@@ -2580,6 +2760,8 @@ impl Evaluator {
             next_lambda_id: 0,
             tuple_stream_created: false,
             keep_tuple_stream: false,
+            options: EvaluatorOptions::default(),
+            start_time: None,
         }
     }
 
@@ -2591,6 +2773,23 @@ impl Evaluator {
             next_lambda_id: 0,
             tuple_stream_created: false,
             keep_tuple_stream: false,
+            options: EvaluatorOptions::default(),
+            start_time: None,
+        }
+    }
+
+    /// Construct an `Evaluator` with guardrail options. `Evaluator::new()`/
+    /// `with_context()` remain unchanged (unlimited options) for existing callers.
+    pub fn with_options(context: Context, options: EvaluatorOptions) -> Self {
+        Evaluator {
+            context,
+            recursion_depth: 0,
+            max_recursion_depth: 302,
+            next_lambda_id: 0,
+            tuple_stream_created: false,
+            keep_tuple_stream: false,
+            options,
+            start_time: None,
         }
     }
 
@@ -2629,7 +2828,7 @@ impl Evaluator {
                     .map(|(p, v)| (p.as_str(), v))
                     .chain(stored.captured_env.iter().map(|(k, v)| (k.as_str(), v)))
                     .collect();
-                return eval_compiled(ce, call_data, Some(&vars));
+                return eval_compiled(ce, call_data, Some(&vars), &self.options, self.start_time);
             }
         }
 
@@ -2860,6 +3059,10 @@ impl Evaluator {
             self.context.set_parent(data.clone());
         }
 
+        if self.options.timeout_ms.is_some() {
+            self.start_time = Some(Instant::now());
+        }
+
         self.tuple_stream_created = false;
         let result = self.evaluate_internal(node, data)?;
         Ok(if self.tuple_stream_created {
@@ -2923,14 +3126,45 @@ impl Evaluator {
             return result;
         }
 
-        // Check recursion depth to prevent stack overflow
+        // Check recursion depth to prevent stack overflow. `effective_limit` is
+        // whichever is tighter: the user's `max_stack_depth` guardrail or the
+        // hardcoded native-stack-safety ceiling (`max_recursion_depth`, always
+        // 302, GitHub issue #34). The hardcoded ceiling is an always-on backstop
+        // regardless of user options — only a user limit BELOW it can produce
+        // D1011; hitting the hardcoded ceiling itself (no option set, or an
+        // option set at/above 302) still produces U1001.
         self.recursion_depth += 1;
-        if self.recursion_depth > self.max_recursion_depth {
+        let effective_limit = match self.options.max_stack_depth {
+            Some(limit) => limit.min(self.max_recursion_depth),
+            None => self.max_recursion_depth,
+        };
+        if self.recursion_depth > effective_limit {
             self.recursion_depth -= 1;
-            return Err(EvaluatorError::EvaluationError(format!(
-                "U1001: Stack overflow - maximum recursion depth ({}) exceeded",
-                self.max_recursion_depth
-            )));
+            return Err(EvaluatorError::EvaluationError(
+                if effective_limit < self.max_recursion_depth {
+                    "D1011: Stack overflow. Check for non-terminating recursive function. Consider rewriting as tail-recursive".to_string()
+                } else {
+                    format!(
+                        "U1001: Stack overflow - maximum recursion depth ({}) exceeded",
+                        effective_limit
+                    )
+                },
+            ));
+        }
+
+        // Check evaluation timeout (D1012). `start_time` is only set (in
+        // `evaluate()`) when `options.timeout_ms` is configured, so this is a
+        // single `is_none()` branch of overhead when no timeout is set.
+        if let Some(timeout_ms) = self.options.timeout_ms {
+            if let Some(start) = self.start_time {
+                if start.elapsed().as_millis() as u64 > timeout_ms {
+                    self.recursion_depth -= 1;
+                    return Err(EvaluatorError::EvaluationError(format!(
+                        "D1012: Evaluation timeout after {} milliseconds. Check for infinite loop",
+                        timeout_ms
+                    )));
+                }
+            }
         }
 
         // The soft depth counter above is calibrated against a comfortably
@@ -3505,6 +3739,7 @@ impl Evaluator {
                                 _ => result.push(value.clone()),
                             }
                         }
+                        check_sequence_length(result.len(), &self.options)?;
                         Ok(JValue::array(result))
                     }
                     JValue::Array(arr) => {
@@ -3521,6 +3756,7 @@ impl Evaluator {
                 if descendants.is_empty() {
                     Ok(JValue::Null) // No descendants means undefined
                 } else {
+                    check_sequence_length(descendants.len(), &self.options)?;
                     Ok(JValue::array(descendants))
                 }
             }
@@ -3730,9 +3966,22 @@ impl Evaluator {
                         let mut filtered = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
                             let result = if let Some(ref s) = shape {
-                                eval_compiled_shaped(&compiled, item, None, s)?
+                                eval_compiled_shaped(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    s,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             } else {
-                                eval_compiled(&compiled, item, None)?
+                                eval_compiled(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             };
                             if compiled_is_truthy(&result) {
                                 filtered.push(item.clone());
@@ -3965,6 +4214,7 @@ impl Evaluator {
                             } else if result.len() == 1 {
                                 Ok(result.into_iter().next().unwrap())
                             } else {
+                                check_sequence_length(result.len(), &self.options)?;
                                 Ok(JValue::array(result))
                             }
                         } else {
@@ -4055,6 +4305,7 @@ impl Evaluator {
                             } else if result.len() == 1 {
                                 Ok(result.into_iter().next().unwrap())
                             } else {
+                                check_sequence_length(result.len(), &self.options)?;
                                 Ok(JValue::array(result))
                             }
                         } // end else (tuple path)
@@ -4096,7 +4347,10 @@ impl Evaluator {
                                 return match result.len() {
                                     0 => Ok(JValue::Null),
                                     1 => Ok(result.pop().unwrap()),
-                                    _ => Ok(JValue::array(result)),
+                                    _ => {
+                                        check_sequence_length(result.len(), &self.options)?;
+                                        Ok(JValue::array(result))
+                                    }
                                 };
                             }
                             _ => {} // Fall through to general path evaluation
@@ -4896,9 +5150,22 @@ impl Evaluator {
                                 let mut result = Vec::with_capacity(arr.len());
                                 for item in arr.iter() {
                                     let value = if let Some(ref s) = shape {
-                                        eval_compiled_shaped(&compiled, item, None, s)?
+                                        eval_compiled_shaped(
+                                            &compiled,
+                                            item,
+                                            None,
+                                            s,
+                                            &self.options,
+                                            self.start_time,
+                                        )?
                                     } else {
-                                        eval_compiled(&compiled, item, None)?
+                                        eval_compiled(
+                                            &compiled,
+                                            item,
+                                            None,
+                                            &self.options,
+                                            self.start_time,
+                                        )?
                                     };
                                     if !value.is_null() && !value.is_undefined() {
                                         result.push(value);
@@ -5045,6 +5312,10 @@ impl Evaluator {
         } else {
             result
         };
+
+        if let JValue::Array(arr) = &result {
+            check_sequence_length(arr.len(), &self.options)?;
+        }
 
         Ok(result)
     }
@@ -5399,9 +5670,22 @@ impl Evaluator {
                         let mut mapped = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
                             let result = if let Some(ref s) = shape {
-                                eval_compiled_shaped(&compiled, item, None, s)?
+                                eval_compiled_shaped(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    s,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             } else {
-                                eval_compiled(&compiled, item, None)?
+                                eval_compiled(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             };
                             if !result.is_undefined() {
                                 mapped.push(result);
@@ -6209,9 +6493,9 @@ impl Evaluator {
             // Apply compiled filter if present
             if let Some(ref compiled) = filter_compiled {
                 let result = if let Some(ref s) = shape {
-                    eval_compiled_shaped(compiled, item, None, s)?
+                    eval_compiled_shaped(compiled, item, None, s, &self.options, self.start_time)?
                 } else {
-                    eval_compiled(compiled, item, None)?
+                    eval_compiled(compiled, item, None, &self.options, self.start_time)?
                 };
                 if !compiled_is_truthy(&result) {
                     continue;
@@ -7437,6 +7721,14 @@ impl Evaluator {
                     other => vec![other.clone()], // Wrap non-array in array
                 };
 
+                // Pre-check combined size before concatenating, mirroring
+                // jsonata-js's append() (`arg1.length + arg2.length > options.sequence`).
+                let second_len = match second {
+                    JValue::Array(a) => a.len(),
+                    _ => 1,
+                };
+                check_sequence_length(arr.len() + second_len, &self.options)?;
+
                 Ok(functions::array::append(&arr, second)?)
             }
             "reverse" => {
@@ -7698,6 +7990,7 @@ impl Evaluator {
                         } else {
                             let keys: Vec<JValue> =
                                 obj.keys().map(|k| JValue::string(k.clone())).collect();
+                            check_sequence_length(keys.len(), &self.options)?;
                             Ok(unwrap_single(keys))
                         }
                     }
@@ -7720,6 +8013,7 @@ impl Evaluator {
                         if all_keys.is_empty() {
                             Ok(JValue::Null)
                         } else {
+                            check_sequence_length(all_keys.len(), &self.options)?;
                             Ok(unwrap_single(all_keys))
                         }
                     }
@@ -7777,6 +8071,7 @@ impl Evaluator {
                 } else if results.len() == 1 {
                     Ok(results[0].clone())
                 } else {
+                    check_sequence_length(results.len(), &self.options)?;
                     Ok(JValue::array(results))
                 }
             }
@@ -7791,7 +8086,15 @@ impl Evaluator {
                     // Not a container - pass through unchanged (e.g. so $string() still
                     // sees the function value and applies its own function->"" rule).
                     lambda @ (JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(lambda.clone()),
-                    JValue::Object(obj) => Ok(functions::object::spread(obj)?),
+                    JValue::Object(obj) => {
+                        // functions::object::spread() always returns an array with one
+                        // element per key (mirrors jsonata-js's push-per-key loop through
+                        // this.createSequence()), so it needs the same cap as the
+                        // array-fanout branch below and as the "keys" arm's single-object
+                        // branch.
+                        check_sequence_length(obj.len(), &self.options)?;
+                        Ok(functions::object::spread(obj)?)
+                    }
                     JValue::Array(arr) => {
                         // Spread each object in the array
                         let mut result = Vec::new();
@@ -7813,6 +8116,7 @@ impl Evaluator {
                                 other => result.push(other.clone()),
                             }
                         }
+                        check_sequence_length(result.len(), &self.options)?;
                         Ok(JValue::array(result))
                     }
                     // Non-objects are returned unchanged
@@ -7879,11 +8183,18 @@ impl Evaluator {
                                     let mut vars = HashMap::new();
                                     for item in arr.iter() {
                                         vars.insert(param_name, item);
-                                        let mapped = eval_compiled(&compiled, data, Some(&vars))?;
+                                        let mapped = eval_compiled(
+                                            &compiled,
+                                            data,
+                                            Some(&vars),
+                                            &self.options,
+                                            self.start_time,
+                                        )?;
                                         if !mapped.is_undefined() {
                                             result.push(mapped);
                                         }
                                     }
+                                    check_sequence_length(result.len(), &self.options)?;
                                     return Ok(JValue::array(result));
                                 }
                             }
@@ -7914,11 +8225,14 @@ impl Evaluator {
                                                     &ce_clone,
                                                     call_data,
                                                     Some(&vars),
+                                                    &self.options,
+                                                    self.start_time,
                                                 )?;
                                                 if !mapped.is_undefined() {
                                                     result.push(mapped);
                                                 }
                                             }
+                                            check_sequence_length(result.len(), &self.options)?;
                                             return Ok(JValue::array(result));
                                         }
                                     }
@@ -7953,6 +8267,7 @@ impl Evaluator {
                                 result.push(mapped);
                             }
                         }
+                        check_sequence_length(result.len(), &self.options)?;
                         Ok(JValue::array(result))
                     }
                     JValue::Null => Ok(JValue::Null),
@@ -8015,7 +8330,13 @@ impl Evaluator {
                             let mut vars = HashMap::new();
                             for item in items.iter() {
                                 vars.insert(param_name, item);
-                                let pred_result = eval_compiled(&compiled, data, Some(&vars))?;
+                                let pred_result = eval_compiled(
+                                    &compiled,
+                                    data,
+                                    Some(&vars),
+                                    &self.options,
+                                    self.start_time,
+                                )?;
                                 if compiled_is_truthy(&pred_result) {
                                     result.push(item.clone());
                                 }
@@ -8027,6 +8348,7 @@ impl Evaluator {
                                     return Ok(JValue::Undefined);
                                 }
                             }
+                            check_sequence_length(result.len(), &self.options)?;
                             return Ok(JValue::array(result));
                         }
                     }
@@ -8049,8 +8371,13 @@ impl Evaluator {
                                         .collect();
                                     for item in items.iter() {
                                         vars.insert(param_name.as_str(), item);
-                                        let pred_result =
-                                            eval_compiled(&ce_clone, call_data, Some(&vars))?;
+                                        let pred_result = eval_compiled(
+                                            &ce_clone,
+                                            call_data,
+                                            Some(&vars),
+                                            &self.options,
+                                            self.start_time,
+                                        )?;
                                         if compiled_is_truthy(&pred_result) {
                                             result.push(item.clone());
                                         }
@@ -8062,6 +8389,7 @@ impl Evaluator {
                                             return Ok(JValue::Undefined);
                                         }
                                     }
+                                    check_sequence_length(result.len(), &self.options)?;
                                     return Ok(JValue::array(result));
                                 }
                             }
@@ -8106,6 +8434,7 @@ impl Evaluator {
                     }
                 }
 
+                check_sequence_length(result.len(), &self.options)?;
                 Ok(JValue::array(result))
             }
 
@@ -8182,7 +8511,13 @@ impl Evaluator {
                             for item in items[start_idx..].iter() {
                                 let vars: HashMap<&str, &JValue> =
                                     HashMap::from([(acc_name, &accumulator), (item_name, item)]);
-                                accumulator = eval_compiled(&compiled, data, Some(&vars))?;
+                                accumulator = eval_compiled(
+                                    &compiled,
+                                    data,
+                                    Some(&vars),
+                                    &self.options,
+                                    self.start_time,
+                                )?;
                             }
                             return Ok(accumulator);
                         }
@@ -8211,8 +8546,13 @@ impl Evaluator {
                                             vars.insert(item_param.as_str(), item);
                                             // Evaluate and drop vars before assigning accumulator
                                             // to satisfy borrow checker (vars borrows accumulator)
-                                            let new_acc =
-                                                eval_compiled(&ce_clone, call_data, Some(&vars))?;
+                                            let new_acc = eval_compiled(
+                                                &ce_clone,
+                                                call_data,
+                                                Some(&vars),
+                                                &self.options,
+                                                self.start_time,
+                                            )?;
                                             drop(vars);
                                             accumulator = new_acc;
                                         }
@@ -8359,6 +8699,7 @@ impl Evaluator {
                                 result.push(fn_result);
                             }
                         }
+                        check_sequence_length(result.len(), &self.options)?;
                         Ok(JValue::array(result))
                     }
                     JValue::Null => Ok(JValue::Null),
@@ -9219,11 +9560,26 @@ impl Evaluator {
         // Trampoline loop - keeps evaluating until we get a final value
         let result = loop {
             iterations += 1;
-            if iterations > MAX_TCO_ITERATIONS {
+            // The hardcoded iteration cap is a backstop for when no timeout is
+            // configured; it must not preempt a configured timeout (which is the
+            // more specific, user-controlled guardrail). Without this gate, an
+            // infinite tail-recursive loop with a cheap per-iteration body hits
+            // this cap in single-digit-to-tens of milliseconds and reports the
+            // misleading "U1001: Stack overflow" (TCO does not grow the stack;
+            // there is no depth-500 stack here) instead of D1012, for *any*
+            // realistic `timeout_ms` (100ms, 1s, the docs' own 5000ms default) -
+            // defeating the purpose of the timeout guardrail for exactly the
+            // scenario it exists to catch (see jsonata-js's own `$inf := function
+            // (){$inf()}; $inf()` guardrails-documentation example).
+            if self.options.timeout_ms.is_none() && iterations > MAX_TCO_ITERATIONS {
                 self.context.pop_scope();
                 return Err(EvaluatorError::EvaluationError(
                     "U1001: Stack overflow - maximum recursion depth (500) exceeded".to_string(),
                 ));
+            }
+            if let Err(e) = check_loop_timeout(&self.options, self.start_time) {
+                self.context.pop_scope();
+                return Err(e);
             }
 
             // Evaluate the lambda body within the persistent scope
@@ -10092,6 +10448,7 @@ impl Evaluator {
                     other => result.push(other.clone()),
                 }
 
+                check_sequence_length(result.len(), &self.options)?;
                 Ok(JValue::array(result))
             }
             "reverse" => match arg {
@@ -10108,6 +10465,7 @@ impl Evaluator {
             "keys" => match arg {
                 JValue::Object(obj) => {
                     let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
+                    check_sequence_length(keys.len(), &self.options)?;
                     Ok(JValue::array(keys))
                 }
                 JValue::Null => Ok(JValue::Null),
@@ -10194,9 +10552,22 @@ impl Evaluator {
                         let mut filtered = Vec::with_capacity(_arr.len());
                         for item in _arr.iter() {
                             let result = if let Some(ref s) = shape {
-                                eval_compiled_shaped(&compiled, item, None, s)?
+                                eval_compiled_shaped(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    s,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             } else {
-                                eval_compiled(&compiled, item, None)?
+                                eval_compiled(
+                                    &compiled,
+                                    item,
+                                    None,
+                                    &self.options,
+                                    self.start_time,
+                                )?
                             };
                             if compiled_is_truthy(&result) {
                                 filtered.push(item.clone());
@@ -10284,9 +10655,16 @@ impl Evaluator {
                     let mut filtered = Vec::with_capacity(_arr.len());
                     for item in _arr.iter() {
                         let result = if let Some(ref s) = shape {
-                            eval_compiled_shaped(&compiled, item, None, s)?
+                            eval_compiled_shaped(
+                                &compiled,
+                                item,
+                                None,
+                                s,
+                                &self.options,
+                                self.start_time,
+                            )?
                         } else {
-                            eval_compiled(&compiled, item, None)?
+                            eval_compiled(&compiled, item, None, &self.options, self.start_time)?
                         };
                         if compiled_is_truthy(&result) {
                             filtered.push(item.clone());
@@ -11178,6 +11556,7 @@ impl Evaluator {
                 "D2014: Range operator results in too many elements (> 10,000,000)".to_string(),
             ));
         }
+        check_sequence_length(size, &self.options)?;
 
         let mut result = Vec::with_capacity(size);
         if start <= end {

@@ -14,7 +14,10 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 
-use crate::evaluator::{eval_compiled, CompiledExpr, EvaluatorError};
+use crate::evaluator::{
+    check_loop_timeout, check_sequence_length, eval_compiled, CompiledExpr, EvaluatorError,
+    EvaluatorOptions,
+};
 use crate::value::JValue;
 
 // ---------------------------------------------------------------------------
@@ -167,13 +170,19 @@ pub(crate) struct Vm<'prog> {
     prog: &'prog BytecodeProgram,
     /// Operand stack.
     stack: Vec<JValue>,
+    options: EvaluatorOptions,
 }
 
 impl<'prog> Vm<'prog> {
-    pub(crate) fn new(prog: &'prog BytecodeProgram) -> Self {
+    /// Construct a `Vm` with guardrail options (timeout/sequence-length; stack
+    /// depth is not meaningful here — the VM is an iterative flat-instruction
+    /// loop, not native recursion, and self-recursive user lambdas can't
+    /// compile to bytecode in the first place, see design-spec Phase 2 notes).
+    pub(crate) fn with_options(prog: &'prog BytecodeProgram, options: EvaluatorOptions) -> Self {
         Vm {
             prog,
             stack: Vec::with_capacity(16),
+            options,
         }
     }
 
@@ -184,7 +193,19 @@ impl<'prog> Vm<'prog> {
         data: &JValue,
         vars: Option<&HashMap<&str, &JValue>>,
     ) -> Result<JValue, EvaluatorError> {
-        run_inner(self.prog, data, vars, &mut self.stack)
+        let start_time = if self.options.timeout_ms.is_some() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        run_inner(
+            self.prog,
+            data,
+            vars,
+            &mut self.stack,
+            &self.options,
+            start_time,
+        )
     }
 }
 
@@ -197,6 +218,8 @@ fn run_inner(
     data: &JValue,
     vars: Option<&HashMap<&str, &JValue>>,
     stack: &mut Vec<JValue>,
+    options: &EvaluatorOptions,
+    start_time: Option<std::time::Instant>,
 ) -> Result<JValue, EvaluatorError> {
     use crate::evaluator::{
         call_pure_builtin_by_name, compiled_arithmetic, compiled_concat, compiled_equal,
@@ -236,12 +259,12 @@ fn run_inner(
             Instr::GetField(idx) => {
                 let val = stack.pop().unwrap_or(JValue::Undefined);
                 let field = &string_pool[*idx as usize];
-                stack.push(get_field_cached(&val, field, &shape_cache[ip]));
+                stack.push(get_field_cached(&val, field, &shape_cache[ip], options)?);
                 ip += 1;
             }
             Instr::GetDataField(idx) => {
                 let field = &string_pool[*idx as usize];
-                stack.push(get_field_cached(data, field, &shape_cache[ip]));
+                stack.push(get_field_cached(data, field, &shape_cache[ip], options)?);
                 ip += 1;
             }
             Instr::GetVar(idx) => {
@@ -262,7 +285,7 @@ fn run_inner(
                 }
                 .unwrap_or(JValue::Undefined);
                 let field = &string_pool[*field_idx as usize];
-                stack.push(get_field_cached(&obj, field, &shape_cache[ip]));
+                stack.push(get_field_cached(&obj, field, &shape_cache[ip], options)?);
                 ip += 1;
             }
 
@@ -537,7 +560,7 @@ fn run_inner(
                 let n = *arg_count as usize;
                 let start = stack.len().saturating_sub(n);
                 let args: Vec<JValue> = stack.drain(start..).collect();
-                stack.push(call_pure_builtin_by_name(name, &args, data)?);
+                stack.push(call_pure_builtin_by_name(name, &args, data, options)?);
                 ip += 1;
             }
 
@@ -551,21 +574,36 @@ fn run_inner(
                     JValue::Array(arr) => {
                         let mut kept: Vec<JValue> = Vec::with_capacity(arr.len());
                         for item in arr.iter() {
-                            let test = run_inner(sub_prog, item, vars, &mut sub_stack)?;
+                            check_loop_timeout(options, start_time)?;
+                            let test = run_inner(
+                                sub_prog,
+                                item,
+                                vars,
+                                &mut sub_stack,
+                                options,
+                                start_time,
+                            )?;
                             if compiled_is_truthy(&test) {
                                 kept.push(item.clone());
                             }
                         }
                         match kept.len() {
                             0 => JValue::Undefined,
-                            1 => kept.pop().unwrap(),
-                            _ => JValue::array(kept),
+                            1 => {
+                                check_sequence_length(1, options)?;
+                                kept.pop().unwrap()
+                            }
+                            _ => {
+                                check_sequence_length(kept.len(), options)?;
+                                JValue::array(kept)
+                            }
                         }
                     }
                     JValue::Undefined => JValue::Undefined,
                     other => {
                         // Single value: apply predicate directly
-                        let test = run_inner(sub_prog, &other, vars, &mut sub_stack)?;
+                        let test =
+                            run_inner(sub_prog, &other, vars, &mut sub_stack, options, start_time)?;
                         if compiled_is_truthy(&test) {
                             other
                         } else {
@@ -580,7 +618,7 @@ fn run_inner(
             // ── Fallback ─────────────────────────────────────────────
             Instr::EvalFallback(idx) => {
                 let expr = &fallback_exprs[*idx as usize];
-                stack.push(eval_compiled(expr, data, vars)?);
+                stack.push(eval_compiled(expr, data, vars, options, start_time)?);
                 ip += 1;
             }
 
@@ -603,14 +641,19 @@ fn run_inner(
 /// On objects with IndexMap storage, caches the positional index so subsequent
 /// accesses (for the same object schema) are O(1) positional lookups.
 #[inline]
-fn get_field_cached(val: &JValue, field: &str, cache: &Cell<Option<usize>>) -> JValue {
+fn get_field_cached(
+    val: &JValue,
+    field: &str,
+    cache: &Cell<Option<usize>>,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
     match val {
         JValue::Object(obj) => {
             // Try cached positional index first
             if let Some(idx) = cache.get() {
                 if let Some(v) = obj.get_index(idx) {
                     if v.0 == field {
-                        return v.1.clone();
+                        return Ok(v.1.clone());
                     }
                     // Cache miss (schema changed) — fall through
                 }
@@ -621,29 +664,144 @@ fn get_field_cached(val: &JValue, field: &str, cache: &Cell<Option<usize>>) -> J
                 if let Some(idx) = obj.get_index_of(field) {
                     cache.set(Some(idx));
                 }
-                v.clone()
+                Ok(v.clone())
             } else {
-                JValue::Undefined
+                Ok(JValue::Undefined)
             }
         }
         JValue::Array(arr) => {
             // Array: map field access over elements (implicit array mapping).
             // Mirrors `compiled_field_step`: flatten nested arrays one level.
+            // This is a query-result sequence (D2015 applies, matching
+            // `evaluate_path`'s array-mapping check in evaluator.rs).
             let mut results: Vec<JValue> = Vec::with_capacity(arr.len());
             for item in arr.iter() {
-                let v = get_field_cached(item, field, cache);
+                let v = get_field_cached(item, field, cache, options)?;
                 match v {
                     JValue::Undefined => {}
                     JValue::Array(inner) => results.extend(inner.iter().cloned()),
                     other => results.push(other),
                 }
             }
-            match results.len() {
+            check_sequence_length(results.len(), options)?;
+            Ok(match results.len() {
                 0 => JValue::Undefined,
                 1 => results.pop().unwrap(),
                 _ => JValue::array(results),
-            }
+            })
         }
-        _ => JValue::Undefined,
+        _ => Ok(JValue::Undefined),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 9: direct VM-path guardrail tests
+//
+// These live in-crate (rather than in `tests/integration_test.rs`) because
+// `Vm`, `Vm::with_options`, `try_compile_expr`, and `BytecodeCompiler::compile`
+// are all `pub(crate)` and not reachable from an external test crate, and the
+// only external hook (`_bench` facade in `src/lib.rs`, gated on `--features
+// bench`) hardcodes `EvaluatorOptions::default()` — extending it is Task 10's
+// territory. Constructing the pipeline directly here proves `FilterByBytecode`
+// itself (not `eval_compiled_inner`, which Task 8 already covers) enforces
+// D2015/D1012 once `EvaluatorOptions` reaches it.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::BytecodeCompiler;
+    use crate::evaluator::try_compile_expr;
+    use crate::parser::parse;
+
+    /// Compile `expr_src` and assert it produced at least one
+    /// `Instr::FilterByBytecode` — guards against the test silently exercising
+    /// `EvalFallback` instead (which would test nothing about this file).
+    fn compile_and_assert_uses_filter_by_bytecode(expr_src: &str) -> BytecodeProgram {
+        let ast = parse(expr_src).expect("parse");
+        let compiled = try_compile_expr(&ast).unwrap_or_else(|| {
+            panic!("expected `{expr_src}` to compile to a CompiledExpr, got None")
+        });
+        let prog = BytecodeCompiler::compile(&compiled);
+        assert!(
+            prog.instrs
+                .iter()
+                .any(|i| matches!(i, Instr::FilterByBytecode(_))),
+            "expected `{expr_src}` to compile to Instr::FilterByBytecode, got: {:?}",
+            prog.instrs
+        );
+        prog
+    }
+
+    #[test]
+    fn test_filter_by_bytecode_raises_d2015() {
+        let data: JValue = serde_json::json!({
+            "items": (0..1000).collect::<Vec<i32>>()
+        })
+        .into();
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ >= 0]");
+        let options = EvaluatorOptions {
+            max_sequence_length: Some(10),
+            ..Default::default()
+        };
+        let err = Vm::with_options(&prog, options)
+            .run(&data, None)
+            .expect_err("expected D2015");
+        assert!(err.to_string().contains("D2015"), "got: {err}");
+    }
+
+    /// Boundary check: `max_sequence_length=0` must raise D2015 even when the
+    /// filtered result is a single element, not just when it has 2+. Before this
+    /// fix, the `1 => kept.pop().unwrap()` singleton-unwrap arm skipped the
+    /// `check_sequence_length` call entirely, so a 1-element result silently
+    /// bypassed a `sequence: 0` cap — inconsistent with the 2+ arm and with the
+    /// range operator / `MapCall`, which already check unconditionally. Mirrors
+    /// upstream: a single-element push against `sequence: 0` still throws there
+    /// too, since `0 + 1 > 0`.
+    #[test]
+    fn test_filter_by_bytecode_raises_d2015_at_zero_with_single_result() {
+        let data: JValue = serde_json::json!({
+            "items": [1, 2, 3]
+        })
+        .into();
+        // Only one item matches `$ = 2`, so `kept.len() == 1` at the point the
+        // guardrail must fire.
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ = 2]");
+        let options = EvaluatorOptions {
+            max_sequence_length: Some(0),
+            ..Default::default()
+        };
+        let err = Vm::with_options(&prog, options)
+            .run(&data, None)
+            .expect_err("expected D2015 for a single-element result against sequence: 0");
+        assert!(err.to_string().contains("D2015"), "got: {err}");
+    }
+
+    #[test]
+    fn test_filter_by_bytecode_unlimited_options_does_not_raise() {
+        let data: JValue = serde_json::json!({
+            "items": (0..1000).collect::<Vec<i32>>()
+        })
+        .into();
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ >= 0]");
+        // Default (unlimited) options must not raise — proves the guardrail is
+        // opt-in and existing unlimited-usage behavior is unchanged.
+        let result = Vm::with_options(&prog, EvaluatorOptions::default()).run(&data, None);
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+    }
+
+    #[test]
+    fn test_filter_by_bytecode_raises_d1012_timeout() {
+        let data: JValue = serde_json::json!({
+            "items": (0..2_000_000).collect::<Vec<i32>>()
+        })
+        .into();
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ >= 0]");
+        let options = EvaluatorOptions {
+            timeout_ms: Some(0),
+            ..Default::default()
+        };
+        let err = Vm::with_options(&prog, options)
+            .run(&data, None)
+            .expect_err("expected D1012");
+        assert!(err.to_string().contains("D1012"), "got: {err}");
     }
 }
