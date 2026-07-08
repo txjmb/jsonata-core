@@ -1,0 +1,120 @@
+name: TEST - Benchmark on self-hosted macOS runner
+
+# THROWAWAY validation workflow - not part of the release pipeline. Exists
+# only to validate that release.yml's "Benchmark and Record Release
+# Performance" job would actually work on the self-hosted Mac Mini runner
+# (runs-on: [self-hosted, macOS, ARM64]) before migrating it there for real.
+# Does NOT record anything to the benchmark-data branch and does NOT open
+# regression issues. Delete this file once validated.
+#
+# v2: verifies Node.js (provisioned once, manually, via
+# scripts/setup-macos-benchmark-runner.sh - NOT installed by this workflow)
+# is present and usable, since the runner runs directly on the physical
+# host (not a container - confirmed via real ~/.cargo, ~/.local paths in
+# v1's job environment), so a manually-provisioned Node persists across
+# runs.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-benchmark-macos:
+    name: Test benchmark suite on Mac Mini
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      # Same sudo/no-terminal issue noted elsewhere in release.yml --
+      # actions/setup-python doesn't work on this self-hosted runner.
+      - name: Install UV
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python (macOS)
+        run: |
+          uv python install 3.14
+          uv venv --python 3.14 .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify Node.js is provisioned
+        run: |
+          if command -v node >/dev/null 2>&1; then
+            echo "node found: $(node --version)"
+          else
+            echo "::warning::Node.js not found on this runner. Run scripts/setup-macos-benchmark-runner.sh on the runner host first. JS comparison will be skipped for this run."
+          fi
+
+      - name: Install Python dependencies
+        run: |
+          uv pip install --upgrade maturin rich matplotlib pandas jsonata
+
+      - name: Install JavaScript dependencies
+        if: always()
+        run: |
+          if command -v node >/dev/null 2>&1; then
+            cd benchmarks/javascript
+            npm install jsonata@latest
+          else
+            echo "node not available - skipping"
+          fi
+
+      - name: Build jsonata-rs comparison binary
+        run: |
+          cd benchmarks/rust
+          cargo update -p jsonata-rs
+          cargo build --release
+
+      - name: Build jsonatapy (optimized)
+        run: |
+          maturin build --release --out dist
+          uv pip install --reinstall --find-links dist jsonatapy
+
+      - name: Verify installation
+        run: |
+          python -c "import jsonatapy; print(f'jsonatapy version: {jsonatapy.__version__}')"
+          python -c "import jsonata; print('jsonata-python installed')"
+          test -x benchmarks/rust/target/release/jsonata-rs-bench && echo "jsonata-rs-bench built"
+          if command -v node >/dev/null 2>&1; then
+            cd benchmarks/javascript && node -e "const jsonata = require('jsonata'); console.log('jsonata (JS) installed');"
+          else
+            echo "node not available - JS comparison will be skipped (this is fine, not used by regression detection)"
+          fi
+
+      - name: Run benchmark suite
+        run: |
+          cd benchmarks
+          python python/benchmark.py
+          RESULTS_FILE=$(ls -t results/benchmark_results_*.json | head -1)
+          echo "Benchmark results saved to: $RESULTS_FILE"
+          echo "--- Summary ---"
+          python3 -c "
+          import json
+          with open('$RESULTS_FILE') as f:
+              data = json.load(f)
+          results = data.get('results', data) if isinstance(data, dict) else data
+          if isinstance(data, dict) and 'results' in data:
+              results = data['results']
+          print(f'Total test results: {len(results)}')
+          missing_jsonatapy = [r['name'] for r in results if not r.get('jsonatapy_ms')]
+          if missing_jsonatapy:
+              print(f'WARNING - tests missing jsonatapy_ms: {missing_jsonatapy}')
+          else:
+              print('All tests have a jsonatapy_ms value (this is what the real regression check reads)')
+          "
+
+      - name: Upload results as artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-benchmark-macos-results
+          path: benchmarks/results/benchmark_results_*.json
+          retention-days: 7
