@@ -1415,23 +1415,37 @@ fn test_deeply_nested_arithmetic_caught_at_parse_construction_time() {
     let expr_str = format!("({})", vec!["1"; 200_000].join("+"));
     let result = parse(&expr_str);
     match result {
-        Err(e) => assert!(format!("{e}").contains("U1002"), "expected U1002, got: {e}"),
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(msg.contains("U1002"), "expected U1002, got: {msg}");
+            // U1002 is also used by ast_transform.rs's separate, earlier-added
+            // post-parse guard ("while resolving ancestor/path metadata"), so
+            // checking the error code alone isn't enough to prove the NEW
+            // parser-level guard (added in this commit) is the one that fired.
+            assert!(
+                msg.contains("while parsing expression"),
+                "expected the parser-level guard's message (not ast_transform's), got: {msg}"
+            );
+        }
         Ok(_) => panic!("expected a graceful depth-limit error"),
     }
 }
 
 /// Sibling subtrees must not inherit accumulated depth from an earlier
-/// sibling: an array of two SHALLOW arithmetic expressions must parse fine
-/// even though each element's `parse_expression` call briefly re-enters the
-/// loop-driven counter — proves depth is restored to its pre-call value
-/// between the two array elements, not left elevated.
+/// sibling. Each sibling here is a chain of 400 terms — safely under
+/// MAX_PARSE_DEPTH (1000) on its own, but three of them summed (1200) would
+/// exceed the ceiling if depth accumulated ACROSS siblings instead of being
+/// restored to its pre-call value between them. This makes the test actually
+/// load-bearing: a hypothetical "doesn't reset depth" bug would fail it,
+/// unlike a shallow chain whose cumulative depth stays under the ceiling
+/// regardless of whether reset happens.
 #[test]
 fn test_sibling_subtrees_do_not_inherit_depth() {
-    let shallow = vec!["1"; 20].join("+");
-    let expr_str = format!("[{shallow}, {shallow}, {shallow}]");
+    let chain = vec!["1"; 400].join("+");
+    let expr_str = format!("[{chain}, {chain}, {chain}]");
     let result = parse(&expr_str);
     assert!(
         result.is_ok(),
-        "shallow siblings should parse fine, got: {result:?}"
+        "siblings should each parse independently without inheriting depth from a prior sibling, got: {result:?}"
     );
 }
