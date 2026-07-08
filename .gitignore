@@ -63,6 +63,11 @@ benchmarks/javascript/package-lock.json
 # Test artifacts
 # tests/jsonata-js/ - Now a git submodule, don't ignore
 
+# Claude Code local settings (personal per-developer permissions/config,
+# not meant to be shared across the team)
+.claude/settings.local.json
+.claude/worktrees/
+
 # Temporary files
 *.tmp
 *.bak
