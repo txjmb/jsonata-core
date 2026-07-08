@@ -1506,6 +1506,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#status-as-of-2026-07-07" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status (as of 2026-07-07)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#context" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1637,6 +1648,56 @@
 
 
 <h1 id="jsonata-js-221-compatibility-upgrade">jsonata-js 2.2.1 compatibility upgrade<a class="headerlink" href="#jsonata-js-221-compatibility-upgrade" title="Permanent link">&para;</a></h1>
+<h2 id="status-as-of-2026-07-07">Status (as of 2026-07-07)<a class="headerlink" href="#status-as-of-2026-07-07" title="Permanent link">&para;</a></h2>
+<p><strong>Phase 1 is done and merged</strong> (<code>bbce6e7</code>, "jsonata-js 2.2.1 Phase 1: signature engine rewrite for
++/- support", #36). The submodule is bumped to <code>v2.2.1</code> on <code>main</code> and the reference suite passes
+1274/1274 — all shipped under jsonatapy <code>2.1.5</code>, no version bump needed, since Phase 1 was pure
+bug-fix/parity work.</p>
+<p><strong>Phase 2 (guardrails) is done</strong>, implemented per the 13-task
+<code>docs/superpowers/plans/2026-07-07-jsonata-2.2.1-phase2-guardrails-plan.md</code>, all tasks committed
+on this branch. <code>EvaluatorOptions</code> (<code>timeout_ms</code>/<code>max_stack_depth</code>/<code>max_sequence_length</code>, all
+<code>Option&lt;_&gt;</code>, default <code>None</code> = unlimited/unchanged behavior) is threaded through all three
+execution surfaces this port has grown beyond jsonata-js's single-engine model — the tree-walker,
+the "compiled expression" fast-path interpreter (<code>eval_compiled</code>), and the bytecode VM (<code>vm.rs</code>) —
+raising <code>D1011</code> (stack depth), <code>D1012</code> (timeout), and <code>D2015</code> (sequence length) as applicable —
+these are not a 1:1 mapping to the three surfaces: <code>D1011</code> is tree-walker-only (self-recursive
+lambdas can't compile into <code>eval_compiled</code> or the VM), while both <code>D1012</code> and <code>D2015</code> are enforced
+independently in all three (the VM's <code>FilterByBytecode</code> and <code>eval_compiled_inner</code>'s entry
+checkpoint each needed their own checks, since neither shares a checkpoint with the tree-walker's
+<code>evaluate_internal</code> or with each other).
+Parity across all three surfaces is verified by a dedicated test suite
+(<code>tests/python/test_guardrails.py</code>, 26 cases, plus Rust-side coverage in
+<code>tests/integration_test.rs</code> and <code>src/vm.rs</code>'s <code>#[cfg(test)]</code> module) that exercises both the
+VM-preferred path and the path forced through the tree-walker fallback.</p>
+<p>Two corrections were made to this document's original D2015 construct list (see the "Sequence
+length → D2015" section below) during implementation, verified against
+<code>tests/jsonata-js/src/{jsonata,functions}.js</code> directly rather than just this spec's summary of it:
+<code>$sift</code> is <strong>not</strong> sequence-capped upstream (<code>sift()</code> returns a plain filtered object, no
+<code>createSequence()</code> call — excluded, despite being named in the original list below); <code>$lookup</code>
+<strong>is</strong> sequence-capped upstream (<code>functions.js</code>'s array-fanout branch calls <code>createSequence()</code> —
+added, despite not being in the original list below).</p>
+<p>One structural decision went beyond the original plan text: rather than enumerating every call
+site in compiled/HOF code that could bypass the <code>D1012</code> timeout check, a single checkpoint was
+placed at the entry of <code>eval_compiled_inner</code> (the compiled-expression interpreter's single funnel
+point) plus one inside the TCO trampoline (<code>invoke_lambda_with_tco</code>) — these are the two execution
+loops that are genuinely independent of each other and of <code>evaluate_internal</code>'s own per-node
+checkpoint, so no other site needed its own separate check.</p>
+<p>Two pre-existing bugs were found along the way. Both are <strong>out of scope for this plan and were
+NOT fixed</strong> — they're recorded here for future work, not claimed as resolved:
+- The parser has no recursion-depth guard and can crash the whole process (SIGSEGV) on deeply
+  left-nested arithmetic expressions (roughly 4000+ terms) — independent of, and prior to, the
+  evaluator's own <code>D1011</code>/<code>U1001</code> guards, which never get a chance to run since the crash happens
+  during parsing, before evaluation starts.
+- <code>Instr::MakeArray(u16)</code> (<code>src/compiler.rs</code>) silently produces <strong>wrong, truncated</strong> results — not
+  even an error — for JSONata array literals with more than 65,536 elements, because the element
+  count is cast to <code>u16</code> and overflows silently. This is more severe than the parser crash (silent
+  data corruption vs. a loud failure) and should be prioritized in any follow-up. Fixing this would
+  also unblock adding a literal-array <code>D2015</code> check (<code>MakeArray</code>/<code>ArrayConstruct</code> are currently
+  unguarded — see the "Sequence length → D2015" section below) for full upstream parity, since a
+  length cap can't safely be layered on top of a length computation that already overflows.</p>
+<p>Per this document's Scope section below, Phase 2 is the first behavioral reason a <code>2.2.0</code>
+jsonatapy release would make sense — a version bump/release is a separate follow-up decision, not
+part of this implementation.</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
 <p><code>tests/jsonata-js</code> (the reference test-suite submodule) is currently pinned at <code>v2.1.0-3-gff36f0b</code>
 (3 commits past the <code>v2.1.0</code> tag). Upstream has since released <code>v2.1.1</code>, <code>v2.2.0</code>, and <code>v2.2.1</code>.
@@ -1741,14 +1802,25 @@ the same checkpoint where recursion depth is already checked per node (<code>eva
 it piggybacks on an existing hot-path check rather than introducing a new timer thread.</p>
 <h3 id="sequence-length-d2015">Sequence length → D2015<a class="headerlink" href="#sequence-length-d2015" title="Permanent link">&para;</a></h3>
 <p>New plumbing — unlike depth/timeout there is no existing hook for this. jsonata-js applies this
-cap only to <em>query-result</em> sequences (map/filter/group/wildcard/descendants/append/spread/keys/
-each/sift/range), not literal array construction (<code>[1,2,3]</code>). The Rust port needs equivalent
-scoping: enforce the cap at the analogous result-construction sites in <code>evaluator.rs</code>, <strong>and</strong>
-since compiled expressions run through the bytecode VM by default, the same cap must be enforced
-at the equivalent instructions in <code>vm.rs</code> (<code>MakeArray</code>, map/filter opcodes, etc.) — otherwise the
-VM path would silently bypass the guardrail for any expression that happens to compile. This is
-the largest, most invasive piece of Phase 2; the implementation plan must enumerate every such
-call site in both engines.</p>
+cap to <em>query-result</em> sequences (map/filter/group/wildcard/descendants/append/spread/keys/each/
+sift/range) <strong>and</strong> to flat/non-nested literal array construction (<code>[1,2,3]</code>): upstream's array
+literal evaluation (<code>evaluateUnary</code>'s <code>[</code> case, <code>tests/jsonata-js/src/jsonata.js:544</code>) routes each
+non-nested element through <code>fn.append</code>, which itself calls the <code>createSequence</code>-based cap
+(<code>tests/jsonata-js/src/functions.js:1727</code>) — confirmed empirically against live jsonata-js:
+<code>[1,2,3,4,5]</code> with <code>sequence: 2</code> raises <code>D2015</code> upstream. Nested-array literals (e.g.
+<code>[[1,2],[3,4]]</code>) escape the cap in upstream, since each nested sub-array is a single element
+passed to <code>append</code>, not fanned out.</p>
+<p><strong>This Rust port currently caps only the query-result sites, not literal array construction —</strong>
+<code>Instr::MakeArray</code>/<code>CompiledExpr::ArrayConstruct</code> are unguarded, a deliberate, temporary
+divergence from upstream (see the Status section's bug list: capping <code>MakeArray</code> safely is
+entangled with the pre-existing, unfixed <code>MakeArray(u16)</code> truncation bug, so a length check can't
+be safely added on top of code whose length computation already overflows silently for arrays over
+65,536 elements). The Rust port's nested-array-literals-escape-the-cap behavior already matches
+upstream correctly; only the flat-literal case is a known gap. The implementation plan enumerates
+every query-result call site that IS guarded in both the tree-walker (<code>evaluator.rs</code>) and the
+bytecode VM (<code>vm.rs</code>) — since compiled expressions run through the VM by default, the same cap
+must be enforced at the equivalent instructions there (map/filter opcodes, etc.) or the VM path
+would silently bypass the guardrail for any expression that happens to compile.</p>
 <p><code>D2014</code>'s message (range-operator size cap) already says "10,000,000" matching upstream's 2.2.1
 wording bump from 1e6 — no action needed there.</p>
 <h3 id="python-api-jsonatapy">Python API (<code>jsonatapy</code>)<a class="headerlink" href="#python-api-jsonatapy" title="Permanent link">&para;</a></h3>
