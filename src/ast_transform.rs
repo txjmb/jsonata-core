@@ -165,6 +165,254 @@ fn coded(code: &'static str, message: impl Into<String>) -> AstTransformError {
     }
 }
 
+// --- Recursion-depth safety (Task 2 of the plan referenced in the module
+// doc comment above) ---
+//
+// Two INDEPENDENT depth counters, per the module doc comment's analysis:
+// one shared by cycle 1 (transform_node/transform_children/
+// transform_path_steps/migrate_binding_markers) AND cycle 3
+// (walk_backward/seek_parent_step/seek_parent_wrapped) -- because cycle 3 is
+// reached from WITHIN live cycle-1 stack frames, their depths add and must
+// share one counter -- and a second, wholly separate counter for
+// substitute_labels (cycle 2), which only ever runs after cycle 1/3 have
+// fully unwound (see `resolve_ancestry`). Do NOT let these two counters
+// influence each other.
+//
+// Ceiling rationale: chosen empirically (see
+// `test_deeply_nested_arithmetic_does_not_overflow_native_stack_at_parse_time`
+// and `test_reasonable_nesting_still_parses_successfully` in
+// tests/integration_test.rs) to be comfortably safe on a 1MB-stack thread
+// (matching Windows' default, the same constraint `evaluate_internal`'s
+// analogous guard in evaluator.rs was built for). `stacker::maybe_grow`
+// below is the actual backstop against a real native-stack overflow; this
+// ceiling exists so pathological input fails gracefully well before that
+// backstop would ever need to trigger.
+const MAX_TRANSFORM_DEPTH: usize = 1000;
+const MAX_LABEL_SUBSTITUTION_DEPTH: usize = 1000;
+
+// Same constants `evaluate_internal` (src/evaluator.rs) uses for its
+// analogous native-stack safety net -- see that function's doc comment for
+// the full rationale. Kept as separate constants (rather than reused from
+// evaluator.rs) since this module has no dependency on evaluator.rs and the
+// two guards are conceptually independent safety nets.
+const AST_TRANSFORM_RED_ZONE: usize = 128 * 1024;
+const AST_TRANSFORM_GROW_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+/// New error code `U1002` (no jsonata-js equivalent, like its sibling
+/// `U1001` in evaluator.rs -- JS has no comparable native-stack-overflow
+/// failure mode): a `U`-prefixed, not `S`-prefixed, code since this is a
+/// Rust-implementation-specific resource guard on an otherwise syntactically
+/// valid expression, not a JSONata syntax error. Using an `S0`-numbered slot
+/// (the next unused being S0218) would risk colliding with a future upstream
+/// jsonata-js `S0218` that means something else entirely; `U1001` is already
+/// taken by evaluator.rs's analogous stack-depth guard, so this is `U1002`.
+fn check_transform_depth(depth: usize) -> Result<(), AstTransformError> {
+    if depth > MAX_TRANSFORM_DEPTH {
+        Err(coded(
+            "U1002",
+            format!(
+                "Stack overflow - maximum expression nesting depth ({}) exceeded while resolving ancestor/path metadata",
+                MAX_TRANSFORM_DEPTH
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// See `check_transform_depth` -- same error code, separate counter/ceiling
+/// for `substitute_labels`'s own independent recursion (cycle 2).
+fn check_label_substitution_depth(depth: usize) -> Result<(), AstTransformError> {
+    if depth > MAX_LABEL_SUBSTITUTION_DEPTH {
+        Err(coded(
+            "U1002",
+            format!(
+                "Stack overflow - maximum expression nesting depth ({}) exceeded while substituting ancestor labels",
+                MAX_LABEL_SUBSTITUTION_DEPTH
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+// --- Iterative teardown for the depth guard's bail-out path ---
+//
+// A SECOND, independent stack-overflow vector from the traversal recursion
+// the depth guard above protects against, found empirically while
+// validating this task's fix: when `check_transform_depth`/
+// `check_label_substitution_depth` trips inside `transform_node`/
+// `transform_children`/`transform_path_steps`, that function's OWN
+// `node`/`steps` parameter can still hold an ENORMOUS unprocessed remainder
+// (we bail out before ever destructuring it -- e.g. a `1+1+1+...` chain 200
+// levels past the ceiling still has ~199,800 more nested `Binary` levels
+// hanging off the node we're about to return `Err` for). If we just let
+// that `node`/`steps` value drop normally as the function returns, Rust's
+// compiler-generated recursive `Drop` glue walks the WHOLE remaining chain
+// one native stack frame per nesting level -- completely bypassing the
+// depth counter above, since that glue isn't a function call this file
+// controls. Confirmed empirically, independent of any ast_transform code:
+// simply constructing then normally-dropping a ~20,000-deep `Box<AstNode>`
+// chain overflows a 1MB-stack thread outright.
+//
+// The fix is an explicit heap work-list (`Vec<AstNode>`) instead of the
+// call stack: pop one node, move its `Box<AstNode>`/`Vec<AstNode>`/
+// `Vec<PathStep>` children onto the list (dropping only that one node's own
+// shallow, non-recursive fields for free as the match arm's temporaries go
+// out of scope), repeat. Stack usage is O(1) regardless of how deep the
+// abandoned remainder is, because no recursive function call (guarded or
+// not) is ever made -- only a `while` loop over a heap-allocated `Vec`.
+//
+// Every function that OWNS an `AstNode`/`Vec<PathStep>`/`PathStep`
+// parameter and can bail out with that parameter's traversal still
+// incomplete (`transform_node`, `transform_children`, `transform_path_steps`,
+// and -- for the `step.stages` a step still carries when its OWN `.node`
+// fails to transform -- `migrate_binding_markers`) must route the abandoned
+// value through here instead of letting it drop implicitly. Anything that
+// already came back out of a SUCCESSFUL (`Ok`) call is guaranteed
+// depth-bounded (that call would have hit the guard above otherwise) and is
+// always safe to drop normally.
+fn push_ast_node_children(node: AstNode, stack: &mut Vec<AstNode>) {
+    match node {
+        AstNode::Path { steps } => {
+            for step in steps {
+                push_path_step_children(step, stack);
+            }
+        }
+        AstNode::Binary { lhs, rhs, .. } => {
+            stack.push(*lhs);
+            stack.push(*rhs);
+        }
+        AstNode::Unary { operand, .. } => stack.push(*operand),
+        AstNode::Function { args, .. } => stack.extend(args),
+        AstNode::Call { procedure, args } => {
+            stack.push(*procedure);
+            stack.extend(args);
+        }
+        AstNode::Lambda { body, .. } => stack.push(*body),
+        AstNode::Array(elements) | AstNode::Block(elements) | AstNode::ArrayGroup(elements) => {
+            stack.extend(elements);
+        }
+        AstNode::Object(pairs) => {
+            for (k, v) in pairs {
+                stack.push(k);
+                stack.push(v);
+            }
+        }
+        AstNode::ObjectTransform { input, pattern } => {
+            stack.push(*input);
+            for (k, v) in pattern {
+                stack.push(k);
+                stack.push(v);
+            }
+        }
+        AstNode::Conditional {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            stack.push(*condition);
+            stack.push(*then_branch);
+            if let Some(e) = else_branch {
+                stack.push(*e);
+            }
+        }
+        AstNode::Sort { input, terms } => {
+            stack.push(*input);
+            for (e, _asc) in terms {
+                stack.push(e);
+            }
+        }
+        AstNode::Transform {
+            location,
+            update,
+            delete,
+        } => {
+            stack.push(*location);
+            stack.push(*update);
+            if let Some(d) = delete {
+                stack.push(*d);
+            }
+        }
+        AstNode::FunctionApplication(inner) | AstNode::Predicate(inner) => stack.push(*inner),
+        // Leaf nodes (String/Name/Number/Boolean/Null/Undefined/Placeholder/
+        // Regex/Variable/ParentVariable/Wildcard/Descendant/Parent): no
+        // nested AstNode -- whatever's left of `node` (a String, an f64,
+        // ...) is dropped here for free, in O(1), as this match arm ends.
+        _ => {}
+    }
+}
+
+/// See `push_ast_node_children` -- the `PathStep`-flavored equivalent
+/// (a step's `.node` plus any `Stage::Filter` predicate expressions its
+/// `.stages` carries; the step's other fields -- `focus`/`index_var`/
+/// `ancestor_label`/`is_tuple` -- are never recursive, so they drop for
+/// free here too).
+fn push_path_step_children(step: PathStep, stack: &mut Vec<AstNode>) {
+    stack.push(step.node);
+    push_stage_children(step.stages, stack);
+}
+
+/// See `push_ast_node_children` -- pulls the `Box<AstNode>` out of every
+/// `Stage::Filter` (a step's predicate expressions) onto the work-list;
+/// `Stage::Index` carries only a variable name, nothing recursive.
+fn push_stage_children(stages: Vec<Stage>, stack: &mut Vec<AstNode>) {
+    for stage in stages {
+        if let Stage::Filter(e) = stage {
+            stack.push(*e);
+        }
+    }
+}
+
+/// Entry point: drop `node` iteratively rather than via the ordinary
+/// recursive `Drop` glue. See the doc comment above `push_ast_node_children`
+/// for why this exists.
+fn drop_ast_node_iteratively(node: AstNode) {
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        push_ast_node_children(n, &mut stack);
+    }
+}
+
+/// See `drop_ast_node_iteratively` -- the `Vec<PathStep>`-flavored entry
+/// point, used by `transform_path_steps`'s own bail-out (its parameter is a
+/// `Vec<PathStep>`, not a single `AstNode`).
+fn drop_path_steps_iteratively(steps: Vec<PathStep>) {
+    let mut stack = Vec::new();
+    for step in steps {
+        push_path_step_children(step, &mut stack);
+    }
+    while let Some(n) = stack.pop() {
+        push_ast_node_children(n, &mut stack);
+    }
+}
+
+/// See `drop_ast_node_iteratively` -- the `Vec<Stage>`-flavored entry point,
+/// used by `migrate_binding_markers`'s bail-out (a step's OWN `.node` failed
+/// to transform, but its `.stages` -- filter predicates -- are still owned
+/// and untouched).
+fn drop_stages_iteratively(stages: Vec<Stage>) {
+    let mut stack = Vec::new();
+    push_stage_children(stages, &mut stack);
+    while let Some(n) = stack.pop() {
+        push_ast_node_children(n, &mut stack);
+    }
+}
+
+/// Builds the `U1002` error without needing ownership of the abandoned
+/// node/steps -- kept separate from `drop_ast_node_iteratively`/
+/// `drop_path_steps_iteratively` so callers can drop first, then construct
+/// the error, in either order convenient at the call site.
+fn max_transform_depth_error() -> AstTransformError {
+    coded(
+        "U1002",
+        format!(
+            "Stack overflow - maximum expression nesting depth ({}) exceeded while resolving ancestor/path metadata",
+            MAX_TRANSFORM_DEPTH
+        ),
+    )
+}
+
 /// A `%` reference still seeking its ancestor step, mirroring jsonata-js's
 /// `slot` object (`{label, level, index}` -- we don't need `index`, since
 /// that's only used by jsonata-js to index into its global mutable
@@ -251,7 +499,8 @@ impl Transformed {
 /// Entry point: resolve all ancestor references in a freshly-parsed AST.
 pub fn resolve_ancestry(ast: AstNode) -> Result<AstNode, AstTransformError> {
     let mut state = AncestryState::new();
-    let transformed = transform_node(ast, &mut state)?;
+    // Depth 0: the root of cycle 1+3's shared counter.
+    let transformed = transform_node(ast, &mut state, 0)?;
     // Mirrors jsonata-js's final check (parser.js ~L1404): a bare `%` as the
     // WHOLE expression, or any dangling (never-resolved) pending ancestor
     // reference that bubbled all the way to the top, means there was no
@@ -262,7 +511,10 @@ pub fn resolve_ancestry(ast: AstNode) -> Result<AstNode, AstTransformError> {
             "The parent operator % cannot be used at this point in the expression",
         ));
     }
-    Ok(substitute_labels(transformed.node, &state))
+    // Depth 0 again: substitute_labels is a SEPARATE, independent counter --
+    // cycle 1+3's frames are gone by now (transform_node above already
+    // returned), so this is not a continuation of the depth above.
+    substitute_labels(transformed.node, &state, 0)
 }
 
 /// Final pass: rewrite every `AstNode::Parent(label)` in the tree to its
@@ -270,54 +522,76 @@ pub fn resolve_ancestry(ast: AstNode) -> Result<AstNode, AstTransformError> {
 /// separate pass rather than done inline. Mirrors `transform_children`'s
 /// traversal shape exactly (every composite node type), since by this point
 /// there's no error case left to handle -- the tree is already fully valid.
-fn substitute_labels(node: AstNode, state: &AncestryState) -> AstNode {
-    match node {
+fn substitute_labels(
+    node: AstNode,
+    state: &AncestryState,
+    depth: usize,
+) -> Result<AstNode, AstTransformError> {
+    check_label_substitution_depth(depth)?;
+    stacker::maybe_grow(
+        AST_TRANSFORM_RED_ZONE,
+        AST_TRANSFORM_GROW_STACK_SIZE,
+        || substitute_labels_impl(node, state, depth),
+    )
+}
+
+fn substitute_labels_impl(
+    node: AstNode,
+    state: &AncestryState,
+    depth: usize,
+) -> Result<AstNode, AstTransformError> {
+    let depth = depth + 1;
+    Ok(match node {
         AstNode::Parent(label) => AstNode::Parent(state.canonical(&label)),
         AstNode::Path { steps } => AstNode::Path {
             steps: steps
                 .into_iter()
-                .map(|s| PathStep {
-                    node: substitute_labels(s.node, state),
-                    // Stages (predicates) can contain `%` references whose
-                    // labels were aliased during resolution (e.g. a second
-                    // predicate reusing a step an earlier one already tagged),
-                    // so they must be substituted too -- otherwise the
-                    // pre-alias label survives and evaluates against the wrong
-                    // tuple key.
-                    stages: s
-                        .stages
-                        .into_iter()
-                        .map(|st| match st {
-                            Stage::Filter(e) => {
-                                Stage::Filter(Box::new(substitute_labels(*e, state)))
-                            }
-                            Stage::Index(v) => Stage::Index(v),
-                        })
-                        .collect(),
-                    ..s
+                .map(|s| -> Result<PathStep, AstTransformError> {
+                    Ok(PathStep {
+                        node: substitute_labels(s.node, state, depth)?,
+                        // Stages (predicates) can contain `%` references whose
+                        // labels were aliased during resolution (e.g. a second
+                        // predicate reusing a step an earlier one already tagged),
+                        // so they must be substituted too -- otherwise the
+                        // pre-alias label survives and evaluates against the wrong
+                        // tuple key.
+                        stages: s
+                            .stages
+                            .into_iter()
+                            .map(|st| -> Result<Stage, AstTransformError> {
+                                Ok(match st {
+                                    Stage::Filter(e) => Stage::Filter(Box::new(substitute_labels(
+                                        *e, state, depth,
+                                    )?)),
+                                    Stage::Index(v) => Stage::Index(v),
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                        ..s
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, _>>()?,
         },
         AstNode::Block(exprs) => AstNode::Block(
             exprs
                 .into_iter()
-                .map(|e| substitute_labels(e, state))
-                .collect(),
+                .map(|e| substitute_labels(e, state, depth))
+                .collect::<Result<Vec<_>, _>>()?,
         ),
         AstNode::Binary { op, lhs, rhs } => AstNode::Binary {
             op,
-            lhs: Box::new(substitute_labels(*lhs, state)),
-            rhs: Box::new(substitute_labels(*rhs, state)),
+            lhs: Box::new(substitute_labels(*lhs, state, depth)?),
+            rhs: Box::new(substitute_labels(*rhs, state, depth)?),
         },
         AstNode::Unary { op, operand } => AstNode::Unary {
             op,
-            operand: Box::new(substitute_labels(*operand, state)),
+            operand: Box::new(substitute_labels(*operand, state, depth)?),
         },
         AstNode::Array(elements) => AstNode::Array(
             elements
                 .into_iter()
-                .map(|e| substitute_labels(e, state))
-                .collect(),
+                .map(|e| substitute_labels(e, state, depth))
+                .collect::<Result<Vec<_>, _>>()?,
         ),
         AstNode::Function {
             name,
@@ -327,16 +601,16 @@ fn substitute_labels(node: AstNode, state: &AncestryState) -> AstNode {
             name,
             args: args
                 .into_iter()
-                .map(|a| substitute_labels(a, state))
-                .collect(),
+                .map(|a| substitute_labels(a, state, depth))
+                .collect::<Result<Vec<_>, _>>()?,
             is_builtin,
         },
         AstNode::Call { procedure, args } => AstNode::Call {
-            procedure: Box::new(substitute_labels(*procedure, state)),
+            procedure: Box::new(substitute_labels(*procedure, state, depth)?),
             args: args
                 .into_iter()
-                .map(|a| substitute_labels(a, state))
-                .collect(),
+                .map(|a| substitute_labels(a, state, depth))
+                .collect::<Result<Vec<_>, _>>()?,
         },
         AstNode::Lambda {
             params,
@@ -345,61 +619,81 @@ fn substitute_labels(node: AstNode, state: &AncestryState) -> AstNode {
             thunk,
         } => AstNode::Lambda {
             params,
-            body: Box::new(substitute_labels(*body, state)),
+            body: Box::new(substitute_labels(*body, state, depth)?),
             signature,
             thunk,
         },
         AstNode::Object(pairs) => AstNode::Object(
             pairs
                 .into_iter()
-                .map(|(k, v)| (substitute_labels(k, state), substitute_labels(v, state)))
-                .collect(),
+                .map(|(k, v)| -> Result<(AstNode, AstNode), AstTransformError> {
+                    Ok((
+                        substitute_labels(k, state, depth)?,
+                        substitute_labels(v, state, depth)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         ),
         AstNode::ObjectTransform { input, pattern } => AstNode::ObjectTransform {
-            input: Box::new(substitute_labels(*input, state)),
+            input: Box::new(substitute_labels(*input, state, depth)?),
             pattern: pattern
                 .into_iter()
-                .map(|(k, v)| (substitute_labels(k, state), substitute_labels(v, state)))
-                .collect(),
+                .map(|(k, v)| -> Result<(AstNode, AstNode), AstTransformError> {
+                    Ok((
+                        substitute_labels(k, state, depth)?,
+                        substitute_labels(v, state, depth)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         },
         AstNode::Conditional {
             condition,
             then_branch,
             else_branch,
         } => AstNode::Conditional {
-            condition: Box::new(substitute_labels(*condition, state)),
-            then_branch: Box::new(substitute_labels(*then_branch, state)),
-            else_branch: else_branch.map(|e| Box::new(substitute_labels(*e, state))),
+            condition: Box::new(substitute_labels(*condition, state, depth)?),
+            then_branch: Box::new(substitute_labels(*then_branch, state, depth)?),
+            else_branch: match else_branch {
+                Some(e) => Some(Box::new(substitute_labels(*e, state, depth)?)),
+                None => None,
+            },
         },
         AstNode::Sort { input, terms } => AstNode::Sort {
-            input: Box::new(substitute_labels(*input, state)),
+            input: Box::new(substitute_labels(*input, state, depth)?),
             terms: terms
                 .into_iter()
-                .map(|(e, asc)| (substitute_labels(e, state), asc))
-                .collect(),
+                .map(|(e, asc)| -> Result<(AstNode, bool), AstTransformError> {
+                    Ok((substitute_labels(e, state, depth)?, asc))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         },
         AstNode::Transform {
             location,
             update,
             delete,
         } => AstNode::Transform {
-            location: Box::new(substitute_labels(*location, state)),
-            update: Box::new(substitute_labels(*update, state)),
-            delete: delete.map(|d| Box::new(substitute_labels(*d, state))),
+            location: Box::new(substitute_labels(*location, state, depth)?),
+            update: Box::new(substitute_labels(*update, state, depth)?),
+            delete: match delete {
+                Some(d) => Some(Box::new(substitute_labels(*d, state, depth)?)),
+                None => None,
+            },
         },
         AstNode::FunctionApplication(inner) => {
-            AstNode::FunctionApplication(Box::new(substitute_labels(*inner, state)))
+            AstNode::FunctionApplication(Box::new(substitute_labels(*inner, state, depth)?))
         }
         AstNode::ArrayGroup(elements) => AstNode::ArrayGroup(
             elements
                 .into_iter()
-                .map(|e| substitute_labels(e, state))
-                .collect(),
+                .map(|e| substitute_labels(e, state, depth))
+                .collect::<Result<Vec<_>, _>>()?,
         ),
-        AstNode::Predicate(inner) => AstNode::Predicate(Box::new(substitute_labels(*inner, state))),
+        AstNode::Predicate(inner) => {
+            AstNode::Predicate(Box::new(substitute_labels(*inner, state, depth)?))
+        }
         // Leaf nodes and everything else pass through unchanged.
         other => other,
-    }
+    })
 }
 
 /// A raw parse-time binding marker (`@$var` or `#$var`) that still needs to
@@ -555,13 +849,38 @@ fn wrap_marker_as_path(
 
 /// Recursively rebuild `node`, resolving any `%`/`@`/`#` found within.
 /// Mirrors jsonata-js's processAST's generic per-node-type dispatch.
+///
+/// `depth` is the shared cycle-1+cycle-3 counter (see the module doc comment
+/// and the constants above `coded`) -- every recursive call anywhere in
+/// cycle 1 OR cycle 3 must pass `depth + 1`, never a fresh `0`.
 fn transform_node(
     node: AstNode,
     state: &mut AncestryState,
+    depth: usize,
 ) -> Result<Transformed, AstTransformError> {
+    if depth > MAX_TRANSFORM_DEPTH {
+        // `node` may still hold an enormous unprocessed remainder here --
+        // see the doc comment above `push_ast_node_children` for why this
+        // can't just be allowed to drop normally.
+        drop_ast_node_iteratively(node);
+        return Err(max_transform_depth_error());
+    }
+    stacker::maybe_grow(
+        AST_TRANSFORM_RED_ZONE,
+        AST_TRANSFORM_GROW_STACK_SIZE,
+        || transform_node_impl(node, state, depth),
+    )
+}
+
+fn transform_node_impl(
+    node: AstNode,
+    state: &mut AncestryState,
+    depth: usize,
+) -> Result<Transformed, AstTransformError> {
+    let depth = depth + 1;
     match node {
         AstNode::Path { steps } => {
-            let (transformed_steps, pending) = transform_path_steps(steps, state)?;
+            let (transformed_steps, pending) = transform_path_steps(steps, state, depth)?;
             Ok(Transformed {
                 node: AstNode::Path {
                     steps: transformed_steps,
@@ -573,7 +892,7 @@ fn transform_node(
             let mut pending = Vec::new();
             let mut transformed_exprs = Vec::with_capacity(exprs.len());
             for e in exprs {
-                let t = transform_node(e, state)?;
+                let t = transform_node(e, state, depth)?;
                 pending.extend(t.pending);
                 transformed_exprs.push(t.node);
             }
@@ -610,7 +929,7 @@ fn transform_node(
                 AstNode::Variable(name) => name,
                 _ => unreachable!("parser guarantees FocusBind's rhs is always Variable"),
             };
-            let transformed_lhs = transform_node(*lhs, state)?;
+            let transformed_lhs = transform_node(*lhs, state, depth)?;
             wrap_marker_as_path(transformed_lhs, BindingMarker::Focus(var_name))
         }
         // Same story as FocusBind above, but for bare top-level `#$var`
@@ -625,12 +944,12 @@ fn transform_node(
                 AstNode::Variable(name) => name,
                 _ => unreachable!("parser guarantees IndexBind's rhs is always Variable"),
             };
-            let transformed_lhs = transform_node(*lhs, state)?;
+            let transformed_lhs = transform_node(*lhs, state, depth)?;
             wrap_marker_as_path(transformed_lhs, BindingMarker::Index(var_name))
         }
         // Recurse into every other node's children unchanged (no ancestor
         // resolution needed for nodes that aren't paths/blocks/parent refs).
-        other => transform_children(other, state),
+        other => transform_children(other, state, depth),
     }
 }
 
@@ -650,14 +969,39 @@ fn transform_node(
 ///   simply remains an inert `AstNode::Parent(label)` in the body until the
 ///   lambda is invoked (matching jsonata-js: `function(){%}` parses fine,
 ///   with the raw `%` untouched inside the body).
+///
+/// `depth` follows the same shared cycle-1+cycle-3 convention as
+/// `transform_node` (see its doc comment) -- `transform_children` is a full
+/// participant of cycle 1, so it checks depth itself rather than relying
+/// solely on `transform_node`'s check.
 fn transform_children(
     node: AstNode,
     state: &mut AncestryState,
+    depth: usize,
 ) -> Result<Transformed, AstTransformError> {
+    if depth > MAX_TRANSFORM_DEPTH {
+        // See transform_node's identical check: `node` may still hold an
+        // enormous unprocessed remainder here.
+        drop_ast_node_iteratively(node);
+        return Err(max_transform_depth_error());
+    }
+    stacker::maybe_grow(
+        AST_TRANSFORM_RED_ZONE,
+        AST_TRANSFORM_GROW_STACK_SIZE,
+        || transform_children_impl(node, state, depth),
+    )
+}
+
+fn transform_children_impl(
+    node: AstNode,
+    state: &mut AncestryState,
+    depth: usize,
+) -> Result<Transformed, AstTransformError> {
+    let depth = depth + 1;
     match node {
         AstNode::Binary { op, lhs, rhs } => {
-            let lhs_t = transform_node(*lhs, state)?;
-            let rhs_t = transform_node(*rhs, state)?;
+            let lhs_t = transform_node(*lhs, state, depth)?;
+            let rhs_t = transform_node(*rhs, state, depth)?;
             let mut pending = lhs_t.pending;
             pending.extend(rhs_t.pending);
             Ok(Transformed {
@@ -670,7 +1014,7 @@ fn transform_children(
             })
         }
         AstNode::Unary { op, operand } => {
-            let t = transform_node(*operand, state)?;
+            let t = transform_node(*operand, state, depth)?;
             Ok(Transformed {
                 node: AstNode::Unary {
                     op,
@@ -683,7 +1027,7 @@ fn transform_children(
             let mut pending = Vec::new();
             let mut transformed = Vec::with_capacity(elements.len());
             for e in elements {
-                let t = transform_node(e, state)?;
+                let t = transform_node(e, state, depth)?;
                 pending.extend(t.pending);
                 transformed.push(t.node);
             }
@@ -700,7 +1044,7 @@ fn transform_children(
             let mut pending = Vec::new();
             let mut transformed = Vec::with_capacity(args.len());
             for a in args {
-                let t = transform_node(a, state)?;
+                let t = transform_node(a, state, depth)?;
                 pending.extend(t.pending);
                 transformed.push(t.node);
             }
@@ -717,11 +1061,11 @@ fn transform_children(
             // Only args bubble (see doc comment above) -- procedure is
             // still structurally transformed, just doesn't contribute to
             // this Call's own pending.
-            let procedure_t = transform_node(*procedure, state)?;
+            let procedure_t = transform_node(*procedure, state, depth)?;
             let mut pending = Vec::new();
             let mut transformed_args = Vec::with_capacity(args.len());
             for a in args {
-                let t = transform_node(a, state)?;
+                let t = transform_node(a, state, depth)?;
                 pending.extend(t.pending);
                 transformed_args.push(t.node);
             }
@@ -740,7 +1084,7 @@ fn transform_children(
             thunk,
         } => {
             // body's pending is deliberately dropped -- see doc comment above.
-            let body_t = transform_node(*body, state)?;
+            let body_t = transform_node(*body, state, depth)?;
             Ok(Transformed::leaf(AstNode::Lambda {
                 params,
                 body: Box::new(body_t.node),
@@ -752,9 +1096,9 @@ fn transform_children(
             let mut pending = Vec::new();
             let mut transformed = Vec::with_capacity(pairs.len());
             for (k, v) in pairs {
-                let k_t = transform_node(k, state)?;
+                let k_t = transform_node(k, state, depth)?;
                 pending.extend(k_t.pending);
-                let v_t = transform_node(v, state)?;
+                let v_t = transform_node(v, state, depth)?;
                 pending.extend(v_t.pending);
                 transformed.push((k_t.node, v_t.node));
             }
@@ -764,13 +1108,13 @@ fn transform_children(
             })
         }
         AstNode::ObjectTransform { input, pattern } => {
-            let input_t = transform_node(*input, state)?;
+            let input_t = transform_node(*input, state, depth)?;
             let mut pending = input_t.pending;
             let mut transformed_pattern = Vec::with_capacity(pattern.len());
             for (k, v) in pattern {
-                let k_t = transform_node(k, state)?;
+                let k_t = transform_node(k, state, depth)?;
                 pending.extend(k_t.pending);
-                let v_t = transform_node(v, state)?;
+                let v_t = transform_node(v, state, depth)?;
                 pending.extend(v_t.pending);
                 transformed_pattern.push((k_t.node, v_t.node));
             }
@@ -787,12 +1131,12 @@ fn transform_children(
             then_branch,
             else_branch,
         } => {
-            let condition_t = transform_node(*condition, state)?;
-            let then_t = transform_node(*then_branch, state)?;
+            let condition_t = transform_node(*condition, state, depth)?;
+            let then_t = transform_node(*then_branch, state, depth)?;
             let mut pending = condition_t.pending;
             pending.extend(then_t.pending);
             let else_t = match else_branch {
-                Some(e) => Some(transform_node(*e, state)?),
+                Some(e) => Some(transform_node(*e, state, depth)?),
                 None => None,
             };
             let else_node = else_t.map(|t| {
@@ -818,7 +1162,7 @@ fn transform_children(
             // term slot resolves against the last input step (no predicate-
             // style "resolve against the step itself" special case is needed;
             // it's a plain uniform backward walk over the input steps).
-            let input_t = transform_node(*input, state)?;
+            let input_t = transform_node(*input, state, depth)?;
             let was_path = matches!(input_t.node, AstNode::Path { .. });
             // jsonata wraps a non-path input into a single-step path so the
             // sort step has something to walk back through. We do the same for
@@ -830,9 +1174,15 @@ fn transform_children(
             let mut pending = input_t.pending;
             let mut transformed_terms = Vec::with_capacity(terms.len());
             for (expr, asc) in terms {
-                let t = transform_node(expr, state)?;
+                let t = transform_node(expr, state, depth)?;
                 for slot in t.pending {
-                    let remaining = walk_backward(&mut steps, &slot.label, slot.level, state)?;
+                    // Cycle 3 entry point: this walk_backward call nests ON
+                    // TOP of transform_children's still-live frame, so it
+                    // gets `depth + 1` from the SAME shared counter, not a
+                    // fresh one (see the module doc comment's cycle-1/cycle-3
+                    // analysis).
+                    let remaining =
+                        walk_backward(&mut steps, &slot.label, slot.level, state, depth + 1)?;
                     if remaining > 0 {
                         pending.push(PendingAncestor {
                             label: slot.label,
@@ -868,12 +1218,12 @@ fn transform_children(
             update,
             delete,
         } => {
-            let location_t = transform_node(*location, state)?;
-            let update_t = transform_node(*update, state)?;
+            let location_t = transform_node(*location, state, depth)?;
+            let update_t = transform_node(*update, state, depth)?;
             let mut pending = location_t.pending;
             pending.extend(update_t.pending);
             let delete_t = match delete {
-                Some(d) => Some(transform_node(*d, state)?),
+                Some(d) => Some(transform_node(*d, state, depth)?),
                 None => None,
             };
             let delete_node = delete_t.map(|t| {
@@ -890,7 +1240,7 @@ fn transform_children(
             })
         }
         AstNode::FunctionApplication(inner) => {
-            let t = transform_node(*inner, state)?;
+            let t = transform_node(*inner, state, depth)?;
             Ok(Transformed {
                 node: AstNode::FunctionApplication(Box::new(t.node)),
                 pending: t.pending,
@@ -900,7 +1250,7 @@ fn transform_children(
             let mut pending = Vec::new();
             let mut transformed = Vec::with_capacity(elements.len());
             for e in elements {
-                let t = transform_node(e, state)?;
+                let t = transform_node(e, state, depth)?;
                 pending.extend(t.pending);
                 transformed.push(t.node);
             }
@@ -910,7 +1260,7 @@ fn transform_children(
             })
         }
         AstNode::Predicate(inner) => {
-            let t = transform_node(*inner, state)?;
+            let t = transform_node(*inner, state, depth)?;
             Ok(Transformed {
                 node: AstNode::Predicate(Box::new(t.node)),
                 pending: t.pending,
@@ -930,10 +1280,37 @@ fn transform_children(
 /// processed one dot at a time), so resolving every step's own pending
 /// reference against the FULL flattened list-so-far in left-to-right order
 /// produces the same result as jsonata-js's incremental resolution.
+///
+/// `depth` follows the shared cycle-1+cycle-3 convention (see
+/// `transform_node`'s doc comment) -- this function is a full cycle-1
+/// participant (its own frame sits between `transform_node`'s Path arm and
+/// the `migrate_binding_markers`/`transform_node`/`resolve_predicate_slot`/
+/// `walk_backward` calls it makes), so it checks depth itself.
 fn transform_path_steps(
     steps: Vec<PathStep>,
     state: &mut AncestryState,
+    depth: usize,
 ) -> Result<(Vec<PathStep>, Vec<PendingAncestor>), AstTransformError> {
+    if depth > MAX_TRANSFORM_DEPTH {
+        // `steps` may still hold unprocessed steps whose own `.node`/
+        // `.stages` are deeply nested -- see transform_node's identical
+        // check and the doc comment above `push_ast_node_children`.
+        drop_path_steps_iteratively(steps);
+        return Err(max_transform_depth_error());
+    }
+    stacker::maybe_grow(
+        AST_TRANSFORM_RED_ZONE,
+        AST_TRANSFORM_GROW_STACK_SIZE,
+        || transform_path_steps_impl(steps, state, depth),
+    )
+}
+
+fn transform_path_steps_impl(
+    steps: Vec<PathStep>,
+    state: &mut AncestryState,
+    depth: usize,
+) -> Result<(Vec<PathStep>, Vec<PendingAncestor>), AstTransformError> {
+    let depth = depth + 1;
     // Pass 1: migrate #/@ into step flags, recursing into nested content
     // (which may itself bubble up pending `%` references, e.g. an object
     // constructor or array containing a `%`). `own_pending[i]` is whatever
@@ -950,7 +1327,10 @@ fn transform_path_steps(
     // matching jsonata-js's slot-creation order.
     let mut pred_pending: Vec<Vec<PendingAncestor>> = Vec::with_capacity(steps.len());
     for step in steps {
-        let (spliced, pending) = migrate_binding_markers(step, state)?;
+        // migrate_binding_markers itself never checks/increments (per the
+        // module doc comment), but it forwards into transform_node, so it
+        // still needs `depth + 1` to account for its own stack frame.
+        let (spliced, pending) = migrate_binding_markers(step, state, depth)?;
         let last_idx = spliced.len().saturating_sub(1);
         let mut pending_opt = Some(pending);
         for (i, mut s) in spliced.into_iter().enumerate() {
@@ -960,7 +1340,7 @@ fn transform_path_steps(
             for stage in stages {
                 match stage {
                     Stage::Filter(expr) => {
-                        let t = transform_node(*expr, state)?;
+                        let t = transform_node(*expr, state, depth)?;
                         pp.extend(t.pending);
                         new_stages.push(Stage::Filter(Box::new(t.node)));
                     }
@@ -985,11 +1365,21 @@ fn transform_path_steps(
     // step's seekingParent BEFORE the step's own slot), then its own pending.
     // Any reference that runs off the front of this path (never finding a
     // target) bubbles up as this whole Path's own pending.
+    //
+    // Both resolve_predicate_slot and walk_backward here are cycle-3 entry
+    // points nesting ON TOP of this still-live transform_path_steps frame --
+    // `depth + 1` from the SAME shared counter, not a fresh one.
     let mut path_pending: Vec<PendingAncestor> = Vec::new();
     for i in 0..resolved.len() {
         for pending in std::mem::take(&mut pred_pending[i]) {
-            let remaining =
-                resolve_predicate_slot(&mut resolved, i, &pending.label, pending.level, state)?;
+            let remaining = resolve_predicate_slot(
+                &mut resolved,
+                i,
+                &pending.label,
+                pending.level,
+                state,
+                depth + 1,
+            )?;
             if remaining > 0 {
                 path_pending.push(PendingAncestor {
                     label: pending.label,
@@ -999,8 +1389,13 @@ fn transform_path_steps(
         }
         let pending_here = std::mem::take(&mut own_pending[i]);
         for pending in pending_here {
-            let remaining =
-                walk_backward(&mut resolved[..i], &pending.label, pending.level, state)?;
+            let remaining = walk_backward(
+                &mut resolved[..i],
+                &pending.label,
+                pending.level,
+                state,
+                depth + 1,
+            )?;
             if remaining > 0 {
                 path_pending.push(PendingAncestor {
                     label: pending.label,
@@ -1025,25 +1420,32 @@ fn transform_path_steps(
 /// Either way, whatever level remains unresolved is walked backward through
 /// `resolved[..i]`; the leftover (if the reference runs off the path front)
 /// is returned to bubble up as the enclosing path's own pending.
+///
+/// No depth CHECK of its own (per the module doc comment: this frame sits at
+/// the base of cycle 3 each time but isn't itself part of a self-loop), but
+/// it still must forward `depth + 1` -- accounting for its own stack frame --
+/// into `seek_parent_step`/`walk_backward`, both shared-counter cycle-3
+/// entry points.
 fn resolve_predicate_slot(
     resolved: &mut [PathStep],
     i: usize,
     label: &str,
     level: usize,
     state: &mut AncestryState,
+    depth: usize,
 ) -> Result<usize, AstTransformError> {
     // Split so the attached step (`rest[0]`) and the steps before it
     // (`prefix`) can be borrowed mutably at the same time.
     let (prefix, rest) = resolved.split_at_mut(i);
     let remaining = if level == 1 {
-        seek_parent_step(&mut rest[0], label, 1, state)?
+        seek_parent_step(&mut rest[0], label, 1, state, depth + 1)?
     } else {
         level - 1
     };
     if remaining == 0 {
         Ok(0)
     } else {
-        walk_backward(prefix, label, remaining, state)
+        walk_backward(prefix, label, remaining, state, depth + 1)
     }
 }
 
@@ -1053,12 +1455,39 @@ fn resolve_predicate_slot(
 /// `steps` ran out before the reference resolved, so the caller must keep
 /// walking further back through whatever contains `steps` (or, if there is
 /// nothing further back, treat it as still-pending / bubble it up).
+///
+/// `depth` is the SAME shared cycle-1+cycle-3 counter used by
+/// `transform_node`/`transform_children`/`transform_path_steps` (see the
+/// module doc comment) -- `walk_backward` is reached FROM live cycle-1
+/// frames, so it must never reset to a fresh counter here.
 fn walk_backward(
+    steps: &mut [PathStep],
+    label: &str,
+    level: usize,
+    state: &mut AncestryState,
+    depth: usize,
+) -> Result<usize, AstTransformError> {
+    check_transform_depth(depth)?;
+    stacker::maybe_grow(
+        AST_TRANSFORM_RED_ZONE,
+        AST_TRANSFORM_GROW_STACK_SIZE,
+        || walk_backward_impl(steps, label, level, state, depth),
+    )
+}
+
+fn walk_backward_impl(
     steps: &mut [PathStep],
     label: &str,
     mut level: usize,
     state: &mut AncestryState,
+    depth: usize,
 ) -> Result<usize, AstTransformError> {
+    // Computed once, not per-iteration: the `while` loop below is bounded
+    // iteration (each seek_parent_step call fully returns before the next
+    // iteration starts, so their stack usage never overlaps) -- only the
+    // *nesting* into seek_parent_step/seek_parent_wrapped's own recursion
+    // adds a real stack frame, which is what `depth + 1` accounts for.
+    let depth = depth + 1;
     let mut index = steps.len();
     while level > 0 {
         if index == 0 {
@@ -1110,7 +1539,7 @@ fn walk_backward(
                 _ => break,
             }
         }
-        level = seek_parent_step(&mut steps[index], label, level, state)?;
+        level = seek_parent_step(&mut steps[index], label, level, state, depth)?;
     }
     Ok(0)
 }
@@ -1118,12 +1547,32 @@ fn walk_backward(
 /// Try to resolve one level of a pending ancestor reference against a
 /// single candidate step. Returns the remaining level (0 = tagged here).
 /// Mirrors jsonata-js's seekParent (parser.js ~L941-986).
+///
+/// `depth` is the same shared cycle-1+cycle-3 counter (see the module doc
+/// comment).
 fn seek_parent_step(
     step: &mut PathStep,
     label: &str,
     level: usize,
     state: &mut AncestryState,
+    depth: usize,
 ) -> Result<usize, AstTransformError> {
+    check_transform_depth(depth)?;
+    stacker::maybe_grow(
+        AST_TRANSFORM_RED_ZONE,
+        AST_TRANSFORM_GROW_STACK_SIZE,
+        || seek_parent_step_impl(step, label, level, state, depth),
+    )
+}
+
+fn seek_parent_step_impl(
+    step: &mut PathStep,
+    label: &str,
+    level: usize,
+    state: &mut AncestryState,
+    depth: usize,
+) -> Result<usize, AstTransformError> {
+    let depth = depth + 1;
     match &mut step.node {
         AstNode::Name(_) | AstNode::Wildcard => {
             let remaining = level - 1;
@@ -1156,7 +1605,7 @@ fn seek_parent_step(
         // find it.
         AstNode::FunctionApplication(inner) => {
             step.is_tuple = true;
-            seek_parent_wrapped(inner.as_mut(), label, level, state)
+            seek_parent_wrapped(inner.as_mut(), label, level, state, depth)
         }
         // A parenthesized block reached directly as a path step (e.g. a
         // leading `(Account.Order)` with no `.` before it, or a multi-
@@ -1165,7 +1614,7 @@ fn seek_parent_step(
         AstNode::Block(exprs) => match exprs.last_mut() {
             Some(last) => {
                 step.is_tuple = true;
-                seek_parent_wrapped(last, label, level, state)
+                seek_parent_wrapped(last, label, level, state, depth)
             }
             // An empty block `()` produces no ancestor and no tuple; the walk
             // simply steps over it with the level unchanged (mirrors jsonata-js
@@ -1188,19 +1637,39 @@ fn seek_parent_step(
 /// other for doubly-nested parens (e.g. `Account.(Order.(Product)).%`).
 /// Anything else (a literal, a function call, ...) can't derive an
 /// ancestor: S0217.
+///
+/// `depth` is the same shared cycle-1+cycle-3 counter (see the module doc
+/// comment).
 fn seek_parent_wrapped(
     node: &mut AstNode,
     label: &str,
     level: usize,
     state: &mut AncestryState,
+    depth: usize,
 ) -> Result<usize, AstTransformError> {
+    check_transform_depth(depth)?;
+    stacker::maybe_grow(
+        AST_TRANSFORM_RED_ZONE,
+        AST_TRANSFORM_GROW_STACK_SIZE,
+        || seek_parent_wrapped_impl(node, label, level, state, depth),
+    )
+}
+
+fn seek_parent_wrapped_impl(
+    node: &mut AstNode,
+    label: &str,
+    level: usize,
+    state: &mut AncestryState,
+    depth: usize,
+) -> Result<usize, AstTransformError> {
+    let depth = depth + 1;
     match node {
-        AstNode::Path { steps } => walk_backward(steps, label, level, state),
+        AstNode::Path { steps } => walk_backward(steps, label, level, state, depth),
         // A nested block (e.g. the inner `()` of `.()`, or `(a; b)`): recurse
         // into its last expression, or -- for an empty block -- step over it
         // leaving the level unchanged (jsonata-js seekParent's block guard).
         AstNode::Block(exprs) => match exprs.last_mut() {
-            Some(last) => seek_parent_wrapped(last, label, level, state),
+            Some(last) => seek_parent_wrapped(last, label, level, state, depth),
             None => Ok(level),
         },
         _ => Err(coded(
@@ -1221,9 +1690,15 @@ fn seek_parent_wrapped(
 /// stamped onto the LAST of them (not onto a step wrapping the whole thing).
 /// Also returns whatever pending ancestor references bubbled up from
 /// transforming this step's content.
+///
+/// No depth CHECK of its own (per the module doc comment: not itself
+/// self-recursive), but it closes the transform_path_steps -> transform_node
+/// cycle, so `depth + 1` (accounting for its own stack frame) must still be
+/// forwarded into `transform_node`.
 fn migrate_binding_markers(
     mut step: PathStep,
     state: &mut AncestryState,
+    depth: usize,
 ) -> Result<(Vec<PathStep>, Vec<PendingAncestor>), AstTransformError> {
     match step.node {
         AstNode::Binary {
@@ -1235,8 +1710,20 @@ fn migrate_binding_markers(
                 AstNode::Variable(name) => name,
                 _ => unreachable!("parser guarantees FocusBind's rhs is always Variable"),
             };
-            let transformed_lhs = transform_node(*lhs, state)?;
-            splice_marker_steps(transformed_lhs, BindingMarker::Focus(var_name))
+            match transform_node(*lhs, state, depth + 1) {
+                Ok(transformed_lhs) => {
+                    splice_marker_steps(transformed_lhs, BindingMarker::Focus(var_name))
+                }
+                // `step.node` (the `Binary{FocusBind, lhs, rhs}`) was already
+                // consumed by the match above, but `step.stages` (this
+                // step's own predicate expressions, untouched so far) is
+                // still owned here -- see push_ast_node_children's doc
+                // comment for why it can't just be allowed to drop normally.
+                Err(e) => {
+                    drop_stages_iteratively(std::mem::take(&mut step.stages));
+                    Err(e)
+                }
+            }
         }
         AstNode::Binary {
             op: BinaryOp::IndexBind,
@@ -1247,14 +1734,26 @@ fn migrate_binding_markers(
                 AstNode::Variable(name) => name,
                 _ => unreachable!("parser guarantees IndexBind's rhs is always Variable"),
             };
-            let transformed_lhs = transform_node(*lhs, state)?;
-            splice_marker_steps(transformed_lhs, BindingMarker::Index(var_name))
+            match transform_node(*lhs, state, depth + 1) {
+                Ok(transformed_lhs) => {
+                    splice_marker_steps(transformed_lhs, BindingMarker::Index(var_name))
+                }
+                Err(e) => {
+                    drop_stages_iteratively(std::mem::take(&mut step.stages));
+                    Err(e)
+                }
+            }
         }
-        other => {
-            let t = transform_node(other, state)?;
-            step.node = t.node;
-            Ok((vec![step], t.pending))
-        }
+        other => match transform_node(other, state, depth + 1) {
+            Ok(t) => {
+                step.node = t.node;
+                Ok((vec![step], t.pending))
+            }
+            Err(e) => {
+                drop_stages_iteratively(std::mem::take(&mut step.stages));
+                Err(e)
+            }
+        },
     }
 }
 

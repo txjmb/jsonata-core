@@ -1303,3 +1303,58 @@ fn test_map_stored_lambda_bypass_raises_d1012_timeout() {
     let err = evaluator.evaluate(&ast, &data).expect_err("expected D1012");
     assert!(err.to_string().contains("D1012"), "got: {err}");
 }
+
+/// Deeply left-nested arithmetic (e.g. `1+1+1+...`) must hit a graceful
+/// depth-guard error in ast_transform's post-parse pass, not crash the
+/// whole process. Historical bug: `parser::parse()` unconditionally pipes
+/// every parse through `ast_transform::resolve_ancestry`, whose recursive
+/// AST walk had no depth guard (found during jsonata-js 2.2.1 Phase 2
+/// guardrails work — see docs/superpowers/specs/2026-07-04-jsonata-2.2.1-design.md).
+/// Confirmed empirically (this session) that the raw Pratt parser handles
+/// this input fine at n=200,000; the crash is entirely in the post-parse
+/// ast_transform pass.
+#[test]
+fn test_deeply_nested_arithmetic_does_not_overflow_native_stack_at_parse_time() {
+    let handle = std::thread::Builder::new()
+        .stack_size(1024 * 1024) // 1MB, matching Windows' default thread stack
+        .spawn(|| {
+            let expr_str = format!("({})", vec!["1"; 200_000].join("+"));
+            match parse(&expr_str) {
+                Ok(_) => "Ok".to_string(),
+                Err(e) => format!("Err({e})"),
+            }
+        })
+        .unwrap();
+
+    let outcome = handle.join().expect(
+        "expression parsing overflowed the native stack instead of returning a graceful error",
+    );
+
+    assert!(
+        outcome.starts_with("Err"),
+        "expected a graceful depth-limit error, got: {outcome}"
+    );
+    assert!(
+        outcome.contains("U1002"),
+        "expected the U1002 depth-limit error code, got: {outcome}"
+    );
+}
+
+/// Companion to the crash-repro test above: reasonable nesting (well below
+/// the ast_transform depth ceiling) must still parse successfully -- proves
+/// the new guard doesn't fire on legitimate expressions. 200 arithmetic
+/// terms produce ~400 recursive `transform_node`/`transform_children` stack
+/// frames (each `+` adds two: `transform_node` -> `transform_children` ->
+/// `transform_node`(lhs)), comfortably under the MAX_TRANSFORM_DEPTH=1000
+/// ceiling -- empirically, the ceiling's actual cutoff for this shape of
+/// expression is between n=500 (still `Ok`) and n=501 (`Err`), so 200 terms
+/// leaves a healthy margin rather than sitting right at the edge.
+#[test]
+fn test_reasonable_nesting_still_parses_successfully() {
+    let expr_str = format!("({})", vec!["1"; 200].join("+"));
+    let result = parse(&expr_str);
+    assert!(
+        result.is_ok(),
+        "expected reasonable nesting to parse fine, got: {result:?}"
+    );
+}
