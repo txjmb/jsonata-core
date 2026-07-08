@@ -104,6 +104,7 @@ nav:
       - Contributing: development/contributing.md
       - Testing: development/testing.md
       - Architecture: development/architecture.md
+      - Releasing: development/releasing.md
   - About:
       - Changelog: changelog.md
       - License: license.md
