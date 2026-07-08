@@ -178,6 +178,25 @@ fn coded(code: &'static str, message: impl Into<String>) -> AstTransformError {
 // fully unwound (see `resolve_ancestry`). Do NOT let these two counters
 // influence each other.
 //
+// A LATER guard was added directly in `parser.rs` (`MAX_PARSE_DEPTH`, also
+// 1000) that bounds the parser's OWN recursion/loop-iteration counter --
+// this is NOT the same thing as "real AST tree depth is always <=1000".
+// Calibrated empirically (throwaway harness, this session) across several
+// shapes: for simple ones (flat Binary/Unary/Array/Object chains) the
+// parser's counter tracks real tree depth 1:1, so `ast_transform`'s own
+// ceiling below fires first, well before the parser's. But for COMPOUND
+// shapes where one parser-guarded call/iteration corresponds to more than
+// one real `AstNode`-nesting hop (e.g. `a.(a.(a.(...)))`, where each level
+// costs one recursive `parse_expression` call for the `FunctionApplication`
+// body PLUS the `Path` wrapper it returns into), real tree depth reachable
+// via a parser-accepted expression can run up to ~2x the parser's own
+// counter value (observed: parser counter 999 -> real tree depth 2000).
+// This means DO NOT assume "the parser already bounds real depth to
+// <=1000" as a reason to raise this file's ceiling to just above 1000 --
+// that reasoning is unsound for compound shapes and was corrected before
+// shipping (see PR discussion). This file's own ceiling stays genuinely
+// load-bearing for those shapes, not just cosmetic defense-in-depth.
+//
 // Ceiling rationale: chosen empirically (see
 // `test_deeply_nested_arithmetic_does_not_overflow_native_stack_at_parse_time`
 // and `test_reasonable_nesting_still_parses_successfully` in
@@ -245,7 +264,7 @@ fn check_transform_depth(depth: usize) -> Result<(), AstTransformError> {
         Err(coded(
             "U1002",
             format!(
-                "Stack overflow - maximum expression nesting depth ({}) exceeded while resolving ancestor/path metadata",
+                "Stack overflow - maximum expression nesting depth ({}) exceeded while post-processing the parsed expression",
                 MAX_TRANSFORM_DEPTH
             ),
         ))
@@ -261,7 +280,7 @@ fn check_label_substitution_depth(depth: usize) -> Result<(), AstTransformError>
         Err(coded(
             "U1002",
             format!(
-                "Stack overflow - maximum expression nesting depth ({}) exceeded while substituting ancestor labels",
+                "Stack overflow - maximum expression nesting depth ({}) exceeded while finalizing the parsed expression",
                 MAX_LABEL_SUBSTITUTION_DEPTH
             ),
         ))
@@ -441,7 +460,7 @@ fn max_transform_depth_error() -> AstTransformError {
     coded(
         "U1002",
         format!(
-            "Stack overflow - maximum expression nesting depth ({}) exceeded while resolving ancestor/path metadata",
+            "Stack overflow - maximum expression nesting depth ({}) exceeded while post-processing the parsed expression",
             MAX_TRANSFORM_DEPTH
         ),
     )

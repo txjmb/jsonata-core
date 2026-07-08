@@ -1419,8 +1419,8 @@ fn test_deeply_nested_arithmetic_caught_at_parse_construction_time() {
             let msg = format!("{e}");
             assert!(msg.contains("U1002"), "expected U1002, got: {msg}");
             // U1002 is also used by ast_transform.rs's separate, earlier-added
-            // post-parse guard ("while resolving ancestor/path metadata"), so
-            // checking the error code alone isn't enough to prove the NEW
+            // post-parse guard ("while post-processing the parsed expression"),
+            // so checking the error code alone isn't enough to prove the NEW
             // parser-level guard (added in this commit) is the one that fired.
             assert!(
                 msg.contains("while parsing expression"),
