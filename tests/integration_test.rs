@@ -1358,3 +1358,80 @@ fn test_reasonable_nesting_still_parses_successfully() {
         "expected reasonable nesting to parse fine, got: {result:?}"
     );
 }
+
+/// Deeply PARENTHESIZED nesting (e.g. `((((...))))`) must hit a graceful
+/// depth-guard error during parsing itself, not crash the process. This is
+/// a DIFFERENT crash than the flat-arithmetic-chain one Task 2 fixed in
+/// ast_transform.rs: parens are real recursive descent inside
+/// `parse_primary`/`parse_expression` (src/parser.rs), so this crashes
+/// BEFORE ast_transform ever runs, and BEFORE ast_transform's own guard
+/// gets a chance to protect anything. Found during Task 2's validation
+/// (this session) — contradicts the original "crash is not in the parser"
+/// framing for this specific shape (see the plan's Scope Amendment).
+#[test]
+fn test_deeply_nested_parens_does_not_overflow_native_stack_at_parse_time() {
+    let handle = std::thread::Builder::new()
+        .stack_size(1024 * 1024) // 1MB, matching Windows' default thread stack
+        .spawn(|| {
+            let n = 5_000;
+            let expr_str = format!("{}1{}", "(".repeat(n), ")".repeat(n));
+            match parse(&expr_str) {
+                Ok(_) => "Ok".to_string(),
+                Err(e) => format!("Err({e})"),
+            }
+        })
+        .unwrap();
+
+    let outcome = handle.join().expect(
+        "expression parsing overflowed the native stack instead of returning a graceful error",
+    );
+
+    assert!(
+        outcome.starts_with("Err") && outcome.contains("U1002"),
+        "expected a graceful U1002 depth-limit error, got: {outcome}"
+    );
+}
+
+/// Reasonable paren nesting must still work (the guard must not fire on
+/// legitimate expressions). Pick a depth comfortably below the chosen
+/// ceiling (Step 4 picks the ceiling; this must stay well under it).
+#[test]
+fn test_reasonable_paren_nesting_still_parses() {
+    let n = 50;
+    let expr_str = format!("{}1{}", "(".repeat(n), ")".repeat(n));
+    let result = parse(&expr_str);
+    assert!(
+        result.is_ok(),
+        "reasonable paren nesting should parse fine, got: {result:?}"
+    );
+}
+
+/// The flat left-associative arithmetic chain from Task 2 must now ALSO be
+/// caught here, at parse-construction time, independent of ast_transform's
+/// guard (which still runs afterward as defense-in-depth, but should never
+/// see a tree deep enough to matter now).
+#[test]
+fn test_deeply_nested_arithmetic_caught_at_parse_construction_time() {
+    let expr_str = format!("({})", vec!["1"; 200_000].join("+"));
+    let result = parse(&expr_str);
+    match result {
+        Err(e) => assert!(format!("{e}").contains("U1002"), "expected U1002, got: {e}"),
+        Ok(_) => panic!("expected a graceful depth-limit error"),
+    }
+}
+
+/// Sibling subtrees must not inherit accumulated depth from an earlier
+/// sibling: an array of two SHALLOW arithmetic expressions must parse fine
+/// even though each element's `parse_expression` call briefly re-enters the
+/// loop-driven counter — proves depth is restored to its pre-call value
+/// between the two array elements, not left elevated.
+#[test]
+fn test_sibling_subtrees_do_not_inherit_depth() {
+    let shallow = vec!["1"; 20].join("+");
+    let expr_str = format!("[{shallow}, {shallow}, {shallow}]");
+    let result = parse(&expr_str);
+    assert!(
+        result.is_ok(),
+        "shallow siblings should parse fine, got: {result:?}"
+    );
+}
