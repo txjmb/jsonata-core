@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.1.7] - 2026-07-08
+
+### Added
 - Guardrails: `timeout` (ms, error code `D1012`), `max_stack_depth` (error code `D1011`), and
   `max_sequence_length` (error code `D2015`) keyword arguments on `compile()` and every
   `evaluate*()` call, enforced consistently across all three execution engines (tree-walker,

@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "jsonata-core"
-version = "2.1.6"
+version = "2.1.7"
 dependencies = [
  "base64",
  "chrono",
