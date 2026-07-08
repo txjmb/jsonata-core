@@ -31,6 +31,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# Number of independent measurement trials per test, per implementation - the
+# minimum across these is what actually gets recorded (see
+# _run_jsonatapy_benchmark's docstring for why min, and why this exists at
+# all: single-sample wall-clock timing swung -66% to +120% between two runs
+# of IDENTICAL code, which is what made the release pipeline's regression
+# detection cry wolf on every release).
+REPEAT_TRIALS = 5
+
 
 def _describe_platform() -> str:
     """Describe the environment actually running the benchmark, not wherever
@@ -181,8 +189,23 @@ class BenchmarkSuite:
             print(f"⚠ Error running JavaScript benchmark: {e}")
             return -1.0
 
-    def _run_jsonatapy_benchmark(self, expression: str, data: Any, iterations: int) -> float:
-        """Run benchmark using jsonatapy (Rust/PyO3) implementation."""
+    def _run_jsonatapy_benchmark(
+        self, expression: str, data: Any, iterations: int, repeats: int = REPEAT_TRIALS
+    ) -> float:
+        """Run benchmark using jsonatapy (Rust/PyO3) implementation.
+
+        Takes the MINIMUM elapsed time across `repeats` independent measurement
+        passes (after one shared warmup), not a single sample. A single
+        wall-clock sample is dominated by transient system-level noise (CPU
+        scheduling, GC pauses, shared/virtualized host jitter) - confirmed
+        empirically: two consecutive single-sample runs of IDENTICAL code
+        swung from -66% to +120% on the same machine, which is exactly the
+        false-positive "regression" this project's release automation kept
+        opening issues for (#48, #51, #59, #60 - all closed as noise). Min,
+        not mean/median, because interference can only make a run slower than
+        the code's true achievable speed, never faster - the minimum across
+        several trials is the best available estimate of that true speed.
+        """
         if not JSONATAPY_AVAILABLE:
             return -1.0
 
@@ -192,7 +215,7 @@ class BenchmarkSuite:
             print(f"⚠ jsonatapy compilation failed: {e}")
             return -1.0
 
-        # Warm up
+        # Warm up (once - shared across all measurement trials below)
         warmup_iters = min(100, max(10, iterations // 10))
         for _ in range(warmup_iters):
             try:
@@ -201,19 +224,27 @@ class BenchmarkSuite:
                 print(f"⚠ jsonatapy warmup failed: {e}")
                 return -1.0
 
-        # Measure
-        start = time.perf_counter()
-        for _ in range(iterations):
-            compiled.evaluate(data)
-        elapsed = time.perf_counter() - start
+        # Measure: `repeats` independent trials, keep the minimum
+        best_elapsed = None
+        for _ in range(repeats):
+            start = time.perf_counter()
+            for _ in range(iterations):
+                compiled.evaluate(data)
+            elapsed = time.perf_counter() - start
+            if best_elapsed is None or elapsed < best_elapsed:
+                best_elapsed = elapsed
 
-        return elapsed * 1000  # Convert to milliseconds
+        return best_elapsed * 1000  # Convert to milliseconds
 
-    def _run_jsonatapy_json_benchmark(self, expression: str, data: Any, iterations: int) -> float:
+    def _run_jsonatapy_json_benchmark(
+        self, expression: str, data: Any, iterations: int, repeats: int = REPEAT_TRIALS
+    ) -> float:
         """Run benchmark using jsonatapy's pure Rust path (JSON string I/O).
 
         This bypasses Python↔Rust object conversion by using evaluate_json(),
-        giving a fair Rust-to-Rust comparison against jsonata-rs.
+        giving a fair Rust-to-Rust comparison against jsonata-rs. Takes the
+        minimum across `repeats` trials - see _run_jsonatapy_benchmark's
+        docstring for why.
         """
         if not JSONATAPY_AVAILABLE:
             return -1.0
@@ -227,7 +258,7 @@ class BenchmarkSuite:
         # Pre-serialize data to JSON string (not counted in benchmark time)
         json_str = json.dumps(data)
 
-        # Warm up
+        # Warm up (once - shared across all measurement trials below)
         warmup_iters = min(100, max(10, iterations // 10))
         for _ in range(warmup_iters):
             try:
@@ -236,13 +267,17 @@ class BenchmarkSuite:
                 print(f"⚠ jsonatapy (json) warmup failed: {e}")
                 return -1.0
 
-        # Measure
-        start = time.perf_counter()
-        for _ in range(iterations):
-            compiled.evaluate_json(json_str)
-        elapsed = time.perf_counter() - start
+        # Measure: `repeats` independent trials, keep the minimum
+        best_elapsed = None
+        for _ in range(repeats):
+            start = time.perf_counter()
+            for _ in range(iterations):
+                compiled.evaluate_json(json_str)
+            elapsed = time.perf_counter() - start
+            if best_elapsed is None or elapsed < best_elapsed:
+                best_elapsed = elapsed
 
-        return elapsed * 1000  # Convert to milliseconds
+        return best_elapsed * 1000  # Convert to milliseconds
 
     def _run_jsonata_python_benchmark(self, expression: str, data: Any, iterations: int) -> float:
         """Run benchmark using jsonata-python (rayokota) implementation.
