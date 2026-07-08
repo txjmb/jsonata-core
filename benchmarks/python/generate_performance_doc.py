@@ -41,6 +41,8 @@ INTRO = """# Performance Benchmarks
 
 jsonatapy is a high-performance Rust implementation of JSONata with Python bindings. This page presents benchmark comparisons against other JSONata implementations.
 
+**These numbers come from a dedicated, self-hosted Mac Mini (Apple Silicon), not a shared cloud CI runner** — single-tenant physical hardware with no other workloads competing for CPU. This matters: single-sample measurements on a shared/virtualized runner were previously noisy enough that identical code, measured twice, swung -66% to +120%. Every number below is also the *minimum* of {repeat_trials} independent measurement trials per test (not an average) — for CPU-bound microbenchmarks, interference can only make a run slower than the code's true achievable speed, never faster, so the minimum across repeated trials is the best available estimate of that true speed.
+
 ## Implementations Tested
 
 | Implementation | Language | Version | Description |
@@ -191,6 +193,7 @@ def main() -> int:
     platform = data.get("platform", "unknown")
     python_version = data.get("python_version", "unknown")
     run_date = data.get("timestamp", "unknown")[:10]
+    repeat_trials = data.get("repeat_trials", "an unknown number of")
 
     try:
         import jsonatapy
@@ -219,6 +222,7 @@ def main() -> int:
         jsonatapy_version=jsonatapy_version,
         node_version=node_version,
         run_date=run_date,
+        repeat_trials=repeat_trials,
     )
 
     summary = "## Summary by Category\n\n" + category_summary_table(results)
