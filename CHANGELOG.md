@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `evaluate*()` call, enforced consistently across all three execution engines (tree-walker,
   compiled-expression fast path, bytecode VM). All default to `None` (unlimited) — no behavior
   change unless configured. See [Guardrails](docs/api.md#guardrails). (jsonata-js 2.2.1 Phase 2, #56)
+- Documented the guardrails API in `docs/api.md`, `docs/usage.md`, and `docs/error-handling.md`
+  (previously shipped with accurate Python docstrings but no user-facing docs), and corrected
+  `docs/migration-from-js.md`'s stale claim that Python had no built-in timeout support.
 
 ### Fixed
 - A deeply-nested expression (arithmetic chains, parenthesized/grouped expressions) no longer
@@ -23,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count, and internal constant-pool bookkeeping) no longer silently produce wrong, truncated
   results for oversized literals/blocks/calls (e.g. array literals with more than 65,535
   elements) — such cases now fall back to the always-correct tree-walker instead.
+- `ast_transform.rs`'s depth-guard error messages no longer imply `%`/`@`/`#` ancestor-operator
+  usage (e.g. "...while resolving ancestor/path metadata") when the guard fires for any
+  sufficiently-nested expression, including plain arithmetic.
 - Release workflow now fails loudly on a fresh dispatch when the target version tag already
   exists at a different commit, instead of silently reusing the wrong commit (#53).
 
