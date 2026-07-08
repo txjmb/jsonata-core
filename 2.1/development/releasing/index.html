@@ -12,31 +12,31 @@
         <meta name="author" content="jsonatapy contributors">
       
       
-        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.1/benchmarks/">
+        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.1/development/releasing/">
       
       
-        <link rel="prev" href="../performance/">
+        <link rel="prev" href="../architecture/">
       
       
-        <link rel="next" href="../optimization-tips/">
+        <link rel="next" href="../../changelog/">
       
       
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Benchmarks - jsonata-core + jsonatapy</title>
+        <title>Releasing - jsonata-core + jsonatapy</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -55,9 +55,9 @@
       
     
     
-      <link rel="stylesheet" href="../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
   
@@ -92,7 +92,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#benchmarks" class="md-skip">
+        <a href="#releasing" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +110,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../.." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -130,7 +130,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Benchmarks
+              Releasing
             
           </span>
         </div>
@@ -243,7 +243,7 @@
   
   
     <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
+      <a href="../.." class="md-tabs__link">
         
   
   
@@ -264,7 +264,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../installation/" class="md-tabs__link">
+        <a href="../../installation/" class="md-tabs__link">
           
   
   
@@ -284,7 +284,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../rust-crate/" class="md-tabs__link">
+        <a href="../../rust-crate/" class="md-tabs__link">
           
   
   
@@ -304,7 +304,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/" class="md-tabs__link">
+        <a href="../../api/" class="md-tabs__link">
           
   
   
@@ -320,13 +320,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../performance/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../performance/" class="md-tabs__link">
           
   
   
@@ -346,7 +344,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../compatibility/" class="md-tabs__link">
+        <a href="../../compatibility/" class="md-tabs__link">
           
   
   
@@ -362,11 +360,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../development/building/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../building/" class="md-tabs__link">
           
   
   
@@ -386,7 +386,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../changelog/" class="md-tabs__link">
+        <a href="../../changelog/" class="md-tabs__link">
           
   
   
@@ -420,7 +420,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../.." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -450,7 +450,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -531,7 +531,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../installation/" class="md-nav__link">
+      <a href="../../installation/" class="md-nav__link">
         
   
   
@@ -559,7 +559,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../usage/" class="md-nav__link">
+      <a href="../../usage/" class="md-nav__link">
         
   
   
@@ -587,7 +587,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../examples/" class="md-nav__link">
+      <a href="../../examples/" class="md-nav__link">
         
   
   
@@ -676,7 +676,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rust-crate/" class="md-nav__link">
+      <a href="../../rust-crate/" class="md-nav__link">
         
   
   
@@ -765,7 +765,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/" class="md-nav__link">
+      <a href="../../api/" class="md-nav__link">
         
   
   
@@ -793,7 +793,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../jsonata-language/" class="md-nav__link">
+      <a href="../../jsonata-language/" class="md-nav__link">
         
   
   
@@ -821,7 +821,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../error-handling/" class="md-nav__link">
+      <a href="../../error-handling/" class="md-nav__link">
         
   
   
@@ -853,31 +853,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -895,7 +892,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -913,7 +910,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../performance/" class="md-nav__link">
+      <a href="../../performance/" class="md-nav__link">
         
   
   
@@ -938,37 +935,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Benchmarks
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
         
   
   
@@ -984,164 +954,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#running-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running Benchmarks
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#implementations-compared" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Implementations Compared
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#benchmark-categories" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Benchmark Categories
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#results" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Results
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pure-rust-criterion-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pure-Rust Criterion Benchmarks
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Pure-Rust Criterion Benchmarks">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#what-is-measured" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What is measured
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#results-release-build-amd-ryzen-intel-core-simd-enabled" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Results (release build, AMD Ryzen / Intel Core, SIMD enabled)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#comparison-with-jsonata-rs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Comparison with jsonata-rs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#clarification-rust-only-in-the-python-benchmark-suite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Clarification: "rust-only" in the Python benchmark suite
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#key-findings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Key Findings
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#custom-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Custom Benchmarks
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1154,7 +966,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../optimization-tips/" class="md-nav__link">
+      <a href="../../optimization-tips/" class="md-nav__link">
         
   
   
@@ -1243,7 +1055,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../compatibility/" class="md-nav__link">
+      <a href="../../compatibility/" class="md-nav__link">
         
   
   
@@ -1271,7 +1083,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../migration-from-js/" class="md-nav__link">
+      <a href="../../migration-from-js/" class="md-nav__link">
         
   
   
@@ -1299,7 +1111,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../migration-from-jsonata-python/" class="md-nav__link">
+      <a href="../../migration-from-jsonata-python/" class="md-nav__link">
         
   
   
@@ -1331,28 +1143,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
-        
-          
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
             
   
   
@@ -1370,7 +1185,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1388,7 +1203,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/building/" class="md-nav__link">
+      <a href="../building/" class="md-nav__link">
         
   
   
@@ -1416,7 +1231,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/parser/" class="md-nav__link">
+      <a href="../parser/" class="md-nav__link">
         
   
   
@@ -1444,7 +1259,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/contributing/" class="md-nav__link">
+      <a href="../contributing/" class="md-nav__link">
         
   
   
@@ -1472,7 +1287,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/testing/" class="md-nav__link">
+      <a href="../testing/" class="md-nav__link">
         
   
   
@@ -1500,7 +1315,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/architecture/" class="md-nav__link">
+      <a href="../architecture/" class="md-nav__link">
         
   
   
@@ -1525,10 +1340,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../development/releasing/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1544,6 +1386,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#before-dispatching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before dispatching
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dispatching-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dispatching a release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-workflow-does-automatically" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the workflow does automatically
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#after-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        After a release
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1617,7 +1523,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="../../changelog/" class="md-nav__link">
         
   
   
@@ -1645,7 +1551,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../license/" class="md-nav__link">
+      <a href="../../license/" class="md-nav__link">
         
   
   
@@ -1673,7 +1579,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../credits/" class="md-nav__link">
+      <a href="../../credits/" class="md-nav__link">
         
   
   
@@ -1728,10 +1634,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#running-benchmarks" class="md-nav__link">
+  <a href="#before-dispatching" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Running Benchmarks
+        Before dispatching
       
     </span>
   </a>
@@ -1739,10 +1645,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#implementations-compared" class="md-nav__link">
+  <a href="#dispatching-a-release" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Implementations Compared
+        Dispatching a release
       
     </span>
   </a>
@@ -1750,10 +1656,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#benchmark-categories" class="md-nav__link">
+  <a href="#what-the-workflow-does-automatically" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Benchmark Categories
+        What the workflow does automatically
       
     </span>
   </a>
@@ -1761,104 +1667,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#results" class="md-nav__link">
+  <a href="#after-a-release" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Results
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pure-rust-criterion-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pure-Rust Criterion Benchmarks
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Pure-Rust Criterion Benchmarks">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#what-is-measured" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What is measured
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#results-release-build-amd-ryzen-intel-core-simd-enabled" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Results (release build, AMD Ryzen / Intel Core, SIMD enabled)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#comparison-with-jsonata-rs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Comparison with jsonata-rs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#clarification-rust-only-in-the-python-benchmark-suite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Clarification: "rust-only" in the Python benchmark suite
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#key-findings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Key Findings
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#custom-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Custom Benchmarks
+        After a release
       
     </span>
   </a>
@@ -1885,177 +1697,53 @@
   
 
 
-<h1 id="benchmarks">Benchmarks<a class="headerlink" href="#benchmarks" title="Permanent link">&para;</a></h1>
-<p>jsonatapy includes a comprehensive benchmark suite comparing performance across multiple JSONata implementations.</p>
-<h2 id="running-benchmarks">Running Benchmarks<a class="headerlink" href="#running-benchmarks" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Build jsonatapy</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>maturin<span class="w"> </span>develop<span class="w"> </span>--release
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Install benchmark dependencies</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>bench
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Run full benchmark suite</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/python/benchmark.py
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># Update docs/performance.md with latest results</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/update_docs.py
-</span></code></pre></div>
-<h2 id="implementations-compared">Implementations Compared<a class="headerlink" href="#implementations-compared" title="Permanent link">&para;</a></h2>
-<p>Latest benchmark results (2026-02-21) compare:</p>
+<h1 id="releasing">Releasing<a class="headerlink" href="#releasing" title="Permanent link">&para;</a></h1>
+<p>How to cut a new jsonatapy/jsonata-core release.</p>
+<h2 id="before-dispatching">Before dispatching<a class="headerlink" href="#before-dispatching" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>jsonatapy</strong> - Rust-based Python extension (this project), <code>evaluate(dict)</code> path</li>
-<li><strong>jsonatapy (rust-only)</strong> - Same library, <code>evaluate_json(str)</code> path (bypasses Python object conversion)</li>
-<li><strong>jsonata-js</strong> - Official JavaScript reference implementation (Node.js v24.13.1)</li>
-<li><strong>jsonata-python</strong> - Pure Python implementation</li>
-<li><strong>jsonata-rs</strong> - Pure Rust CLI implementation (optional, requires building the binary)</li>
+<li><strong>Keep <code>CHANGELOG.md</code>'s <code>[Unreleased]</code> section current as you go</strong>, not just at release
+   time — add an entry under <code>### Added</code>/<code>### Changed</code>/<code>### Fixed</code>/etc. as part of the PR that
+   introduces the change, the same way you'd update tests. The release workflow enforces this: it
+   refuses to release if <code>[Unreleased]</code> has no entries (see below), but a changelog written
+   after-the-fact from a commit-message dump is much lower quality than one written when the
+   change was still fresh in your head.</li>
+<li>Confirm <code>cargo test --all-features</code>, <code>cargo clippy --all-targets --all-features -- -D
+   warnings</code>, <code>cargo fmt --check</code>, and the Python reference suite are all green on <code>main</code>.</li>
+<li>Decide the version number (semver, e.g. <code>2.1.7</code>).</li>
 </ol>
-<p>To include jsonata-rs in benchmarks:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>benchmarks/rust
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cargo<span class="w"> </span>build<span class="w"> </span>--release
-</span></code></pre></div></p>
-<h2 id="benchmark-categories">Benchmark Categories<a class="headerlink" href="#benchmark-categories" title="Permanent link">&para;</a></h2>
+<h2 id="dispatching-a-release">Dispatching a release<a class="headerlink" href="#dispatching-a-release" title="Permanent link">&para;</a></h2>
+<p>Trigger the <a href="../../.github/workflows/release.yml"><code>Release</code> workflow</a> manually
+(<code>workflow_dispatch</code>) from the Actions tab, or via <code>gh workflow run release.yml -f version=X.Y.Z</code>.
+Set <code>dry_run: true</code> first if you want to exercise the build/test/publish steps without actually
+publishing to PyPI/crates.io.</p>
+<h2 id="what-the-workflow-does-automatically">What the workflow does automatically<a class="headerlink" href="#what-the-workflow-does-automatically" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Simple Paths</strong> - Basic field access and arithmetic (<code>name</code>, <code>a.b.c</code>, <code>x + y</code>)</li>
-<li><strong>Array Operations</strong> - Aggregation and filtering on arrays of scalars and objects</li>
-<li><strong>Complex Transformations</strong> - Object construction, conditionals, nested function calls</li>
-<li><strong>Deep Nesting</strong> - Paths 12+ levels deep, nested array access</li>
-<li><strong>String Operations</strong> - <code>$uppercase</code>, <code>$substring</code>, <code>$contains</code>, etc.</li>
-<li><strong>Higher-Order Functions</strong> - <code>$map</code>, <code>$filter</code>, <code>$reduce</code> with lambdas</li>
-<li><strong>Realistic Workload</strong> - E-commerce dataset queries: filter, aggregate, transform, sort</li>
-<li><strong>Path Comparison</strong> - Same expressions across all four evaluation paths (<code>evaluate</code>, <code>evaluate_json</code>, <code>evaluate_with_data</code>, <code>evaluate_data_to_json</code>)</li>
+<li>Validates the version string is well-formed semver.</li>
+<li>Bumps <code>Cargo.toml</code>/<code>pyproject.toml</code>/<code>Cargo.lock</code> to the new version.</li>
+<li><strong>Bumps <code>CHANGELOG.md</code></strong>: renames the accumulated <code>## [Unreleased]</code> section to
+  <code>## [$VERSION] - $DATE</code> and inserts a fresh, empty <code>[Unreleased]</code> template above it
+  (<code>scripts/bump-changelog.sh</code>). This step <strong>fails the release</strong> if <code>[Unreleased]</code> has no
+  bullet entries — that's a strong signal the changelog wasn't kept current during development
+  (see step 1 above). If you hit this and the release genuinely has nothing user-facing to note,
+  add a bullet by hand (e.g. "Internal maintenance release, no user-facing changes.") rather than
+  bypassing the check.</li>
+<li>Commits the version bump (including the updated <code>CHANGELOG.md</code>) and creates the <code>vX.Y.Z</code> tag —
+  idempotently: re-dispatching the same version after a partial failure reuses the existing
+  commit/tag/changelog entry instead of duplicating them, but <strong>fails loudly</strong> (does not silently
+  proceed) if the tag already exists at a <em>different</em> commit than the one this run would release,
+  since that's previously caused stale-commit bugs in benchmark/build jobs that all check out
+  <code>refs/tags/v$VERSION</code> explicitly.</li>
+<li>Builds wheels for all target platforms, builds the sdist, runs the test suite against the
+  built wheels, and (unless <code>dry_run: true</code>) publishes to PyPI and crates.io, then creates the
+  GitHub Release with autogenerated notes.</li>
 </ul>
-<h2 id="results">Results<a class="headerlink" href="#results" title="Permanent link">&para;</a></h2>
-<p>See <a href="../performance/">Performance</a> for detailed benchmark results, charts, and analysis of the performance characteristics of each category.</p>
-<hr />
-<h2 id="pure-rust-criterion-benchmarks">Pure-Rust Criterion Benchmarks<a class="headerlink" href="#pure-rust-criterion-benchmarks" title="Permanent link">&para;</a></h2>
-<p>The Python benchmark suite measures end-to-end performance including the Python↔Rust
-boundary cost. To measure the Rust evaluator in isolation — with no Python interpreter,
-no PyO3, no GIL, no object conversion — the crate includes a
-<a href="https://bheisler.github.io/criterion.rs/book/">Criterion</a> benchmark suite.</p>
-<p>This is the most direct measure of what <code>jsonata-core</code> costs as a Rust library.</p>
-<h3 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span>bench<span class="w"> </span>--no-default-features<span class="w"> </span>--features<span class="w"> </span>simd
-</span></code></pre></div>
-<p>Results are written to <code>target/criterion/</code>. Open
-<code>target/criterion/report/index.html</code> for the full HTML report.</p>
-<h3 id="what-is-measured">What is measured<a class="headerlink" href="#what-is-measured" title="Permanent link">&para;</a></h3>
-<p>Each benchmark parses the expression once (outside the timed loop), then measures
-repeated <code>Evaluator::new().evaluate(&amp;ast, &amp;data)</code> calls using Criterion's statistical
-framework (outlier detection, confidence intervals, automatically tuned sample count).</p>
-<h3 id="results-release-build-amd-ryzen-intel-core-simd-enabled">Results (release build, AMD Ryzen / Intel Core, SIMD enabled)<a class="headerlink" href="#results-release-build-amd-ryzen-intel-core-simd-enabled" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Benchmark</th>
-<th>Time</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Simple field lookup (<code>name</code>)</td>
-<td>81 ns</td>
-</tr>
-<tr>
-<td>Deep path 5 levels (<code>a.b.c.d.e</code>)</td>
-<td>140 ns</td>
-</tr>
-<tr>
-<td>Arithmetic (<code>price * quantity</code>)</td>
-<td>140 ns</td>
-</tr>
-<tr>
-<td>Conditional (<code>price &gt; 100 ? "expensive" : "affordable"</code>)</td>
-<td>106 ns</td>
-</tr>
-<tr>
-<td>String operations (<code>$uppercase</code>, <code>$substring</code>)</td>
-<td>126–284 ns</td>
-</tr>
-<tr>
-<td><code>$sum</code> (100 elements)</td>
-<td>287 ns</td>
-</tr>
-<tr>
-<td><code>$sum</code> (1000 elements)</td>
-<td>1.88 µs</td>
-</tr>
-<tr>
-<td>Filter predicate (100 objects)</td>
-<td>7.9 µs</td>
-</tr>
-<tr>
-<td>Filter by category (100-product dataset)</td>
-<td>9.3 µs</td>
-</tr>
-<tr>
-<td>Complex transformation (100-product dataset)</td>
-<td>44 µs</td>
-</tr>
-<tr>
-<td><code>$sort</code> / top-rated (100-product dataset)</td>
-<td>18 µs</td>
-</tr>
-</tbody>
-</table>
-<h3 id="comparison-with-jsonata-rs">Comparison with jsonata-rs<a class="headerlink" href="#comparison-with-jsonata-rs" title="Permanent link">&para;</a></h3>
-<p><a href="https://crates.io/crates/jsonata-rs">jsonata-rs</a> is the only other pure-Rust JSONata
-implementation. Based on its published benchmarks, <code>jsonata-core</code> is approximately
-<strong>40x faster</strong> across typical workloads:</p>
-<table>
-<thead>
-<tr>
-<th>Category</th>
-<th>jsonata-core</th>
-<th>jsonata-rs (est.)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Simple path lookup</td>
-<td>81 ns</td>
-<td>~3 µs</td>
-</tr>
-<tr>
-<td><code>$sum</code> (100 elements)</td>
-<td>287 ns</td>
-<td>~20 µs</td>
-</tr>
-<tr>
-<td>Filter predicate (100 objects)</td>
-<td>7.9 µs</td>
-<td>~385 µs</td>
-</tr>
-</tbody>
-</table>
-<p>The gap comes from <code>jsonata-core</code>'s JValue type (O(1) <code>Rc</code> clones, no heap allocation
-for common operations) and a compile-once expression cache that eliminates repeated
-predicate recompilation.</p>
-<h3 id="clarification-rust-only-in-the-python-benchmark-suite">Clarification: "rust-only" in the Python benchmark suite<a class="headerlink" href="#clarification-rust-only-in-the-python-benchmark-suite" title="Permanent link">&para;</a></h3>
-<p>The Python benchmark suite labels the <code>evaluate_json(json_string)</code> path as
-"rust-only". This is <strong>not</strong> the same as the Criterion benchmarks above. Both paths
-use the Rust evaluator; the difference is how data enters and exits:</p>
+<h2 id="after-a-release">After a release<a class="headerlink" href="#after-a-release" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>evaluate(dict)</code></strong> — PyO3 walks the Python dict tree → JValue → evaluate → JValue → Python object</li>
-<li><strong><code>evaluate_json(str)</code></strong> — serde_json parses the JSON string → JValue → evaluate → JValue → serde_json serializes</li>
+<li>Verify the new version on PyPI/crates.io and that <code>import jsonatapy;
+  print(jsonatapy.__version__)</code> reports the expected version.</li>
+<li>If anything about the release process itself needs fixing, that's a <code>.github/workflows/release.yml</code>
+  change like any other — it's not a separate, undocumented process.</li>
 </ul>
-<p>For small payloads, serde_json parse+serialize overhead can exceed the PyO3 traversal
-cost, so <code>evaluate_json</code> is sometimes <em>slower</em> than <code>evaluate(dict)</code> on tiny inputs.
-Neither path eliminates the Python boundary; they just cross it differently.</p>
-<p>The Criterion benchmarks are the only measurements that eliminate the Python boundary
-entirely.</p>
-<h2 id="key-findings">Key Findings<a class="headerlink" href="#key-findings" title="Permanent link">&para;</a></h2>
-<p>jsonatapy is the fastest Python JSONata implementation available, and faster than the JavaScript reference for pure expression workloads. The performance ceiling for array-heavy workloads is set by Python's object model: converting Python dicts to Rust values costs roughly 1µs per field, which dominates evaluation time for large datasets. The <code>JsonataData</code> API and <code>evaluate_json</code> path avoid this cost.</p>
-<h2 id="custom-benchmarks">Custom Benchmarks<a class="headerlink" href="#custom-benchmarks" title="Permanent link">&para;</a></h2>
-<p>To add new benchmark cases, edit <code>benchmarks/python/benchmark.py</code> and add entries to the benchmark list:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;My custom test&quot;</span><span class="p">,</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;Custom&quot;</span><span class="p">,</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="s2">&quot;expression&quot;</span><span class="p">:</span> <span class="s2">&quot;items[price &gt; 100].name&quot;</span><span class="p">,</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;items&quot;</span><span class="p">:</span> <span class="p">[</span><span class="o">...</span><span class="p">]},</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="s2">&quot;iterations&quot;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="s2">&quot;warmup&quot;</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
-</span></code></pre></div>
 
 
 
@@ -2144,10 +1832,10 @@ entirely.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
