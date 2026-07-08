@@ -1,0 +1,147 @@
+name: Manual Benchmark Run (Mac Mini)
+
+# Standalone, repeatable workflow to run the release benchmark suite on the
+# self-hosted Mac Mini runner WITHOUT cutting a release. release.yml's
+# benchmark-and-record job only runs after create-github-release succeeds
+# (i.e. only as part of an actual release), so this exists for checking the
+# runner still works, or just wanting current numbers, without publishing
+# to PyPI/crates.io or bumping any version.
+#
+# By default (record: false) this is read-only: runs the suite, uploads
+# results as an artifact, touches nothing in git. With record: true, it
+# additionally regenerates docs/performance.md and commits it to main (same
+# as a real release would), and saves its results to benchmark-data under
+# results/macos-arm64/manual-<short-sha>.json for historical reference -
+# but deliberately does NOT touch results/macos-arm64/latest.json (that
+# stays exclusively updated by real releases, so a manual run here can never
+# silently become the baseline a future release gets compared against) and
+# does NOT run any regression comparison or open an issue (this workflow
+# isn't tied to a release, so "regression vs what?" has no good answer).
+
+on:
+  workflow_dispatch:
+    inputs:
+      record:
+        description: 'Also commit docs/performance.md and save results to benchmark-data (does not touch the release baseline)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  benchmark:
+    name: Run Benchmarks (Manual, Mac Mini)
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      # Same sudo/no-terminal issue as release.yml's benchmark job (see its
+      # comments) - actions/setup-python doesn't work on this runner.
+      - name: Install UV
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Python (macOS)
+        run: |
+          uv python install 3.14
+          uv venv --python 3.14 .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      # Node.js is NOT installed here - provisioned once, manually, on the
+      # runner host (scripts/setup-macos-benchmark-runner.sh). See that
+      # script and release.yml's benchmark job for why.
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Python dependencies
+        run: |
+          uv pip install --upgrade maturin rich matplotlib pandas jsonata
+
+      - name: Install JavaScript dependencies
+        run: |
+          cd benchmarks/javascript
+          npm install jsonata@latest
+
+      - name: Build jsonata-rs comparison binary
+        run: |
+          cd benchmarks/rust
+          cargo update -p jsonata-rs
+          cargo build --release
+
+      - name: Build jsonatapy (optimized)
+        run: |
+          maturin build --release --out dist
+          uv pip install --reinstall --find-links dist jsonatapy
+
+      - name: Verify installation
+        run: |
+          python -c "import jsonatapy; print(f'jsonatapy version: {jsonatapy.__version__}')"
+          python -c "import jsonata; print('jsonata-python installed')"
+          cd benchmarks/javascript && node -e "const jsonata = require('jsonata'); console.log('jsonata installed');"
+          test -x ../rust/target/release/jsonata-rs-bench && echo "jsonata-rs-bench built"
+
+      - name: Run benchmark suite
+        id: run_benchmark
+        run: |
+          cd benchmarks
+          python python/benchmark.py
+          RESULTS_FILE=$(ls -t results/benchmark_results_*.json | head -1)
+          echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
+          echo "Benchmark results saved to: $RESULTS_FILE"
+
+      - name: Update docs/performance.md (local copy)
+        run: |
+          python benchmarks/python/generate_performance_doc.py \
+            "benchmarks/${{ steps.run_benchmark.outputs.results_file }}" \
+            docs/performance.md
+
+      - name: Upload results as artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: manual-benchmark-results
+          path: |
+            benchmarks/results/*.json
+            docs/performance.md
+          retention-days: 30
+
+      - name: Commit docs/performance.md and save results (only if record=true)
+        if: github.event.inputs.record == 'true'
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          RESULTS_FILE="$(pwd)/benchmarks/${{ steps.run_benchmark.outputs.results_file }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main
+          git worktree add /tmp/performance-doc-commit FETCH_HEAD
+          cp docs/performance.md /tmp/performance-doc-commit/docs/performance.md
+          cd /tmp/performance-doc-commit
+          if git diff --quiet -- docs/performance.md; then
+            echo "docs/performance.md unchanged - skipping commit"
+          else
+            git add docs/performance.md
+            git commit -m "docs(benchmarks): update performance.md (manual run, ${SHORT_SHA})"
+            git push origin HEAD:main
+          fi
+          cd -
+
+          git fetch origin benchmark-data
+          git worktree add -B benchmark-data /tmp/benchmark-data-manual FETCH_HEAD
+          mkdir -p /tmp/benchmark-data-manual/results/macos-arm64
+          cp "$RESULTS_FILE" "/tmp/benchmark-data-manual/results/macos-arm64/manual-${SHORT_SHA}.json"
+          cd /tmp/benchmark-data-manual
+          git add "results/macos-arm64/manual-${SHORT_SHA}.json"
+          git commit -m "chore: record manual benchmark results for ${SHORT_SHA} (macos-arm64)"
+          git push origin HEAD:benchmark-data
