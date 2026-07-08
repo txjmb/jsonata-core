@@ -474,6 +474,12 @@ fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Opti
 
         // ── Object construction ─────────────────────────────────────────
         AstNode::Object(pairs) => {
+            // Instr::MakeObject's operand is a u16 element count - bail out
+            // to the (always-correct, no-limit) tree-walker rather than
+            // silently truncating via CompiledExpr::ObjectConstruct here.
+            if pairs.len() > u16::MAX as usize {
+                return None;
+            }
             let mut fields = Vec::with_capacity(pairs.len());
             for (key_node, val_node) in pairs {
                 // Key must be a string literal
@@ -489,6 +495,12 @@ fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Opti
 
         // ── Array construction ──────────────────────────────────────────
         AstNode::Array(elems) => {
+            // Instr::MakeArray's operand is a u16 element count - bail out
+            // to the (always-correct, no-limit) tree-walker rather than
+            // silently truncating via CompiledExpr::ArrayConstruct here.
+            if elems.len() > u16::MAX as usize {
+                return None;
+            }
             let mut compiled = Vec::with_capacity(elems.len());
             for elem in elems {
                 // Tag whether the element itself is an array constructor: if so, its

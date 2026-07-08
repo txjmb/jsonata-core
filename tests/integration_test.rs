@@ -1449,3 +1449,63 @@ fn test_sibling_subtrees_do_not_inherit_depth() {
         "siblings should each parse independently without inheriting depth from a prior sibling, got: {result:?}"
     );
 }
+
+/// A literal array with more than u16::MAX (65,535) elements must not
+/// silently truncate via Instr::MakeArray's u16 operand - it should either
+/// evaluate correctly (falling back to the tree-walker, which has no such
+/// limit) or be rejected with a clear error, but never silently return a
+/// wrong-length result. Historical bug: compiler.rs:328's
+/// `Instr::MakeArray(elems.len() as u16)` truncates silently (confirmed
+/// empirically: a 100,000-element literal previously returned length 34,464
+/// = 100,000 mod 65,536).
+///
+/// NOTE ON API CHOICE: this deliberately goes through `jsonata_core::_bench`
+/// (compile-to-bytecode + VM run), NOT bare `Evaluator::evaluate`. Bare
+/// `Evaluator::evaluate` never calls `try_compile_expr`/the VM at all for a
+/// top-level array/object literal (`evaluate_internal_impl`'s
+/// `AstNode::Array`/`AstNode::Object` arms are pure tree-walker code, with no
+/// compiler involvement) - so a test built on it would pass identically
+/// whether or not the u16-truncation guard exists, proving nothing. `_bench`
+/// (feature = "bench", used by `benches/evaluator_bench.rs` for the same
+/// reason) is the only way to reach the actual compiled path from outside
+/// `src/`. This mirrors what production code (`JsonataExpression` in
+/// `src/lib.rs`) really does: try to compile, and fall back to the
+/// tree-walker when compilation declines (returns `None`).
+#[cfg(feature = "bench")]
+#[test]
+fn test_large_literal_array_does_not_silently_truncate() {
+    use jsonata_core::_bench;
+    let n = 100_000;
+    let expr_str = format!("[{}]", vec!["1"; n].join(","));
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+    let result = match _bench::compile(&ast) {
+        Some(prog) => _bench::run(&prog, &data).unwrap(),
+        None => Evaluator::new().evaluate(&ast, &data).unwrap(),
+    };
+    match result {
+        JValue::Array(arr) => assert_eq!(arr.len(), n, "array literal was silently truncated"),
+        other => panic!("expected array, got {other:?}"),
+    }
+}
+
+/// Same shape for object literals and Instr::MakeObject. See the API-choice
+/// note on `test_large_literal_array_does_not_silently_truncate` above.
+#[cfg(feature = "bench")]
+#[test]
+fn test_large_literal_object_does_not_silently_truncate() {
+    use jsonata_core::_bench;
+    let n = 100_000;
+    let pairs: Vec<String> = (0..n).map(|i| format!("\"k{i}\": {i}")).collect();
+    let expr_str = format!("{{{}}}", pairs.join(","));
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+    let result = match _bench::compile(&ast) {
+        Some(prog) => _bench::run(&prog, &data).unwrap(),
+        None => Evaluator::new().evaluate(&ast, &data).unwrap(),
+    };
+    match result {
+        JValue::Object(obj) => assert_eq!(obj.len(), n, "object literal was silently truncated"),
+        other => panic!("expected object, got {other:?}"),
+    }
+}
