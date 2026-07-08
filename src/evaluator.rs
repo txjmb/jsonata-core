@@ -349,17 +349,27 @@ fn reject_if_too_large_to_pool(compiled: CompiledExpr) -> Option<CompiledExpr> {
 
 /// Conservative upper bound check: does `expr`'s node count exceed `limit`?
 ///
-/// Each of `BytecodeCompiler`'s 4 pools gains at most one entry per
-/// `CompiledExpr` node processed (fewer, after interning dedup), so the total
-/// node count of the tree being compiled is a safe upper bound for every
-/// pool's occupancy - including a pool populated by a *nested*, independently
-/// pooled `BytecodeCompiler` instance (e.g. a `FieldPath` step's filter
-/// predicate, recompiled into its own `BytecodeProgram` in
-/// `compiler.rs`'s `FieldPath` arm), since that nested instance can only ever
-/// process a strict subset of this tree's nodes. Over-counting (e.g. including
-/// a filter predicate's nodes in the outer count even though it is compiled by
-/// a separate `BytecodeCompiler` with its own pools) is safe: it only means
-/// falling back to the tree-walker slightly earlier than strictly necessary.
+/// Each of `BytecodeCompiler`'s 4 pools gains at most one entry per countable
+/// unit processed here (fewer, after interning dedup), so the total count
+/// this walk produces is a safe upper bound for every pool's occupancy -
+/// including a pool populated by a *nested*, independently pooled
+/// `BytecodeCompiler` instance (e.g. a `FieldPath` step's filter predicate,
+/// recompiled into its own `BytecodeProgram` in `compiler.rs`'s `FieldPath`
+/// arm), since that nested instance can only ever process a strict subset of
+/// this tree's nodes. Over-counting (e.g. including a filter predicate's
+/// nodes in the outer count even though it is compiled by a separate
+/// `BytecodeCompiler` with its own pools) is safe: it only means falling back
+/// to the tree-walker slightly earlier than strictly necessary.
+///
+/// "Countable unit" is *not* simply "one `CompiledExpr` node": a
+/// `CompiledExpr::FieldPath`'s individual `CompiledStep`s are not
+/// `CompiledExpr` nodes themselves, yet `compiler.rs`'s `FieldPath` arm
+/// interns *every* step's field name into `string_pool` regardless of
+/// whether that step carries a filter predicate. So this walk counts each
+/// `PathStep` as its own unit (in addition to still recursing into any
+/// filter expression the step may have) - a `FieldPath` with N no-filter
+/// steps contributes N units here, matching the N `string_pool` entries it
+/// costs in `compiler.rs`, not zero.
 ///
 /// Uses a shared decrementing budget so pathologically large trees bail out
 /// immediately instead of always walking to completion.
@@ -403,9 +413,23 @@ fn compiled_expr_node_count_exceeds(expr: &CompiledExpr, limit: usize) -> bool {
             // ── Compound ──────────────────────────────────────────────
             CompiledExpr::ObjectConstruct(pairs) => pairs.iter().any(|(_, v)| walk(v, budget)),
             CompiledExpr::ArrayConstruct(elems) => elems.iter().any(|(e, _)| walk(e, budget)),
-            CompiledExpr::FieldPath(steps) => steps
-                .iter()
-                .any(|s| s.filter.as_ref().is_some_and(|f| walk(f, budget))),
+            CompiledExpr::FieldPath(steps) => {
+                for step in steps.iter() {
+                    // Each step interns its field name into `string_pool` in
+                    // `compiler.rs` regardless of whether it has a filter -
+                    // count the step itself, not just its optional filter.
+                    if *budget == 0 {
+                        return true;
+                    }
+                    *budget -= 1;
+                    if let Some(filter) = step.filter.as_ref() {
+                        if walk(filter, budget) {
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
             CompiledExpr::BuiltinCall { args, .. } => args.iter().any(|a| walk(a, budget)),
             CompiledExpr::Block(exprs) => exprs.iter().any(|e| walk(e, budget)),
 

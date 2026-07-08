@@ -1644,3 +1644,77 @@ fn test_sibling_blocks_do_not_cumulatively_overflow_shared_const_pool() {
         other => panic!("expected object, got {other:?}"),
     }
 }
+
+/// A `CallBuiltin` with more than `u8::MAX` (255) arguments must not silently
+/// truncate via `Instr::CallBuiltin`'s `u8` `arg_count` operand. `$merge` is
+/// the only compilable builtin whose `compilable_builtin_max_args` returns
+/// `None` (it's variadic: `$merge(obj1, obj2, ...)` is a real, supported call
+/// form - see the `"merge" => match effective_args.len() { ... }` arm in
+/// `evaluator.rs`, which merges the raw argument list directly when there is
+/// more than one arg), so it's the only builtin that can reach the dedicated
+/// `args.len() > u8::MAX as usize` guard in `try_compile_expr_inner`'s
+/// `AstNode::Function { is_builtin: true, .. }` arm - every other compilable
+/// builtin already has a fixed `max` from `compilable_builtin_max_args` that
+/// is well under 255.
+///
+/// This test calls `$merge` with 300 single-key object arguments, each with a
+/// distinct key (`k0`..`k299`). Historical bug (pre-fix): `compiler.rs`'s
+/// `CompiledExpr::BuiltinCall` arm emits `Instr::CallBuiltin { arg_count:
+/// args.len() as u8, .. }` with no upper-bound check; `300 as u8` wraps to
+/// `44`. All 300 compiled argument sub-expressions still get pushed onto the
+/// VM operand stack (each is its own `compile_expr` call), but `CallBuiltin`
+/// would only pop 44 of them for the merge call, so the runtime result would
+/// only ever contain the last 44 arguments' keys (44 keys, not 300) - the
+/// same "arguments silently go missing" corruption pattern as the sibling
+/// `BlockEnd`/`MakeArray`/`MakeObject` truncation bugs above, just manifesting
+/// as a short result instead of a wrong one.
+///
+/// Post-fix: `try_compile_expr_inner` bails out (`return None`) before ever
+/// calling `BytecodeCompiler::compile`, so `_bench::compile` must return
+/// `None` for this expression - asserted explicitly below - and the whole
+/// expression falls back to the tree-walking `Evaluator`, which has no such
+/// arg-count ceiling and merges all 300 objects correctly.
+///
+/// NOTE ON API CHOICE: same reasoning as the tests above - bare
+/// `Evaluator::evaluate` never invokes `try_compile_expr`/the VM at all, so a
+/// test built on it alone would not exercise the guard being fixed here.
+#[cfg(feature = "bench")]
+#[test]
+fn test_merge_call_with_more_than_u8_max_args_does_not_silently_truncate() {
+    use jsonata_core::_bench;
+    let n = 300;
+    let objects: Vec<String> = (0..n).map(|i| format!("{{\"k{i}\": {i}}}")).collect();
+    let expr_str = format!("$merge({})", objects.join(", "));
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+
+    // The guard must make compilation decline entirely (fall back to the
+    // tree-walker) rather than succeed with a truncated arg count baked into
+    // the bytecode.
+    assert!(
+        _bench::compile(&ast).is_none(),
+        "expected the >u8::MAX-arg $merge call to decline bytecode compilation \
+         (fall back to the tree-walker), but it compiled successfully - the \
+         u8::MAX arg-count guard appears to be missing or broken"
+    );
+
+    let result = Evaluator::new().evaluate(&ast, &data).unwrap();
+    match result {
+        JValue::Object(obj) => {
+            assert_eq!(
+                obj.len(),
+                n,
+                "merge() with 300 single-key object args silently dropped keys - \
+                 likely the u8 arg-count truncation this guard exists to prevent"
+            );
+            for i in 0..n {
+                assert_eq!(
+                    obj.get(&format!("k{i}")),
+                    Some(&JValue::from(i as i64)),
+                    "missing or wrong value for k{i} in merged result"
+                );
+            }
+        }
+        other => panic!("expected object, got {other:?}"),
+    }
+}
