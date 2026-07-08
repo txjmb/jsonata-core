@@ -667,10 +667,43 @@ impl Lexer {
     }
 }
 
+// Same constants `evaluate_internal` (src/evaluator.rs) and
+// ast_transform.rs's `resolve_ancestry` use for their analogous
+// native-stack safety nets -- see those for the full rationale. Kept as
+// separate constants (rather than reused from those modules) since this
+// module has no dependency on them and the guards are conceptually
+// independent safety nets.
+const PARSER_RED_ZONE: usize = 128 * 1024;
+const PARSER_GROW_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+// Same ceiling as ast_transform.rs's MAX_TRANSFORM_DEPTH (1000), chosen for
+// consistency: a tree that passes THIS guard (enforced earlier, at parse
+// construction time) should also comfortably pass ast_transform's guard
+// afterward, which stays in place as harmless defense-in-depth. Empirically
+// verified (this task, scratch test, 1MB-stack thread, release build) that
+// n=999 succeeds and n=1001 fails gracefully with U1002 for BOTH the
+// deeply-parenthesized case (real recursive descent per level, the more
+// expensive of the two shapes since `stacker::maybe_grow`'s growth still
+// costs real stack per `parse_expression` call) and the flat-arithmetic
+// loop-driven case -- so 1000 has essentially zero headroom by construction
+// (that's the point: it's an exact ceiling match with ast_transform, not an
+// independently-tuned one) but is not itself unsafe at that ceiling.
+const MAX_PARSE_DEPTH: usize = 1000;
+
 /// Parser for JSONata expressions using Pratt parsing
 pub struct Parser {
     lexer: Lexer,
     current_token: Token,
+    /// Current expression-nesting depth, shared by two structurally
+    /// different growth patterns (see `parse_expression`/
+    /// `parse_expression_impl`): recursive descent (parens, unary
+    /// operands, array/object elements, function args, blocks -- depth
+    /// grows by 1 per actual recursive call to `parse_expression` and
+    /// shrinks back on return) and loop-driven left-nesting (flat
+    /// `1+1+1+...` chains -- a SINGLE call's `loop { .. }` reassigns `lhs`
+    /// to a deeper node every iteration without a new recursive call).
+    /// Both must be bounded by this one counter; see `MAX_PARSE_DEPTH`.
+    depth: usize,
 }
 
 impl Parser {
@@ -680,6 +713,7 @@ impl Parser {
         Ok(Parser {
             lexer,
             current_token,
+            depth: 0,
         })
     }
 
@@ -1062,8 +1096,56 @@ impl Parser {
         }
     }
 
-    /// Parse an expression with Pratt parsing
+    /// Bumps the shared nesting-depth counter and errors out gracefully
+    /// (`U1002`) once `MAX_PARSE_DEPTH` is exceeded, instead of letting
+    /// either growth pattern (recursive descent or loop-driven
+    /// left-nesting -- see `Parser::depth`'s doc comment) overflow the
+    /// native stack. New error code `U1002` (no jsonata-js equivalent):
+    /// reuses the same code `ast_transform.rs`'s `resolve_ancestry` guard
+    /// introduced for the same conceptual guard, enforced earlier in the
+    /// pipeline (at raw-parse construction time, before ast_transform ever
+    /// runs).
+    fn bump_parse_depth(&mut self) -> Result<(), ParserError> {
+        self.depth += 1;
+        if self.depth > MAX_PARSE_DEPTH {
+            return Err(ParserError::Coded {
+                code: "U1002",
+                message: format!(
+                    "Stack overflow - maximum expression nesting depth ({}) exceeded while parsing expression",
+                    MAX_PARSE_DEPTH
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Parse an expression with Pratt parsing.
+    ///
+    /// Thin wrapper around `parse_expression_impl` that owns the
+    /// entry-depth push/pop (matching `evaluate_internal`'s
+    /// `stacker::maybe_grow` pattern in src/evaluator.rs): every actual
+    /// recursive call to `parse_expression` (parens, unary operands,
+    /// array/object elements, function args, blocks, ...) bumps `self.depth`
+    /// on entry and restores it to the pre-call value on return, so depth
+    /// accumulated while parsing one subtree never leaks into an unrelated
+    /// sibling subtree parsed afterward. Loop-driven left-nesting (the flat
+    /// `1+1+1+...` case, where `parse_expression_impl`'s own `loop { .. }`
+    /// reassigns `lhs` to a deeper node every iteration WITHOUT a new
+    /// recursive call) is bounded separately, by additional `bump_parse_depth`
+    /// calls at each `lhs = ..` reassignment site inside that loop.
     fn parse_expression(&mut self, min_bp: u8) -> Result<AstNode, ParserError> {
+        let entry_depth = self.depth;
+        self.bump_parse_depth()?;
+
+        let result = stacker::maybe_grow(PARSER_RED_ZONE, PARSER_GROW_STACK_SIZE, || {
+            self.parse_expression_impl(min_bp)
+        });
+
+        self.depth = entry_depth;
+        result
+    }
+
+    fn parse_expression_impl(&mut self, min_bp: u8) -> Result<AstNode, ParserError> {
         let mut lhs = self.parse_primary()?;
 
         loop {
@@ -1121,6 +1203,7 @@ impl Parser {
                         };
 
                         steps.push(PathStep::new(AstNode::ArrayGroup(elements)));
+                        self.bump_parse_depth()?;
                         lhs = AstNode::Path { steps };
                     } else if self.current_token == Token::LeftParen {
                         // Check for .(expr) syntax (function application)
@@ -1140,6 +1223,7 @@ impl Parser {
                             steps.push(PathStep::new(AstNode::FunctionApplication(Box::new(
                                 AstNode::Block(Vec::new()),
                             ))));
+                            self.bump_parse_depth()?;
                             lhs = AstNode::Path { steps };
                             continue;
                         }
@@ -1171,6 +1255,7 @@ impl Parser {
                         };
 
                         steps.push(PathStep::new(AstNode::FunctionApplication(Box::new(expr))));
+                        self.bump_parse_depth()?;
                         lhs = AstNode::Path { steps };
                     } else {
                         // Normal dot path
@@ -1244,6 +1329,7 @@ impl Parser {
                             }
                         }
 
+                        self.bump_parse_depth()?;
                         lhs = AstNode::Path { steps };
                     }
                 }
@@ -1273,6 +1359,7 @@ impl Parser {
                         steps.push(PathStep::new(AstNode::Predicate(Box::new(
                             AstNode::Boolean(true),
                         ))));
+                        self.bump_parse_depth()?;
                         lhs = AstNode::Path { steps };
                     } else {
                         // Normal predicate
@@ -1285,6 +1372,7 @@ impl Parser {
                         };
 
                         steps.push(PathStep::new(AstNode::Predicate(Box::new(predicate))));
+                        self.bump_parse_depth()?;
                         lhs = AstNode::Path { steps };
                     }
                 }
@@ -1319,6 +1407,7 @@ impl Parser {
                         | AstNode::Block(_)
                         | AstNode::Call { .. }
                         | AstNode::Function { .. } => {
+                            self.bump_parse_depth()?;
                             lhs = AstNode::Call {
                                 procedure: Box::new(lhs),
                                 args,
@@ -1337,6 +1426,7 @@ impl Parser {
                                             ))
                                         }
                                     };
+                                    self.bump_parse_depth()?;
                                     lhs = AstNode::Function {
                                         name,
                                         args,
@@ -1365,6 +1455,7 @@ impl Parser {
                                             AstNode::FunctionApplication(Box::new(func_call)),
                                         ));
 
+                                        self.bump_parse_depth()?;
                                         lhs = AstNode::Path {
                                             steps: context_steps,
                                         };
@@ -1422,6 +1513,7 @@ impl Parser {
                                             )),
                                         ));
 
+                                        self.bump_parse_depth()?;
                                         lhs = AstNode::Path {
                                             steps: context_steps,
                                         };
@@ -1433,6 +1525,7 @@ impl Parser {
                                 }
                                 // Handle $-prefixed function names: $uppercase()
                                 AstNode::Variable(name) => {
+                                    self.bump_parse_depth()?;
                                     lhs = AstNode::Function {
                                         name: name.clone(),
                                         args,
@@ -1460,6 +1553,7 @@ impl Parser {
                         None
                     };
 
+                    self.bump_parse_depth()?;
                     lhs = AstNode::Conditional {
                         condition: Box::new(lhs),
                         then_branch: Box::new(then_branch),
@@ -1502,6 +1596,7 @@ impl Parser {
                     self.expect(Token::RightBrace)?;
 
                     // Object constructor with input: lhs{k:v} means transform lhs using the object pattern
+                    self.bump_parse_depth()?;
                     lhs = AstNode::ObjectTransform {
                         input: Box::new(lhs),
                         pattern: pairs,
@@ -1532,6 +1627,7 @@ impl Parser {
                     // the same generic Binary shape (rather than a dedicated
                     // AstNode::IndexBind variant) lets that variant be retired
                     // from ast.rs entirely.
+                    self.bump_parse_depth()?;
                     lhs = AstNode::Binary {
                         op: BinaryOp::IndexBind,
                         lhs: Box::new(lhs),
@@ -1557,6 +1653,7 @@ impl Parser {
                     };
                     self.advance()?; // skip variable
 
+                    self.bump_parse_depth()?;
                     lhs = AstNode::Binary {
                         op: BinaryOp::FocusBind,
                         lhs: Box::new(lhs),
@@ -1597,6 +1694,7 @@ impl Parser {
 
                     self.expect(Token::RightParen)?;
 
+                    self.bump_parse_depth()?;
                     lhs = AstNode::Sort {
                         input: Box::new(lhs),
                         terms,
@@ -1641,6 +1739,7 @@ impl Parser {
                     self.advance()?;
                     let rhs = self.parse_expression(right_bp)?;
 
+                    self.bump_parse_depth()?;
                     lhs = AstNode::Binary {
                         op,
                         lhs: Box::new(lhs),

@@ -17,7 +17,7 @@ result = expr.evaluate(data, bindings=None)
 
 ## Functions
 
-### `evaluate(expression, data, bindings=None)`
+### `evaluate(expression, data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)`
 
 Compile and evaluate a JSONata expression in one step.
 
@@ -25,10 +25,17 @@ Compile and evaluate a JSONata expression in one step.
 - `expression` (str): JSONata query/transformation expression
 - `data` (Any): Data to query (typically dict or list)
 - `bindings` (Optional[Dict[str, Any]]): Optional variable bindings
+- `timeout` (Optional[int]): Maximum evaluation time in milliseconds. Raises `ValueError`
+  with a `D1012` code on timeout. Default `None` (unlimited). See [Guardrails](#guardrails).
+- `max_stack_depth` (Optional[int]): Maximum recursion stack depth. Raises `ValueError`
+  with a `D1011` code when exceeded. Default `None` (unlimited).
+- `max_sequence_length` (Optional[int]): Maximum length of a query-result sequence
+  (`$map`/`$filter`/wildcards/descendants/etc). Raises `ValueError` with a `D2015` code
+  when exceeded. Default `None` (unlimited).
 
 **Returns:** `Any` - Result of evaluating the expression
 
-**Raises:** `ValueError` - If parsing or evaluation fails
+**Raises:** `ValueError` - If parsing or evaluation fails, or a guardrail is exceeded
 
 **Example:**
 ```python
@@ -47,12 +54,17 @@ result = jsonatapy.evaluate(
 
 **Note:** For repeated evaluations with the same expression, use `compile()` for better performance.
 
-### `compile(expression)`
+### `compile(expression, *, timeout=None, max_stack_depth=None, max_sequence_length=None)`
 
 Compile a JSONata expression for repeated evaluation.
 
 **Parameters:**
 - `expression` (str): JSONata query/transformation expression
+- `timeout` (Optional[int]): Default max evaluation time in milliseconds for all
+  `evaluate*()` calls on this expression (can be overridden per-call). See [Guardrails](#guardrails).
+- `max_stack_depth` (Optional[int]): Default max recursion stack depth (can be overridden per-call).
+- `max_sequence_length` (Optional[int]): Default max query-result sequence length
+  (can be overridden per-call).
 
 **Returns:** `JsonataExpression` - Compiled expression object
 
@@ -67,23 +79,29 @@ result1 = expr.evaluate(data1)  # ["A"]
 
 data2 = {"orders": [{"product": "B", "price": 50}]}
 result2 = expr.evaluate(data2)  # []
+
+# With a compile-time default guardrail
+expr = jsonatapy.compile("$sum(items.price)", timeout=1000)
 ```
 
 ## JsonataExpression Class
 
 Compiled JSONata expression that can be evaluated multiple times.
 
-### `evaluate(data, bindings=None)`
+### `evaluate(data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)`
 
 Evaluate the compiled expression against data.
 
 **Parameters:**
 - `data` (Any): Data to query (typically dict or list)
 - `bindings` (Optional[Dict[str, Any]]): Optional variable bindings
+- `timeout`, `max_stack_depth`, `max_sequence_length` (Optional[int]): Per-call guardrail
+  overrides — see `compile()` above and [Guardrails](#guardrails). Each overrides any
+  default set at compile time, for this call only.
 
 **Returns:** `Any` - Result of evaluation
 
-**Raises:** `ValueError` - If evaluation fails
+**Raises:** `ValueError` - If evaluation fails, or a guardrail is exceeded
 
 **Example:**
 ```python
@@ -111,17 +129,19 @@ JSONata to Python:
 - array → `list`
 - object → `dict`
 
-### `evaluate_json(json_str, bindings=None)`
+### `evaluate_json(json_str, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)`
 
 Evaluate with JSON string input/output for maximum performance.
 
 **Parameters:**
 - `json_str` (str): Input data as JSON string
 - `bindings` (Optional[Dict[str, Any]]): Optional variable bindings
+- `timeout`, `max_stack_depth`, `max_sequence_length` (Optional[int]): Per-call guardrail
+  overrides — see [Guardrails](#guardrails).
 
 **Returns:** `str` - Result as JSON string
 
-**Raises:** `ValueError` - If JSON parsing or evaluation fails
+**Raises:** `ValueError` - If JSON parsing or evaluation fails, or a guardrail is exceeded
 
 **Example:**
 ```python
@@ -158,6 +178,40 @@ JSONata specification version supported.
 ```python
 print(jsonatapy.__jsonata_version__)  # "2.1.0"
 ```
+
+## Guardrails
+
+`compile()`, `JsonataExpression.compile()`, and every `evaluate*()` method accept three optional
+keyword-only arguments that protect against runaway or adversarial expressions:
+
+| Parameter             | Limits                                                       | Error code |
+|------------------------|--------------------------------------------------------------|------------|
+| `timeout`              | Max evaluation time, in milliseconds                          | `D1012`    |
+| `max_stack_depth`      | Max recursion depth (e.g. recursive lambdas)                   | `D1011`    |
+| `max_sequence_length`  | Max length of a query-result sequence (`$map`/`$filter`/wildcards/descendants/etc) | `D2015` |
+
+All three default to `None` (unlimited), matching behavior with no guardrails configured. Set
+them at `compile()` time as defaults for every subsequent `evaluate*()` call, or pass them to an
+individual `evaluate*()` call to override the compile-time default for that call only:
+
+```python
+import jsonatapy
+
+# Compile-time default
+expr = jsonatapy.compile("$sum(items.price)", timeout=1000, max_sequence_length=1_000_000)
+
+# Per-call override
+result = expr.evaluate(data, timeout=5000)
+
+# Raised on violation
+try:
+    jsonatapy.evaluate("($inf := function(){$inf()}; $inf())", None, timeout=100)
+except ValueError as e:
+    print(e)  # D1012: Evaluation timeout after 100 milliseconds. Check for infinite loop
+```
+
+See [Guardrail Errors](error-handling.md#guardrail-errors) for the full list of error codes and
+messages.
 
 ## Error Handling
 

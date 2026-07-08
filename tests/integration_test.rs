@@ -1303,3 +1303,418 @@ fn test_map_stored_lambda_bypass_raises_d1012_timeout() {
     let err = evaluator.evaluate(&ast, &data).expect_err("expected D1012");
     assert!(err.to_string().contains("D1012"), "got: {err}");
 }
+
+/// Deeply left-nested arithmetic (e.g. `1+1+1+...`) must hit a graceful
+/// depth-guard error in ast_transform's post-parse pass, not crash the
+/// whole process. Historical bug: `parser::parse()` unconditionally pipes
+/// every parse through `ast_transform::resolve_ancestry`, whose recursive
+/// AST walk had no depth guard (found during jsonata-js 2.2.1 Phase 2
+/// guardrails work — see docs/superpowers/specs/2026-07-04-jsonata-2.2.1-design.md).
+/// Confirmed empirically (this session) that the raw Pratt parser handles
+/// this input fine at n=200,000; the crash is entirely in the post-parse
+/// ast_transform pass.
+#[test]
+fn test_deeply_nested_arithmetic_does_not_overflow_native_stack_at_parse_time() {
+    let handle = std::thread::Builder::new()
+        .stack_size(1024 * 1024) // 1MB, matching Windows' default thread stack
+        .spawn(|| {
+            let expr_str = format!("({})", vec!["1"; 200_000].join("+"));
+            match parse(&expr_str) {
+                Ok(_) => "Ok".to_string(),
+                Err(e) => format!("Err({e})"),
+            }
+        })
+        .unwrap();
+
+    let outcome = handle.join().expect(
+        "expression parsing overflowed the native stack instead of returning a graceful error",
+    );
+
+    assert!(
+        outcome.starts_with("Err"),
+        "expected a graceful depth-limit error, got: {outcome}"
+    );
+    assert!(
+        outcome.contains("U1002"),
+        "expected the U1002 depth-limit error code, got: {outcome}"
+    );
+}
+
+/// Companion to the crash-repro test above: reasonable nesting (well below
+/// the ast_transform depth ceiling) must still parse successfully -- proves
+/// the new guard doesn't fire on legitimate expressions. 200 arithmetic
+/// terms produce ~400 recursive `transform_node`/`transform_children` stack
+/// frames (each `+` adds two: `transform_node` -> `transform_children` ->
+/// `transform_node`(lhs)), comfortably under the MAX_TRANSFORM_DEPTH=1000
+/// ceiling -- empirically, the ceiling's actual cutoff for this shape of
+/// expression is between n=500 (still `Ok`) and n=501 (`Err`), so 200 terms
+/// leaves a healthy margin rather than sitting right at the edge.
+#[test]
+fn test_reasonable_nesting_still_parses_successfully() {
+    let expr_str = format!("({})", vec!["1"; 200].join("+"));
+    let result = parse(&expr_str);
+    assert!(
+        result.is_ok(),
+        "expected reasonable nesting to parse fine, got: {result:?}"
+    );
+}
+
+/// Deeply PARENTHESIZED nesting (e.g. `((((...))))`) must hit a graceful
+/// depth-guard error during parsing itself, not crash the process. This is
+/// a DIFFERENT crash than the flat-arithmetic-chain one Task 2 fixed in
+/// ast_transform.rs: parens are real recursive descent inside
+/// `parse_primary`/`parse_expression` (src/parser.rs), so this crashes
+/// BEFORE ast_transform ever runs, and BEFORE ast_transform's own guard
+/// gets a chance to protect anything. Found during Task 2's validation
+/// (this session) — contradicts the original "crash is not in the parser"
+/// framing for this specific shape (see the plan's Scope Amendment).
+#[test]
+fn test_deeply_nested_parens_does_not_overflow_native_stack_at_parse_time() {
+    let handle = std::thread::Builder::new()
+        .stack_size(1024 * 1024) // 1MB, matching Windows' default thread stack
+        .spawn(|| {
+            let n = 5_000;
+            let expr_str = format!("{}1{}", "(".repeat(n), ")".repeat(n));
+            match parse(&expr_str) {
+                Ok(_) => "Ok".to_string(),
+                Err(e) => format!("Err({e})"),
+            }
+        })
+        .unwrap();
+
+    let outcome = handle.join().expect(
+        "expression parsing overflowed the native stack instead of returning a graceful error",
+    );
+
+    assert!(
+        outcome.starts_with("Err") && outcome.contains("U1002"),
+        "expected a graceful U1002 depth-limit error, got: {outcome}"
+    );
+}
+
+/// Reasonable paren nesting must still work (the guard must not fire on
+/// legitimate expressions). Pick a depth comfortably below the chosen
+/// ceiling (Step 4 picks the ceiling; this must stay well under it).
+#[test]
+fn test_reasonable_paren_nesting_still_parses() {
+    let n = 50;
+    let expr_str = format!("{}1{}", "(".repeat(n), ")".repeat(n));
+    let result = parse(&expr_str);
+    assert!(
+        result.is_ok(),
+        "reasonable paren nesting should parse fine, got: {result:?}"
+    );
+}
+
+/// The flat left-associative arithmetic chain from Task 2 must now ALSO be
+/// caught here, at parse-construction time, independent of ast_transform's
+/// guard (which still runs afterward as defense-in-depth, but should never
+/// see a tree deep enough to matter now).
+#[test]
+fn test_deeply_nested_arithmetic_caught_at_parse_construction_time() {
+    let expr_str = format!("({})", vec!["1"; 200_000].join("+"));
+    let result = parse(&expr_str);
+    match result {
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(msg.contains("U1002"), "expected U1002, got: {msg}");
+            // U1002 is also used by ast_transform.rs's separate, earlier-added
+            // post-parse guard ("while post-processing the parsed expression"),
+            // so checking the error code alone isn't enough to prove the NEW
+            // parser-level guard (added in this commit) is the one that fired.
+            assert!(
+                msg.contains("while parsing expression"),
+                "expected the parser-level guard's message (not ast_transform's), got: {msg}"
+            );
+        }
+        Ok(_) => panic!("expected a graceful depth-limit error"),
+    }
+}
+
+/// Sibling subtrees must not inherit accumulated depth from an earlier
+/// sibling. Each sibling here is a chain of 400 terms — safely under
+/// MAX_PARSE_DEPTH (1000) on its own, but three of them summed (1200) would
+/// exceed the ceiling if depth accumulated ACROSS siblings instead of being
+/// restored to its pre-call value between them. This makes the test actually
+/// load-bearing: a hypothetical "doesn't reset depth" bug would fail it,
+/// unlike a shallow chain whose cumulative depth stays under the ceiling
+/// regardless of whether reset happens.
+#[test]
+fn test_sibling_subtrees_do_not_inherit_depth() {
+    let chain = vec!["1"; 400].join("+");
+    let expr_str = format!("[{chain}, {chain}, {chain}]");
+    let result = parse(&expr_str);
+    assert!(
+        result.is_ok(),
+        "siblings should each parse independently without inheriting depth from a prior sibling, got: {result:?}"
+    );
+}
+
+/// A literal array with more than u16::MAX (65,535) elements must not
+/// silently truncate via Instr::MakeArray's u16 operand - it should either
+/// evaluate correctly (falling back to the tree-walker, which has no such
+/// limit) or be rejected with a clear error, but never silently return a
+/// wrong-length result. Historical bug: compiler.rs:328's
+/// `Instr::MakeArray(elems.len() as u16)` truncates silently (confirmed
+/// empirically: a 100,000-element literal previously returned length 34,464
+/// = 100,000 mod 65,536).
+///
+/// NOTE ON API CHOICE: this deliberately goes through `jsonata_core::_bench`
+/// (compile-to-bytecode + VM run), NOT bare `Evaluator::evaluate`. Bare
+/// `Evaluator::evaluate` never calls `try_compile_expr`/the VM at all for a
+/// top-level array/object literal (`evaluate_internal_impl`'s
+/// `AstNode::Array`/`AstNode::Object` arms are pure tree-walker code, with no
+/// compiler involvement) - so a test built on it would pass identically
+/// whether or not the u16-truncation guard exists, proving nothing. `_bench`
+/// (feature = "bench", used by `benches/evaluator_bench.rs` for the same
+/// reason) is the only way to reach the actual compiled path from outside
+/// `src/`. This mirrors what production code (`JsonataExpression` in
+/// `src/lib.rs`) really does: try to compile, and fall back to the
+/// tree-walker when compilation declines (returns `None`).
+#[cfg(feature = "bench")]
+#[test]
+fn test_large_literal_array_does_not_silently_truncate() {
+    use jsonata_core::_bench;
+    let n = 100_000;
+    let expr_str = format!("[{}]", vec!["1"; n].join(","));
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+    let result = match _bench::compile(&ast) {
+        Some(prog) => _bench::run(&prog, &data).unwrap(),
+        None => Evaluator::new().evaluate(&ast, &data).unwrap(),
+    };
+    match result {
+        JValue::Array(arr) => assert_eq!(arr.len(), n, "array literal was silently truncated"),
+        other => panic!("expected array, got {other:?}"),
+    }
+}
+
+/// Same shape for object literals and Instr::MakeObject. See the API-choice
+/// note on `test_large_literal_array_does_not_silently_truncate` above.
+#[cfg(feature = "bench")]
+#[test]
+fn test_large_literal_object_does_not_silently_truncate() {
+    use jsonata_core::_bench;
+    let n = 100_000;
+    let pairs: Vec<String> = (0..n).map(|i| format!("\"k{i}\": {i}")).collect();
+    let expr_str = format!("{{{}}}", pairs.join(","));
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+    let result = match _bench::compile(&ast) {
+        Some(prog) => _bench::run(&prog, &data).unwrap(),
+        None => Evaluator::new().evaluate(&ast, &data).unwrap(),
+    };
+    match result {
+        JValue::Object(obj) => assert_eq!(obj.len(), n, "object literal was silently truncated"),
+        other => panic!("expected object, got {other:?}"),
+    }
+}
+
+/// A `(...; ...; ...)` block with more than u16::MAX sub-expressions must not
+/// silently truncate via `Instr::BlockEnd`'s `u16` operand.
+///
+/// NOTE ON TEST SHAPE: a naive "does the block's OWN returned value survive"
+/// test does not detect this bug. `Instr::BlockEnd` always `stack.pop()`s the
+/// real top-of-stack first (the true last-evaluated element) regardless of
+/// the (possibly truncated) `n` - so a bare block whose value is returned
+/// directly always reports the correct last value even when truncated; the
+/// only observable effect of a truncated `n` is that `BlockEnd` *under-drains*
+/// the stack, leaving `(true_n - truncated_n)` stale elements buried
+/// underneath. Those stale elements are invisible unless a LATER instruction's
+/// own "top N" window reaches down far enough to swallow one of them instead
+/// of the value that should logically be there.
+///
+/// So this test wraps the giant block as the *middle* element of a 3-element
+/// array literal `[0, (5;5;...;5), 9]`, with the block body a single REPEATED
+/// constant (not 70,000 distinct values) so that only `BlockEnd`'s `u16` is
+/// exercised - distinct block values would additionally overflow
+/// `const_pool`'s own `u16` index (a different truncation site), conflating
+/// two bugs. Traced pre-fix (n = 70_000, truncated to 70_000 mod 65_536 =
+/// 4_464): `BlockEnd` pops the true last `5` correctly but only removes
+/// `4_463` of the `70_000` pushed copies, leaving the `0` canary buried more
+/// than 3 slots below the top of stack. The subsequent `MakeArray(3)` then
+/// takes the top 3 stack slots - which are two leftover `5`s and the `9` -
+/// silently producing `[5, 5, 9]` instead of `[0, 5, 9]`. The `0` canary is
+/// gone (and permanently leaked below, never popped). Post-fix, the new
+/// `AstNode::Block` compiler guard makes the whole array literal decline to
+/// compile (`?` propagates the `None`), so it falls back to the tree-walker,
+/// which has no such limit and returns the correct `[0, 5, 9]`.
+///
+/// NOTE ON API CHOICE: like the two large-literal tests above, this must go
+/// through `jsonata_core::_bench` (compile-to-bytecode + VM run), not bare
+/// `Evaluator::evaluate` - `evaluate_internal_impl`'s `AstNode::Block` arm
+/// (and `AstNode::Array`'s) is pure tree-walker code with no compiler
+/// involvement, so a test built on bare `evaluate()` would pass identically
+/// whether or not the guard exists, proving nothing.
+#[cfg(feature = "bench")]
+#[test]
+fn test_large_block_does_not_silently_truncate() {
+    use jsonata_core::_bench;
+    let n = 70_000;
+    let block_body = vec!["5"; n].join(";");
+    let expr_str = format!("[0, ({block_body}), 9]");
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+    let result = match _bench::compile(&ast) {
+        Some(prog) => _bench::run(&prog, &data).unwrap(),
+        None => Evaluator::new().evaluate(&ast, &data).unwrap(),
+    };
+    assert_eq!(
+        result,
+        JValue::array(vec![
+            JValue::from(0i64),
+            JValue::from(5i64),
+            JValue::from(9i64)
+        ]),
+        "large block silently corrupted a sibling array element via BlockEnd's truncated u16 operand"
+    );
+}
+
+/// Two *sibling* blocks, each individually within every existing per-node
+/// arity guard (`AstNode::Block`'s own `u16::MAX` element-count guard from
+/// this same task, and `AstNode::Object`'s 2-pair count), can still overflow
+/// `BytecodeCompiler`'s shared `const_pool` **cumulatively**: both blocks'
+/// distinct literals are interned into the *same* `const_pool` by the *same`
+/// `BytecodeCompiler` instance compiling the whole object literal.
+///
+/// NOTE ON WHY THIS SHAPE (not a single oversized construct, and not a
+/// dotted field path): every "flat and wide" AST shape capable of holding
+/// tens of thousands of *direct* children (`Block`, `Array`, `Object`,
+/// builtin-call argument lists) is already bounded by its own per-node arity
+/// guard (`AstNode::Array`/`AstNode::Object`'s guards from the prior task,
+/// this task's own `AstNode::Block` guard, and the `CallBuiltin` arg-count
+/// guard below) - so no *single* node can any longer overflow a pool by
+/// itself. What those per-node guards cannot see is *cross-sibling*
+/// accumulation: two children that are each individually small enough to
+/// pass their own guard, compiled by the same `BytecodeCompiler` instance,
+/// whose *combined* distinct-literal count overflows the shared pool. A
+/// dotted path (`a.b.c...`) was tried first to reach a single oversized
+/// `string_pool`, but the parser's own recursive-descent depth guard
+/// (`MAX_PARSE_DEPTH = 1000`, unrelated to this task) rejects any path with
+/// more than ~1000 steps long before it could reach 65,536 - so a
+/// same-pool-different-siblings construction (which stays only 2-3 AST
+/// levels deep: `Object -> Block -> literal`, well under that limit) is the
+/// only reachable shape for this bug class.
+///
+/// Concretely: object `{"a": (0;1;...;39999), "b": (200000;200001;...;239999)}`.
+/// Block "a" contributes ~40,000 distinct consts (plus its own object key),
+/// block "b" another ~40,000 distinct consts (offset by 200,000 so no value
+/// coincidentally dedups with block "a"'s), for roughly 80,002 total distinct
+/// entries - comfortably over the `u16` pool's 65,536-slot capacity. Traced
+/// pre-fix: `intern_const`'s `self.const_pool.len() as u16` wraps once the
+/// pool passes 65,536 entries, and this wraparound region falls late enough
+/// in block "b"'s 40,000 elements to include its own *last* (kept) literal -
+/// so block "b"'s result silently aliases an earlier, wrong constant (some
+/// value less than 240000) instead of its true last value `239999`. Block
+/// "a" (whose own last element sits entirely before the wraparound) is
+/// unaffected, so this also demonstrates the bug is real per-entry
+/// corruption, not a coincidental total-count mismatch.
+///
+/// NOTE ON API CHOICE: same reasoning as the two tests above - bare
+/// `Evaluator::evaluate` never reaches the compiled path for a top-level
+/// `AstNode::Object`, so this must go through `jsonata_core::_bench`.
+#[cfg(feature = "bench")]
+#[test]
+fn test_sibling_blocks_do_not_cumulatively_overflow_shared_const_pool() {
+    use jsonata_core::_bench;
+    let m = 40_000;
+    let n = 40_000;
+    let block_a = (0..m).map(|i| i.to_string()).collect::<Vec<_>>().join(";");
+    let block_b = (0..n)
+        .map(|i| (200_000 + i).to_string())
+        .collect::<Vec<_>>()
+        .join(";");
+    let expr_str = format!("{{\"a\": ({block_a}), \"b\": ({block_b})}}");
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+    let result = match _bench::compile(&ast) {
+        Some(prog) => _bench::run(&prog, &data).unwrap(),
+        None => Evaluator::new().evaluate(&ast, &data).unwrap(),
+    };
+    match result {
+        JValue::Object(obj) => {
+            assert_eq!(obj.get("a"), Some(&JValue::from((m - 1) as i64)));
+            assert_eq!(
+                obj.get("b"),
+                Some(&JValue::from((200_000 + n - 1) as i64)),
+                "sibling block's last value was cumulatively corrupted via const_pool's \
+                 wrapped u16 index"
+            );
+        }
+        other => panic!("expected object, got {other:?}"),
+    }
+}
+
+/// A `CallBuiltin` with more than `u8::MAX` (255) arguments must not silently
+/// truncate via `Instr::CallBuiltin`'s `u8` `arg_count` operand. `$merge` is
+/// the only compilable builtin whose `compilable_builtin_max_args` returns
+/// `None` (it's variadic: `$merge(obj1, obj2, ...)` is a real, supported call
+/// form - see the `"merge" => match effective_args.len() { ... }` arm in
+/// `evaluator.rs`, which merges the raw argument list directly when there is
+/// more than one arg), so it's the only builtin that can reach the dedicated
+/// `args.len() > u8::MAX as usize` guard in `try_compile_expr_inner`'s
+/// `AstNode::Function { is_builtin: true, .. }` arm - every other compilable
+/// builtin already has a fixed `max` from `compilable_builtin_max_args` that
+/// is well under 255.
+///
+/// This test calls `$merge` with 300 single-key object arguments, each with a
+/// distinct key (`k0`..`k299`). Historical bug (pre-fix): `compiler.rs`'s
+/// `CompiledExpr::BuiltinCall` arm emits `Instr::CallBuiltin { arg_count:
+/// args.len() as u8, .. }` with no upper-bound check; `300 as u8` wraps to
+/// `44`. All 300 compiled argument sub-expressions still get pushed onto the
+/// VM operand stack (each is its own `compile_expr` call), but `CallBuiltin`
+/// would only pop 44 of them for the merge call, so the runtime result would
+/// only ever contain the last 44 arguments' keys (44 keys, not 300) - the
+/// same "arguments silently go missing" corruption pattern as the sibling
+/// `BlockEnd`/`MakeArray`/`MakeObject` truncation bugs above, just manifesting
+/// as a short result instead of a wrong one.
+///
+/// Post-fix: `try_compile_expr_inner` bails out (`return None`) before ever
+/// calling `BytecodeCompiler::compile`, so `_bench::compile` must return
+/// `None` for this expression - asserted explicitly below - and the whole
+/// expression falls back to the tree-walking `Evaluator`, which has no such
+/// arg-count ceiling and merges all 300 objects correctly.
+///
+/// NOTE ON API CHOICE: same reasoning as the tests above - bare
+/// `Evaluator::evaluate` never invokes `try_compile_expr`/the VM at all, so a
+/// test built on it alone would not exercise the guard being fixed here.
+#[cfg(feature = "bench")]
+#[test]
+fn test_merge_call_with_more_than_u8_max_args_does_not_silently_truncate() {
+    use jsonata_core::_bench;
+    let n = 300;
+    let objects: Vec<String> = (0..n).map(|i| format!("{{\"k{i}\": {i}}}")).collect();
+    let expr_str = format!("$merge({})", objects.join(", "));
+    let ast = parse(&expr_str).unwrap();
+    let data = JValue::Null;
+
+    // The guard must make compilation decline entirely (fall back to the
+    // tree-walker) rather than succeed with a truncated arg count baked into
+    // the bytecode.
+    assert!(
+        _bench::compile(&ast).is_none(),
+        "expected the >u8::MAX-arg $merge call to decline bytecode compilation \
+         (fall back to the tree-walker), but it compiled successfully - the \
+         u8::MAX arg-count guard appears to be missing or broken"
+    );
+
+    let result = Evaluator::new().evaluate(&ast, &data).unwrap();
+    match result {
+        JValue::Object(obj) => {
+            assert_eq!(
+                obj.len(),
+                n,
+                "merge() with 300 single-key object args silently dropped keys - \
+                 likely the u8 arg-count truncation this guard exists to prevent"
+            );
+            for i in 0..n {
+                assert_eq!(
+                    obj.get(&format!("k{i}")),
+                    Some(&JValue::from(i as i64)),
+                    "missing or wrong value for k{i} in merged result"
+                );
+            }
+        }
+        other => panic!("expected object, got {other:?}"),
+    }
+}
