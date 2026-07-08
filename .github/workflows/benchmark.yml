@@ -129,7 +129,7 @@ jobs:
           cd benchmarks
           python python/enhanced_report.py
 
-      - name: Download baseline (previous release)
+      - name: Download baseline (previous main-branch run)
         if: github.event_name == 'pull_request'
         continue-on-error: true
         run: |
@@ -140,9 +140,17 @@ jobs:
           # FETCH_HEAD, but whether it also updates the origin/benchmark-data
           # remote-tracking ref depends on actions/checkout's configured fetch
           # refspec, which isn't guaranteed.
+          #
+          # Reads results/ubuntu-latest/latest.json - this job's OWN baseline,
+          # updated by this same workflow's "Record results" step below on
+          # every push to main, NOT release.yml's baseline (which moved to
+          # results/macos-arm64/ when the release benchmark job migrated to
+          # the self-hosted Mac Mini runner - comparing a ubuntu-latest PR run
+          # against a macOS-Mini release baseline would be exactly the kind of
+          # apples-to-oranges mismatch that migration was meant to eliminate).
           git fetch origin benchmark-data
 
-          if git show FETCH_HEAD:results/latest.json > benchmarks/baseline/baseline.json.tmp; then
+          if git show FETCH_HEAD:results/ubuntu-latest/latest.json > benchmarks/baseline/baseline.json.tmp; then
             mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
             echo "Baseline results downloaded from benchmark-data"
           else
@@ -166,6 +174,39 @@ jobs:
             benchmarks/results/*.png
             benchmarks/comparison.json
           retention-days: 90
+
+      - name: Record results to benchmark-data
+        # Only on a real push to main, not every PR attempt (PRs only READ
+        # this baseline above, they don't write it) - keeps this workflow's
+        # own ubuntu-latest baseline current for future PR comparisons,
+        # decoupled from release.yml's baseline (which moved to
+        # results/macos-arm64/ - see the "Download baseline" step above for
+        # why these must stay separate namespaces).
+        if: github.event_name == 'push'
+        run: |
+          RESULTS_FILE="$(pwd)/benchmarks/${{ steps.run_benchmark.outputs.results_file }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin benchmark-data
+          git worktree add -B benchmark-data /tmp/benchmark-data FETCH_HEAD
+
+          mkdir -p /tmp/benchmark-data/results/ubuntu-latest
+          cp "$RESULTS_FILE" "/tmp/benchmark-data/results/ubuntu-latest/latest.json"
+
+          cd /tmp/benchmark-data
+          git add results/ubuntu-latest/latest.json
+          # Nothing to commit if this push's numbers happen to produce a
+          # byte-identical file to what's already recorded (possible for a
+          # docs-only/comment-only change matching the path filters above) -
+          # skip rather than create an empty commit.
+          if git diff --cached --quiet; then
+            echo "results/ubuntu-latest/latest.json unchanged - skipping commit"
+          else
+            git commit -m "chore: record benchmark results for $(git -C "$GITHUB_WORKSPACE" rev-parse --short HEAD) (ubuntu-latest)"
+            git push origin HEAD:benchmark-data
+          fi
 
       - name: Comment on PR
         if: github.event_name == 'pull_request'
