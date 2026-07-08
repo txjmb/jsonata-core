@@ -124,6 +124,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # This runner is a persistent, self-hosted machine, not an
+          # ephemeral GitHub-hosted one - these /tmp worktree paths survive
+          # between job runs (neither path is ever explicitly torn down
+          # after use, on success or failure). Force-clean any leftover from
+          # a previous run before adding a fresh one, or `git worktree add`
+          # fails with "fatal: '<path>' already exists".
+          git worktree remove --force /tmp/performance-doc-commit 2>/dev/null || rm -rf /tmp/performance-doc-commit
+          git worktree prune
+
           git fetch origin main
           git worktree add /tmp/performance-doc-commit FETCH_HEAD
           cp docs/performance.md /tmp/performance-doc-commit/docs/performance.md
@@ -136,6 +145,9 @@ jobs:
             git push origin HEAD:main
           fi
           cd -
+
+          git worktree remove --force /tmp/benchmark-data-manual 2>/dev/null || rm -rf /tmp/benchmark-data-manual
+          git worktree prune
 
           git fetch origin benchmark-data
           git worktree add -B benchmark-data /tmp/benchmark-data-manual FETCH_HEAD
