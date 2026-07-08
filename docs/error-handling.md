@@ -46,6 +46,59 @@ except ValueError as e:
 - Accessing undefined variables
 - Runtime type mismatches
 
+### Guardrail Errors
+
+Raised when an evaluation exceeds a configured `timeout`, `max_stack_depth`, or
+`max_sequence_length` (see [Guardrails](api.md#guardrails)). Each carries a distinct error code
+so callers can tell which limit was hit.
+
+```python
+import jsonatapy
+
+try:
+    jsonatapy.evaluate(
+        "($inf := function(){$inf()}; $inf())",
+        None,
+        timeout=100,
+    )
+except ValueError as e:
+    print(e)
+    # D1012: Evaluation timeout after 100 milliseconds. Check for infinite loop
+
+try:
+    jsonatapy.evaluate(
+        "($f := function($n){$n = 0 ? 0 : 1 + $f($n - 1)}; $f(100))",
+        None,
+        max_stack_depth=50,
+    )
+except ValueError as e:
+    print(e)
+    # D1011: Stack overflow. Check for non-terminating recursive function.
+    # Consider rewriting as tail-recursive
+
+try:
+    jsonatapy.evaluate(
+        "$map([1..1000000], function($n) { $n })",
+        None,
+        max_sequence_length=1000,
+    )
+except ValueError as e:
+    print(e)
+    # D2015: The maximum sequence length of 1000 was exceeded.
+```
+
+**Codes:**
+- `D1011` — recursion stack depth exceeded `max_stack_depth`
+- `D1012` — evaluation ran longer than `timeout` milliseconds
+- `D2015` — a query-result sequence (map/filter/wildcard/descendants/etc) exceeded `max_sequence_length`
+
+All three default to unlimited (`None`) — these errors only occur if you've explicitly configured
+the corresponding limit.
+
+**Note:** `U1001` and `U1002` are separate, always-on native-stack safety nets (not configurable)
+that guard against a whole-process crash on pathologically deep recursion or expression nesting —
+they exist independently of any guardrail you configure and cannot be disabled.
+
 ### Type Errors
 
 Raised when operations receive incompatible types.

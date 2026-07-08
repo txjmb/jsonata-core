@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rust/Python build configuration
 - CI/CD workflows
 - Documentation framework
+- Guardrails: `timeout` (ms, error code `D1012`), `max_stack_depth` (error code `D1011`), and
+  `max_sequence_length` (error code `D2015`) keyword arguments on `compile()` and every
+  `evaluate*()` call, enforced consistently across all three execution engines (tree-walker,
+  compiled-expression fast path, bytecode VM). All default to `None` (unlimited) — no behavior
+  change unless configured. See [Guardrails](docs/api.md#guardrails).
 
 ### Changed
 
@@ -20,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- A deeply-nested expression (arithmetic chains, parenthesized/grouped expressions) no longer
+  crashes the whole process (previously a native stack overflow) — now raises a graceful `U1002`
+  error instead, via a depth guard in the parser and a second, defense-in-depth guard in the
+  post-parse AST pass.
+- `Instr::MakeArray`/`MakeObject`/`BlockEnd`'s bytecode operands (and `CallBuiltin`'s argument
+  count, and internal constant-pool bookkeeping) no longer silently produce wrong, truncated
+  results for oversized literals/blocks/calls (e.g. array literals with more than 65,535
+  elements) — such cases now fall back to the always-correct tree-walker instead.
 
 ### Security
 
