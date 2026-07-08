@@ -249,6 +249,42 @@ result = safe_evaluate("invalid[[syntax", {})
 # Returns: None
 ```
 
+## Guardrails
+
+jsonatapy accepts three optional keyword arguments, on `compile()`/`JsonataExpression.compile()`
+(as defaults) and on every `evaluate*()` call (as a per-call override), to protect against
+runaway or adversarial expressions. All three default to `None` (unlimited), matching prior
+behavior exactly when unspecified.
+
+- `timeout` — maximum evaluation time in milliseconds. Raises `ValueError` with a `D1012` code.
+- `max_stack_depth` — maximum recursion depth (e.g. deeply recursive lambdas). Raises `ValueError`
+  with a `D1011` code.
+- `max_sequence_length` — maximum length of a query-result sequence (`$map`/`$filter`/wildcards/
+  descendants/etc). Raises `ValueError` with a `D2015` code.
+
+```python
+import jsonatapy
+
+# Set defaults at compile time...
+expr = jsonatapy.compile("$sum(items.price)", timeout=1000, max_sequence_length=100_000)
+
+# ...or override per call
+result = expr.evaluate(data, timeout=5000)
+
+# A non-terminating expression is stopped instead of hanging forever
+try:
+    jsonatapy.evaluate(
+        "($inf := function(){$inf()}; $inf())",
+        None,
+        timeout=100,
+    )
+except ValueError as e:
+    print(e)
+    # D1012: Evaluation timeout after 100 milliseconds. Check for infinite loop
+```
+
+See [Error Handling](error-handling.md#guardrail-errors) for the full list of guardrail error codes.
+
 ## Performance Optimization
 
 ### Compile Once

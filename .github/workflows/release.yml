@@ -137,10 +137,28 @@ jobs:
         run: |
           cargo update -p jsonata-core
 
+      - name: Bump CHANGELOG.md
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+
+          # Re-run safety, matching "Commit version bump" below: if a prior attempt
+          # at this same version already flushed [Unreleased] into [$VERSION] and
+          # pushed it, [Unreleased] is now legitimately empty - re-running the bump
+          # script would fail loudly on that (by design, for the FIRST run), so skip
+          # entirely once the version's own entry already exists.
+          if grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
+            echo "CHANGELOG.md already has a [$VERSION] entry - skipping (re-run case)"
+          else
+            ./scripts/bump-changelog.sh "$VERSION"
+          fi
+
+          echo "Updated CHANGELOG.md:"
+          head -30 CHANGELOG.md
+
       - name: Commit version bump
         run: |
           VERSION="${{ needs.validate-version.outputs.version }}"
-          git add Cargo.toml pyproject.toml Cargo.lock
+          git add Cargo.toml pyproject.toml Cargo.lock CHANGELOG.md
 
           # Skip commit if nothing changed (re-run case)
           if git diff --cached --quiet; then

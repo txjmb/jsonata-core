@@ -311,7 +311,7 @@ pub(crate) struct CompiledStep {
 /// Returns None for anything that requires full AST evaluation (lambda calls,
 /// function calls with side effects, complex paths, etc.).
 pub(crate) fn try_compile_expr(node: &AstNode) -> Option<CompiledExpr> {
-    try_compile_expr_inner(node, None)
+    reject_if_too_large_to_pool(try_compile_expr_inner(node, None)?)
 }
 
 /// Like `try_compile_expr` but additionally allows the specified variable names
@@ -321,7 +321,137 @@ pub(crate) fn try_compile_expr_with_allowed_vars(
     node: &AstNode,
     allowed_vars: &[&str],
 ) -> Option<CompiledExpr> {
-    try_compile_expr_inner(node, Some(allowed_vars))
+    reject_if_too_large_to_pool(try_compile_expr_inner(node, Some(allowed_vars))?)
+}
+
+/// Reject (fall back to the tree-walker) a fully-built `CompiledExpr` tree
+/// whose node count could overflow one of `BytecodeCompiler`'s `u16`-indexed
+/// pools (`const_pool` / `string_pool` / `fallback_exprs` / `sub_programs`).
+///
+/// `BytecodeCompiler::compile` is otherwise infallible (`fn compile(&CompiledExpr)
+/// -> BytecodeProgram`, called from `src/compiler.rs`'s own recursive filter-predicate
+/// compilation, `src/vm.rs`, and twice from `src/lib.rs`) - changing its signature to
+/// return `Option`/`Result` so its 4 pool-interning helpers could "abort gracefully"
+/// mid-compilation would ripple to all of those call sites for a bug class that is
+/// already astronomically impractical to trigger (it requires tens of thousands of
+/// distinct string/field-name/literal constants, or that many nested fallback
+/// sub-expressions, inside one compiled expression). Guarding here instead - before
+/// `BytecodeCompiler::compile` is ever invoked - avoids that ripple entirely, matching
+/// the same "compiler declines, tree-walker (which has no such limit) handles it"
+/// architecture used by the `AstNode::Array`/`AstNode::Block` arity guards above.
+fn reject_if_too_large_to_pool(compiled: CompiledExpr) -> Option<CompiledExpr> {
+    if compiled_expr_node_count_exceeds(&compiled, u16::MAX as usize) {
+        None
+    } else {
+        Some(compiled)
+    }
+}
+
+/// Conservative upper bound check: does `expr`'s node count exceed `limit`?
+///
+/// Each of `BytecodeCompiler`'s 4 pools gains at most one entry per countable
+/// unit processed here (fewer, after interning dedup), so the total count
+/// this walk produces is a safe upper bound for every pool's occupancy -
+/// including a pool populated by a *nested*, independently pooled
+/// `BytecodeCompiler` instance (e.g. a `FieldPath` step's filter predicate,
+/// recompiled into its own `BytecodeProgram` in `compiler.rs`'s `FieldPath`
+/// arm), since that nested instance can only ever process a strict subset of
+/// this tree's nodes. Over-counting (e.g. including a filter predicate's
+/// nodes in the outer count even though it is compiled by a separate
+/// `BytecodeCompiler` with its own pools) is safe: it only means falling back
+/// to the tree-walker slightly earlier than strictly necessary.
+///
+/// "Countable unit" is *not* simply "one `CompiledExpr` node": a
+/// `CompiledExpr::FieldPath`'s individual `CompiledStep`s are not
+/// `CompiledExpr` nodes themselves, yet `compiler.rs`'s `FieldPath` arm
+/// interns *every* step's field name into `string_pool` regardless of
+/// whether that step carries a filter predicate. So this walk counts each
+/// `PathStep` as its own unit (in addition to still recursing into any
+/// filter expression the step may have) - a `FieldPath` with N no-filter
+/// steps contributes N units here, matching the N `string_pool` entries it
+/// costs in `compiler.rs`, not zero.
+///
+/// Uses a shared decrementing budget so pathologically large trees bail out
+/// immediately instead of always walking to completion.
+fn compiled_expr_node_count_exceeds(expr: &CompiledExpr, limit: usize) -> bool {
+    fn walk(expr: &CompiledExpr, budget: &mut usize) -> bool {
+        if *budget == 0 {
+            return true;
+        }
+        *budget -= 1;
+        match expr {
+            // ── Leaves: no children ──────────────────────────────────
+            CompiledExpr::Literal(_)
+            | CompiledExpr::ExplicitNull
+            | CompiledExpr::FieldLookup(_)
+            | CompiledExpr::NestedFieldLookup(_, _)
+            | CompiledExpr::VariableLookup(_)
+            | CompiledExpr::ContextVar(_) => false,
+
+            // ── Binary ────────────────────────────────────────────────
+            CompiledExpr::Compare { lhs, rhs, .. }
+            | CompiledExpr::Arithmetic { lhs, rhs, .. }
+            | CompiledExpr::Concat(lhs, rhs)
+            | CompiledExpr::And(lhs, rhs)
+            | CompiledExpr::Or(lhs, rhs)
+            | CompiledExpr::Coalesce(lhs, rhs) => walk(lhs, budget) || walk(rhs, budget),
+
+            // ── Unary ─────────────────────────────────────────────────
+            CompiledExpr::Not(inner) | CompiledExpr::Negate(inner) => walk(inner, budget),
+
+            // ── Conditional ───────────────────────────────────────────
+            CompiledExpr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                walk(condition, budget)
+                    || walk(then_expr, budget)
+                    || else_expr.as_ref().is_some_and(|e| walk(e, budget))
+            }
+
+            // ── Compound ──────────────────────────────────────────────
+            CompiledExpr::ObjectConstruct(pairs) => pairs.iter().any(|(_, v)| walk(v, budget)),
+            CompiledExpr::ArrayConstruct(elems) => elems.iter().any(|(e, _)| walk(e, budget)),
+            CompiledExpr::FieldPath(steps) => {
+                for step in steps.iter() {
+                    // Each step interns its field name into `string_pool` in
+                    // `compiler.rs` regardless of whether it has a filter -
+                    // count the step itself, not just its optional filter.
+                    if *budget == 0 {
+                        return true;
+                    }
+                    *budget -= 1;
+                    if let Some(filter) = step.filter.as_ref() {
+                        if walk(filter, budget) {
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
+            CompiledExpr::BuiltinCall { args, .. } => args.iter().any(|a| walk(a, budget)),
+            CompiledExpr::Block(exprs) => exprs.iter().any(|e| walk(e, budget)),
+
+            // ── Higher-order functions ────────────────────────────────
+            CompiledExpr::MapCall { array, body, .. }
+            | CompiledExpr::FilterCall { array, body, .. } => {
+                walk(array, budget) || walk(body, budget)
+            }
+            CompiledExpr::ReduceCall {
+                array,
+                body,
+                initial,
+                ..
+            } => {
+                walk(array, budget)
+                    || walk(body, budget)
+                    || initial.as_ref().is_some_and(|i| walk(i, budget))
+            }
+        }
+    }
+    let mut budget = limit;
+    walk(expr, &mut budget)
 }
 
 fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Option<CompiledExpr> {
@@ -474,6 +604,12 @@ fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Opti
 
         // ── Object construction ─────────────────────────────────────────
         AstNode::Object(pairs) => {
+            // Instr::MakeObject's operand is a u16 element count - bail out
+            // to the (always-correct, no-limit) tree-walker rather than
+            // silently truncating via CompiledExpr::ObjectConstruct here.
+            if pairs.len() > u16::MAX as usize {
+                return None;
+            }
             let mut fields = Vec::with_capacity(pairs.len());
             for (key_node, val_node) in pairs {
                 // Key must be a string literal
@@ -489,6 +625,12 @@ fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Opti
 
         // ── Array construction ──────────────────────────────────────────
         AstNode::Array(elems) => {
+            // Instr::MakeArray's operand is a u16 element count - bail out
+            // to the (always-correct, no-limit) tree-walker rather than
+            // silently truncating via CompiledExpr::ArrayConstruct here.
+            if elems.len() > u16::MAX as usize {
+                return None;
+            }
             let mut compiled = Vec::with_capacity(elems.len());
             for elem in elems {
                 // Tag whether the element itself is an array constructor: if so, its
@@ -501,6 +643,13 @@ fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Opti
 
         // ── Block (sequential evaluation) ───────────────────────────────
         AstNode::Block(exprs) if !exprs.is_empty() => {
+            // Instr::BlockEnd's operand is a u16 element count - bail out to
+            // the (always-correct, no-limit) tree-walker rather than silently
+            // truncating via CompiledExpr::Block here. Same pattern as the
+            // AstNode::Array guard above.
+            if exprs.len() > u16::MAX as usize {
+                return None;
+            }
             let compiled: Option<Vec<CompiledExpr>> = exprs
                 .iter()
                 .map(|e| try_compile_expr_inner(e, allowed_vars))
@@ -521,6 +670,15 @@ fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Opti
                     if args.len() > max {
                         return None;
                     }
+                }
+                // Instr::CallBuiltin's arg_count operand is a u8 - this is NOT
+                // already covered by the max-args guard above for variadic
+                // builtins like "merge" (compilable_builtin_max_args returns
+                // None, i.e. unbounded), so a call site with > 255 arguments
+                // would otherwise silently truncate `args.len() as u8`. Bail
+                // out to the tree-walker rather than truncate.
+                if args.len() > u8::MAX as usize {
+                    return None;
                 }
                 let compiled_args: Option<Vec<CompiledExpr>> = args
                     .iter()

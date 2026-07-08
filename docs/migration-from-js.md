@@ -206,7 +206,7 @@ import jsonatapy
 from jsonatapy import compile, evaluate
 ```
 
-### 4. No Built-in Timeouts
+### 4. Timeouts and Other Guardrails
 
 **JavaScript:**
 ```javascript
@@ -225,22 +225,24 @@ try {
 
 **Python:**
 ```python
-# No built-in timeout support
-# Use Python's signal module or threading for timeouts
-import signal
+# Built-in timeout support - pass `timeout` (milliseconds) at compile()
+# or evaluate() time, no signal/threading workaround needed.
 import jsonatapy
 
-def timeout_handler(signum, frame):
-    raise TimeoutError('Expression timed out')
-
-signal.signal(signal.SIGALRM, timeout_handler)
-signal.alarm(5)  # 5 seconds
+expr = jsonatapy.compile('expression', timeout=5000)  # 5 seconds
 
 try:
     result = expr.evaluate(data)
-finally:
-    signal.alarm(0)  # Cancel alarm
+except ValueError as e:
+    if 'D1012' in str(e):
+        print('Expression timed out')
 ```
+
+jsonatapy also supports `max_stack_depth` (recursion depth, error code `D1011`) and
+`max_sequence_length` (query-result sequence length, error code `D2015`) as the same kind of
+compile-time-default-or-per-call-override keyword argument — see
+[Guardrails](api.md#guardrails) for the full reference. None of these have a JavaScript
+equivalent beyond `timeout`.
 
 ## Code Examples
 
