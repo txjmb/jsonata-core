@@ -1752,14 +1752,23 @@ work and was closed too:
 jsonatapy release would make sense — a version bump/release is a separate follow-up decision, not
 part of this implementation.</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
-<p><code>tests/jsonata-js</code> (the reference test-suite submodule) is currently pinned at <code>v2.1.0-3-gff36f0b</code>
-(3 commits past the <code>v2.1.0</code> tag). Upstream has since released <code>v2.1.1</code>, <code>v2.2.0</code>, and <code>v2.2.1</code>.
-An automated <code>sync-jsonata.yml</code> workflow already created a <code>sync/jsonata-2.2.1</code> branch, but that
-branch forked from a very old point in <code>main</code>'s history (around version 2.1.4) and predates the
-Null/Undefined tree-walker migration, the <code>lambda_id</code> fix, the compiler/VM layer's later
-hardening, and various CI/publishing fixes. Its only commit not already present in current <code>main</code>
-is the submodule pointer bump itself — it is not a usable starting point and should not be checked
-out or merged. The stale <code>sync/jsonata-2.2.0</code> branch has the same problem.</p>
+<p><strong>Historical — describes the state this plan started from, before Phase 1 executed. See the
+Status section at the top of this document for CURRENT state: the submodule is already bumped to
+<code>v2.2.1</code> on <code>main</code>, and the reference suite passes 1682/1682 against it (verified directly against
+the submodule's own <code>git describe --tags</code> and the real <code>jsonata-js/jsonata</code> upstream remote, not
+just this document, since this exact paragraph was previously left stale after Phase 1 landed and
+caused real confusion later — don't trust this paragraph over the Status section if they ever
+disagree again.)</strong></p>
+<p>At plan-writing time, <code>tests/jsonata-js</code> (the reference test-suite submodule) was pinned at
+<code>v2.1.0-3-gff36f0b</code> (3 commits past the <code>v2.1.0</code> tag). Upstream had since released <code>v2.1.1</code>,
+<code>v2.2.0</code>, and <code>v2.2.1</code>. An automated <code>sync-jsonata.yml</code> workflow already created a
+<code>sync/jsonata-2.2.1</code> branch, but that branch forked from a very old point in <code>main</code>'s history
+(around version 2.1.4) and predates the Null/Undefined tree-walker migration, the <code>lambda_id</code> fix,
+the compiler/VM layer's later hardening, and various CI/publishing fixes. Its only commit not
+already present in current <code>main</code> was the submodule pointer bump itself — it was not a usable
+starting point and was not checked out or merged. The stale <code>sync/jsonata-2.2.0</code> branch had the
+same problem. Both <code>sync/jsonata-2.2.1</code> and <code>sync/jsonata-2.2.0</code> are dead branches now that Phase 1
+and Phase 2 have both landed via separate PRs (#36, #56) — delete them.</p>
 <p>Diffing <code>jsonata-js</code> from our current commit (<code>ff36f0b</code>) to <code>v2.2.1</code> shows real upstream changes:
 a new resource-guardrails feature (<code>timeout</code>/<code>stack</code>/<code>sequence</code> options, new errors D1011/D1012/
 D1013), several prototype-pollution hardening changes specific to JS's shared-prototype-chain
