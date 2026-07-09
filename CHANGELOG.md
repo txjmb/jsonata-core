@@ -8,14 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Documented `JsonataData`, `evaluate_with_data`, and `evaluate_data_to_json` in `docs/api.md`
+  (previously absent from the API reference entirely, despite being the "3-15x faster"
+  pre-converted-data path highlighted in the README's Performance section). Added a cross-link
+  from `docs/rust-crate.md` to the full auto-generated API reference on docs.rs. (#65)
 
 ### Changed
+- Updated Rust dependencies to the latest versions compatible with existing (unpinned) semver
+  requirements: `simd-json` 0.17.0 → 0.17.2 plus 6 transitive patch bumps. No security advisories
+  found before or after (`cargo deny check`). (#65)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- SIMD-accelerated JSON parsing (`simd-json` feature, on by default) was consistently *slower*
+  than the plain `serde_json` fallback for most payload sizes (up to 29% slower at 180KB), the
+  opposite of its intent — caused by allocating fresh internal scratch buffers on every single
+  parse call. Fixed by reusing a thread-local scratch buffer across calls; SIMD parsing now beats
+  `serde_json` consistently (up to +22% faster) instead of losing at 3 of 4 tested sizes.
+  Also corrected the README's "(optional feature)" wording for SIMD, which implied opt-in when
+  it's actually enabled by default, including in published wheels. (#65)
 
 ### Security
 
