@@ -54,6 +54,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Public API
 
+This is a curated overview of the most commonly used items. For the complete,
+auto-generated API reference (every public item, with its full rustdoc
+comments), see **[docs.rs/jsonata-core](https://docs.rs/jsonata-core)**.
+
 ### `parser::parse`
 
 ```rust
