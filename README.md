@@ -135,7 +135,7 @@ benchmark methodology.
 - **Pure Rust core** — no JavaScript runtime, no Node.js dependency
 - **Optional Python bindings** — PyO3/maturin, zero-copy where possible
 - **Cross-platform** — Linux, macOS (Intel & ARM), Windows; Python 3.10–3.14
-- **SIMD-accelerated JSON parsing** — via `simd-json` (optional feature)
+- **SIMD-accelerated JSON parsing** — via `simd-json`, enabled by default (disable with `--no-default-features`)
 
 ---
 

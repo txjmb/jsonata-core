@@ -572,14 +572,33 @@ impl JValue {
 
     /// Parse a JSON string into a JValue (single-pass, no intermediate serde_json::Value).
     ///
-    /// When the `simd` feature is enabled, uses simd-json for 2-4x faster parsing
-    /// on CPUs with SIMD support (SSE4.2/AVX2/NEON). Falls back to serde_json otherwise.
+    /// When the `simd` feature is enabled, uses simd-json for faster parsing on CPUs
+    /// with SIMD support (SSE4.2/AVX2/NEON). Falls back to serde_json otherwise.
+    ///
+    /// `simd_json::serde::from_slice` allocates fresh internal scratch buffers
+    /// (`Buffers::new`) on every call, sized proportionally to the input - measured
+    /// as the dominant cost, large enough to make the "simd" path consistently
+    /// SLOWER than plain serde_json (worse as input grows: -26% at 189 bytes,
+    /// -29% at 180KB). Reusing those buffers across calls via
+    /// `from_slice_with_buffers` (thread-local, since JValue's Rc-based design is
+    /// already single-threaded per instance) eliminates that reallocation and
+    /// brings simd-json back to consistently faster than serde_json (+5% to +22%
+    /// across the same size range, measured with benches/examples/simd_json_bench.rs).
     pub fn from_json_str(s: &str) -> Result<JValue, serde_json::Error> {
         #[cfg(feature = "simd")]
         {
-            // simd-json requires a mutable byte slice with padding
-            let mut bytes = s.as_bytes().to_vec();
-            if let Ok(value) = simd_json::serde::from_slice::<JValue>(&mut bytes) {
+            thread_local! {
+                static SCRATCH: std::cell::RefCell<(Vec<u8>, simd_json::Buffers)> =
+                    std::cell::RefCell::new((Vec::new(), simd_json::Buffers::new(0)));
+            }
+
+            let result = SCRATCH.with(|scratch| {
+                let (bytes, buffers) = &mut *scratch.borrow_mut();
+                bytes.clear();
+                bytes.extend_from_slice(s.as_bytes());
+                simd_json::serde::from_slice_with_buffers::<JValue>(bytes, buffers)
+            });
+            if let Ok(value) = result {
                 return Ok(value);
             }
             // Fall back to serde_json if simd-json fails (e.g., unsupported CPU)
