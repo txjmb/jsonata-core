@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.2] - 2026-07-09
+
+### Added
 - Documented `JsonataData`, `evaluate_with_data`, and `evaluate_data_to_json` in `docs/api.md`
   (previously absent from the API reference entirely, despite being the "3-15x faster"
   pre-converted-data path highlighted in the README's Performance section). Added a cross-link
