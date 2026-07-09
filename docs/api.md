@@ -13,6 +13,10 @@ result = jsonatapy.evaluate(expression, data, bindings=None)
 # Compile and reuse
 expr = jsonatapy.compile(expression)
 result = expr.evaluate(data, bindings=None)
+
+# Pre-convert data for repeated evaluation (fastest path)
+data = jsonatapy.JsonataData(large_dataset)
+result = expr.evaluate_with_data(data)
 ```
 
 ## Functions
@@ -160,6 +164,104 @@ result = json.loads(result_str)
 - High-frequency evaluation
 - Data already in JSON format
 - Performance-critical code
+
+### `evaluate_with_data(data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)`
+
+Evaluate against a pre-converted `JsonataData` handle — fastest path for repeated
+evaluation of the same data, since the Python→Rust conversion happens once (at
+`JsonataData` construction) instead of on every call.
+
+**Parameters:**
+- `data` (JsonataData): A pre-converted data handle — see [JsonataData Class](#jsonatadata-class)
+- `bindings` (Optional[Dict[str, Any]]): Optional variable bindings
+- `timeout`, `max_stack_depth`, `max_sequence_length` (Optional[int]): Per-call guardrail
+  overrides — see [Guardrails](#guardrails).
+
+**Returns:** `Any` - Result of evaluation
+
+**Raises:** `ValueError` - If evaluation fails, or a guardrail is exceeded
+
+**Example:**
+```python
+data = jsonatapy.JsonataData({"orders": [{"price": 150}, {"price": 50}]})
+expr = jsonatapy.compile("orders[price > 100]")
+
+result = expr.evaluate_with_data(data)  # 3-15x faster than evaluate(dict) for repeated use
+```
+
+### `evaluate_data_to_json(data, bindings=None, *, timeout=None, max_stack_depth=None, max_sequence_length=None)`
+
+Evaluate against a pre-converted `JsonataData` handle and return a JSON string —
+combines `evaluate_with_data`'s input-side savings with `evaluate_json`'s
+output-side savings, for the fastest path when both the input and the consumer
+of the result are JSON.
+
+**Parameters:**
+- `data` (JsonataData): A pre-converted data handle — see [JsonataData Class](#jsonatadata-class)
+- `bindings` (Optional[Dict[str, Any]]): Optional variable bindings
+- `timeout`, `max_stack_depth`, `max_sequence_length` (Optional[int]): Per-call guardrail
+  overrides — see [Guardrails](#guardrails).
+
+**Returns:** `str` - Result as JSON string
+
+**Raises:** `ValueError` - If evaluation fails, or a guardrail is exceeded
+
+**Example:**
+```python
+import json
+
+data = jsonatapy.JsonataData.from_json('{"orders": [{"price": 150}, {"price": 50}]}')
+expr = jsonatapy.compile("orders[price > 100]")
+
+result_str = expr.evaluate_data_to_json(data)
+result = json.loads(result_str)
+```
+
+## JsonataData Class
+
+Pre-converted data handle for efficient repeated evaluation. Convert Python data
+to jsonatapy's internal representation once, then reuse it across multiple
+evaluations (via `evaluate_with_data`/`evaluate_data_to_json`) to avoid repeated
+Python↔Rust conversion overhead — see [Performance Tips](#performance-tips).
+
+!!! note "Using jsonata-core directly from Rust?"
+    `JsonataData` exists purely to avoid *Python↔Rust* marshalling overhead — it
+    has no separate equivalent on the Rust side, because there's no such boundary
+    to cross there. In pure Rust you already work with `JValue` natively at zero
+    conversion cost; see the [Quick start](rust-crate.md#quick-start) in the
+    `jsonata-core` docs, which is the direct equivalent of everything below.
+
+### `JsonataData(data)`
+
+Create a handle from a Python object.
+
+**Parameters:**
+- `data` (Any): The data to pre-convert (typically a dict or list)
+
+**Example:**
+```python
+data = jsonatapy.JsonataData({"orders": [{"price": 150}, {"price": 50}]})
+expr = jsonatapy.compile("orders[price > 100]")
+result = expr.evaluate_with_data(data)
+```
+
+### `JsonataData.from_json(json_str)`
+
+Create a handle from a JSON string directly — the fastest way to construct one,
+since it skips Python object conversion entirely and parses JSON straight into
+jsonatapy's internal representation.
+
+**Parameters:**
+- `json_str` (str): Input data as a JSON string
+
+**Returns:** `JsonataData` - A pre-converted data handle
+
+**Raises:** `ValueError` - If the JSON string is invalid
+
+**Example:**
+```python
+data = jsonatapy.JsonataData.from_json('{"orders": [{"price": 150}, {"price": 50}]}')
+```
 
 ## Module Attributes
 
