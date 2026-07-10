@@ -319,6 +319,45 @@ impl JsonataExpression {
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
     }
+
+    /// Evaluate with JSON string input, distinguishing an Undefined result
+    /// (returns Python None) from an explicit JSON null result (returns
+    /// the string "null"). evaluate_json() cannot make this distinction --
+    /// JSON serialization has no way to represent "undefined" separately
+    /// from "null" -- so this method checks the raw evaluated JValue's
+    /// is_undefined() BEFORE serializing, exposing the same signal the
+    /// Rust CLI (src/bin/jsonata/main.rs) already uses internally.
+    ///
+    /// # Errors
+    ///
+    /// Returns ValueError if JSON parsing or evaluation fails
+    #[pyo3(signature = (json_str, bindings=None, timeout=None, max_stack_depth=None, max_sequence_length=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn evaluate_json_or_none(
+        &self,
+        py: Python,
+        json_str: &str,
+        bindings: Option<Py<PyAny>>,
+        timeout: Option<u64>,
+        max_stack_depth: Option<usize>,
+        max_sequence_length: Option<usize>,
+    ) -> PyResult<Option<String>> {
+        let json_data = JValue::from_json_str(json_str)
+            .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
+        let options = evaluator::EvaluatorOptions {
+            timeout_ms: timeout.or(self.default_options.timeout_ms),
+            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
+            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
+        };
+        let result = self.run_eval(py, &json_data, bindings, options)?;
+        if result.is_undefined() {
+            return Ok(None);
+        }
+        result
+            .to_json_string()
+            .map(Some)
+            .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
+    }
 }
 
 /// Compile a JSONata expression into an executable form.
