@@ -89,6 +89,16 @@ async def test_evaluate_batch_reports_per_expression_errors_without_failing_the_
         assert "T2002:" in result.data[1]
 
 
+async def test_evaluate_batch_compile_error_is_not_double_prefixed() -> None:
+    server = create_server()
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "evaluate_batch",
+            {"expressions": ["a["], "data": "{}"},
+        )
+        assert result.data[0] == "Parse error: Unexpected token: Eof"
+
+
 async def test_explain_with_no_topic_returns_function_index() -> None:
     server = create_server()
     async with Client(server) as client:

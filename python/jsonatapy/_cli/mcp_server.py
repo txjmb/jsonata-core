@@ -154,6 +154,10 @@ def create_server() -> FastMCP[Any]:
         for expression in expressions:
             try:
                 expr = jsonatapy.compile(expression)
+            except ValueError as e:
+                results.append(str(e))
+                continue
+            try:
                 result = expr.evaluate_json_or_none(data)
                 results.append(result if result is not None else "")
             except ValueError as e:

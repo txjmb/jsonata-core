@@ -88,6 +88,12 @@ def test_invalid_json_input_exits_three() -> None:
     assert "invalid JSON input" in result.stderr
 
 
+def test_nan_and_infinity_are_rejected_as_invalid_json() -> None:
+    for bad_input in ("NaN", "Infinity", "-Infinity", "1e999"):
+        result = run_cli(["a"], stdin=bad_input)
+        assert result.returncode == 3, f"expected exit 3 for {bad_input!r}, got {result.returncode}"
+
+
 def test_compact_flag_produces_single_line_output() -> None:
     result = run_cli(["-c", '{"x": a}'], stdin='{"a": 1}')
     assert result.returncode == 0

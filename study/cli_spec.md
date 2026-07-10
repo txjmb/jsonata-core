@@ -81,8 +81,7 @@ an Undefined *result* from an explicit null result -- both `evaluate()` and
 `evaluate_json()` collapse that distinction, `evaluate_json_or_none()`
 does not.
 
-One disclosed divergence remains, on the **input/context** side rather than
-the result side:
+Two disclosed divergences remain:
 
 - **`-n`/`--null-input` uses a `null` evaluation context, not JSONata
   `Undefined`.** The public `jsonatapy` Python API has no way to construct
@@ -98,3 +97,15 @@ the result side:
   context value's actual definedness.
   Pinned by `test_null_input_uses_null_not_undefined_context_known_divergence`
   in `tests/python/test_cli.py`.
+
+- **The literal word `mcp` as the first argument is reserved for the MCP
+  subcommand (`jsonatapy mcp ...`) and cannot be used to evaluate an
+  expression literally named `mcp`.** `jsonatapy mcp` always launches the
+  MCP server, even if you intended to evaluate the bare field-access
+  expression `mcp` against stdin. To evaluate an expression literally named
+  `mcp`, use `--from-file` to supply it instead of the first positional
+  argument (e.g. write `mcp` to a file and pass `-f thatfile`), or
+  reference it via a longer path expression that doesn't start with the
+  bare token (e.g. `$.mcp` if your data structure allows it). This
+  divergence does not exist in the Rust CLI, which has no subcommand
+  concept — `jsonata mcp` there simply evaluates the expression `mcp`.

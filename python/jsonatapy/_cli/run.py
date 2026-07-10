@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 
 import jsonatapy
@@ -102,6 +103,17 @@ def _read_expression(expr_source: ExpressionInline | ExpressionFile) -> str | in
         return 2
 
 
+def _reject_constant(token: str) -> float:
+    raise ValueError(f"{token} is not valid JSON")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"{text} is not valid JSON")
+    return value
+
+
 def _read_input_json(input_source: InputStdin | InputFile | InputNull) -> str | int:
     """Returns the raw input JSON text (or "null" for InputNull), or an int
     exit code on failure. Does NOT parse the JSON itself -- only validates
@@ -121,8 +133,8 @@ def _read_input_json(input_source: InputStdin | InputFile | InputNull) -> str | 
             )
             return 2
     try:
-        json.loads(raw)  # validate only
-    except json.JSONDecodeError as e:
+        json.loads(raw, parse_constant=_reject_constant, parse_float=_finite_float)  # validate only
+    except ValueError as e:
         print(f"error: invalid JSON input: {e}", file=sys.stderr)
         return 3
     return raw
