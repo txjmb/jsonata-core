@@ -118,5 +118,13 @@
     "expected_exit": 2,
     "expected_stdout": null,
     "expected_stderr_contains": "--null-input"
+  },
+  {
+    "name": "nan_input_is_exit_3",
+    "args": ["a"],
+    "stdin": "NaN",
+    "expected_exit": 3,
+    "expected_stdout": null,
+    "expected_stderr_contains": null
   }
 ]

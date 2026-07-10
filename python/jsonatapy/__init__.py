@@ -230,6 +230,54 @@ class JsonataExpression:
             json_str, bindings, timeout, max_stack_depth, max_sequence_length
         )
 
+    def evaluate_json_or_none(
+        self,
+        json_str: str,
+        bindings: dict[str, Any] | None = None,
+        *,
+        timeout: int | None = None,
+        max_stack_depth: int | None = None,
+        max_sequence_length: int | None = None,
+    ) -> str | None:
+        """
+        Evaluate with JSON string input, distinguishing Undefined from null.
+
+        Unlike evaluate_json(), which serializes both a JSONata Undefined
+        result and an explicit JSON null result to the same text "null",
+        this method returns None (the Python value) for Undefined and the
+        string "null" for an explicit null result.
+
+        Args:
+            json_str: Input data as a JSON string
+            bindings: Optional additional variable bindings
+            timeout: Maximum evaluation time in milliseconds (raises ValueError
+                with a D1012 code on timeout). Overrides any default set via
+                `compile(timeout=...)` for this call only.
+            max_stack_depth: Maximum recursion stack depth (raises ValueError
+                with a D1011 code when exceeded). Overrides any compile-time default.
+            max_sequence_length: Maximum length of a query-result sequence
+                (map/filter/wildcard/descendants/etc; raises ValueError with a
+                D2015 code when exceeded). Overrides any compile-time default.
+
+        Returns:
+            None if the result is JSONata Undefined, otherwise the result
+            as a JSON string (e.g. "null" for an explicit null result).
+
+        Raises:
+            ValueError: If JSON parsing or evaluation fails, or a guardrail is exceeded
+
+        Example:
+            >>> expr = compile("nonexistent")
+            >>> expr.evaluate_json_or_none('{"a": 1}') is None
+            True
+            >>> expr2 = compile("a")
+            >>> expr2.evaluate_json_or_none('{"a": null}')
+            'null'
+        """
+        return self._expr.evaluate_json_or_none(
+            json_str, bindings, timeout, max_stack_depth, max_sequence_length
+        )
+
     def evaluate_with_data(
         self,
         data: "JsonataData",
