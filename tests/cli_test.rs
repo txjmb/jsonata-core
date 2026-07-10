@@ -97,3 +97,40 @@ fn multi_document_stdin_is_rejected_not_silently_truncated() {
         .code(3)
         .stderr(contains("invalid JSON input"));
 }
+
+#[test]
+fn compact_flag_produces_single_line_output() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("-c")
+        .arg("{\"x\": a}")
+        .write_stdin(r#"{"a": 1}"#)
+        .assert()
+        .success()
+        .stdout("{\"x\":1}\n");
+}
+
+#[test]
+fn raw_output_flag_strips_quotes_from_string_results() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("-r")
+        .arg("name")
+        .write_stdin(r#"{"name": "Alice"}"#)
+        .assert()
+        .success()
+        .stdout("Alice\n");
+}
+
+#[test]
+fn raw_output_flag_does_not_affect_non_string_results() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("-r")
+        .arg("-c")
+        .arg("age")
+        .write_stdin(r#"{"age": 30}"#)
+        .assert()
+        .success()
+        .stdout("30\n");
+}

@@ -91,15 +91,33 @@ fn run(cli: Cli) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    match result.to_json_string_pretty() {
-        Ok(s) => println!("{}", s),
-        Err(e) => {
-            eprintln!("error: could not serialize result: {}", e);
-            return ExitCode::from(1);
+    print_result(&result, cli.compact, cli.raw_output)
+}
+
+fn print_result(result: &JValue, compact: bool, raw_output: bool) -> ExitCode {
+    if raw_output {
+        if let JValue::String(s) = result {
+            println!("{}", s);
+            return ExitCode::SUCCESS;
         }
     }
 
-    ExitCode::SUCCESS
+    let text = if compact {
+        result.to_json_string()
+    } else {
+        result.to_json_string_pretty()
+    };
+
+    match text {
+        Ok(s) => {
+            println!("{}", s);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: could not serialize result: {}", e);
+            ExitCode::from(1)
+        }
+    }
 }
 
 // NOTE: multi-document stdin (e.g. `{"a":1}\n{"a":2}\n`) is NOT supported —
