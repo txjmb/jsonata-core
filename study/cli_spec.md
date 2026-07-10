@@ -71,3 +71,30 @@ parsing — codes match `^[TDUS]\d{4}:`) are printed exactly as `CODE: message`
 with no extra prefix, so scripts/agents can pattern-match on the code
 directly. All other errors are prefixed with `error: ` (or, for
 non-spec-coded parse errors specifically, `Parse error: `).
+
+## Python (`jsonatapy`) implementation notes
+
+The Python CLI (`jsonatapy`, this same package's console script) implements
+this exact contract, using a new library method, `evaluate_json_or_none()`
+(added in Phase 2 specifically for this purpose), to correctly distinguish
+an Undefined *result* from an explicit null result -- both `evaluate()` and
+`evaluate_json()` collapse that distinction, `evaluate_json_or_none()`
+does not.
+
+One disclosed divergence remains, on the **input/context** side rather than
+the result side:
+
+- **`-n`/`--null-input` uses a `null` evaluation context, not JSONata
+  `Undefined`.** The public `jsonatapy` Python API has no way to construct
+  a true `Undefined` top-level context (`None` always maps to `Null` — see
+  `python_to_json` in `src/lib.rs`). This is unobservable for expressions
+  that don't reference `$` (the common `-n` use case: `-n '1 + 1'`,
+  `-n '$now()'`), but is directly observable for the bare context reference
+  itself: `jsonata -n '$'` (Rust) prints nothing (exit 0, `Undefined`),
+  while `jsonatapy -n '$'` (Python) prints the text `null` (exit 0,
+  `Null`). Note `$exists($)` does **not** distinguish these — it returns
+  `false` under `-n` for both CLIs, since this implementation special-cases
+  `$exists($)` to check named-variable-binding presence rather than the
+  context value's actual definedness.
+  Pinned by `test_null_input_uses_null_not_undefined_context_known_divergence`
+  in `tests/python/test_cli.py`.

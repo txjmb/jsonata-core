@@ -138,3 +138,47 @@ def test_malformed_arg_binding_takes_precedence_over_parse_error() -> None:
 def test_malformed_arg_binding_takes_precedence_over_invalid_json_input() -> None:
     result = run_cli(["--arg", "bad", "a"], stdin="not json")
     assert result.returncode == 2
+
+
+def test_parse_error_exits_one() -> None:
+    result = run_cli(["a["], stdin="{}")
+    assert result.returncode == 1
+
+
+def test_missing_expression_argument_exits_two() -> None:
+    result = run_cli([])
+    assert result.returncode == 2
+
+
+def test_nonexistent_input_file_exits_two() -> None:
+    result = run_cli(["a", "/nonexistent/path/data.json"])
+    assert result.returncode == 2
+    assert "could not read input file" in result.stderr
+
+
+def test_unknown_flag_exits_two_via_argparse_default() -> None:
+    result = run_cli(["--not-a-real-flag", "a"])
+    assert result.returncode == 2
+
+
+def test_null_input_uses_null_not_undefined_context_known_divergence() -> None:
+    """Documents a known, disclosed divergence from the Rust CLI (see this
+    plan's Global Constraints): the Python jsonatapy API has no way to
+    construct a true JSONata Undefined top-level CONTEXT (input) -- this is
+    distinct from Task 3's result-side fix (evaluate_json_or_none), which
+    already resolved the RESULT-side undefined/null ambiguity. -n passes a
+    null context instead of Undefined. Unobservable for expressions that
+    don't reference $ (the common -n use case). The bare context reference
+    $ itself distinguishes them directly -- confirmed live against the
+    built Rust binary: `jsonata -n '$'` prints nothing (exit 0, Undefined
+    result), while this Python CLI's `-n '$'` prints the text "null" (exit
+    0, Null result). (Do NOT use $exists($) for this -- verified live that
+    it returns false under -n for BOTH CLIs, because this Rust
+    implementation special-cases $exists($) to check named-variable-binding
+    presence rather than the actual context value's definedness, so it
+    never round-trips through Null-vs-Undefined at all.) If this test ever
+    starts failing because the divergence was fixed, delete it and update
+    study/cli_spec.md's Python-specific notes accordingly."""
+    result = run_cli(["-n", "$"])
+    assert result.returncode == 0
+    assert result.stdout == "null\n"
