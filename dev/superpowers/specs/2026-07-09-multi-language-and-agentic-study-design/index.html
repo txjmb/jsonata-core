@@ -1835,8 +1835,13 @@ cases so they can't silently drift.</p>
 <p><strong>MCP tools</strong> (<code>jsonatapy mcp</code>, richer toolset as decided):
 - <code>evaluate(expression: str, data: str, bindings: dict | None) -&gt; str</code> — evaluate against a
   JSON document, optional variable bindings, returns the JSON-encoded result (or an MCP
-  tool-error with the error code/position on failure).
-- <code>validate(expression: str) -&gt; {ok: bool, error?: str, position?: int}</code> — parse-only check.
+  tool-error with the message, which carries a JSONata spec code prefix like <code>T2002:</code> when
+  applicable — see the Phase 1 correction on structured position not existing below).
+- <code>validate(expression: str) -&gt; {ok: bool, error?: str}</code> — parse-only check. No <code>position</code>
+  field: as established during Phase 1 (see the error-message-convention note further down),
+  neither <code>EvaluatorError</code> nor <code>ParserError</code> carries a structured position today, only an
+  optional spec-code prefix embedded in the message string itself. Don't reintroduce the
+  assumption here.
 - <code>explain(topic: str | None) -&gt; str</code> — returns curated JSONata reference material (function
   index if no topic, specific section if given). This content is authored once and reused
   as the study's Phase 3 cheatsheet, so it's written to be concise (token cost matters for
