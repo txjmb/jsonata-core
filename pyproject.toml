@@ -30,14 +30,22 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+jsonatapy = "jsonatapy.__main__:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-xdist>=3.0",  # Parallel test execution
+    "pytest-asyncio>=0.24",  # Async tests for the FastMCP server (Task 9)
     "ruff>=0.3.0",        # Linting and formatting
     "mypy>=1.0",
     "maturin>=1.0",
+    "fastmcp>=3.0",       # So `dev` installs can run the full test suite (Task 9)
+]
+mcp = [
+    "fastmcp>=3.0",
 ]
 bench = [
     "jsonata>=0.2.0",     # jsonata-python for benchmarking
@@ -67,9 +75,11 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-xdist>=3.0",
+    "pytest-asyncio>=0.24",
     "ruff>=0.3.0",
     "mypy>=1.0",
     "maturin>=1.0",
+    "fastmcp>=3.0",
 ]
 
 [tool.ruff]
@@ -112,6 +122,7 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v --strict-markers"
+asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "compatibility: marks tests that verify JS compatibility",
