@@ -7,6 +7,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
 def run_cli(args: list[str], stdin: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -43,3 +44,43 @@ def test_installed_console_script_entry_point_resolves() -> None:
     result = subprocess.run([jsonatapy_bin, "--version"], capture_output=True, text=True)
     assert result.returncode == 0
     assert "jsonatapy" in result.stdout
+
+
+def test_evaluates_expression_against_stdin_json() -> None:
+    result = run_cli(["name"], stdin='{"name": "Alice"}')
+    assert result.returncode == 0
+    assert result.stdout == '"Alice"\n'
+
+
+def test_evaluates_expression_against_file_argument(tmp_path: Path) -> None:
+    data_file = tmp_path / "data.json"
+    data_file.write_text('{"name": "Bob"}')
+    result = run_cli(["name", str(data_file)])
+    assert result.returncode == 0
+    assert result.stdout == '"Bob"\n'
+
+
+def test_undefined_result_prints_nothing_and_exits_zero() -> None:
+    result = run_cli(["nonexistent_field"], stdin='{"a": 1}')
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
+def test_null_result_prints_literal_null() -> None:
+    result = run_cli(["nullField"], stdin='{"nullField": null}')
+    assert result.returncode == 0
+    assert result.stdout == "null\n"
+
+
+def test_from_file_reads_expression_from_a_file(tmp_path: Path) -> None:
+    expr_file = tmp_path / "expr.jsonata"
+    expr_file.write_text("name")
+    result = run_cli(["-f", str(expr_file)], stdin='{"name": "Carol"}')
+    assert result.returncode == 0
+    assert result.stdout == '"Carol"\n'
+
+
+def test_invalid_json_input_exits_three() -> None:
+    result = run_cli(["a"], stdin="not json")
+    assert result.returncode == 3
+    assert "invalid JSON input" in result.stderr

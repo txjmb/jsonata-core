@@ -7,8 +7,20 @@ the full flag/exit-code contract both implementations must satisfy.
 from __future__ import annotations
 
 import argparse
+import json
+import sys
 
 import jsonatapy
+
+from .resolve import (
+    ExpressionFile,
+    ExpressionInline,
+    InputFile,
+    InputNull,
+    InputStdin,
+    ResolveError,
+    resolve,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,7 +85,80 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _read_expression(expr_source: ExpressionInline | ExpressionFile) -> str | int:
+    """Returns the expression text, or an int exit code on failure."""
+    if isinstance(expr_source, ExpressionInline):
+        return expr_source.text
+    try:
+        with open(expr_source.path, encoding="utf-8") as f:
+            return f.read()
+    except OSError as e:
+        print(
+            f"error: could not read expression file {expr_source.path}: {e}",
+            file=sys.stderr,
+        )
+        return 2
+
+
+def _read_input_json(input_source: InputStdin | InputFile | InputNull) -> str | int:
+    """Returns the raw input JSON text (or "null" for InputNull), or an int
+    exit code on failure. Does NOT parse the JSON itself -- only validates
+    it, since evaluate_json_or_none() takes the raw text directly."""
+    if isinstance(input_source, InputNull):
+        return "null"
+    if isinstance(input_source, InputStdin):
+        raw = sys.stdin.read()
+    else:  # InputFile
+        try:
+            with open(input_source.path, encoding="utf-8") as f:
+                raw = f.read()
+        except OSError as e:
+            print(
+                f"error: could not read input file {input_source.path}: {e}",
+                file=sys.stderr,
+            )
+            return 2
+    try:
+        json.loads(raw)  # validate only
+    except json.JSONDecodeError as e:
+        print(f"error: invalid JSON input: {e}", file=sys.stderr)
+        return 3
+    return raw
+
+
 def run(argv: list[str]) -> int:
-    """Parses argv and returns the process exit code. Full logic added starting Task 4."""
-    build_parser().parse_args(argv)
+    args = build_parser().parse_args(argv)
+
+    try:
+        expr_source, input_source = resolve(
+            args.from_file, args.positional1, args.positional2, args.null_input
+        )
+    except ResolveError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    expression = _read_expression(expr_source)
+    if isinstance(expression, int):
+        return expression
+
+    input_json = _read_input_json(input_source)
+    if isinstance(input_json, int):
+        return input_json
+
+    try:
+        expr = jsonatapy.compile(expression)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+
+    try:
+        result_json = expr.evaluate_json_or_none(input_json)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    if result_json is None:
+        return 0  # Undefined result: print nothing
+
+    print(result_json)
     return 0
