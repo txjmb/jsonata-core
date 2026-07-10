@@ -12,6 +12,8 @@ import sys
 
 import jsonatapy
 
+from .bindings import BindingError, parse_bindings
+from .error_format import format_evaluation_error
 from .resolve import (
     ExpressionFile,
     ExpressionInline,
@@ -137,6 +139,12 @@ def run(argv: list[str]) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
+    try:
+        var_bindings = parse_bindings(args.arg, args.argjson)
+    except BindingError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
     expression = _read_expression(expr_source)
     if isinstance(expression, int):
         return expression
@@ -152,9 +160,9 @@ def run(argv: list[str]) -> int:
         return 1
 
     try:
-        result_json = expr.evaluate_json_or_none(input_json)
+        result_json = expr.evaluate_json_or_none(input_json, var_bindings or None)
     except ValueError as e:
-        print(f"error: {e}", file=sys.stderr)
+        print(format_evaluation_error(str(e)), file=sys.stderr)
         return 1
 
     if result_json is None:

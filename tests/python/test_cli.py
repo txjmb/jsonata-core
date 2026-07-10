@@ -102,3 +102,39 @@ def test_raw_output_flag_does_not_affect_non_string_results() -> None:
     result = run_cli(["-r", "-c", "items"], stdin='{"items": [1, 2, 3]}')
     assert result.returncode == 0
     assert result.stdout == "[1,2,3]\n"
+
+
+def test_arg_binds_a_string_variable() -> None:
+    result = run_cli(["--arg", "region=us", "$region"], stdin="{}")
+    assert result.returncode == 0
+    assert result.stdout == '"us"\n'
+
+
+def test_argjson_binds_a_json_variable() -> None:
+    result = run_cli(["--argjson", "limit=5", "$limit * 2"], stdin="{}")
+    assert result.returncode == 0
+    assert result.stdout == "10\n"
+
+
+def test_malformed_arg_binding_is_a_usage_error() -> None:
+    result = run_cli(["--arg", "noequalssign", "$x"], stdin="{}")
+    assert result.returncode == 2
+
+
+def test_evaluation_error_preserves_jsonata_error_code() -> None:
+    result = run_cli(["null + 1"], stdin="{}")
+    assert result.returncode == 1
+    assert result.stderr.startswith("T2002:")
+
+
+def test_malformed_arg_binding_takes_precedence_over_parse_error() -> None:
+    """Mirrors the Rust CLI's exit-code-precedence fix from the Phase 1
+    final review: a malformed --arg must exit 2 even if the expression
+    would also fail to parse."""
+    result = run_cli(["--arg", "bad", "a["], stdin="{}")
+    assert result.returncode == 2
+
+
+def test_malformed_arg_binding_takes_precedence_over_invalid_json_input() -> None:
+    result = run_cli(["--arg", "bad", "a"], stdin="not json")
+    assert result.returncode == 2
