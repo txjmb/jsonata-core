@@ -21,7 +21,7 @@
   - `1` — expression parse error or evaluation error.
   - `2` — usage/invocation error: malformed CLI flags (clap's own default behavior), malformed `--arg`/`--argjson` (`NAME=VALUE` syntax violated), incompatible flag combination (`-n` + data-file argument, `-f` + two positional arguments), or an expression/input file that cannot be read (I/O error, e.g. not found).
   - `3` — the input was read successfully but is not valid JSON.
-- **Error message convention — do not use `EvaluatorError`'s `Display`/`.to_string()` directly.** `src/lib.rs`'s existing `evaluator_error_to_py` unwraps each variant's inner `String` payload directly (`TypeError(msg) => msg`, etc.) because that inner string already carries the JSONata spec code prefix (e.g. `"T2002: ..."`) that `tests/python/test_reference_suite.py::extract_error_code` depends on — but the enum's own `thiserror`-derived `Display` wraps it in an outer `"Type error: "`/`"Reference error: "`/`"Evaluation error: "` prefix that would bury the code. The CLI must replicate the same unwrap-the-inner-string pattern (see Task 6), not call `.to_string()` on the whole enum. `ParserError` is the opposite case: its `Display` (via `format_parser_error_message`'s existing logic in `src/lib.rs`) already puts the code first for `ParserError::Coded`, so `.to_string()` is correct there, with a `"Parse error: "` prefix added only for non-coded variants.
+- **Error message convention — do not use `EvaluatorError`'s `Display`/`.to_string()` directly, and do not duplicate the unwrap logic.** `src/lib.rs`'s existing `evaluator_error_to_py` unwraps each variant's inner `String` payload directly (`TypeError(msg) => msg`, etc.) because that inner string already carries the JSONata spec code prefix (e.g. `"T2002: ..."`) that `tests/python/test_reference_suite.py::extract_error_code` depends on — but the enum's own `thiserror`-derived `Display` wraps it in an outer `"Type error: "`/`"Reference error: "`/`"Evaluation error: "` prefix that would bury the code. Task 6 extracts this unwrap into a `pub fn message(&self) -> &str` method directly on `EvaluatorError` (in `src/evaluator.rs`, not gated behind the `python` feature) so both `src/lib.rs`'s Python conversion and the CLI call the same code — do not write a second, CLI-local copy of the match arms. `ParserError` is the opposite case: its `Display` (via the existing logic that Task 6 also relocates, as `ParserError::display_message()` in `src/parser.rs`) already puts the code first for `ParserError::Coded`, so `.to_string()`-based formatting is correct there, with a `"Parse error: "` prefix added only for non-coded variants — again, one shared method, not a duplicate.
 - `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D warnings` must stay clean after every task (matches `.github/workflows/lint.yml`).
 - Distribution matrix must match the **existing** `build-wheels` job matrix in `.github/workflows/release.yml` exactly — do not invent additional platforms: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu` (both `ubuntu-latest`), `x86_64-pc-windows-msvc` (`windows-latest`), `aarch64-apple-darwin` (self-hosted macOS runner, no Windows-aarch64 or macOS-x86_64 legs exist today).
 - Design source of truth: `docs/superpowers/specs/2026-07-09-multi-language-and-agentic-study-design.md` (Phase 1 section + the cross-phase Decisions section).
@@ -950,19 +950,241 @@ git commit -m "feat(cli): add -f/--from-file expression source"
 
 ---
 
-### Task 6: `--arg`/`--argjson` bindings, and correct error-message formatting
+### Task 6: `--arg`/`--argjson` bindings, and a shared error-message accessor
 
 **Files:**
 - Create: `src/bin/jsonata/bindings.rs`
 - Create: `src/bin/jsonata/error_format.rs`
+- Modify: `src/evaluator.rs` (add `impl EvaluatorError { pub fn message(&self) -> &str }`)
+- Modify: `src/parser.rs` (add `impl ParserError { pub fn display_message(&self) -> String }`)
+- Modify: `src/lib.rs` (retarget `evaluator_error_to_py`/`parser_error_to_py` to the new methods; delete the now-redundant private `format_parser_error_message`; retarget its two existing unit tests)
 - Modify: `src/bin/jsonata/main.rs`
 - Modify: `tests/cli_test.rs`
 
+**Why this touches library code, not just the CLI:** the pre-flight review of this plan flagged that formatting `EvaluatorError`/`ParserError` for display requires unwrapping thiserror's `Display` wrapper to reach the JSONata-spec-coded inner message — logic that already exists, privately, in `src/lib.rs` (`evaluator_error_to_py`'s match arms; `format_parser_error_message`) gated behind `#[cfg(feature = "python")]` for the first and ungated-but-private for the second. Duplicating that logic again inside `src/bin/jsonata/error_format.rs` would be exactly the kind of verbatim-duplicated-logic-block the task reviewer's rubric treats as an Important finding. The user's explicit decision (see project conversation) was to extract it instead: put the unwrap-and-format logic as `pub` methods directly on `EvaluatorError`/`ParserError` in their owning modules (not in `lib.rs`, which is documented as the "Python API boundary" — the CLI has no reason to depend on PyO3-adjacent code), then have both `src/lib.rs`'s existing Python conversion AND the new CLI call the same method. This is the one place in Phase 1 where "all new code is additive" (Global Constraints) is deliberately not the case — it's a small, behavior-preserving extraction of existing private logic into two public methods, not a change to what either the Python bindings or the CLI actually do.
+
 **Interfaces:**
-- Produces: `bindings::parse_bindings(arg: &[String], argjson: &[String]) -> Result<std::collections::HashMap<String, JValue>, String>`; `error_format::{format_evaluator_error, format_parser_error}`.
+- Produces: `EvaluatorError::message(&self) -> &str` (`src/evaluator.rs`) — unwraps the variant's inner `String` without the enum's `Display`-derived outer prefix. `ParserError::display_message(&self) -> String` (`src/parser.rs`) — the full CLI/Python-ready string: `Coded` variants pass through as `"CODE: message"`, others get a `"Parse error: "` prefix. `bindings::parse_bindings(arg: &[String], argjson: &[String]) -> Result<std::collections::HashMap<String, JValue>, String>`. `error_format::format_evaluator_error(e: &EvaluatorError) -> String` — CLI-only presentation layer on top of `e.message()` (adds the `"error: "` prefix for non-spec-coded messages; this part is CLI-specific and has no Python-side equivalent, so it stays in the CLI, not the library).
 - Consumes: `jsonata_core::evaluator::EvaluatorError`, `jsonata_core::parser::ParserError` (both existing, `src/evaluator.rs:2511-2523`, `src/parser.rs:9-46`), `jsonata_core::value::JValue::string`/`from_json_str`, `jsonata_core::evaluator::Context::bind` (`src/evaluator.rs:2638`).
 
-- [ ] **Step 1: Write the failing unit tests for binding parsing**
+- [ ] **Step 1: Add the shared `message()`/`display_message()` methods to the library's error types, with unit tests colocated with each type**
+
+In `src/evaluator.rs`, immediately after the existing `EvaluatorError` enum definition and its `impl From<...>` blocks (i.e. right after the closing brace of `impl From<crate::datetime::DateTimeError> for EvaluatorError { ... }`, around line 2532), add:
+
+```rust
+impl EvaluatorError {
+    /// The underlying message, without the outer "Type error: "/
+    /// "Reference error: "/"Evaluation error: " prefix that `Display` (via
+    /// thiserror's `#[error("Type error: {0}")]` etc.) would add. This is
+    /// what JSONata-spec-coded messages like "T2002: ..." actually look
+    /// like — the coded prefix is INSIDE this string, not added by
+    /// `Display`. Used by both the Python bindings (`src/lib.rs`) and the
+    /// `jsonata` CLI so the two never need to duplicate this unwrap.
+    pub fn message(&self) -> &str {
+        match self {
+            EvaluatorError::TypeError(m) => m,
+            EvaluatorError::ReferenceError(m) => m,
+            EvaluatorError::EvaluationError(m) => m,
+        }
+    }
+}
+
+#[cfg(test)]
+mod evaluator_error_message_tests {
+    use super::EvaluatorError;
+
+    #[test]
+    fn message_strips_the_display_prefix() {
+        let e = EvaluatorError::TypeError(
+            "T2002: The left side of the + operator must evaluate to a number".to_string(),
+        );
+        assert_eq!(
+            e.message(),
+            "T2002: The left side of the + operator must evaluate to a number"
+        );
+        // Display, by contrast, adds the "Type error: " wrapper -- this is
+        // exactly the distinction `message()` exists to avoid.
+        assert_eq!(
+            e.to_string(),
+            "Type error: T2002: The left side of the + operator must evaluate to a number"
+        );
+    }
+
+    #[test]
+    fn message_works_for_all_variants() {
+        assert_eq!(
+            EvaluatorError::ReferenceError("$foo is not defined".to_string()).message(),
+            "$foo is not defined"
+        );
+        assert_eq!(
+            EvaluatorError::EvaluationError("something went wrong".to_string()).message(),
+            "something went wrong"
+        );
+    }
+}
+```
+
+In `src/parser.rs`, immediately after the existing `ParserError` enum definition, add:
+
+```rust
+impl ParserError {
+    /// The full display-ready message: `Coded` variants (e.g. S0214) are
+    /// already exactly "code: message" via `Display`, so they pass
+    /// through unchanged; every other variant gets a "Parse error: "
+    /// prefix added. Used by both the Python bindings (`src/lib.rs`) and
+    /// the `jsonata` CLI.
+    pub fn display_message(&self) -> String {
+        let msg = self.to_string();
+        if matches!(self, ParserError::Coded { .. }) {
+            msg
+        } else {
+            format!("Parse error: {}", msg)
+        }
+    }
+}
+
+#[cfg(test)]
+mod parser_error_display_message_tests {
+    use super::ParserError;
+
+    #[test]
+    fn coded_error_passes_through_unchanged() {
+        let e = ParserError::Coded {
+            code: "S0214",
+            message: "The % operator is invalid outside a path".to_string(),
+        };
+        assert_eq!(
+            e.display_message(),
+            "S0214: The % operator is invalid outside a path"
+        );
+    }
+
+    #[test]
+    fn uncoded_error_gets_parse_error_prefix() {
+        let e = ParserError::UnexpectedToken("foo".to_string());
+        assert_eq!(e.display_message(), "Parse error: Unexpected token: foo");
+    }
+}
+```
+
+- [ ] **Step 2: Retarget `src/lib.rs`'s existing Python error conversion onto the new methods, and run the full existing test suite to confirm no behavior change**
+
+In `src/lib.rs`, replace:
+
+```rust
+/// Convert an EvaluatorError to a PyErr
+#[cfg(feature = "python")]
+fn evaluator_error_to_py(e: evaluator::EvaluatorError) -> PyErr {
+    match e {
+        evaluator::EvaluatorError::TypeError(msg) => PyValueError::new_err(msg),
+        evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
+        evaluator::EvaluatorError::EvaluationError(msg) => PyValueError::new_err(msg),
+    }
+}
+
+/// Format a ParserError's Python-facing message.
+/// Coded errors (e.g., S0214) have their message formatted as "code: message",
+/// so they are passed through directly without an additional "Parse error: " prefix.
+/// Other errors get the "Parse error: " prefix for clarity.
+///
+/// Split out from `parser_error_to_py` so this formatting logic can be unit
+/// tested without constructing a `PyErr` (which requires an initialized
+/// Python interpreter -- fine under `maturin develop`/pytest, but panics
+/// under a plain `cargo test --all-features` with no embedded interpreter).
+fn format_parser_error_message(e: &parser::ParserError) -> String {
+    let msg = e.to_string();
+    if matches!(e, parser::ParserError::Coded { .. }) {
+        // Coded errors already have the format "code: message"
+        msg
+    } else {
+        // Other errors get the "Parse error: " prefix
+        format!("Parse error: {}", msg)
+    }
+}
+
+/// Convert a ParserError to a PyErr
+#[cfg(feature = "python")]
+fn parser_error_to_py(e: parser::ParserError) -> PyErr {
+    PyValueError::new_err(format_parser_error_message(&e))
+}
+```
+
+with:
+
+```rust
+/// Convert an EvaluatorError to a PyErr
+#[cfg(feature = "python")]
+fn evaluator_error_to_py(e: evaluator::EvaluatorError) -> PyErr {
+    PyValueError::new_err(e.message().to_string())
+}
+
+/// Convert a ParserError to a PyErr
+#[cfg(feature = "python")]
+fn parser_error_to_py(e: parser::ParserError) -> PyErr {
+    PyValueError::new_err(e.display_message())
+}
+```
+
+`src/lib.rs` has two existing unit tests (in its own `#[cfg(test)] mod tests` block, search for `test_parser_error_to_py_coded_error_no_prefix` and `test_parser_error_to_py_non_coded_error_with_prefix`) that call the now-deleted `format_parser_error_message` directly. Update both call sites from `format_parser_error_message(&coded_error)` / `format_parser_error_message(&non_coded_error)` to `coded_error.display_message()` / `non_coded_error.display_message()` respectively — same assertions, just calling the relocated method.
+
+Run: `cargo test --release --all-features`
+Expected: PASS in full, including the two retargeted `src/lib.rs` tests and the four new tests added in Step 2. This confirms the extraction changed *where* the logic lives, not *what* it does — the Python-facing error strings are byte-for-byte identical to before.
+
+- [ ] **Step 3: Write the CLI-only presentation layer**
+
+Create `src/bin/jsonata/error_format.rs` — this is intentionally small: the shared unwrap/format logic now lives in the library (Step 2), so this module only adds the CLI's own stderr convention (an `"error: "` prefix for messages that don't already start with a JSONata spec code):
+
+```rust
+use jsonata_core::evaluator::EvaluatorError;
+
+/// Formats an `EvaluatorError` for CLI stderr output: `e.message()` (the
+/// library's shared unwrap, see `EvaluatorError::message` in
+/// `src/evaluator.rs`) already carries a JSONata spec code prefix like
+/// "T2002: ..." when applicable; this adds an "error: " prefix only when
+/// it doesn't. `ParserError::display_message()` needs no equivalent
+/// wrapper here — it's already fully CLI-ready (see `src/parser.rs`), so
+/// callers use it directly.
+pub fn format_evaluator_error(e: &EvaluatorError) -> String {
+    let msg = e.message();
+    if is_coded_error(msg) {
+        msg.to_string()
+    } else {
+        format!("error: {}", msg)
+    }
+}
+
+fn is_coded_error(message: &str) -> bool {
+    let bytes = message.as_bytes();
+    bytes.len() >= 6
+        && matches!(bytes[0], b'T' | b'D' | b'U' | b'S')
+        && bytes[1..5].iter().all(u8::is_ascii_digit)
+        && bytes[5] == b':'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coded_evaluator_error_passes_through_unwrapped() {
+        let e = EvaluatorError::TypeError(
+            "T2002: The left side of the + operator must evaluate to a number".to_string(),
+        );
+        assert_eq!(
+            format_evaluator_error(&e),
+            "T2002: The left side of the + operator must evaluate to a number"
+        );
+    }
+
+    #[test]
+    fn uncoded_evaluator_error_gets_error_prefix() {
+        let e = EvaluatorError::ReferenceError("$foo is not defined".to_string());
+        assert_eq!(format_evaluator_error(&e), "error: $foo is not defined");
+    }
+}
+```
+
+- [ ] **Step 4: Write the failing unit tests for binding parsing, then implement**
 
 Create `src/bin/jsonata/bindings.rs`:
 
@@ -1031,109 +1253,10 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Write the failing unit tests for error formatting**
-
-Create `src/bin/jsonata/error_format.rs`:
-
-```rust
-use jsonata_core::evaluator::EvaluatorError;
-use jsonata_core::parser::ParserError;
-
-/// Formats an `EvaluatorError` for CLI stderr output.
-///
-/// Mirrors `evaluator_error_to_py` in `src/lib.rs`: each variant's inner
-/// `String` IS the message to surface (already carries a JSONata spec code
-/// prefix like "T2002: ..." when applicable). The enum's own `Display` impl
-/// (via thiserror's `#[error("Type error: {0}")]` etc.) wraps that in an
-/// outer "Type error: "/"Reference error: "/"Evaluation error: " prefix
-/// that would bury the code — so this must NOT call `.to_string()` on the
-/// whole enum, only match out the inner string directly.
-pub fn format_evaluator_error(e: &EvaluatorError) -> String {
-    let msg = match e {
-        EvaluatorError::TypeError(m) => m,
-        EvaluatorError::ReferenceError(m) => m,
-        EvaluatorError::EvaluationError(m) => m,
-    };
-    prefix_if_uncoded(msg)
-}
-
-/// Formats a `ParserError` for CLI stderr output. `ParserError::Coded`'s
-/// `Display` is already exactly "code: message"; other variants get a
-/// "Parse error: " prefix, matching `format_parser_error_message` in
-/// `src/lib.rs`.
-pub fn format_parser_error(e: &ParserError) -> String {
-    let msg = e.to_string();
-    if matches!(e, ParserError::Coded { .. }) {
-        msg
-    } else {
-        format!("Parse error: {}", msg)
-    }
-}
-
-fn prefix_if_uncoded(message: &str) -> String {
-    if is_coded_error(message) {
-        message.to_string()
-    } else {
-        format!("error: {}", message)
-    }
-}
-
-fn is_coded_error(message: &str) -> bool {
-    let bytes = message.as_bytes();
-    bytes.len() >= 6
-        && matches!(bytes[0], b'T' | b'D' | b'U' | b'S')
-        && bytes[1..5].iter().all(u8::is_ascii_digit)
-        && bytes[5] == b':'
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn coded_evaluator_error_passes_through_unwrapped() {
-        let e = EvaluatorError::TypeError(
-            "T2002: The left side of the + operator must evaluate to a number".to_string(),
-        );
-        assert_eq!(
-            format_evaluator_error(&e),
-            "T2002: The left side of the + operator must evaluate to a number"
-        );
-    }
-
-    #[test]
-    fn uncoded_evaluator_error_gets_error_prefix() {
-        let e = EvaluatorError::ReferenceError("$foo is not defined".to_string());
-        assert_eq!(format_evaluator_error(&e), "error: $foo is not defined");
-    }
-
-    #[test]
-    fn coded_parser_error_is_passed_through() {
-        let e = ParserError::Coded {
-            code: "S0214",
-            message: "The % operator is invalid outside a path".to_string(),
-        };
-        assert_eq!(
-            format_parser_error(&e),
-            "S0214: The % operator is invalid outside a path"
-        );
-    }
-
-    #[test]
-    fn uncoded_parser_error_gets_parse_error_prefix() {
-        let e = ParserError::UnexpectedToken("foo".to_string());
-        assert_eq!(
-            format_parser_error(&e),
-            "Parse error: Unexpected token: foo"
-        );
-    }
-}
-```
-
-- [ ] **Step 3: Run tests to verify all new unit tests pass**
+- [ ] **Step 5: Run all binary-internal unit tests**
 
 Run: `cargo test --release --features cli --bin jsonata`
-Expected: PASS — both new modules are self-contained pure-function code with no dependency on `main.rs`'s wiring yet, so once they compile they should pass immediately (front-loaded implementation-with-tests, same pattern as Task 4's resolver).
+Expected: PASS — `bindings.rs` and `error_format.rs` are self-contained pure-function code with no dependency on `main.rs`'s wiring yet, so once they compile they should pass immediately (front-loaded implementation-with-tests, same pattern as Task 4's resolver).
 
 If `cargo build` fails because `bindings`/`error_format` aren't declared as modules yet, add to `src/bin/jsonata/main.rs` (near the existing `mod resolve;` line):
 
@@ -1142,7 +1265,7 @@ mod bindings;
 mod error_format;
 ```
 
-- [ ] **Step 4: Write the failing black-box tests**
+- [ ] **Step 6: Write the failing black-box tests**
 
 Add to `tests/cli_test.rs`:
 
@@ -1197,12 +1320,12 @@ fn evaluation_error_preserves_jsonata_error_code() {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they fail**
+- [ ] **Step 7: Run tests to verify they fail**
 
 Run: `cargo test --release --features cli --test cli_test`
-Expected: FAIL — `--arg`/`--argjson` are parsed by clap but never applied to the evaluation context; error messages still use the placeholder `eprintln!("error: {}", e)` from Task 2 (which, for `EvaluatorError`, would print `"error: Type error: T2002: ..."` — code buried behind two prefixes, failing the `contains("T2002")` assertion only incidentally since T2002 IS still a substring; verify this test actually distinguishes the fix by checking the FULL expected message shape, not just substring — if it passes before Step 6, add a stricter assertion `stderr(predicates::str::starts_with("T2002:"))` instead of `contains` to force the distinction).
+Expected: FAIL — `--arg`/`--argjson` are parsed by clap but never applied to the evaluation context; error messages still use the placeholder `eprintln!("error: {}", e)` from Task 2 (which, for `EvaluatorError`, would print `"error: Type error: T2002: ..."` — code buried behind two prefixes, failing the `contains("T2002")` assertion only incidentally since T2002 IS still a substring; verify this test actually distinguishes the fix by checking the FULL expected message shape, not just substring — if it passes before Step 9, add a stricter assertion `stderr(predicates::str::starts_with("T2002:"))` instead of `contains` to force the distinction).
 
-Given that risk, use this stricter version instead in Step 4 for `evaluation_error_preserves_jsonata_error_code`:
+Given that risk, use this stricter version instead in Step 7 for `evaluation_error_preserves_jsonata_error_code`:
 
 ```rust
 #[test]
@@ -1217,7 +1340,7 @@ fn evaluation_error_preserves_jsonata_error_code() {
 }
 ```
 
-- [ ] **Step 6: Wire bindings and correct error formatting into `run()`**
+- [ ] **Step 8: Wire bindings and the shared/CLI error formatting into `run()`**
 
 In `src/bin/jsonata/main.rs`, replace:
 
@@ -1269,29 +1392,30 @@ Also replace the parse-error arm earlier in `run()`:
     };
 ```
 
-with:
+with (calling `ParserError::display_message()` from Step 2 directly — it's already fully CLI-ready, no `error_format` wrapper needed for this one):
 
 ```rust
     let ast = match parser::parse(&expression) {
         Ok(ast) => ast,
         Err(e) => {
-            eprintln!("{}", error_format::format_parser_error(&e));
+            eprintln!("{}", e.display_message());
             return ExitCode::from(1);
         }
     };
 ```
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [ ] **Step 9: Run tests to verify they pass**
 
 Run: `cargo test --release --features cli --test cli_test`
 Run: `cargo test --release --features cli --bin jsonata`
-Expected: PASS (all tests, both binary-internal unit tests and black-box integration tests).
+Run: `cargo test --release --all-features`
+Expected: PASS across all three (binary-internal unit tests, black-box integration tests, and the full existing library suite including the retargeted `src/lib.rs` tests from Step 3).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add src/bin/jsonata/main.rs src/bin/jsonata/bindings.rs src/bin/jsonata/error_format.rs tests/cli_test.rs
-git commit -m "feat(cli): add --arg/--argjson bindings and code-preserving error formatting"
+git add src/evaluator.rs src/parser.rs src/lib.rs src/bin/jsonata/main.rs src/bin/jsonata/bindings.rs src/bin/jsonata/error_format.rs tests/cli_test.rs
+git commit -m "feat(cli): add --arg/--argjson bindings; extract shared error message accessors"
 ```
 
 ---
@@ -1868,7 +1992,7 @@ git commit -m "ci(release): build and publish jsonata CLI binaries"
 - `cargo build --release --features cli` produces a working `target/release/jsonata` binary; `cargo build --release` (no features) does not pull in `clap`.
 - All flags in the Global Constraints table are implemented and covered by both `tests/cli_test.rs` (incremental, task-by-task) and `study/cli_fixtures.json` (consolidated, shared with Phase 2).
 - The four exit codes (0/1/2/3) match their documented meanings exactly, verified by `tests/cli_test.rs`'s dedicated exit-code tests (Task 7) and cross-checked by the fixture suite (Task 8).
-- Evaluator/parser error messages preserve JSONata spec codes at the start of the string when present (verified by `evaluation_error_preserves_jsonata_error_code`), using the same inner-string-unwrap convention as `src/lib.rs`'s existing Python error conversion.
+- Evaluator/parser error messages preserve JSONata spec codes at the start of the string when present (verified by `evaluation_error_preserves_jsonata_error_code`), via the shared `EvaluatorError::message()`/`ParserError::display_message()` methods that both `src/lib.rs`'s Python error conversion and the CLI call — not a second, CLI-local reimplementation.
 - `study/cli_spec.md` + `study/cli_fixtures.json` exist and are committed — this is the artifact Phase 2's Python CLI plan will be written against next.
 - `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D warnings` are clean.
 - `cargo test --release --all-features` passes in full (new CLI tests plus the pre-existing suite).
