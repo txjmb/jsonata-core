@@ -22,7 +22,7 @@ from .error_format import format_evaluation_error
 def create_server() -> FastMCP[Any]:
     mcp: FastMCP[Any] = FastMCP(name="jsonatapy")
 
-    @mcp.tool
+    @mcp.tool(run_in_thread=False)
     def evaluate(expression: str, data: str, bindings: dict[str, Any] | None = None) -> str:
         """Evaluate a JSONata expression against a JSON document.
 
@@ -46,7 +46,7 @@ def create_server() -> FastMCP[Any]:
             raise ToolError(format_evaluation_error(str(e))) from e
         return result if result is not None else ""
 
-    @mcp.tool
+    @mcp.tool(run_in_thread=False)
     def validate(expression: str) -> dict[str, Any]:
         """Check whether a JSONata expression parses without evaluating it.
 
@@ -65,7 +65,7 @@ def create_server() -> FastMCP[Any]:
             return {"ok": False, "error": str(e)}
         return {"ok": True}
 
-    @mcp.tool
+    @mcp.tool(run_in_thread=False)
     def evaluate_batch(expressions: list[str], data: str) -> list[str]:
         """Evaluate multiple JSONata expressions against the same document
         in one call, avoiding N round-trips.
