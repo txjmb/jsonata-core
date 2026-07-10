@@ -2534,6 +2534,57 @@ impl From<crate::datetime::DateTimeError> for EvaluatorError {
     }
 }
 
+impl EvaluatorError {
+    /// The underlying message, without the outer "Type error: "/
+    /// "Reference error: "/"Evaluation error: " prefix that `Display` (via
+    /// thiserror's `#[error("Type error: {0}")]` etc.) would add. This is
+    /// what JSONata-spec-coded messages like "T2002: ..." actually look
+    /// like — the coded prefix is INSIDE this string, not added by
+    /// `Display`. Used by both the Python bindings (`src/lib.rs`) and the
+    /// `jsonata` CLI so the two never need to duplicate this unwrap.
+    pub fn message(&self) -> &str {
+        match self {
+            EvaluatorError::TypeError(m) => m,
+            EvaluatorError::ReferenceError(m) => m,
+            EvaluatorError::EvaluationError(m) => m,
+        }
+    }
+}
+
+#[cfg(test)]
+mod evaluator_error_message_tests {
+    use super::EvaluatorError;
+
+    #[test]
+    fn message_strips_the_display_prefix() {
+        let e = EvaluatorError::TypeError(
+            "T2002: The left side of the + operator must evaluate to a number".to_string(),
+        );
+        assert_eq!(
+            e.message(),
+            "T2002: The left side of the + operator must evaluate to a number"
+        );
+        // Display, by contrast, adds the "Type error: " wrapper -- this is
+        // exactly the distinction `message()` exists to avoid.
+        assert_eq!(
+            e.to_string(),
+            "Type error: T2002: The left side of the + operator must evaluate to a number"
+        );
+    }
+
+    #[test]
+    fn message_works_for_all_variants() {
+        assert_eq!(
+            EvaluatorError::ReferenceError("$foo is not defined".to_string()).message(),
+            "$foo is not defined"
+        );
+        assert_eq!(
+            EvaluatorError::EvaluationError("something went wrong".to_string()).message(),
+            "something went wrong"
+        );
+    }
+}
+
 /// Result of evaluating a lambda body that may be a tail call
 /// Used for trampoline-based tail call optimization
 enum LambdaResult {
