@@ -291,6 +291,78 @@ jobs:
           path: dist
           retention-days: 7
 
+  build-cli-binaries:
+    name: Build CLI binary on ${{ matrix.platform.os }} for ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.runner }}
+    needs: [validate-version, update-version]
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # Linux
+          - { os: 'Linux', runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: 'Linux', runner: ubuntu-latest, target: aarch64-unknown-linux-gnu }
+          # Windows
+          - { os: 'Windows', runner: windows-latest, target: x86_64-pc-windows-msvc }
+          # macOS (self-hosted Mac Mini, native ARM64 build)
+          - { os: 'macOS', runner: [self-hosted, macOS, ARM64], target: aarch64-apple-darwin }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/v${{ needs.validate-version.outputs.version }}
+          submodules: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: cli-${{ matrix.platform.target }}
+
+      - name: Install cross-compilation tools (Linux aarch64)
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build CLI binary
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --features cli --target ${{ matrix.platform.target }}
+
+      - name: Package binary (Unix)
+        if: matrix.platform.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist-cli
+          tar czf dist-cli/jsonata-${{ matrix.platform.target }}.tar.gz \
+            -C target/${{ matrix.platform.target }}/release jsonata
+
+      - name: Package binary (Windows)
+        if: matrix.platform.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-cli
+          Compress-Archive -Path target/${{ matrix.platform.target }}/release/jsonata.exe `
+            -DestinationPath dist-cli/jsonata-${{ matrix.platform.target }}.zip
+
+      - name: Upload CLI binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          path: dist-cli
+          retention-days: 7
+
   build-sdist:
     name: Build source distribution
     runs-on: ubuntu-latest
@@ -560,8 +632,8 @@ jobs:
   create-github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [validate-version, test-wheels, generate-changelog, publish-pypi, publish-crates]
-    if: always() && needs.test-wheels.result == 'success'
+    needs: [validate-version, test-wheels, build-cli-binaries, generate-changelog, publish-pypi, publish-crates]
+    if: always() && needs.test-wheels.result == 'success' && needs.build-cli-binaries.result == 'success'
     timeout-minutes: 10
 
     permissions:
@@ -594,6 +666,7 @@ jobs:
           files: |
             artifacts/wheels-*/*
             artifacts/sdist/*
+            artifacts/cli-*/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -611,6 +684,16 @@ jobs:
 
           \`\`\`bash
           pip install jsonatapy==${{ needs.validate-version.outputs.version }}
+          \`\`\`
+
+          ## CLI binary
+
+          Prebuilt \`jsonata\` binaries for Linux (x86_64/aarch64), Windows
+          (x86_64), and macOS (aarch64) are attached to this release. Or
+          build from source:
+
+          \`\`\`bash
+          cargo install jsonata-core --features cli
           \`\`\`
           EOF
 
