@@ -87,3 +87,26 @@ async def test_evaluate_batch_reports_per_expression_errors_without_failing_the_
         )
         assert result.data[0] == "1"
         assert "T2002:" in result.data[1]
+
+
+async def test_explain_with_no_topic_returns_function_index() -> None:
+    server = create_server()
+    async with Client(server) as client:
+        result = await client.call_tool("explain", {"topic": None})
+        assert "$sum" in result.data
+        assert "$filter" in result.data
+
+
+async def test_explain_with_specific_topic_returns_that_section() -> None:
+    server = create_server()
+    async with Client(server) as client:
+        result = await client.call_tool("explain", {"topic": "string"})
+        assert "$uppercase" in result.data
+        assert "$substring" in result.data
+
+
+async def test_explain_with_unknown_topic_lists_available_topics() -> None:
+    server = create_server()
+    async with Client(server) as client:
+        result = await client.call_tool("explain", {"topic": "not-a-real-topic"})
+        assert "unknown topic" in result.data.lower()

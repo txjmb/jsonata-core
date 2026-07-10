@@ -18,6 +18,74 @@ import jsonatapy
 
 from .error_format import format_evaluation_error
 
+# Curated JSONata function reference, grouped by category. Every function
+# name here is confirmed implemented in this crate (grep src/evaluator.rs's
+# dispatch match arms for the quoted name to re-verify if this list is ever
+# extended). Kept concise deliberately -- this content is reused as-is for
+# the Phase 3 agentic study's "jsonata+docs" condition cheatsheet, where
+# token cost directly affects the study's own measurements.
+_REFERENCE: dict[str, str] = {
+    "string": (
+        "String functions: $string(v) convert to string, $length(s), "
+        "$substring(s,start,len?), $substringBefore(s,chars), "
+        "$substringAfter(s,chars), $uppercase(s), $lowercase(s), $trim(s), "
+        "$pad(s,width,char?), $contains(s,pattern), $split(s,sep,limit?), "
+        "$join(arr,sep?), $match(s,pattern,limit?), $replace(s,pattern,repl,limit?)."
+    ),
+    "numeric": (
+        "Numeric functions: $number(v), $abs(n), $floor(n), $ceil(n), "
+        "$round(n,precision?), $power(base,exp), $sqrt(n), "
+        "$formatNumber(n,picture,options?), $formatBase(n,radix?), "
+        "$formatInteger(n,picture), $parseInteger(s,picture)."
+    ),
+    "aggregation": (
+        "Aggregation functions (operate on arrays): $sum(arr), $max(arr), "
+        "$min(arr), $average(arr), $count(arr)."
+    ),
+    "array": (
+        "Array functions: $append(arr1,arr2), $count(arr), $distinct(arr), "
+        "$reverse(arr), $shuffle(arr), $sort(arr,comparator?), $zip(arr1,arr2,...)."
+    ),
+    "object": (
+        "Object functions: $keys(obj), $lookup(obj,key), $merge(arr_of_objs), "
+        "$spread(obj), $sift(obj,predicate), $each(obj,function)."
+    ),
+    "higher-order": (
+        "Higher-order functions: $map(arr,function), $filter(arr,predicate), "
+        "$reduce(arr,function,init?), $single(arr,predicate), $sift(obj,predicate), "
+        "$each(obj,function)."
+    ),
+    "boolean": "Boolean functions: $boolean(v), $not(v), $exists(v).",
+    "datetime": (
+        "Date/time functions: $now(picture?,timezone?), $millis(), "
+        "$fromMillis(n,picture?,timezone?), $toMillis(s,picture?)."
+    ),
+    "encoding": (
+        "Encoding functions: $base64encode(s), $base64decode(s), "
+        "$encodeUrl(s), $encodeUrlComponent(s), $decodeUrl(s), $decodeUrlComponent(s)."
+    ),
+    "misc": (
+        "Other functions: $type(v) returns the JSONata type name, "
+        "$error(msg) raises a custom error, $assert(cond,msg), "
+        "$eval(expr_str,context?) evaluates a JSONata expression given as a string."
+    ),
+}
+
+
+def _explain(topic: str | None) -> str:
+    if topic is None:
+        lines = ["JSONata function reference. Call explain(topic=<name>) for details."]
+        for category, summary in _REFERENCE.items():
+            lines.append(f"- {category}: {summary}")
+        return "\n".join(lines)
+
+    normalized = topic.strip().lower()
+    if normalized in _REFERENCE:
+        return _REFERENCE[normalized]
+
+    available = ", ".join(_REFERENCE.keys())
+    return f"unknown topic {topic!r}. Available topics: {available}"
+
 
 def create_server() -> FastMCP[Any]:
     mcp: FastMCP[Any] = FastMCP(name="jsonatapy")
@@ -91,6 +159,22 @@ def create_server() -> FastMCP[Any]:
             except ValueError as e:
                 results.append(format_evaluation_error(str(e)))
         return results
+
+    @mcp.tool(run_in_thread=False)
+    def explain(topic: str | None = None) -> str:
+        """Get curated JSONata function reference material.
+
+        Args:
+            topic: A category name (e.g. "string", "numeric", "array",
+                "object", "higher-order", "boolean", "datetime", "encoding",
+                "misc"). Omit to get the full category index.
+
+        Returns:
+            Reference text for the requested topic, the full index if no
+            topic given, or a list of available topics if the given topic
+            isn't recognized.
+        """
+        return _explain(topic)
 
     return mcp
 
