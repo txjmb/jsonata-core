@@ -1,0 +1,122 @@
+[
+  {
+    "name": "simple_field_access",
+    "args": ["name"],
+    "stdin": "{\"name\": \"Alice\"}",
+    "expected_exit": 0,
+    "expected_stdout": "\"Alice\"\n",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "compact_output",
+    "args": ["-c", "{\"x\": a}"],
+    "stdin": "{\"a\": 1}",
+    "expected_exit": 0,
+    "expected_stdout": "{\"x\":1}\n",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "raw_output_string",
+    "args": ["-r", "name"],
+    "stdin": "{\"name\": \"Alice\"}",
+    "expected_exit": 0,
+    "expected_stdout": "Alice\n",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "raw_output_non_string_unaffected",
+    "args": ["-r", "-c", "age"],
+    "stdin": "{\"age\": 30}",
+    "expected_exit": 0,
+    "expected_stdout": "30\n",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "null_input_no_stdin_needed",
+    "args": ["-n", "1 + 1"],
+    "stdin": null,
+    "expected_exit": 0,
+    "expected_stdout": "2\n",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "undefined_result_prints_nothing",
+    "args": ["nonexistent_field"],
+    "stdin": "{\"a\": 1}",
+    "expected_exit": 0,
+    "expected_stdout": "",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "null_result_prints_literal_null",
+    "args": ["nullField"],
+    "stdin": "{\"nullField\": null}",
+    "expected_exit": 0,
+    "expected_stdout": "null\n",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "arg_binds_string",
+    "args": ["--arg", "region=us", "$region"],
+    "stdin": "{}",
+    "expected_exit": 0,
+    "expected_stdout": "\"us\"\n",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "argjson_binds_json_value",
+    "args": ["--argjson", "limit=5", "$limit * 2"],
+    "stdin": "{}",
+    "expected_exit": 0,
+    "expected_stdout": "10\n",
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "invalid_json_input_is_exit_3",
+    "args": ["a"],
+    "stdin": "not json",
+    "expected_exit": 3,
+    "expected_stdout": null,
+    "expected_stderr_contains": "invalid JSON input"
+  },
+  {
+    "name": "parse_error_is_exit_1",
+    "args": ["a["],
+    "stdin": "{}",
+    "expected_exit": 1,
+    "expected_stdout": null,
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "evaluation_error_preserves_error_code",
+    "args": ["1 + \"a\""],
+    "stdin": "{}",
+    "expected_exit": 1,
+    "expected_stdout": null,
+    "expected_stderr_contains": "Cannot add"
+  },
+  {
+    "name": "malformed_arg_binding_is_exit_2",
+    "args": ["--arg", "noequalssign", "$x"],
+    "stdin": "{}",
+    "expected_exit": 2,
+    "expected_stdout": null,
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "missing_expression_is_exit_2",
+    "args": [],
+    "stdin": "{}",
+    "expected_exit": 2,
+    "expected_stdout": null,
+    "expected_stderr_contains": null
+  },
+  {
+    "name": "null_input_with_data_file_conflict_is_exit_2",
+    "args": ["-n", "1 + 1"],
+    "stdin": null,
+    "expected_exit": 0,
+    "expected_stdout": "2\n",
+    "expected_stderr_contains": null
+  }
+]
