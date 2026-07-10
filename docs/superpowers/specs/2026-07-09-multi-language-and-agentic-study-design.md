@@ -18,7 +18,11 @@ has two goals that turned out, through discussion, to be sequenced rather than p
 
 The study depends on the CLI existing and being jq-familiar enough that agents can use it
 without extensive onboarding. So the CLI (and its Python `uvx` sibling) moves to the front of
-the work, and Java/.NET move to the back, gated on the study not being a dead end.
+the work. Java/.NET move to the back for sequencing reasons (they're a larger, separate
+effort, and Phases 1-2 have to exist first regardless), but they are **not gated on the
+study's outcome** — their value proposition is independent of whether agents happen to do
+better with JSONata than jq. See "Phase 5/6 gating" under Decisions below for what actually
+gates each of them.
 
 ## Scope
 
@@ -57,6 +61,20 @@ These were settled during brainstorming and apply across all phases:
   surface, no third-party codegen dependency, and it doubles as the C deliverable itself.
 - **Java target:** Java 22+ via `java.lang.foreign` (FFM/Panama), not JNI or JNA. Pure-Java
   binding, no compiled glue per platform.
+- **Phase 5/6 gating (not the agentic study):** Java and .NET bindings are independently
+  valuable regardless of what Phase 3 finds — the study answers "do coding agents do better
+  with JSONata," not "should Java/.NET users have a fast JSONata." Each language's real gate:
+  - **Java:** the open question is whether a native-library binding (platform-specific
+    artifact, not portable JVM bytecode — a real adoption cost) is actually *faster* than the
+    existing pure-Java competitor, jsonata-java. If it isn't clearly faster, that portability
+    cost may not be worth paying for most Java users. So Phase 5's own benchmark step (already
+    in its design, see below) *is* the gate — not for whether Phase 5 happens, but for how
+    much further investment it's worth after the binding exists (Maven Central publishing,
+    further optimization, promotion). Build first, benchmark immediately, let the number
+    decide what's next.
+  - **.NET:** no comparably strong existing native JSONata implementation is known today, so
+    the adoption bar is lower — "correct and reasonably fast" clears it without needing to
+    win a head-to-head. Phase 6 has no comparable go/no-go gate; ship it once it works.
 - **MCP packaging:** `fastmcp` is an optional extra (`jsonatapy[mcp]`), not a hard dependency
   — jsonatapy stays zero-runtime-dependency for embedders; the CLI prints the
   `uvx --from "jsonatapy[mcp]" jsonatapy mcp` hint when fastmcp is missing.
@@ -274,11 +292,14 @@ header existing. Covers:
 `Jsonata` class wraps compile/evaluate/close with `AutoCloseable` for the expression handle.
 
 Benchmark: JMH suite in `benchmarks/java/` running the same expression/data corpus used
-elsewhere in this repo's benchmarks, compared against dashjoin/jsonata-java.
+elsewhere in this repo's benchmarks, compared against dashjoin/jsonata-java. This benchmark
+is not a nice-to-have appended at the end — run it as soon as the binding is functional, since
+its result (not the Phase 3 study) is what determines whether further Java investment
+(Maven Central, optimization, promotion) is worth it. See "Phase 5/6 gating" in Decisions.
 
 Deliverable: build instructions in `bindings/java/README.md` + a prebuilt jar (with bundled
 natives for the CI-built platforms) attached to GitHub Releases. Maven Central publishing is
-explicitly deferred (non-goal).
+explicitly deferred (non-goal) pending the benchmark result.
 
 ### Phase 6: .NET binding
 
@@ -314,11 +335,14 @@ Releases, registry publishing deferred.
   client.
 - Phase 3: the full 720-run matrix is complete, `study/analysis/report.py` produces the
   success-rate/token/failure-mode breakdown, and a written finding (positive or negative)
-  is documented in `study/RESULTS.md` — this is the actual go/no-go gate for Phases 5–6.
+  is documented in `study/RESULTS.md`. This gates the Medium article, not Phases 5–6 (see
+  Decisions).
 - Phase 4: `jsonata.h` + smoke test compile and pass in CI on every relevant PR, and
   `bindings/c/README.md` documents building the shared library and consuming it from both C
   and C++ (compile/link commands, CMake and Makefile snippets).
-- Phase 5: Java benchmark numbers exist against jsonata-java; prebuilt jar attached to a
-  release.
-- Phase 6: .NET benchmark numbers exist against Jsonata.Net.Native; prebuilt package
-  attached to a release.
+- Phase 5: Java benchmark numbers exist against jsonata-java, produced immediately after the
+  binding is functional — this number, not Phase 3, decides how much further investment
+  (Maven Central publishing, optimization, promotion) is worth making; prebuilt jar attached
+  to a release either way.
+- Phase 6: .NET benchmark numbers exist against Jsonata.Net.Native; prebuilt package attached
+  to a release. No comparable go/no-go — ship once correct and reasonably performant.
