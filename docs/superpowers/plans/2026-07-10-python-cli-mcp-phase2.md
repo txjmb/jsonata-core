@@ -16,7 +16,7 @@
   - `jsonatapy.compile(expr)` raising `ValueError` — the message is **already fully formatted**, exactly matching Rust's `ParserError::display_message()`: either `"CODE: message"` for spec-coded errors or `"Parse error: message"` for everything else. Confirmed live: `jsonatapy.compile("a[")` raises `ValueError: Parse error: Unexpected token: Eof`. Pass `str(exc)` straight to stderr — no further processing.
   - `JsonataExpression.evaluate(...)`/`.evaluate_json(...)` raising `ValueError` — the message is the **raw unwrapped** text, exactly matching Rust's `EvaluatorError::message()`: sometimes spec-coded (`"T2002: The left side of the + operator must evaluate to a number"`, confirmed live via `null + 1`), sometimes not (`"Unknown function: undefinedvar"`, confirmed live). The CLI must add an `"error: "` prefix only when the message doesn't already start with a `[TDUS]\d{4}:` code — same logic as `src/bin/jsonata/error_format.rs`'s `is_coded_error`/`format_evaluator_error`, reimplemented in Python (there is no shared-library trick available here since this is a different language; a small, intentional parallel implementation is correct, not duplication in the Rust-internal sense Phase 1 avoided).
 - **Undefined-vs-null result distinction — required a small additive library change (Task 3), decided during planning.** Both `JsonataExpression.evaluate()` and `.evaluate_json()` collapse a JSONata `Undefined` result and an explicit JSON `null` result to the same Python `None` / JSON text `"null"` (confirmed live: `.evaluate_json()` returns the string `"null"` for both a nonexistent-field access and an explicit `null` field — verified by testing both cases directly). Root cause, traced during planning: `src/value.rs`'s `Serialize` impl has `JValue::Undefined => serializer.serialize_none()`, which JSON (having no native "undefined") necessarily renders as the text `"null"` — this is correct behavior for JSON serialization, not a bug, but it means no existing method exposes the pre-serialization `JValue::is_undefined()` check the Rust CLI relies on. In `jsonata-js`, this isn't a problem at all: JS has `undefined` as a first-class value distinct from `null`, so callers just check `result === undefined` directly — there is no reference-implementation "handling" to port, because JS's type system doesn't lose the distinction the way Python's PyO3 bridge does. The fix (approved during planning): add one small, purely additive method, `JsonataExpression.evaluate_json_or_none()`, that checks `is_undefined()` before serializing (Task 3). This is required for `study/cli_fixtures.json`'s `undefined_result_prints_nothing` case to pass for the Python CLI at all — without it, Python cannot faithfully implement `study/cli_spec.md`'s Output section.
-- **Known, disclosed divergence that remains out of scope — do not try to fix this in this plan (distinct from the above):** the Python `jsonatapy` public API has no way to construct a JSONata `Undefined` top-level *context* (input), only results. `python_to_json` in `src/lib.rs` maps Python `None` to `JValue::Null`, never `JValue::Undefined` (confirmed by reading `src/lib.rs:503` and live-testing: `jsonatapy.evaluate("$string($)", None)` returns `"null"`, which only happens for `Null` context). This means the Python CLI's `-n`/`--null-input` passes a `null` context, while the Rust CLI's `-n` gives true `Undefined` context. Unobservable for expressions that don't reference `$` (the common case: `-n '1 + 1'`, `-n '$now()'`); observable for ones that do (`-n '$exists($)'`). This is a narrower, `-n`-only gap (unlike the result-side issue above, which affects any expression) — document it in `study/cli_spec.md`'s Python-specific notes and pin it with a regression test (Task 7) so it's tracked, not silently wrong. Do not conflate this with Task 3's fix; they are different gaps on different sides of evaluation (input context vs. result).
+- **Known, disclosed divergence that remains out of scope — do not try to fix this in this plan (distinct from the above):** the Python `jsonatapy` public API has no way to construct a JSONata `Undefined` top-level *context* (input), only results. `python_to_json` in `src/lib.rs` maps Python `None` to `JValue::Null`, never `JValue::Undefined` (confirmed by reading `src/lib.rs:503` and live-testing: `jsonatapy.evaluate("$string($)", None)` returns `"null"`, which only happens for `Null` context). This means the Python CLI's `-n`/`--null-input` passes a `null` context, while the Rust CLI's `-n` gives true `Undefined` context. Unobservable for expressions that don't reference `$` (the common case: `-n '1 + 1'`, `-n '$now()'`); observable for the bare context reference itself: `-n '$'` prints nothing under the Rust CLI (exit 0, Undefined) but prints the text `null` under the Python CLI (exit 0, Null) — confirmed by direct live-testing of the built Rust binary during Task 7's implementation. **Do not use `$exists($)` as the pinning expression** — verified live that it returns `false` under `-n` for BOTH CLIs (this Rust implementation special-cases `$exists($)` to check named-variable-binding presence rather than value-definedness, per `src/evaluator.rs` around lines 6812-6848, so it does not round-trip through the actual context value at all and cannot distinguish Null from Undefined). This is a narrower, `-n`-only gap (unlike the result-side issue above, which affects any expression) — document it in `study/cli_spec.md`'s Python-specific notes and pin it with a regression test (Task 7) using bare `$`, so it's tracked, not silently wrong. Do not conflate this with Task 3's fix; they are different gaps on different sides of evaluation (input context vs. result).
 - `python/jsonatapy/_cli/*.py` and `python/jsonatapy/__main__.py` must satisfy this project's existing `mypy --strict` config (`disallow_untyped_defs = true` in `pyproject.toml`) — full type hints on every function, no bare `Any` returns without justification.
 - `ruff check`/`ruff format --check` (existing `[tool.ruff]` config in `pyproject.toml`) must stay clean.
 - `fastmcp` is an **optional** dependency (`[project.optional-dependencies] mcp = [...]`), not in `dependencies = []` — importing `jsonatapy` (the library) must never require `fastmcp`. Only `jsonatapy mcp` touches it, and does so lazily with a friendly install-hint on `ImportError`, never a raw traceback.
@@ -1414,21 +1414,26 @@ def test_null_input_uses_null_not_undefined_context_known_divergence() -> None:
     distinct from Task 3's result-side fix (evaluate_json_or_none), which
     already resolved the RESULT-side undefined/null ambiguity. -n passes a
     null context instead of Undefined. Unobservable for expressions that
-    don't reference $ (the common -n use case), but $exists($) distinguishes
-    them -- the Rust CLI's -n gives $exists($) == false (context is
-    Undefined), while this Python CLI's -n gives $exists($) == true
-    (context is null, and $exists(null) is true in JSONata). If this test
-    ever starts failing because the divergence was fixed, delete it and
-    update study/cli_spec.md's Python-specific notes accordingly."""
-    result = run_cli(["-n", "$exists($)"])
+    don't reference $ (the common -n use case). The bare context reference
+    $ itself distinguishes them directly -- confirmed live against the
+    built Rust binary: `jsonata -n '$'` prints nothing (exit 0, Undefined
+    result), while this Python CLI's `-n '$'` prints the text "null" (exit
+    0, Null result). (Do NOT use $exists($) for this -- verified live that
+    it returns false under -n for BOTH CLIs, because this Rust
+    implementation special-cases $exists($) to check named-variable-binding
+    presence rather than the actual context value's definedness, so it
+    never round-trips through Null-vs-Undefined at all.) If this test ever
+    starts failing because the divergence was fixed, delete it and update
+    study/cli_spec.md's Python-specific notes accordingly."""
+    result = run_cli(["-n", "$"])
     assert result.returncode == 0
-    assert result.stdout == "true\n"
+    assert result.stdout == "null\n"
 ```
 
 - [ ] **Step 3: Run all CLI tests and confirm they pass**
 
 Run: `uv run pytest tests/python/test_cli.py -v`
-Expected: PASS. If any exit-code test fails, it's a gap in Tasks 4-6's implementation — fix the specific `run.py` branch that doesn't match `study/cli_spec.md`'s exit-code table before proceeding. If `test_null_input_uses_null_not_undefined_context_known_divergence` fails with `$exists($)` returning `false` instead of `true`, that means the divergence doesn't actually exist the way this plan predicted — stop and report this to the controller rather than adjusting the test to match, since it would mean the Global Constraints section's grounding was wrong somewhere.
+Expected: PASS. If any exit-code test fails, it's a gap in Tasks 4-6's implementation — fix the specific `run.py` branch that doesn't match `study/cli_spec.md`'s exit-code table before proceeding. If `test_null_input_uses_null_not_undefined_context_known_divergence` fails with `$` printing nothing instead of `null`, that means the divergence doesn't actually exist the way this plan predicted — stop and report this to the controller rather than adjusting the test to match, since it would mean the Global Constraints section's grounding was wrong somewhere.
 
 - [ ] **Step 4: Add the Python-specific note to `study/cli_spec.md`**
 
@@ -1453,9 +1458,13 @@ the result side:
   a true `Undefined` top-level context (`None` always maps to `Null` — see
   `python_to_json` in `src/lib.rs`). This is unobservable for expressions
   that don't reference `$` (the common `-n` use case: `-n '1 + 1'`,
-  `-n '$now()'`), but is observable for ones that do — e.g. `$exists($)`
-  returns `false` under the Rust CLI's `-n` (true `Undefined`) and `true`
-  under the Python CLI's `-n` (`null`, and `$exists(null)` is `true`).
+  `-n '$now()'`), but is directly observable for the bare context reference
+  itself: `jsonata -n '$'` (Rust) prints nothing (exit 0, `Undefined`),
+  while `jsonatapy -n '$'` (Python) prints the text `null` (exit 0,
+  `Null`). Note `$exists($)` does **not** distinguish these — it returns
+  `false` under `-n` for both CLIs, since this implementation special-cases
+  `$exists($)` to check named-variable-binding presence rather than the
+  context value's actual definedness.
   Pinned by `test_null_input_uses_null_not_undefined_context_known_divergence`
   in `tests/python/test_cli.py`.
 ```
