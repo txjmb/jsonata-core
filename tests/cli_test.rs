@@ -271,3 +271,50 @@ fn evaluation_error_preserves_jsonata_error_code() {
         .code(1)
         .stderr(predicates::str::starts_with("T2002:"));
 }
+
+#[test]
+fn invalid_json_input_exits_three() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("a")
+        .write_stdin("not json")
+        .assert()
+        .code(3)
+        .stderr(contains("invalid JSON input"));
+}
+
+#[test]
+fn parse_error_exits_one() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("a[")
+        .write_stdin("{}")
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn missing_expression_argument_exits_two() {
+    Command::cargo_bin("jsonata").unwrap().assert().code(2);
+}
+
+#[test]
+fn nonexistent_input_file_exits_two() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("a")
+        .arg("/nonexistent/path/data.json")
+        .assert()
+        .code(2)
+        .stderr(contains("could not read input file"));
+}
+
+#[test]
+fn unknown_flag_exits_two_via_clap_default() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("--not-a-real-flag")
+        .arg("a")
+        .assert()
+        .code(2);
+}
