@@ -64,6 +64,17 @@ fn run(cli: Cli) -> ExitCode {
         }
     };
 
+    // Validate --arg/--argjson bindings before touching the filesystem or
+    // parsing the expression, so malformed usage (exit 2) always takes
+    // precedence over input-read errors (exit 3) and parse errors (exit 1).
+    let var_bindings = match bindings::parse_bindings(&cli.arg, &cli.argjson) {
+        Ok(b) => b,
+        Err(msg) => {
+            eprintln!("error: {}", msg);
+            return ExitCode::from(2);
+        }
+    };
+
     let expression = match expr_source {
         resolve::ExpressionSource::Inline(s) => s,
         resolve::ExpressionSource::File(path) => match std::fs::read_to_string(&path) {
@@ -98,14 +109,6 @@ fn run(cli: Cli) -> ExitCode {
         Err(e) => {
             eprintln!("{}", e.display_message());
             return ExitCode::from(1);
-        }
-    };
-
-    let var_bindings = match bindings::parse_bindings(&cli.arg, &cli.argjson) {
-        Ok(b) => b,
-        Err(msg) => {
-            eprintln!("error: {}", msg);
-            return ExitCode::from(2);
         }
     };
 

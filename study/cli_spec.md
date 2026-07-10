@@ -57,6 +57,13 @@ jsonata [OPTIONS] --from-file <EXPR_FILE> [FILE]
 | 2 | Usage/invocation error: bad flags, malformed `--arg`/`--argjson`, an incompatible flag combination (e.g. `-n` + data file), or an expression/input file that could not be read |
 | 3 | Input was read successfully but is not valid JSON |
 
+Precedence: usage errors (code 2), including malformed `--arg`/`--argjson`
+bindings, are validated immediately after argument resolution — before any
+input is read and before the expression is parsed. This means a malformed
+binding always exits 2, even if the expression would also fail to parse
+(otherwise code 1) or the input would also be invalid JSON (otherwise code
+3).
+
 ## Error message format
 
 Errors go to stderr. JSONata spec-coded errors (e.g. from evaluation or

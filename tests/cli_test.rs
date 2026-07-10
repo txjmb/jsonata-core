@@ -318,3 +318,35 @@ fn unknown_flag_exits_two_via_clap_default() {
         .assert()
         .code(2);
 }
+
+#[test]
+fn malformed_arg_binding_takes_precedence_over_parse_error() {
+    // A malformed --arg is a usage error (exit 2) and must be reported even
+    // when the expression itself would also fail to parse (exit 1). Usage
+    // errors are validated before the expression is parsed, so exit code 2
+    // must win here, not the parse error's exit code 1.
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("--arg")
+        .arg("bad")
+        .arg("a[")
+        .write_stdin("{}")
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn malformed_arg_binding_takes_precedence_over_invalid_json_input() {
+    // A malformed --arg is a usage error (exit 2) and must be reported even
+    // when stdin is not valid JSON (which would otherwise exit 3). Usage
+    // errors are validated before input is read, so exit code 2 must win
+    // here, not the invalid-JSON exit code 3.
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("--arg")
+        .arg("bad")
+        .arg("a")
+        .write_stdin("not json")
+        .assert()
+        .code(2);
+}
