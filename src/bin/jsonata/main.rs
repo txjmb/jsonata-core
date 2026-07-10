@@ -5,6 +5,8 @@ use jsonata_core::value::JValue;
 use std::io::Read;
 use std::process::ExitCode;
 
+mod resolve;
+
 /// Evaluate JSONata expressions against JSON data.
 #[derive(Parser, Debug)]
 #[command(
@@ -12,38 +14,38 @@ use std::process::ExitCode;
     version,
     about = "Evaluate JSONata expressions against JSON data"
 )]
-struct Cli {
+pub(crate) struct Cli {
     /// Compact JSON output (default: pretty-printed)
     #[arg(short = 'c', long)]
-    compact: bool,
+    pub(crate) compact: bool,
 
     /// Print string results without surrounding quotes
     #[arg(short = 'r', long = "raw-output")]
-    raw_output: bool,
+    pub(crate) raw_output: bool,
 
     /// Don't read input; $ is undefined
     #[arg(short = 'n', long = "null-input")]
-    null_input: bool,
+    pub(crate) null_input: bool,
 
     /// Read the expression from a file instead of the first positional argument
     #[arg(short = 'f', long = "from-file", value_name = "FILE")]
-    from_file: Option<String>,
+    pub(crate) from_file: Option<String>,
 
     /// Bind $NAME to a string value: --arg NAME=VALUE
     #[arg(long = "arg", value_name = "NAME=VALUE", action = clap::ArgAction::Append)]
-    arg: Vec<String>,
+    pub(crate) arg: Vec<String>,
 
     /// Bind $NAME to a parsed JSON value: --argjson NAME=JSON
     #[arg(long = "argjson", value_name = "NAME=JSON", action = clap::ArgAction::Append)]
-    argjson: Vec<String>,
+    pub(crate) argjson: Vec<String>,
 
     /// The JSONata expression (or, with --from-file, the input data file)
     #[arg(value_name = "EXPRESSION_OR_FILE")]
-    positional1: Option<String>,
+    pub(crate) positional1: Option<String>,
 
     /// The input data file (used only when --from-file supplies the expression)
     #[arg(value_name = "FILE")]
-    positional2: Option<String>,
+    pub(crate) positional2: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -52,22 +54,37 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> ExitCode {
-    let expression = match &cli.positional1 {
-        Some(expr) => expr.clone(),
-        None => {
-            eprintln!("error: missing required argument: EXPRESSION");
+    let (expr_source, input_source) = match resolve::resolve(&cli) {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("error: {}", msg);
             return ExitCode::from(2);
         }
     };
 
-    let data_source = cli.positional2.clone();
-
-    let data = match read_input(data_source.as_deref()) {
-        Ok(data) => data,
-        Err((msg, code)) => {
-            eprintln!("{}", msg);
-            return ExitCode::from(code);
+    let expression = match expr_source {
+        resolve::ExpressionSource::Inline(s) => s,
+        resolve::ExpressionSource::File(_) => {
+            unreachable!("Task 5 implements ExpressionSource::File handling")
         }
+    };
+
+    let data = match input_source {
+        resolve::InputSource::Null => JValue::Undefined,
+        resolve::InputSource::Stdin => match read_input(None) {
+            Ok(data) => data,
+            Err((msg, code)) => {
+                eprintln!("{}", msg);
+                return ExitCode::from(code);
+            }
+        },
+        resolve::InputSource::File(path) => match read_input(Some(&path)) {
+            Ok(data) => data,
+            Err((msg, code)) => {
+                eprintln!("{}", msg);
+                return ExitCode::from(code);
+            }
+        },
     };
 
     let ast = match parser::parse(&expression) {

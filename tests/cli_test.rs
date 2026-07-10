@@ -134,3 +134,31 @@ fn raw_output_flag_does_not_affect_non_string_results() {
         .success()
         .stdout("30\n");
 }
+
+#[test]
+fn null_input_flag_evaluates_without_reading_stdin() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("-n")
+        .arg("1 + 1")
+        .assert()
+        .success()
+        .stdout("2\n");
+}
+
+#[test]
+fn null_input_with_file_argument_is_a_usage_error() {
+    let dir = std::env::temp_dir();
+    let path = dir.join("jsonata_cli_test_null_conflict.json");
+    std::fs::write(&path, r#"{"a": 1}"#).unwrap();
+
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("-n")
+        .arg("1 + 1")
+        .arg(path.to_str().unwrap())
+        .assert()
+        .code(2);
+
+    std::fs::remove_file(&path).unwrap();
+}
