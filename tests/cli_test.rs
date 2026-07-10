@@ -213,3 +213,61 @@ fn from_file_with_nonexistent_expression_file_is_usage_error() {
         .code(2)
         .stderr(contains("could not read expression file"));
 }
+
+#[test]
+fn arg_binds_a_string_variable() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("--arg")
+        .arg("region=us")
+        .arg("$region")
+        .write_stdin("{}")
+        .assert()
+        .success()
+        .stdout("\"us\"\n");
+}
+
+#[test]
+fn argjson_binds_a_json_variable() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("--argjson")
+        .arg("limit=5")
+        .arg("$limit * 2")
+        .write_stdin("{}")
+        .assert()
+        .success()
+        .stdout("10\n");
+}
+
+#[test]
+fn malformed_arg_binding_is_a_usage_error() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("--arg")
+        .arg("noequalssign")
+        .arg("$x")
+        .write_stdin("{}")
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn evaluation_error_preserves_jsonata_error_code() {
+    // NOTE: the brief's original example expression `1 + "a"` was checked
+    // against this codebase's actual arithmetic error handling and does
+    // NOT produce a coded error here -- `add()` in src/evaluator.rs falls
+    // through to an uncoded `format!("Cannot add {:?} and {:?}", ...)` for
+    // a Number/String mismatch (pre-existing behavior, unrelated to this
+    // task's refactor). `null + 1` (an explicit null literal against the
+    // `+` operator) is the expression that actually exercises the T2002
+    // coded path in this codebase, so it is used here instead to verify
+    // that a coded error passes through un-double-wrapped.
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("null + 1")
+        .write_stdin("{}")
+        .assert()
+        .code(1)
+        .stderr(predicates::str::starts_with("T2002:"));
+}

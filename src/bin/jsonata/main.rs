@@ -5,6 +5,8 @@ use jsonata_core::value::JValue;
 use std::io::Read;
 use std::process::ExitCode;
 
+mod bindings;
+mod error_format;
 mod resolve;
 
 /// Evaluate JSONata expressions against JSON data.
@@ -94,16 +96,28 @@ fn run(cli: Cli) -> ExitCode {
     let ast = match parser::parse(&expression) {
         Ok(ast) => ast,
         Err(e) => {
-            eprintln!("error: {}", e);
+            eprintln!("{}", e.display_message());
             return ExitCode::from(1);
         }
     };
 
-    let mut evaluator = Evaluator::with_context(Context::new());
+    let var_bindings = match bindings::parse_bindings(&cli.arg, &cli.argjson) {
+        Ok(b) => b,
+        Err(msg) => {
+            eprintln!("error: {}", msg);
+            return ExitCode::from(2);
+        }
+    };
+
+    let mut context = Context::new();
+    for (name, value) in var_bindings {
+        context.bind(name, value);
+    }
+    let mut evaluator = Evaluator::with_context(context);
     let result = match evaluator.evaluate(&ast, &data) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("error: {}", e);
+            eprintln!("{}", error_format::format_evaluator_error(&e));
             return ExitCode::from(1);
         }
     };

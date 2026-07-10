@@ -618,37 +618,13 @@ fn create_evaluator(
 /// Convert an EvaluatorError to a PyErr
 #[cfg(feature = "python")]
 fn evaluator_error_to_py(e: evaluator::EvaluatorError) -> PyErr {
-    match e {
-        evaluator::EvaluatorError::TypeError(msg) => PyValueError::new_err(msg),
-        evaluator::EvaluatorError::ReferenceError(msg) => PyValueError::new_err(msg),
-        evaluator::EvaluatorError::EvaluationError(msg) => PyValueError::new_err(msg),
-    }
-}
-
-/// Format a ParserError's Python-facing message.
-/// Coded errors (e.g., S0214) have their message formatted as "code: message",
-/// so they are passed through directly without an additional "Parse error: " prefix.
-/// Other errors get the "Parse error: " prefix for clarity.
-///
-/// Split out from `parser_error_to_py` so this formatting logic can be unit
-/// tested without constructing a `PyErr` (which requires an initialized
-/// Python interpreter -- fine under `maturin develop`/pytest, but panics
-/// under a plain `cargo test --all-features` with no embedded interpreter).
-fn format_parser_error_message(e: &parser::ParserError) -> String {
-    let msg = e.to_string();
-    if matches!(e, parser::ParserError::Coded { .. }) {
-        // Coded errors already have the format "code: message"
-        msg
-    } else {
-        // Other errors get the "Parse error: " prefix
-        format!("Parse error: {}", msg)
-    }
+    PyValueError::new_err(e.message().to_string())
 }
 
 /// Convert a ParserError to a PyErr
 #[cfg(feature = "python")]
 fn parser_error_to_py(e: parser::ParserError) -> PyErr {
-    PyValueError::new_err(format_parser_error_message(&e))
+    PyValueError::new_err(e.display_message())
 }
 
 /// JSONata Python module
@@ -678,8 +654,8 @@ mod tests {
     mod parser_error_handling {
         use super::super::*;
 
-        // These test format_parser_error_message() directly (a plain string
-        // function) rather than parser_error_to_py(), which constructs a
+        // These test ParserError::display_message() directly (a plain string
+        // method) rather than parser_error_to_py(), which constructs a
         // PyErr -- that requires an initialized Python interpreter, which
         // isn't available under a bare `cargo test --all-features` run (no
         // embedded interpreter, unlike the maturin-built extension loaded
@@ -693,7 +669,7 @@ mod tests {
                 code: "S0214",
                 message: "Expected a variable reference after @".to_string(),
             };
-            let msg = format_parser_error_message(&coded_error);
+            let msg = coded_error.display_message();
 
             // The message should start with the code, not "Parse error: "
             assert!(
@@ -712,7 +688,7 @@ mod tests {
         fn test_parser_error_to_py_non_coded_error_with_prefix() {
             // Test that non-coded errors still get the "Parse error: " prefix
             let non_coded_error = parser::ParserError::UnexpectedToken("foo".to_string());
-            let msg = format_parser_error_message(&non_coded_error);
+            let msg = non_coded_error.display_message();
 
             // The message should have the "Parse error: " prefix
             assert!(

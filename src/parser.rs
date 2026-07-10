@@ -44,6 +44,45 @@ pub enum ParserError {
     Coded { code: &'static str, message: String },
 }
 
+impl ParserError {
+    /// The full display-ready message: `Coded` variants (e.g. S0214) are
+    /// already exactly "code: message" via `Display`, so they pass
+    /// through unchanged; every other variant gets a "Parse error: "
+    /// prefix added. Used by both the Python bindings (`src/lib.rs`) and
+    /// the `jsonata` CLI.
+    pub fn display_message(&self) -> String {
+        let msg = self.to_string();
+        if matches!(self, ParserError::Coded { .. }) {
+            msg
+        } else {
+            format!("Parse error: {}", msg)
+        }
+    }
+}
+
+#[cfg(test)]
+mod parser_error_display_message_tests {
+    use super::ParserError;
+
+    #[test]
+    fn coded_error_passes_through_unchanged() {
+        let e = ParserError::Coded {
+            code: "S0214",
+            message: "The % operator is invalid outside a path".to_string(),
+        };
+        assert_eq!(
+            e.display_message(),
+            "S0214: The % operator is invalid outside a path"
+        );
+    }
+
+    #[test]
+    fn uncoded_error_gets_parse_error_prefix() {
+        let e = ParserError::UnexpectedToken("foo".to_string());
+        assert_eq!(e.display_message(), "Parse error: Unexpected token: foo");
+    }
+}
+
 /// Token types for the lexer
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
