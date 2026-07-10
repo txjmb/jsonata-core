@@ -1,0 +1,2065 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="High-performance JSONata implementation in Rust, with Python bindings">
+      
+      
+        <meta name="author" content="jsonatapy contributors">
+      
+      
+        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/dev/superpowers/specs/2026-07-09-multi-language-and-agentic-study-design/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Multi-language surface, agentic CLI, and the JSONata-vs-jq agentic study - jsonata-core + jsonatapy</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config",""),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>"undefined"!=typeof __md_analytics&&__md_analytics()</script>
+  
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#multi-language-surface-agentic-cli-and-the-jsonata-vs-jq-agentic-study" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            jsonata-core + jsonatapy
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Multi-language surface, agentic CLI, and the JSONata-vs-jq agentic study
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/txjmb/jsonata-core" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jsonata-core
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../rust-crate/" class="md-tabs__link">
+          
+  
+  
+  Rust Crate (jsonata-core)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../api/" class="md-tabs__link">
+          
+  
+  
+  Python Package (jsonatapy)
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../performance/" class="md-tabs__link">
+          
+  
+  
+  Performance
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../compatibility/" class="md-tabs__link">
+          
+  
+  
+  Compatibility
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../development/building/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../changelog/" class="md-tabs__link">
+          
+  
+  
+  About
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    jsonata-core + jsonatapy
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/txjmb/jsonata-core" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jsonata-core
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rust Crate (jsonata-core)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Rust Crate (jsonata-core)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../rust-crate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python Package (jsonatapy)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Python Package (jsonatapy)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../jsonata-language/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JSONata Language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../error-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Error Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Performance
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Performance Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../optimization-tips/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Optimization Tips
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compatibility
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Compatibility
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../compatibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Compatibility Status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../migration-from-js/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration from JS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../migration-from-jsonata-python/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Migration from jsonata-python
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/parser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Parser Details
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../development/releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    About
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    About
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../credits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Credits
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-rust-cli-jsonata-binary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1: Rust CLI (jsonata binary)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-python-cli-fastmcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2: Python CLI + FastMCP server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-the-agentic-study" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3: The agentic study
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-c-abi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4: C ABI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-5-java-binding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 5: Java binding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-6-net-binding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 6: .NET binding
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-verification-strategy-all-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing / verification strategy (all phases)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#definition-of-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Definition of done
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="multi-language-surface-agentic-cli-and-the-jsonata-vs-jq-agentic-study">Multi-language surface, agentic CLI, and the JSONata-vs-jq agentic study<a class="headerlink" href="#multi-language-surface-agentic-cli-and-the-jsonata-vs-jq-agentic-study" title="Permanent link">&para;</a></h1>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>jsonatapy is currently a Python-only Rust extension (PyO3), 1258/1258 reference-suite
+compatible, published as <code>jsonatapy</code> on PyPI and <code>jsonata-core</code> on crates.io. The next phase
+has two goals that turned out, through discussion, to be sequenced rather than parallel:</p>
+<ol>
+<li><strong>Long-term:</strong> make the Rust JSONata core usable from Java, C#, and C, as a standalone
+   CLI binary usable in place of <code>jq</code>, and as a Python <code>uvx</code>-runnable tool (both as a direct
+   CLI and as a FastMCP server) for agentic workflows.</li>
+<li><strong>Near-term and higher priority:</strong> before investing in Java/.NET bindings, run a real
+   empirical study — using the CLI as the instrument — testing whether coding agents
+   actually complete JSON-wrangling tasks more successfully and with fewer tokens using
+   JSONata than using jq, Python one-liners, or grep/sed/awk. If the result supports it, the
+   study becomes a Medium article. If it doesn't, that's a legitimate finding too and it
+   changes what's worth building next.</li>
+</ol>
+<p>The study depends on the CLI existing and being jq-familiar enough that agents can use it
+without extensive onboarding. So the CLI (and its Python <code>uvx</code> sibling) moves to the front of
+the work, and Java/.NET move to the back, gated on the study not being a dead end.</p>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
+<p>This spec covers six phases. Each phase gets its own implementation plan; this document
+establishes the architecture and decisions that span all of them so later phases don't
+re-litigate settled questions.</p>
+<ol>
+<li>Rust CLI binary (<code>jsonata</code>), jq-familiar interface</li>
+<li>Python CLI + FastMCP server (<code>jsonatapy</code> entry point, <code>jsonatapy mcp</code> subcommand)</li>
+<li>The agentic study (task suite, multi-model trials, analysis, article)</li>
+<li>C ABI (<code>jsonata.h</code>) — the C deliverable and the foundation for 5 and 6</li>
+<li>Java binding (FFM, Java 22+)</li>
+<li>.NET binding (P/Invoke)</li>
+</ol>
+<p><strong>Non-goals for this spec:</strong>
+- Actually writing the Medium article's prose — the study's analysis output feeds it, but
+  article-writing is a separate downstream step not planned here.
+- Maven Central / NuGet.org publishing — phases 5–6 ship as GitHub Release artifacts with
+  build instructions; registry publishing is a later, separate decision.
+- Supporting Java &lt;22 (JNI) or .NET Framework — explicitly out of scope, see Decisions.
+- Changing jsonatapy's existing Python API surface (<code>jsonatapy.transform()</code> etc.) — the CLI
+  and MCP server are new, additive entry points.</p>
+<h2 id="decisions">Decisions<a class="headerlink" href="#decisions" title="Permanent link">&para;</a></h2>
+<p>These were settled during brainstorming and apply across all phases:</p>
+<ul>
+<li><strong>Repo structure:</strong> everything stays in this repo (approach A: monorepo, feature-gated).
+  One version number, one CI, one release workflow. New top-level dirs: <code>bindings/c/</code>,
+  <code>bindings/java/</code>, <code>bindings/dotnet/</code>, <code>study/</code>. <code>benchmarks/</code> gains <code>java/</code>, <code>dotnet/</code>,
+  <code>jq/</code> subdirs in their respective phases.</li>
+<li><strong>CLI interface:</strong> jq-familiar, not jq-syntax — JSONata expressions, jq's ergonomics
+  (stdin/file input, <code>-c</code>/<code>-r</code>/<code>-n</code>, <code>--arg</code>/<code>--argjson</code>, <code>-f</code>). One shared flag spec used by
+  both the Rust binary and the Python entry point, tested against the same case list.</li>
+<li><strong>FFI approach:</strong> hand-written C ABI (~8 functions), not UniFFI or a CLI shim. Small
+  surface, no third-party codegen dependency, and it doubles as the C deliverable itself.</li>
+<li><strong>Java target:</strong> Java 22+ via <code>java.lang.foreign</code> (FFM/Panama), not JNI or JNA. Pure-Java
+  binding, no compiled glue per platform.</li>
+<li><strong>MCP packaging:</strong> <code>fastmcp</code> is an optional extra (<code>jsonatapy[mcp]</code>), not a hard dependency
+  — jsonatapy stays zero-runtime-dependency for embedders; the CLI prints the
+  <code>uvx --from "jsonatapy[mcp]" jsonatapy mcp</code> hint when fastmcp is missing.</li>
+<li><strong>Study rigor:</strong> real agent trials (not static analysis), forced-tool conditions (not
+  free-choice-only), multi-model, with a documentation cheatsheet as an explicit
+  experimental variable rather than always-on or never-on.</li>
+</ul>
+<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">&para;</a></h2>
+<h3 id="phase-1-rust-cli-jsonata-binary">Phase 1: Rust CLI (<code>jsonata</code> binary)<a class="headerlink" href="#phase-1-rust-cli-jsonata-binary" title="Permanent link">&para;</a></h3>
+<p>New <code>[[bin]]</code> target in the existing <code>jsonata-core</code> crate, gated behind a <code>cli</code> feature so
+the <code>clap</code> dependency doesn't leak into library/PyO3 builds:</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[[bin]]</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;jsonata&quot;</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;src/bin/jsonata.rs&quot;</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">required-features</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;cli&quot;</span><span class="p">]</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">[features]</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">cli</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;dep:clap&quot;</span><span class="p">]</span>
+</span></code></pre></div>
+<p><strong>Flags</strong> (jq-familiar):
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>jsonata [OPTIONS] &lt;expression&gt; [file]
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  -c, --compact         compact JSON output (default: pretty-printed)
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  -r, --raw-output       print strings without quotes
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  -n, --null-input       don&#39;t read input; $ is undefined
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  -f, --from-file &lt;f&gt;    read expression from file instead of argv
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>      --arg &lt;name=val&gt;   bind $name to a string value
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>      --argjson &lt;n=val&gt;  bind $name to a parsed JSON value
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  -V, --version
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  -h, --help
+</span></code></pre></div>
+Input: file argument if given, else stdin. Multiple JSON values on stdin are not supported
+in v1 (jq's <code>--slurp</code>/streaming semantics don't map cleanly onto JSONata's single-document
+model — explicitly deferred, not silently mishandled).</p>
+<p><strong>Semantics:</strong>
+- JSONata "undefined" result → print nothing, exit 0 (mirrors jq's empty-output behavior;
+  distinct from an explicit <code>null</code> result, which prints <code>null</code>).
+- Evaluation and parse errors → stderr, exit 1. Neither <code>EvaluatorError</code> nor <code>ParserError</code>
+  carries a structured position field today (verified against <code>src/evaluator.rs</code> and
+  <code>src/parser.rs</code> while planning Phase 1) — only some messages embed a JSONata spec code as
+  a string prefix (e.g. <code>"T2002: ..."</code>, matching the <code>^([TDUS]\d{4}):</code> convention
+  <code>tests/python/test_reference_suite.py::extract_error_code</code> already relies on). The CLI
+  passes the error's <code>Display</code> message through unchanged when it already starts with that
+  code-prefix pattern, and prepends <code>error:</code> otherwise. Adding structured position
+  tracking to the error types themselves is out of scope for this phase.
+- Invalid input JSON → stderr <code>error: invalid JSON input: &lt;serde message&gt;</code>, exit 3.
+- Usage errors (bad flags, missing expression) → clap's standard stderr + exit 2.</p>
+<p>These three exit codes are chosen deliberately for the study: an agent (or the study's
+grading script) can distinguish "my expression was wrong" (1) from "my input was malformed"
+(3) from "I misused the tool" (2) without parsing stderr text.</p>
+<p><strong>Distribution:</strong> existing <code>release.yml</code> gains a step building <code>--features cli</code> release
+binaries for Linux/macOS/Windows × x86_64/aarch64, attached to the GitHub Release. Also
+installable via <code>cargo install jsonata-core --features cli</code>.</p>
+<p><strong>Testing:</strong> <code>tests/cli/</code> using <code>assert_cmd</code>, covering the flag matrix, exit codes, and
+undefined-vs-null-vs-error output distinctions above.</p>
+<h3 id="phase-2-python-cli-fastmcp-server">Phase 2: Python CLI + FastMCP server<a class="headerlink" href="#phase-2-python-cli-fastmcp-server" title="Permanent link">&para;</a></h3>
+<p><code>pyproject.toml</code> gains:
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[project.scripts]</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">jsonatapy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;jsonatapy.__main__:main&quot;</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">[project.optional-dependencies]</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">mcp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;fastmcp&gt;=2.0&quot;</span><span class="p">]</span>
+</span></code></pre></div></p>
+<p><code>python/jsonatapy/__main__.py</code> implements the <strong>identical flag surface</strong> to the Rust binary
+(same flag spec doc, same exit codes), calling the existing <code>jsonatapy</code> Python API
+internally rather than shelling out to the Rust binary. A shared <code>study/cli_spec.md</code> (or
+similar) documents the flags once; both implementations' tests reference the same fixture
+cases so they can't silently drift.</p>
+<p>Dispatch: <code>jsonatapy &lt;expr&gt; [file]</code> behaves as the CLI above; <code>jsonatapy mcp [--http]
+[--port N]</code> launches the MCP server (stdio by default). If <code>fastmcp</code> isn't importable,
+<code>jsonatapy mcp</code> prints the install hint and exits 2 rather than a raw <code>ImportError</code>.</p>
+<p><strong>MCP tools</strong> (<code>jsonatapy mcp</code>, richer toolset as decided):
+- <code>evaluate(expression: str, data: str, bindings: dict | None) -&gt; str</code> — evaluate against a
+  JSON document, optional variable bindings, returns the JSON-encoded result (or an MCP
+  tool-error with the error code/position on failure).
+- <code>validate(expression: str) -&gt; {ok: bool, error?: str, position?: int}</code> — parse-only check.
+- <code>explain(topic: str | None) -&gt; str</code> — returns curated JSONata reference material (function
+  index if no topic, specific section if given). This content is authored once and reused
+  as the study's Phase 3 cheatsheet, so it's written to be concise (token cost matters for
+  both uses).
+- <code>evaluate_batch(expressions: list[str], data: str) -&gt; list[result | error]</code> — run several
+  expressions against one document in one call, avoiding N round-trips.</p>
+<p><strong>Testing:</strong> FastMCP's in-memory client for the four tools; CLI tests mirror Phase 1's
+<code>assert_cmd</code> suite via subprocess or in-process argv invocation.</p>
+<h3 id="phase-3-the-agentic-study">Phase 3: The agentic study<a class="headerlink" href="#phase-3-the-agentic-study" title="Permanent link">&para;</a></h3>
+<p>Lives in <code>study/</code> in this repo — task fixtures, harness, results, analysis script, kept
+separate from the library's own test suite.</p>
+<p><strong>Task suite (~20 tasks):</strong> hand-authored, spanning extraction/filtering, reshaping,
+aggregation/grouping, multi-file joins, deep nested access, and messy-data edge cases
+(missing fields, nulls, heterogeneous array shapes). Each task is a directory:
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>study/tasks/&lt;NN&gt;-&lt;slug&gt;/
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  input/*.json          # one or more input files
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  prompt.md             # natural-language instruction given to the agent
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  check.py              # returns pass/fail given the agent&#39;s stdout/output file
+</span></code></pre></div>
+<code>check.py</code> compares canonical JSON (order-insensitive where the task allows it) rather than
+exact string match, since agents may format output differently. Task difficulty is
+calibrated during the Phase 3 pilot (below) so at least some tasks show &lt;100% success in at
+least one condition — a suite where every condition scores 100% has no signal.</p>
+<p><strong>Conditions (6):</strong>
+1. <code>jsonata-bare</code> — only the <code>jsonata</code> CLI available, no reference docs in the prompt.
+2. <code>jsonata+docs</code> — <code>jsonata</code> CLI + the <code>explain</code> cheatsheet content injected into the
+   system/task prompt (its token count is charged to this condition's total).
+3. <code>jq</code> — only <code>jq</code> available.
+4. <code>python</code> — only a Python interpreter (one-off scripts/one-liners) available.
+5. <code>grep-sed-awk</code> — only those three tools available.
+6. <code>free-choice</code> — all of the above available; measures organic tool adoption, not a
+   controlled comparison arm.</p>
+<p>Each condition is enforced by restricting the agent's available tools/binaries in its
+sandbox (not just prompt instruction) so results reflect actual capability, not compliance.</p>
+<p><strong>Harness:</strong> <code>study/harness/</code> with a pluggable agent-runner interface (<code>run_trial(task,
+condition, model) -&gt; TrialResult</code>), so a second backend (e.g. a different CLI or the raw API)
+can be added later without redesigning the analysis pipeline. First implementation drives
+<code>claude -p</code> non-interactively: JSON output mode for token/turn counts, <code>--model</code> to select
+Sonnet vs Haiku, an isolated temp working directory per run, restricted bash permissions
+matching the condition's allowed tools.</p>
+<p><strong>Metrics per run:</strong> pass/fail (from <code>check.py</code>), total input+output tokens, number of
+turns, number of tool calls, wall-clock seconds, and a failure-mode tag (wrong-answer /
+gave-up / error-loop / timeout) assigned by inspecting the transcript.</p>
+<p><strong>Scale:</strong> 20 tasks × 6 conditions × 3 trials × 2 models ≈ 720 runs. Results append to
+<code>study/results/runs.jsonl</code>; the harness is resumable — re-running skips <code>(task, condition,
+trial, model)</code> tuples already present in the file, so a partial or interrupted run is cheap
+to continue. Before committing to the full matrix, a <strong>calibration pilot</strong> (5 tasks × all 6
+conditions × 1 trial × 1 model, ~30 runs) validates that the harness works end-to-end and
+that task difficulty is calibrated (not universally trivial or universally impossible) —
+this is a checkpoint inside this phase, not a separate phase.</p>
+<p><strong>Analysis:</strong> <code>study/analysis/report.py</code> reads <code>runs.jsonl</code> and produces: success rate per
+condition (overall and per-task), token cost conditional on success (median/p90), tool
+adoption distribution in <code>free-choice</code>, and failure-mode breakdown per condition. Output is
+tables/CSVs plus matplotlib figures suitable for dropping into the article.</p>
+<h3 id="phase-4-c-abi">Phase 4: C ABI<a class="headerlink" href="#phase-4-c-abi" title="Permanent link">&para;</a></h3>
+<p><code>capi</code> feature on the existing <code>cdylib</code>, adding <code>src/capi.rs</code>:</p>
+<div class="language-c highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1">// bindings/c/jsonata.h</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">typedef</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">JsonataExpr</span><span class="w"> </span><span class="n">JsonataExpr</span><span class="p">;</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">JsonataExpr</span><span class="o">*</span><span class="w"> </span><span class="nf">jsonata_compile</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">expr_utf8</span><span class="p">);</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="nf">jsonata_evaluate</span><span class="p">(</span><span class="n">JsonataExpr</span><span class="o">*</span><span class="w"> </span><span class="n">expr</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">json_utf8</span><span class="p">);</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="kt">int</span><span class="w">   </span><span class="nf">jsonata_bind_var</span><span class="p">(</span><span class="n">JsonataExpr</span><span class="o">*</span><span class="w"> </span><span class="n">expr</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">json_value_utf8</span><span class="p">);</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="kt">void</span><span class="w">  </span><span class="nf">jsonata_free_expr</span><span class="p">(</span><span class="n">JsonataExpr</span><span class="o">*</span><span class="w"> </span><span class="n">expr</span><span class="p">);</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="kt">void</span><span class="w">  </span><span class="nf">jsonata_free_string</span><span class="p">(</span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="n">s</span><span class="p">);</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="kt">int</span><span class="w">   </span><span class="nf">jsonata_last_error_code</span><span class="p">(</span><span class="n">JsonataExpr</span><span class="o">*</span><span class="w"> </span><span class="n">expr</span><span class="p">);</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="nf">jsonata_last_error_message</span><span class="p">(</span><span class="n">JsonataExpr</span><span class="o">*</span><span class="w"> </span><span class="n">expr</span><span class="p">);</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="kt">int</span><span class="w">   </span><span class="nf">jsonata_last_error_position</span><span class="p">(</span><span class="n">JsonataExpr</span><span class="o">*</span><span class="w"> </span><span class="n">expr</span><span class="p">);</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="k">const</span><span class="w"> </span><span class="kt">char</span><span class="o">*</span><span class="w"> </span><span class="nf">jsonata_version</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+</span></code></pre></div>
+<p>JSON strings cross the boundary as UTF-8 C strings (no C-visible structured value model) —
+simplest possible surface, and symmetric parsing cost keeps the Java/.NET benchmarks
+comparable to the Rust-internal path. <code>jsonata_compile</code> returns <code>NULL</code> on parse failure;
+callers check <code>jsonata_last_error_*</code> via a small thread-local error slot (documented as
+<strong>not thread-safe across handles from different threads</strong> — one <code>JsonataExpr*</code> per thread,
+matching the core's existing <code>Rc</code>-based non-<code>Send</code> design noted in project memory).</p>
+<p><code>bindings/c/jsonata.h</code> is hand-maintained (not bindgen-generated, to keep it readable) and
+validated by a CI-compiled C smoke test (<code>bindings/c/examples/smoke.c</code>) that compiles and
+links against the built <code>cdylib</code> on every PR touching <code>src/capi.rs</code> or the header.</p>
+<p><strong>Consuming it from C/C++ (<code>bindings/c/README.md</code>):</strong> documented, not just implied by the
+header existing. Covers:
+- Building the shared library: <code>cargo build --release --features capi</code> produces
+  <code>target/release/libjsonata_core.so</code> (Linux) / <code>.dylib</code> (macOS) / <code>jsonata_core.dll</code> +
+  <code>jsonata_core.dll.lib</code> (Windows) — the crate's existing <code>crate-type = ["cdylib", "rlib"]</code>
+  already emits these, <code>capi</code> just adds the <code>extern "C"</code> symbols to the library that's
+  already being built.
+- A minimal <code>#include "jsonata.h"</code> C example (the same <code>smoke.c</code> used as the CI check,
+  documented inline) showing compile + link, e.g.
+  <code>cc -Ibindings/c examples/smoke.c -Ltarget/release -ljsonata_core -o smoke</code> on Linux/macOS,
+  with the Windows MSVC equivalent (<code>cl</code> + <code>jsonata_core.dll.lib</code>) and a note on setting
+  <code>LD_LIBRARY_PATH</code>/<code>DYLD_LIBRARY_PATH</code>/<code>PATH</code> so the built binary can find the shared
+  library at runtime.
+- A C++ example showing the same header used from C++ (extern "C" linkage already handled by
+  the header's own <code>#ifdef __cplusplus</code> guard) plus a tiny RAII wrapper class around
+  <code>JsonataExpr*</code>/<code>jsonata_free_expr</code> as an idiomatic-C++ usage pattern — illustrative only,
+  not a shipped library (a real C++ wrapper library is out of scope for this phase).
+- CMake and plain-Makefile snippets for linking against the prebuilt shared library from a
+  downstream C/C++ project (both patterns are common enough downstream that showing both is
+  worth the small doc cost; picking one and skipping the other would just shift the request
+  to whichever half is missing).</p>
+<h3 id="phase-5-java-binding">Phase 5: Java binding<a class="headerlink" href="#phase-5-java-binding" title="Permanent link">&para;</a></h3>
+<p><code>bindings/java/</code> — a Maven project, pure-Java <code>java.lang.foreign</code> binding over the C ABI
+(no JNI, no compiled glue). Native libraries bundled under <code>src/main/resources/native/
+{os}-{arch}/</code> and extracted to a temp file at class-load time, <code>System.load()</code>'d once. A
+<code>Jsonata</code> class wraps compile/evaluate/close with <code>AutoCloseable</code> for the expression handle.</p>
+<p>Benchmark: JMH suite in <code>benchmarks/java/</code> running the same expression/data corpus used
+elsewhere in this repo's benchmarks, compared against dashjoin/jsonata-java.</p>
+<p>Deliverable: build instructions in <code>bindings/java/README.md</code> + a prebuilt jar (with bundled
+natives for the CI-built platforms) attached to GitHub Releases. Maven Central publishing is
+explicitly deferred (non-goal).</p>
+<h3 id="phase-6-net-binding">Phase 6: .NET binding<a class="headerlink" href="#phase-6-net-binding" title="Permanent link">&para;</a></h3>
+<p><code>bindings/dotnet/</code> — a net8.0 class library using <code>[LibraryImport]</code> source-generated
+P/Invoke over the C ABI. Native libraries laid out under <code>runtimes/{rid}/native/</code> (standard
+NuGet convention, so packaging later is a non-event even though publishing itself is
+deferred). A <code>JsonataExpression</code> class implements <code>IDisposable</code>.</p>
+<p>Benchmark: BenchmarkDotNet suite in <code>benchmarks/dotnet/</code>, compared against
+Jsonata.Net.Native.</p>
+<p>Deliverable: same shape as Java — build instructions + prebuilt package artifact on GitHub
+Releases, registry publishing deferred.</p>
+<h2 id="testing-verification-strategy-all-phases">Testing / verification strategy (all phases)<a class="headerlink" href="#testing-verification-strategy-all-phases" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Phases 1–2 share one flag-behavior fixture set (<code>study/cli_spec.md</code> + a JSON case list)
+  consumed by both <code>assert_cmd</code> (Rust) and pytest (Python), so the two CLIs can't silently
+  diverge in flag semantics.</li>
+<li>Phase 3's harness is validated by the calibration pilot before the full matrix runs —
+  cheap to catch a broken checker or miscalibrated task before spending the full budget.</li>
+<li>Phase 4's C smoke test and Phases 5–6's benchmark suites are CI-gated to only run when
+  their respective <code>bindings/*</code> or <code>src/capi.rs</code> paths change, keeping normal PR CI fast.</li>
+<li>Existing 1258-case reference suite and Rust unit tests are unaffected by any of this —
+  all new code is additive (new bin target, new optional feature, new bindings dirs).</li>
+</ul>
+<h2 id="definition-of-done">Definition of done<a class="headerlink" href="#definition-of-done" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Phase 1: <code>jsonata</code> binary builds via <code>cargo build --release --features cli</code>, is attached
+  to GitHub Releases for all target platforms, and passes the shared CLI fixture suite.</li>
+<li>Phase 2: <code>uvx jsonatapy '&lt;expr&gt;' file.json</code> works with no prior install; <code>uvx --from
+  "jsonatapy[mcp]" jsonatapy mcp</code> serves the four MCP tools, verified against a FastMCP
+  client.</li>
+<li>Phase 3: the full 720-run matrix is complete, <code>study/analysis/report.py</code> produces the
+  success-rate/token/failure-mode breakdown, and a written finding (positive or negative)
+  is documented in <code>study/RESULTS.md</code> — this is the actual go/no-go gate for Phases 5–6.</li>
+<li>Phase 4: <code>jsonata.h</code> + smoke test compile and pass in CI on every relevant PR, and
+  <code>bindings/c/README.md</code> documents building the shared library and consuming it from both C
+  and C++ (compile/link commands, CMake and Makefile snippets).</li>
+<li>Phase 5: Java benchmark numbers exist against jsonata-java; prebuilt jar attached to a
+  release.</li>
+<li>Phase 6: .NET benchmark numbers exist against Jsonata.Net.Native; prebuilt package
+  attached to a release.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2024-2026 jsonatapy contributors
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/txjmb/jsonata-core" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://pypi.org/project/jsonatapy/" target="_blank" rel="noopener" title="pypi.org" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6M286.2 444.7a20.4 20.4 0 1 1 0-40.7 20.4 20.4 0 1 1 0 40.7M167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4m-6.6-183.4a20.4 20.4 0 1 1 0 40.8 20.4 20.4 0 1 1 0-40.8"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
