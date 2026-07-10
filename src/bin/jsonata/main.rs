@@ -2,7 +2,11 @@ use clap::Parser;
 
 /// Evaluate JSONata expressions against JSON data.
 #[derive(Parser, Debug)]
-#[command(name = "jsonata", version, about = "Evaluate JSONata expressions against JSON data")]
+#[command(
+    name = "jsonata",
+    version,
+    about = "Evaluate JSONata expressions against JSON data"
+)]
 struct Cli {
     /// Compact JSON output (default: pretty-printed)
     #[arg(short = 'c', long)]
