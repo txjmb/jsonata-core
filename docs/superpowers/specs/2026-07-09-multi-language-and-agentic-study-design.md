@@ -244,6 +244,28 @@ matching the core's existing `Rc`-based non-`Send` design noted in project memor
 validated by a CI-compiled C smoke test (`bindings/c/examples/smoke.c`) that compiles and
 links against the built `cdylib` on every PR touching `src/capi.rs` or the header.
 
+**Consuming it from C/C++ (`bindings/c/README.md`):** documented, not just implied by the
+header existing. Covers:
+- Building the shared library: `cargo build --release --features capi` produces
+  `target/release/libjsonata_core.so` (Linux) / `.dylib` (macOS) / `jsonata_core.dll` +
+  `jsonata_core.dll.lib` (Windows) — the crate's existing `crate-type = ["cdylib", "rlib"]`
+  already emits these, `capi` just adds the `extern "C"` symbols to the library that's
+  already being built.
+- A minimal `#include "jsonata.h"` C example (the same `smoke.c` used as the CI check,
+  documented inline) showing compile + link, e.g.
+  `cc -Ibindings/c examples/smoke.c -Ltarget/release -ljsonata_core -o smoke` on Linux/macOS,
+  with the Windows MSVC equivalent (`cl` + `jsonata_core.dll.lib`) and a note on setting
+  `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH`/`PATH` so the built binary can find the shared
+  library at runtime.
+- A C++ example showing the same header used from C++ (extern "C" linkage already handled by
+  the header's own `#ifdef __cplusplus` guard) plus a tiny RAII wrapper class around
+  `JsonataExpr*`/`jsonata_free_expr` as an idiomatic-C++ usage pattern — illustrative only,
+  not a shipped library (a real C++ wrapper library is out of scope for this phase).
+- CMake and plain-Makefile snippets for linking against the prebuilt shared library from a
+  downstream C/C++ project (both patterns are common enough downstream that showing both is
+  worth the small doc cost; picking one and skipping the other would just shift the request
+  to whichever half is missing).
+
 ### Phase 5: Java binding
 
 `bindings/java/` — a Maven project, pure-Java `java.lang.foreign` binding over the C ABI
@@ -293,7 +315,9 @@ Releases, registry publishing deferred.
 - Phase 3: the full 720-run matrix is complete, `study/analysis/report.py` produces the
   success-rate/token/failure-mode breakdown, and a written finding (positive or negative)
   is documented in `study/RESULTS.md` — this is the actual go/no-go gate for Phases 5–6.
-- Phase 4: `jsonata.h` + smoke test compile and pass in CI on every relevant PR.
+- Phase 4: `jsonata.h` + smoke test compile and pass in CI on every relevant PR, and
+  `bindings/c/README.md` documents building the shared library and consuming it from both C
+  and C++ (compile/link commands, CMake and Makefile snippets).
 - Phase 5: Java benchmark numbers exist against jsonata-java; prebuilt jar attached to a
   release.
 - Phase 6: .NET benchmark numbers exist against Jsonata.Net.Native; prebuilt package
