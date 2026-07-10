@@ -164,8 +164,13 @@ Dispatch: `jsonatapy <expr> [file]` behaves as the CLI above; `jsonatapy mcp [--
 **MCP tools** (`jsonatapy mcp`, richer toolset as decided):
 - `evaluate(expression: str, data: str, bindings: dict | None) -> str` — evaluate against a
   JSON document, optional variable bindings, returns the JSON-encoded result (or an MCP
-  tool-error with the error code/position on failure).
-- `validate(expression: str) -> {ok: bool, error?: str, position?: int}` — parse-only check.
+  tool-error with the message, which carries a JSONata spec code prefix like `T2002:` when
+  applicable — see the Phase 1 correction on structured position not existing below).
+- `validate(expression: str) -> {ok: bool, error?: str}` — parse-only check. No `position`
+  field: as established during Phase 1 (see the error-message-convention note further down),
+  neither `EvaluatorError` nor `ParserError` carries a structured position today, only an
+  optional spec-code prefix embedded in the message string itself. Don't reintroduce the
+  assumption here.
 - `explain(topic: str | None) -> str` — returns curated JSONata reference material (function
   index if no topic, specific section if given). This content is authored once and reused
   as the study's Phase 3 cheatsheet, so it's written to be concise (token cost matters for
