@@ -89,11 +89,11 @@
   },
   {
     "name": "evaluation_error_preserves_error_code",
-    "args": ["1 + \"a\""],
+    "args": ["null + 1"],
     "stdin": "{}",
     "expected_exit": 1,
     "expected_stdout": null,
-    "expected_stderr_contains": "Cannot add"
+    "expected_stderr_contains": "T2002:"
   },
   {
     "name": "malformed_arg_binding_is_exit_2",
@@ -113,10 +113,10 @@
   },
   {
     "name": "null_input_with_data_file_conflict_is_exit_2",
-    "args": ["-n", "1 + 1"],
+    "args": ["-n", "1 + 1", "study/cli_fixtures_testdata.json"],
     "stdin": null,
-    "expected_exit": 0,
-    "expected_stdout": "2\n",
-    "expected_stderr_contains": null
+    "expected_exit": 2,
+    "expected_stdout": null,
+    "expected_stderr_contains": "--null-input"
   }
 ]
