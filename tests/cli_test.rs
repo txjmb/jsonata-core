@@ -162,3 +162,54 @@ fn null_input_with_file_argument_is_a_usage_error() {
 
     std::fs::remove_file(&path).unwrap();
 }
+
+#[test]
+fn from_file_reads_expression_from_a_file() {
+    let dir = std::env::temp_dir();
+    let expr_path = dir.join("jsonata_cli_test_expr.jsonata");
+    std::fs::write(&expr_path, "name").unwrap();
+
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("-f")
+        .arg(expr_path.to_str().unwrap())
+        .write_stdin(r#"{"name": "Carol"}"#)
+        .assert()
+        .success()
+        .stdout("\"Carol\"\n");
+
+    std::fs::remove_file(&expr_path).unwrap();
+}
+
+#[test]
+fn from_file_with_data_file_argument() {
+    let dir = std::env::temp_dir();
+    let expr_path = dir.join("jsonata_cli_test_expr2.jsonata");
+    let data_path = dir.join("jsonata_cli_test_data2.json");
+    std::fs::write(&expr_path, "name").unwrap();
+    std::fs::write(&data_path, r#"{"name": "Dave"}"#).unwrap();
+
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("-f")
+        .arg(expr_path.to_str().unwrap())
+        .arg(data_path.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout("\"Dave\"\n");
+
+    std::fs::remove_file(&expr_path).unwrap();
+    std::fs::remove_file(&data_path).unwrap();
+}
+
+#[test]
+fn from_file_with_nonexistent_expression_file_is_usage_error() {
+    Command::cargo_bin("jsonata")
+        .unwrap()
+        .arg("-f")
+        .arg("/nonexistent/path/to/expr.jsonata")
+        .write_stdin("{}")
+        .assert()
+        .code(2)
+        .stderr(contains("could not read expression file"));
+}

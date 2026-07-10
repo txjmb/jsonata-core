@@ -64,9 +64,13 @@ fn run(cli: Cli) -> ExitCode {
 
     let expression = match expr_source {
         resolve::ExpressionSource::Inline(s) => s,
-        resolve::ExpressionSource::File(_) => {
-            unreachable!("Task 5 implements ExpressionSource::File handling")
-        }
+        resolve::ExpressionSource::File(path) => match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: could not read expression file {}: {}", path, e);
+                return ExitCode::from(2);
+            }
+        },
     };
 
     let data = match input_source {
