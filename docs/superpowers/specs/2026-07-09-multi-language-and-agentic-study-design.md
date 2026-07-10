@@ -100,11 +100,14 @@ model — explicitly deferred, not silently mishandled).
 **Semantics:**
 - JSONata "undefined" result → print nothing, exit 0 (mirrors jq's empty-output behavior;
   distinct from an explicit `null` result, which prints `null`).
-- Evaluation errors → stderr, formatted as `<code> at position <pos>: <message>` (reusing the
-  existing error type's fields), exit 1.
-- Expression parse errors → same stderr format, exit 1 (parse errors are a subset of
-  evaluation errors from the CLI's perspective — both come from `JsonataExpression::new`
-  failing before or during evaluation).
+- Evaluation and parse errors → stderr, exit 1. Neither `EvaluatorError` nor `ParserError`
+  carries a structured position field today (verified against `src/evaluator.rs` and
+  `src/parser.rs` while planning Phase 1) — only some messages embed a JSONata spec code as
+  a string prefix (e.g. `"T2002: ..."`, matching the `^([TDUS]\d{4}):` convention
+  `tests/python/test_reference_suite.py::extract_error_code` already relies on). The CLI
+  passes the error's `Display` message through unchanged when it already starts with that
+  code-prefix pattern, and prepends `error: ` otherwise. Adding structured position
+  tracking to the error types themselves is out of scope for this phase.
 - Invalid input JSON → stderr `error: invalid JSON input: <serde message>`, exit 3.
 - Usage errors (bad flags, missing expression) → clap's standard stderr + exit 2.
 
