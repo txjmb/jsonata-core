@@ -26,6 +26,12 @@ def test_argjson_with_invalid_json_is_an_error() -> None:
         parse_bindings([], ["x=not json"])
 
 
+def test_argjson_rejects_nan_and_infinity() -> None:
+    for bad in ("NaN", "Infinity", "-Infinity", "1e999"):
+        with pytest.raises(BindingError):
+            parse_bindings([], [f"x={bad}"])
+
+
 def test_arg_value_may_contain_equals_signs() -> None:
     b = parse_bindings(["eq=a=b"], [])
     assert b == {"eq": "a=b"}

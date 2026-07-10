@@ -129,6 +129,11 @@ def test_malformed_arg_binding_is_a_usage_error() -> None:
     assert result.returncode == 2
 
 
+def test_argjson_nan_is_usage_error_exit_two() -> None:
+    result = run_cli(["--argjson", "x=NaN", "$x"], stdin="{}")
+    assert result.returncode == 2
+
+
 def test_evaluation_error_preserves_jsonata_error_code() -> None:
     result = run_cli(["null + 1"], stdin="{}")
     assert result.returncode == 1
