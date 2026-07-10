@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def run_cli(args: list[str], stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     """Runs the jsonatapy CLI via `python -m jsonatapy` (PATH-independent,
@@ -182,3 +184,40 @@ def test_null_input_uses_null_not_undefined_context_known_divergence() -> None:
     result = run_cli(["-n", "$"])
     assert result.returncode == 0
     assert result.stdout == "null\n"
+
+
+def test_mcp_subcommand_dispatches_without_crashing_on_missing_fastmcp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Simulates fastmcp not being installed by making the import fail,
+    without needing to actually uninstall it from the test environment.
+
+    Also purges jsonatapy._cli.mcp_server from sys.modules first: when the
+    whole test suite is collected together, test_mcp_server.py's module-level
+    imports (pytest.importorskip("fastmcp"), etc.) already ran during
+    collection and cached both `fastmcp` and `jsonatapy._cli.mcp_server` in
+    sys.modules -- without this purge, `from ._cli.mcp_server import serve`
+    below would return the cached module without re-running its body (so
+    the module-level `from fastmcp import FastMCP` that's supposed to raise
+    ImportError never executes), and the failure would surface later from
+    fastmcp's own internal lazy submodule import instead, escaping
+    _run_mcp's narrow except-ImportError guard around just that one import
+    statement."""
+    import builtins
+    import sys
+
+    monkeypatch.delitem(sys.modules, "jsonatapy._cli.mcp_server", raising=False)
+
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "fastmcp" or name.startswith("fastmcp."):
+            raise ImportError("No module named 'fastmcp'")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    from jsonatapy.__main__ import _run_mcp
+
+    exit_code = _run_mcp([])
+    assert exit_code == 2
