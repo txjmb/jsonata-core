@@ -84,3 +84,21 @@ def test_invalid_json_input_exits_three() -> None:
     result = run_cli(["a"], stdin="not json")
     assert result.returncode == 3
     assert "invalid JSON input" in result.stderr
+
+
+def test_compact_flag_produces_single_line_output() -> None:
+    result = run_cli(["-c", '{"x": a}'], stdin='{"a": 1}')
+    assert result.returncode == 0
+    assert result.stdout == '{"x":1}\n'
+
+
+def test_raw_output_flag_strips_quotes_from_string_results() -> None:
+    result = run_cli(["-r", "name"], stdin='{"name": "Alice"}')
+    assert result.returncode == 0
+    assert result.stdout == "Alice\n"
+
+
+def test_raw_output_flag_does_not_affect_non_string_results() -> None:
+    result = run_cli(["-r", "-c", "items"], stdin='{"items": [1, 2, 3]}')
+    assert result.returncode == 0
+    assert result.stdout == "[1,2,3]\n"

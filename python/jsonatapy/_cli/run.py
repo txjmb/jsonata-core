@@ -160,5 +160,24 @@ def run(argv: list[str]) -> int:
     if result_json is None:
         return 0  # Undefined result: print nothing
 
-    print(result_json)
+    print_result(result_json, args.compact, args.raw_output)
     return 0
+
+
+def print_result(result_json: str, compact: bool, raw_output: bool) -> None:
+    """Prints a non-undefined evaluate_json_or_none() result per -c/-r flags.
+
+    `result_json` is already valid JSON text -- this function only handles
+    presentation (raw string unquoting, pretty vs compact), it never
+    re-evaluates or re-validates the JSON.
+    """
+    value = json.loads(result_json)
+
+    if raw_output and isinstance(value, str):
+        print(value)
+        return
+
+    if compact:
+        print(json.dumps(value, separators=(",", ":")))
+    else:
+        print(json.dumps(value, indent=2))
