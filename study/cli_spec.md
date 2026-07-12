@@ -79,24 +79,12 @@ this exact contract, using a new library method, `evaluate_json_or_none()`
 (added in Phase 2 specifically for this purpose), to correctly distinguish
 an Undefined *result* from an explicit null result -- both `evaluate()` and
 `evaluate_json()` collapse that distinction, `evaluate_json_or_none()`
-does not.
+does not. `evaluate_json_or_none()`'s `json_str` parameter also accepts
+`None` (in addition to a JSON string) to bind the top-level context (`$`)
+to a true `Undefined`, which `-n`/`--null-input` uses -- this is distinct
+from passing the text `"null"`, which binds `$` to an explicit JSON null.
 
-Two disclosed divergences remain:
-
-- **`-n`/`--null-input` uses a `null` evaluation context, not JSONata
-  `Undefined`.** The public `jsonatapy` Python API has no way to construct
-  a true `Undefined` top-level context (`None` always maps to `Null` — see
-  `python_to_json` in `src/lib.rs`). This is unobservable for expressions
-  that don't reference `$` (the common `-n` use case: `-n '1 + 1'`,
-  `-n '$now()'`), but is directly observable for the bare context reference
-  itself: `jsonata -n '$'` (Rust) prints nothing (exit 0, `Undefined`),
-  while `jsonatapy -n '$'` (Python) prints the text `null` (exit 0,
-  `Null`). Note `$exists($)` does **not** distinguish these — it returns
-  `false` under `-n` for both CLIs, since this implementation special-cases
-  `$exists($)` to check named-variable-binding presence rather than the
-  context value's actual definedness.
-  Pinned by `test_null_input_uses_null_not_undefined_context_known_divergence`
-  in `tests/python/test_cli.py`.
+One disclosed divergence remains:
 
 - **The literal word `mcp` as the first argument is reserved for the MCP
   subcommand (`jsonatapy mcp ...`) and cannot be used to evaluate an

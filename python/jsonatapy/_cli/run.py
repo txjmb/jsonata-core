@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-r", "--raw-output", action="store_true", help="Print string results without quotes"
     )
     parser.add_argument(
-        "-n", "--null-input", action="store_true", help="Don't read input; $ is null"
+        "-n", "--null-input", action="store_true", help="Don't read input; $ is Undefined"
     )
     parser.add_argument(
         "-f",
@@ -114,12 +114,13 @@ def _finite_float(text: str) -> float:
     return value
 
 
-def _read_input_json(input_source: InputStdin | InputFile | InputNull) -> str | int:
-    """Returns the raw input JSON text (or "null" for InputNull), or an int
-    exit code on failure. Does NOT parse the JSON itself -- only validates
-    it, since evaluate_json_or_none() takes the raw text directly."""
+def _read_input_json(input_source: InputStdin | InputFile | InputNull) -> str | int | None:
+    """Returns the raw input JSON text, None for InputNull (no input document
+    at all -- binds $ to a true Undefined via evaluate_json_or_none), or an
+    int exit code on failure. Does NOT parse the JSON itself -- only
+    validates it, since evaluate_json_or_none() takes the raw text directly."""
     if isinstance(input_source, InputNull):
-        return "null"
+        return None
     if isinstance(input_source, InputStdin):
         raw = sys.stdin.read()
     else:  # InputFile

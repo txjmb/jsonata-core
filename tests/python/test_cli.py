@@ -174,27 +174,16 @@ def test_unknown_flag_exits_two_via_argparse_default() -> None:
     assert result.returncode == 2
 
 
-def test_null_input_uses_null_not_undefined_context_known_divergence() -> None:
-    """Documents a known, disclosed divergence from the Rust CLI (see this
-    plan's Global Constraints): the Python jsonatapy API has no way to
-    construct a true JSONata Undefined top-level CONTEXT (input) -- this is
-    distinct from Task 3's result-side fix (evaluate_json_or_none), which
-    already resolved the RESULT-side undefined/null ambiguity. -n passes a
-    null context instead of Undefined. Unobservable for expressions that
-    don't reference $ (the common -n use case). The bare context reference
-    $ itself distinguishes them directly -- confirmed live against the
-    built Rust binary: `jsonata -n '$'` prints nothing (exit 0, Undefined
-    result), while this Python CLI's `-n '$'` prints the text "null" (exit
-    0, Null result). (Do NOT use $exists($) for this -- verified live that
-    it returns false under -n for BOTH CLIs, because this Rust
-    implementation special-cases $exists($) to check named-variable-binding
-    presence rather than the actual context value's definedness, so it
-    never round-trips through Null-vs-Undefined at all.) If this test ever
-    starts failing because the divergence was fixed, delete it and update
-    study/cli_spec.md's Python-specific notes accordingly."""
+def test_null_input_binds_dollar_to_true_undefined() -> None:
+    """-n must bind $ to a true JSONata Undefined, matching the Rust CLI
+    exactly (`jsonata -n '$'` prints nothing, exit 0). Previously this CLI
+    passed an explicit JSON null context instead (Python's evaluate_json_or_none
+    had no way to represent "no input at all"), so `-n '$'` printed the text
+    "null" -- a disclosed divergence, now fixed via evaluate_json_or_none's
+    Optional json_str."""
     result = run_cli(["-n", "$"])
     assert result.returncode == 0
-    assert result.stdout == "null\n"
+    assert result.stdout == ""
 
 
 def test_mcp_subcommand_dispatches_without_crashing_on_missing_fastmcp(
