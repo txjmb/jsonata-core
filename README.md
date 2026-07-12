@@ -90,6 +90,20 @@ Supports Python 3.10, 3.11, 3.12, 3.13, 3.14 on Linux, macOS (Intel & ARM), and 
 
 ---
 
+## Command-line quick start
+
+Both packages also ship a CLI, `jq`-shaped, with an identical contract:
+
+```bash
+pip install jsonatapy
+echo '{"orders":[{"product":"Laptop","price":1200}]}' | jsonatapy 'orders[price > 100].product'
+# "Laptop"
+```
+
+See [CLI Reference](docs/cli.md) for the full flag/exit-code contract.
+
+---
+
 ## What is JSONata?
 
 JSONata is a query and transformation language for JSON data:
@@ -144,6 +158,7 @@ benchmark methodology.
 - [Installation](docs/installation.md)
 - [API Reference](docs/api.md)
 - [Usage Guide](docs/usage.md)
+- [CLI Reference](docs/cli.md)
 - [Performance](docs/performance.md)
 - [Optimization Tips](docs/optimization-tips.md)
 - [Building from Source](docs/development/building.md)

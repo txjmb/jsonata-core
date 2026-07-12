@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `evaluate_json_or_none()`'s `json_str` parameter now accepts `None` (in addition to a JSON
+  string), binding the top-level context (`$`) to a true JSONata `Undefined` rather than an
+  explicit `null`. (#68)
+- `docs/cli.md`: a full command-line reference for both `jsonata` (Rust) and `jsonatapy`
+  (Python), covering flags, input resolution, output/exit-code semantics, and the MCP
+  subcommand — previously undocumented outside internal spec/plan files. (#68)
 
 ### Changed
 
@@ -16,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- The Python CLI's `-n`/`--null-input` now binds `$` to a true `Undefined`, matching the Rust
+  CLI exactly (`jsonatapy -n '$'` now prints nothing, as `jsonata -n '$'` already did). It
+  previously passed an explicit JSON `null` context instead, observable only for expressions
+  referencing `$` directly. (#68)
 
 ### Security
 

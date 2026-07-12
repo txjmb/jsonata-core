@@ -12,6 +12,7 @@ Comprehensive documentation for jsonatapy - the high-performance Python implemen
 ### Using jsonatapy
 - **[api.md](api.md)** - Complete Python API reference
 - **[usage.md](usage.md)** - Common patterns and examples
+- **[cli.md](cli.md)** - Command-line interface (`jsonata`/`jsonatapy`): flags, exit codes, examples
 - **[performance.md](performance.md)** - Performance guide and benchmarks
 
 ### Development
