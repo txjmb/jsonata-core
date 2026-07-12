@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.3] - 2026-07-12
+
+### Added
 - `evaluate_json_or_none()`'s `json_str` parameter now accepts `None` (in addition to a JSON
   string), binding the top-level context (`$`) to a true JSONata `Undefined` rather than an
   explicit `null`. (#68)
