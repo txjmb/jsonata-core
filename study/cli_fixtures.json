@@ -40,6 +40,14 @@
     "expected_stderr_contains": null
   },
   {
+    "name": "null_input_binds_dollar_to_true_undefined",
+    "args": ["-n", "$"],
+    "stdin": null,
+    "expected_exit": 0,
+    "expected_stdout": "",
+    "expected_stderr_contains": null
+  },
+  {
     "name": "undefined_result_prints_nothing",
     "args": ["nonexistent_field"],
     "stdin": "{\"a\": 1}",

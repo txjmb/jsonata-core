@@ -232,7 +232,7 @@ class JsonataExpression:
 
     def evaluate_json_or_none(
         self,
-        json_str: str,
+        json_str: str | None,
         bindings: dict[str, Any] | None = None,
         *,
         timeout: int | None = None,
@@ -248,7 +248,10 @@ class JsonataExpression:
         string "null" for an explicit null result.
 
         Args:
-            json_str: Input data as a JSON string
+            json_str: Input data as a JSON string, or None for no input
+                document at all -- the top-level context (`$`) is then a
+                true JSONata Undefined, distinct from passing "null" (an
+                explicit JSON null context).
             bindings: Optional additional variable bindings
             timeout: Maximum evaluation time in milliseconds (raises ValueError
                 with a D1012 code on timeout). Overrides any default set via

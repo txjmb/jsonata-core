@@ -328,6 +328,11 @@ impl JsonataExpression {
     /// is_undefined() BEFORE serializing, exposing the same signal the
     /// Rust CLI (src/bin/jsonata/main.rs) already uses internally.
     ///
+    /// `json_str=None` means no input document at all -- the top-level
+    /// context (`$`) is bound to a true `Undefined`, matching the Rust
+    /// CLI's `--null-input` behavior. This is distinct from passing the
+    /// text `"null"`, which binds `$` to an explicit JSON null.
+    ///
     /// # Errors
     ///
     /// Returns ValueError if JSON parsing or evaluation fails
@@ -336,14 +341,17 @@ impl JsonataExpression {
     fn evaluate_json_or_none(
         &self,
         py: Python,
-        json_str: &str,
+        json_str: Option<&str>,
         bindings: Option<Py<PyAny>>,
         timeout: Option<u64>,
         max_stack_depth: Option<usize>,
         max_sequence_length: Option<usize>,
     ) -> PyResult<Option<String>> {
-        let json_data = JValue::from_json_str(json_str)
-            .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
+        let json_data = match json_str {
+            Some(s) => JValue::from_json_str(s)
+                .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?,
+            None => JValue::Undefined,
+        };
         let options = evaluator::EvaluatorOptions {
             timeout_ms: timeout.or(self.default_options.timeout_ms),
             max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),

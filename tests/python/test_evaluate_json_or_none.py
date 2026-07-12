@@ -47,3 +47,14 @@ def test_evaluation_error_raises_value_error_with_coded_message() -> None:
         assert str(e).startswith("T2002:")
     else:
         raise AssertionError("expected ValueError for null + 1")
+
+
+def test_none_json_str_binds_context_to_true_undefined() -> None:
+    """None (no input at all) must produce a true JSONata Undefined context,
+    distinct from an explicit JSON null context. The bare context reference
+    `$` distinguishes them: with Undefined context, `$` evaluates to
+    Undefined (this method returns None); with a null context, `$` evaluates
+    to the null value itself (this method returns the string "null")."""
+    expr = jsonatapy.compile("$")
+    assert expr.evaluate_json_or_none(None) is None
+    assert expr.evaluate_json_or_none("null") == "null"

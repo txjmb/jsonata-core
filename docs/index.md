@@ -50,6 +50,18 @@ let data = JValue::from_json_str(r#"{"orders":[{"product":"Laptop","price":1200}
 let result = Evaluator::new().evaluate(&ast, &data)?;
 ```
 
+## Command-line quick start
+
+Both packages also ship a CLI, `jq`-shaped, with an identical contract:
+
+```bash
+pip install jsonatapy
+echo '{"orders":[{"product":"Laptop","price":1200}]}' | jsonatapy 'orders[price > 100].product'
+# "Laptop"
+```
+
+See [CLI reference](cli.md) for the full flag/exit-code contract.
+
 ---
 
 ## Performance highlights
