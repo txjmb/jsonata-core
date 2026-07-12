@@ -541,6 +541,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#command-line-quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-line quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#performance-highlights" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1673,6 +1684,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#command-line-quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command-line quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#performance-highlights" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1777,6 +1799,13 @@
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="kd">let</span><span class="w"> </span><span class="n">data</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JValue</span><span class="p">::</span><span class="n">from_json_str</span><span class="p">(</span><span class="s">r#&quot;{&quot;orders&quot;:[{&quot;product&quot;:&quot;Laptop&quot;,&quot;price&quot;:1200}]}&quot;#</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="kd">let</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Evaluator</span><span class="p">::</span><span class="n">new</span><span class="p">().</span><span class="n">evaluate</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ast</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">data</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
 </span></code></pre></div>
+<h2 id="command-line-quick-start">Command-line quick start<a class="headerlink" href="#command-line-quick-start" title="Permanent link">&para;</a></h2>
+<p>Both packages also ship a CLI, <code>jq</code>-shaped, with an identical contract:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>jsonatapy
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;orders&quot;:[{&quot;product&quot;:&quot;Laptop&quot;,&quot;price&quot;:1200}]}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jsonatapy<span class="w"> </span><span class="s1">&#39;orders[price &gt; 100].product&#39;</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># &quot;Laptop&quot;</span>
+</span></code></pre></div>
+<p>See <a href="cli/">CLI reference</a> for the full flag/exit-code contract.</p>
 <hr />
 <h2 id="performance-highlights">Performance highlights<a class="headerlink" href="#performance-highlights" title="Permanent link">&para;</a></h2>
 <ul>

@@ -12,13 +12,9 @@
         <meta name="author" content="jsonatapy contributors">
       
       
-        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.2/performance/">
+        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.2/cli/">
       
       
-        <link rel="prev" href="../error-handling/">
-      
-      
-        <link rel="next" href="../benchmarks/">
       
       
         
@@ -29,7 +25,7 @@
     
     
       
-        <title>Performance Overview - jsonata-core + jsonatapy</title>
+        <title>Command-line interface - jsonata-core + jsonatapy</title>
       
     
     
@@ -92,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#performance-benchmarks" class="md-skip">
+        <a href="#command-line-interface" class="md-skip">
           Skip to content
         </a>
       
@@ -130,7 +126,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Performance Overview
+              Command-line interface
             
           </span>
         </div>
@@ -320,13 +316,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../performance/" class="md-tabs__link">
           
   
   
@@ -853,31 +847,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -895,7 +886,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -910,37 +901,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Performance Overview
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
         
   
   
@@ -956,209 +920,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#implementations-tested" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Implementations Tested
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Implementations Tested">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#methodology-compile-once-evaluate-many" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Methodology: compile-once, evaluate-many
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#summary-by-category" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Summary by Category
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#detailed-results" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Detailed Results
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Detailed Results">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#simple-paths" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Simple Paths
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#array-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Array Operations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complex-transformations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complex Transformations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deep-nesting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deep Nesting
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#string-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        String Operations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#higher-order-functions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Higher-Order Functions
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#realistic-workload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Realistic Workload
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#path-comparison" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Path Comparison
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#performance-characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Performance Characteristics
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Performance Characteristics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#optimizing-array-workloads" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optimizing Array Workloads
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#methodology" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Methodology
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1773,38 +1534,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#implementations-tested" class="md-nav__link">
+  <a href="#installation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Implementations Tested
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Implementations Tested">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#methodology-compile-once-evaluate-many" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Methodology: compile-once, evaluate-many
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#summary-by-category" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Summary by Category
+        Installation
       
     </span>
   </a>
@@ -1812,143 +1545,87 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#detailed-results" class="md-nav__link">
+  <a href="#usage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Detailed Results
+        Usage
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Detailed Results">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#simple-paths" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Simple Paths
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#array-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Array Operations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complex-transformations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complex Transformations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deep-nesting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deep Nesting
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#string-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        String Operations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#higher-order-functions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Higher-Order Functions
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#realistic-workload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Realistic Workload
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#path-comparison" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Path Comparison
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#performance-characteristics" class="md-nav__link">
+  <a href="#flags" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Performance Characteristics
+        Flags
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Performance Characteristics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#optimizing-array-workloads" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optimizing Array Workloads
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#methodology" class="md-nav__link">
+  <a href="#-n-null-input" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Methodology
+        -n/--null-input
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-message-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error message format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-server-python-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP server (Python only)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#full-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full contract
       
     </span>
   </a>
@@ -1975,634 +1652,162 @@
   
 
 
-<h1 id="performance-benchmarks">Performance Benchmarks<a class="headerlink" href="#performance-benchmarks" title="Permanent link">&para;</a></h1>
-<p>jsonatapy is a high-performance Rust implementation of JSONata with Python bindings. This page presents benchmark comparisons against other JSONata implementations.</p>
-<p><strong>These numbers come from a dedicated, self-hosted Mac Mini (Apple Silicon), not a shared cloud CI runner</strong> — single-tenant physical hardware with no other workloads competing for CPU. This matters: single-sample measurements on a shared/virtualized runner were previously noisy enough that identical code, measured twice, swung -66% to +120%. Every number below is also the <em>minimum</em> of 5 independent measurement trials per test (not an average) — for CPU-bound microbenchmarks, interference can only make a run slower than the code's true achievable speed, never faster, so the minimum across repeated trials is the best available estimate of that true speed.</p>
-<h2 id="implementations-tested">Implementations Tested<a class="headerlink" href="#implementations-tested" title="Permanent link">&para;</a></h2>
+<h1 id="command-line-interface">Command-line interface<a class="headerlink" href="#command-line-interface" title="Permanent link">&para;</a></h1>
+<p>Both packages ship a command-line tool with an identical flag/exit-code
+contract — <code>jsonata</code> (Rust, from <code>jsonata-core</code>) and <code>jsonatapy</code> (Python,
+from <code>jsonatapy</code>). Pick whichever matches how you installed the library;
+scripts written against one work unchanged against the other.</p>
+<p>The shape deliberately mirrors <code>jq</code>: <code>&lt;tool&gt; [OPTIONS] EXPRESSION [FILE]</code>,
+reading JSON from a file argument or stdin, printing the result to stdout.
+The expression syntax itself is JSONata, not <code>jq</code>'s — but where <code>jq</code> often
+needs several piped filters to filter, aggregate, and reshape data, a single
+JSONata expression usually does all three at once. Path expressions
+(<code>orders[price &gt; 100].product</code>) will also look familiar if you've used
+JSONPath.</p>
+<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Python</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span>jsonatapy
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>jsonatapy<span class="w"> </span><span class="s1">&#39;orders[price &gt; 100].product&#39;</span><span class="w"> </span>data.json
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Rust (from source)</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>cargo<span class="w"> </span>install<span class="w"> </span>jsonata-core<span class="w"> </span>--features<span class="w"> </span>cli
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>jsonata<span class="w"> </span><span class="s1">&#39;orders[price &gt; 100].product&#39;</span><span class="w"> </span>data.json
+</span></code></pre></div>
+<h2 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>jsonata   [OPTIONS] [EXPRESSION] [FILE]
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>jsonatapy [OPTIONS] [EXPRESSION] [FILE]
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>&lt;tool&gt; [OPTIONS] --from-file &lt;EXPR_FILE&gt; [FILE]
+</span></code></pre></div>
+<p>If <code>FILE</code> is omitted, input is read from stdin.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;name&quot;: &quot;Alice&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jsonatapy<span class="w"> </span><span class="s1">&#39;name&#39;</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># &quot;Alice&quot;</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>jsonatapy<span class="w"> </span><span class="s1">&#39;name&#39;</span><span class="w"> </span>data.json
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># &quot;Alice&quot;</span>
+</span></code></pre></div>
+<h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Implementation</th>
-<th>Language</th>
-<th>Version</th>
+<th>Flag</th>
 <th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>jsonatapy</strong></td>
-<td>Rust + Python</td>
-<td>2.2.2</td>
-<td>This project (compiled Rust extension via PyO3)</td>
+<td><code>-c</code>, <code>--compact</code></td>
+<td>Compact JSON output (default: pretty-printed)</td>
 </tr>
 <tr>
-<td><strong>jsonatapy</strong> (rust-only)</td>
-<td>Rust + Python</td>
-<td>2.2.2</td>
-<td>Same library, JSON string I/O path (bypasses Python object conversion)</td>
+<td><code>-r</code>, <code>--raw-output</code></td>
+<td>Print string results without surrounding quotes (non-string results are unaffected)</td>
 </tr>
 <tr>
-<td><strong>jsonata-js</strong></td>
-<td>JavaScript</td>
-<td>2.1.0</td>
-<td>Reference implementation (Node.js v20.20.2)</td>
+<td><code>-n</code>, <code>--null-input</code></td>
+<td>Don't read input; <code>$</code> is <code>Undefined</code>. Cannot be combined with a data-file argument.</td>
 </tr>
 <tr>
-<td><strong>jsonata-python</strong></td>
-<td>Python</td>
-<td>unknown</td>
-<td>Pure Python implementation</td>
+<td><code>-f</code>, <code>--from-file &lt;FILE&gt;</code></td>
+<td>Read the expression from <code>FILE</code> instead of the first positional argument. The (now single) remaining positional argument, if given, is the input data file.</td>
 </tr>
 <tr>
-<td><strong>jsonata-rs</strong></td>
-<td>Rust</td>
-<td>0.3</td>
-<td>Pure Rust implementation (CLI benchmark, no Python overhead)</td>
+<td><code>--arg NAME=VALUE</code></td>
+<td>Bind <code>$NAME</code> to the string <code>VALUE</code>. Repeatable. <code>VALUE</code> may itself contain <code>=</code> characters (only the first <code>=</code> splits name from value).</td>
+</tr>
+<tr>
+<td><code>--argjson NAME=JSON</code></td>
+<td>Bind <code>$NAME</code> to the JSON value parsed from <code>JSON</code>. Repeatable.</td>
+</tr>
+<tr>
+<td><code>-V</code>, <code>--version</code></td>
+<td>Print version and exit 0.</td>
+</tr>
+<tr>
+<td><code>-h</code>, <code>--help</code></td>
+<td>Print help and exit 0.</td>
 </tr>
 </tbody>
 </table>
-<h3 id="methodology-compile-once-evaluate-many">Methodology: compile-once, evaluate-many<a class="headerlink" href="#methodology-compile-once-evaluate-many" title="Permanent link">&para;</a></h3>
-<p>Every implementation below is measured the way a real caller who evaluates the same expression repeatedly would use it, not its slowest possible one-off call:</p>
-<ul>
-<li><strong>jsonatapy</strong> — <code>jsonatapy.compile(expr)</code> once, then <code>.evaluate(data)</code> in the timed loop. No further reuse is available; the compiled bytecode is already cached on the expression object.</li>
-<li>
-<p><strong>jsonata-js</strong> — <code>jsonata(expr)</code> once, then <code>.evaluate(data)</code> in the timed loop. Same story: this is already the library's fastest repeated-call path.</p>
-</li>
-<li>
-<p><strong>jsonata-python</strong> — uses its documented <code>Context</code> object (<code>ctx = jsonata.Context()</code>, then <code>ctx(expr, data)</code> in the loop) rather than the one-off <code>transform()</code> convenience function. <code>transform()</code> re-bootstraps an embedded Duktape engine — reloading the <code>jsonata.js</code> library into it — on every single call; reusing a <code>Context</code> keeps that engine warm and is the library's own documented path for repeated evaluation. It is <em>not</em> a true compile-once equivalent, since <code>Context.__call__</code> still re-parses the expression string on every call, so some of the remaining gap to jsonatapy/jsonata-js is real parsing cost this library doesn't let a caller amortize away.</p>
-</li>
-</ul>
-<p>Benchmarks run on 2026-07-08.</p>
-<h2 id="summary-by-category">Summary by Category<a class="headerlink" href="#summary-by-category" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Category</th>
-<th>jsonatapy vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Simple Paths</td>
-<td><strong>2.7x faster</strong></td>
-</tr>
-<tr>
-<td>Array Operations</td>
-<td><strong>1.9x faster</strong></td>
-</tr>
-<tr>
-<td>Complex Transformations</td>
-<td><strong>5.5x faster</strong></td>
-</tr>
-<tr>
-<td>Deep Nesting</td>
-<td><strong>1.4x faster</strong></td>
-</tr>
-<tr>
-<td>String Operations</td>
-<td><strong>5.3x faster</strong></td>
-</tr>
-<tr>
-<td>Higher-Order Functions</td>
-<td><strong>9.2x faster</strong></td>
-</tr>
-<tr>
-<td>Realistic Workload</td>
-<td><strong>1.5x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h2 id="detailed-results">Detailed Results<a class="headerlink" href="#detailed-results" title="Permanent link">&para;</a></h2>
-<h3 id="simple-paths">Simple Paths<a class="headerlink" href="#simple-paths" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Simple Path</td>
-<td>tiny</td>
-<td>6.326</td>
-<td>6.588</td>
-<td>14.740</td>
-<td>1842.276</td>
-<td>61.632</td>
-<td><strong>2.3x faster</strong></td>
-</tr>
-<tr>
-<td>Deep Path (5 levels)</td>
-<td>tiny</td>
-<td>9.409</td>
-<td>9.425</td>
-<td>22.610</td>
-<td>3025.274</td>
-<td>72.117</td>
-<td><strong>2.4x faster</strong></td>
-</tr>
-<tr>
-<td>Array Index Access</td>
-<td>100 elements</td>
-<td>6.427</td>
-<td>9.300</td>
-<td>9.440</td>
-<td>942.855</td>
-<td>86.428</td>
-<td><strong>1.5x faster</strong></td>
-</tr>
-<tr>
-<td>Arithmetic Expression</td>
-<td>tiny</td>
-<td>4.241</td>
-<td>5.153</td>
-<td>19.100</td>
-<td>2622.020</td>
-<td>56.809</td>
-<td><strong>4.5x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="array-operations">Array Operations<a class="headerlink" href="#array-operations" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Array Sum (100 elements)</td>
-<td>100 elements</td>
-<td>1.685</td>
-<td>2.226</td>
-<td>5.920</td>
-<td>305.974</td>
-<td>17.968</td>
-<td><strong>3.5x faster</strong></td>
-</tr>
-<tr>
-<td>Array Max (100 elements)</td>
-<td>100 elements</td>
-<td>1.432</td>
-<td>1.980</td>
-<td>5.550</td>
-<td>299.518</td>
-<td>17.966</td>
-<td><strong>3.9x faster</strong></td>
-</tr>
-<tr>
-<td>Array Count (100 elements)</td>
-<td>100 elements</td>
-<td>2.626</td>
-<td>3.764</td>
-<td>7.510</td>
-<td>532.242</td>
-<td>35.079</td>
-<td><strong>2.9x faster</strong></td>
-</tr>
-<tr>
-<td>Array Sum (1000 elements)</td>
-<td>1000 elements</td>
-<td>2.787</td>
-<td>3.878</td>
-<td>4.550</td>
-<td>178.736</td>
-<td>24.349</td>
-<td><strong>1.6x faster</strong></td>
-</tr>
-<tr>
-<td>Array Max (1000 elements)</td>
-<td>1000 elements</td>
-<td>2.306</td>
-<td>3.374</td>
-<td>3.700</td>
-<td>166.936</td>
-<td>24.341</td>
-<td><strong>1.6x faster</strong></td>
-</tr>
-<tr>
-<td>Array Sum (10000 elements)</td>
-<td>10000 elements</td>
-<td>6.617</td>
-<td>9.635</td>
-<td>8.770</td>
-<td>354.684</td>
-<td>59.872</td>
-<td><strong>1.3x faster</strong></td>
-</tr>
-<tr>
-<td>Array Mapping (extract field)</td>
-<td>100 objects</td>
-<td>42.549</td>
-<td>35.726</td>
-<td>18.250</td>
-<td>2678.886</td>
-<td>210.859</td>
-<td>2.3x slower</td>
-</tr>
-<tr>
-<td>Array Mapping + Sum</td>
-<td>100 objects</td>
-<td>41.801</td>
-<td>34.591</td>
-<td>21.560</td>
-<td>2987.670</td>
-<td>211.051</td>
-<td>1.9x slower</td>
-</tr>
-<tr>
-<td>Array Filtering (predicate)</td>
-<td>100 objects</td>
-<td>30.075</td>
-<td>21.448</td>
-<td>44.770</td>
-<td>6759.223</td>
-<td>109.573</td>
-<td><strong>1.5x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="complex-transformations">Complex Transformations<a class="headerlink" href="#complex-transformations" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Object Construction (simple)</td>
-<td>tiny</td>
-<td>5.630</td>
-<td>5.303</td>
-<td>24.760</td>
-<td>2545.947</td>
-<td>33.754</td>
-<td><strong>4.4x faster</strong></td>
-</tr>
-<tr>
-<td>Object Construction (nested)</td>
-<td>tiny</td>
-<td>7.734</td>
-<td>6.607</td>
-<td>30.580</td>
-<td>2913.775</td>
-<td>36.875</td>
-<td><strong>4.0x faster</strong></td>
-</tr>
-<tr>
-<td>Conditional Expression</td>
-<td>tiny</td>
-<td>1.762</td>
-<td>2.073</td>
-<td>11.610</td>
-<td>1363.979</td>
-<td>26.235</td>
-<td><strong>6.6x faster</strong></td>
-</tr>
-<tr>
-<td>Multiple Nested Functions</td>
-<td>tiny</td>
-<td>2.442</td>
-<td>2.708</td>
-<td>17.410</td>
-<td>1788.894</td>
-<td>27.879</td>
-<td><strong>7.1x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="deep-nesting">Deep Nesting<a class="headerlink" href="#deep-nesting" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Deep Path (12 levels)</td>
-<td>12 levels</td>
-<td>9.562</td>
-<td>8.914</td>
-<td>23.150</td>
-<td>2929.821</td>
-<td>55.372</td>
-<td><strong>2.4x faster</strong></td>
-</tr>
-<tr>
-<td>Nested Array Access</td>
-<td>4-level nested arrays</td>
-<td>16.914</td>
-<td>19.027</td>
-<td>6.390</td>
-<td>612.692</td>
-<td>108.031</td>
-<td>2.6x slower</td>
-</tr>
-</tbody>
-</table>
-<h3 id="string-operations">String Operations<a class="headerlink" href="#string-operations" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>String Uppercase</td>
-<td>tiny</td>
-<td>4.863</td>
-<td>5.173</td>
-<td>20.150</td>
-<td>2413.651</td>
-<td>53.489</td>
-<td><strong>4.1x faster</strong></td>
-</tr>
-<tr>
-<td>String Lowercase</td>
-<td>tiny</td>
-<td>4.807</td>
-<td>5.216</td>
-<td>19.920</td>
-<td>2416.669</td>
-<td>53.246</td>
-<td><strong>4.1x faster</strong></td>
-</tr>
-<tr>
-<td>String Length</td>
-<td>tiny</td>
-<td>4.211</td>
-<td>4.838</td>
-<td>21.950</td>
-<td>2617.585</td>
-<td>55.043</td>
-<td><strong>5.2x faster</strong></td>
-</tr>
-<tr>
-<td>String Concatenation</td>
-<td>tiny</td>
-<td>3.849</td>
-<td>3.759</td>
-<td>24.010</td>
-<td>1932.848</td>
-<td>30.280</td>
-<td><strong>6.2x faster</strong></td>
-</tr>
-<tr>
-<td>String Substring</td>
-<td>tiny</td>
-<td>3.259</td>
-<td>3.520</td>
-<td>17.910</td>
-<td>1694.051</td>
-<td>28.720</td>
-<td><strong>5.5x faster</strong></td>
-</tr>
-<tr>
-<td>String Contains</td>
-<td>tiny</td>
-<td>2.165</td>
-<td>2.482</td>
-<td>14.630</td>
-<td>1427.701</td>
-<td>28.338</td>
-<td><strong>6.8x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="higher-order-functions">Higher-Order Functions<a class="headerlink" href="#higher-order-functions" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>$map with lambda</td>
-<td>100 elements</td>
-<td>1.973</td>
-<td>2.072</td>
-<td>21.450</td>
-<td>2693.451</td>
-<td>7.102</td>
-<td><strong>10.9x faster</strong></td>
-</tr>
-<tr>
-<td>$filter with lambda</td>
-<td>100 elements</td>
-<td>1.927</td>
-<td>2.011</td>
-<td>21.370</td>
-<td>2698.443</td>
-<td>7.043</td>
-<td><strong>11.1x faster</strong></td>
-</tr>
-<tr>
-<td>$reduce with lambda</td>
-<td>100 elements</td>
-<td>3.659</td>
-<td>3.745</td>
-<td>20.510</td>
-<td>2707.532</td>
-<td>7.699</td>
-<td><strong>5.6x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="realistic-workload">Realistic Workload<a class="headerlink" href="#realistic-workload" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Filter by category</td>
-<td>100 products</td>
-<td>75.515</td>
-<td>55.814</td>
-<td>45.200</td>
-<td>7477.472</td>
-<td>320.311</td>
-<td>1.7x slower</td>
-</tr>
-<tr>
-<td>Calculate total value</td>
-<td>100 products</td>
-<td>69.418</td>
-<td>56.145</td>
-<td>33.590</td>
-<td>5175.303</td>
-<td>319.921</td>
-<td>2.1x slower</td>
-</tr>
-<tr>
-<td>Complex transformation</td>
-<td>100 products</td>
-<td>38.575</td>
-<td>32.048</td>
-<td>78.590</td>
-<td>9345.187</td>
-<td>137.732</td>
-<td><strong>2.0x faster</strong></td>
-</tr>
-<tr>
-<td>Group by category (aggregate)</td>
-<td>100 products</td>
-<td>35.215</td>
-<td>29.877</td>
-<td>79.550</td>
-<td>N/A</td>
-<td>135.798</td>
-<td><strong>2.3x faster</strong></td>
-</tr>
-<tr>
-<td>Top rated products</td>
-<td>100 products</td>
-<td>17.500</td>
-<td>13.144</td>
-<td>34.710</td>
-<td>4539.881</td>
-<td>68.134</td>
-<td><strong>2.0x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="path-comparison">Path Comparison<a class="headerlink" href="#path-comparison" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>jsonatapy (ms)</th>
-<th>Iterations</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Filter by category (data handle)</td>
-<td>12.909</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Filter by category (data→json)</td>
-<td>6.166</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Complex transformation (data handle)</td>
-<td>33.787</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Complex transformation (data→json)</td>
-<td>28.536</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Aggregate (data handle)</td>
-<td>6.279</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Aggregate (data→json)</td>
-<td>6.299</td>
-<td>500</td>
-</tr>
-</tbody>
-</table>
-<h2 id="performance-characteristics">Performance Characteristics<a class="headerlink" href="#performance-characteristics" title="Permanent link">&para;</a></h2>
-<p><strong>Faster than JavaScript:</strong></p>
-<ul>
-<li>Simple Paths (<strong>2.7x faster</strong>)</li>
-<li>Array Operations (<strong>1.9x faster</strong>)</li>
-<li>Complex Transformations (<strong>5.5x faster</strong>)</li>
-<li>Deep Nesting (<strong>1.4x faster</strong>)</li>
-<li>String Operations (<strong>5.3x faster</strong>)</li>
-<li>Higher-Order Functions (<strong>9.2x faster</strong>)</li>
-<li>Realistic Workload (<strong>1.5x faster</strong>)</li>
-</ul>
-<p><strong>Comparable to JavaScript:</strong></p>
-<ul>
-<li>(none this run)</li>
-</ul>
-<h3 id="optimizing-array-workloads">Optimizing Array Workloads<a class="headerlink" href="#optimizing-array-workloads" title="Permanent link">&para;</a></h3>
-<p>For array-heavy workloads, the dominant cost is converting Python dicts to Rust values on every call. Use <code>JsonataData</code> to pre-convert data once and reuse across multiple evaluations:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="o">...</span><span class="p">}</span>  <span class="c1"># your data</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;products[price &gt; 100]&quot;</span><span class="p">)</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Pre-convert once</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">jdata</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">JsonataData</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Reuse many times (3-15x faster than evaluate(dict))</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">jdata</span><span class="p">)</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>jsonatapy<span class="w"> </span>--arg<span class="w"> </span><span class="nv">region</span><span class="o">=</span>us<span class="w"> </span>--argjson<span class="w"> </span><span class="nv">limit</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="s1">&#39;$region &amp; &quot;: &quot; &amp; $limit&#39;</span><span class="w"> </span>-n
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># &quot;us: 5&quot;</span>
 </span></code></pre></div>
-<h2 id="methodology">Methodology<a class="headerlink" href="#methodology" title="Permanent link">&para;</a></h2>
+<p>(The quotes are part of the JSON output — the result is a string. Use <code>-r</code> to print it unquoted.)</p>
+<h2 id="-n-null-input"><code>-n</code>/<code>--null-input</code><a class="headerlink" href="#-n-null-input" title="Permanent link">&para;</a></h2>
+<p>Evaluates the expression with no input document at all: <code>$</code> is a true
+JSONata <code>Undefined</code>, not an explicit <code>null</code>. Useful for expressions that
+don't depend on external data (<code>$now()</code>, arithmetic, <code>--arg</code>/<code>--argjson</code>
+bindings):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>jsonatapy<span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;1 + 1&#39;</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># 2</span>
+</span></code></pre></div>
+<p>This is only observable for expressions that reference <code>$</code> directly — an
+explicit <code>null</code> context would print <code>null</code> for the bare expression <code>$</code>,
+while <code>Undefined</code> prints nothing:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>jsonatapy<span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;$&#39;</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># (no output, exit 0)</span>
+</span></code></pre></div>
+<h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Date:</strong> 2026-07-08</li>
-<li><strong>Platform:</strong> GitHub Actions (self-hosted Michaels-Mini, physical/dedicated hardware, macOS ARM64)</li>
-<li><strong>Python:</strong> 3.14.6</li>
-<li><strong>Node.js:</strong> v20.20.2</li>
-<li>All times are total wall-clock time for the stated number of iterations</li>
-<li>Each benchmark includes a warmup phase before measurement</li>
-<li>'vs JS' column shows jsonatapy speedup relative to the JavaScript reference implementation</li>
-<li>Values &gt; 1x mean jsonatapy is faster; &lt; 1x means JavaScript is faster</li>
+<li>A JSONata <code>Undefined</code> result prints nothing to stdout, exit 0.</li>
+<li>A JSON <code>null</code> result prints the literal text <code>null</code>, exit 0.</li>
+<li>Otherwise, the result is printed as JSON (pretty by default, single-line
+  with <code>-c</code>), followed by a trailing newline. With <code>-r</code>, string results are
+  printed unquoted/unescaped instead; non-string results are unaffected by
+  <code>-r</code>.</li>
 </ul>
+<h2 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Success (including an <code>Undefined</code> result, and <code>--version</code>/<code>--help</code>)</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Expression parse error or evaluation error</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Usage/invocation error: bad flags, malformed <code>--arg</code>/<code>--argjson</code>, an incompatible flag combination (e.g. <code>-n</code> + data file), or an expression/input file that could not be read</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Input was read successfully but is not valid JSON</td>
+</tr>
+</tbody>
+</table>
+<h2 id="error-message-format">Error message format<a class="headerlink" href="#error-message-format" title="Permanent link">&para;</a></h2>
+<p>Errors go to stderr. JSONata spec-coded errors (e.g. from evaluation or
+parsing — codes match <code>^[TDUS]\d{4}:</code>) are printed exactly as <code>CODE: message</code>
+with no extra prefix, so scripts/agents can pattern-match on the code
+directly:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>jsonatapy<span class="w"> </span><span class="s1">&#39;null + 1&#39;</span><span class="w"> </span>-n
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># T2002: The left side of the + operator must evaluate to a number</span>
+</span></code></pre></div>
+<p>All other errors are prefixed with <code>error:</code> (or, for non-spec-coded parse
+errors specifically, <code>Parse error:</code>).</p>
+<h2 id="mcp-server-python-only">MCP server (Python only)<a class="headerlink" href="#mcp-server-python-only" title="Permanent link">&para;</a></h2>
+<p><code>jsonatapy</code> can also run as an <a href="https://modelcontextprotocol.io/">MCP</a> server,
+exposing JSONata evaluation as tools for AI agents:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;jsonatapy[mcp]&#39;</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>jsonatapy<span class="w"> </span>mcp<span class="w">          </span><span class="c1"># stdio transport</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>jsonatapy<span class="w"> </span>mcp<span class="w"> </span>--http<span class="w">   </span><span class="c1"># HTTP transport (default port 8000)</span>
+</span></code></pre></div>
+<p>Because <code>mcp</code> is reserved as the first argument for this subcommand, it
+cannot be used as a literal expression naming a field called <code>mcp</code> — use
+<code>--from-file</code> or a longer path expression (e.g. <code>$.mcp</code>) instead.</p>
+<h2 id="full-contract">Full contract<a class="headerlink" href="#full-contract" title="Permanent link">&para;</a></h2>
+<p><code>study/cli_spec.md</code> in the repository is the canonical, executable
+flag/exit-code contract both implementations are tested against
+(<code>study/cli_fixtures.json</code>) — consult it if you're contributing to either
+CLI implementation rather than just using it.</p>
 
 
 
