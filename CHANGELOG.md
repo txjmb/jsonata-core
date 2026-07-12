@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subcommand — previously undocumented outside internal spec/plan files. (#68)
 
 ### Changed
+- Release CLI binary archives are now named `jsonata-v<version>-<target>.tar.gz`/`.zip`
+  (previously `jsonata-<target>.tar.gz`/`.zip` with no version embedded).
 
 ### Deprecated
 
@@ -26,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI exactly (`jsonatapy -n '$'` now prints nothing, as `jsonata -n '$'` already did). It
   previously passed an explicit JSON `null` context instead, observable only for expressions
   referencing `$` directly. (#68)
+- Release workflow: `publish-pypi` and `publish-crates` now require `build-cli-binaries` to
+  succeed first. Previously the two registry publishes were independent of the CLI binary
+  build, so a CLI build failure (untested in a real release prior to this) would have shipped
+  a version to PyPI/crates.io with no CLI binaries attached and no way to reuse that version
+  number.
 
 ### Security
 

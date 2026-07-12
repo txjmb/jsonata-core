@@ -345,7 +345,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-cli
-          tar czf dist-cli/jsonata-${{ matrix.platform.target }}.tar.gz \
+          tar czf dist-cli/jsonata-v${{ needs.validate-version.outputs.version }}-${{ matrix.platform.target }}.tar.gz \
             -C target/${{ matrix.platform.target }}/release jsonata
 
       - name: Package binary (Windows)
@@ -354,7 +354,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist-cli
           Compress-Archive -Path target/${{ matrix.platform.target }}/release/jsonata.exe `
-            -DestinationPath dist-cli/jsonata-${{ matrix.platform.target }}.zip
+            -DestinationPath dist-cli/jsonata-v${{ needs.validate-version.outputs.version }}-${{ matrix.platform.target }}.zip
 
       - name: Upload CLI binary
         uses: actions/upload-artifact@v7
@@ -569,7 +569,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [validate-version, test-wheels, generate-changelog]
+    needs: [validate-version, test-wheels, build-cli-binaries, generate-changelog]
     if: github.event.inputs.dry_run != 'true'
     timeout-minutes: 15
     environment:
@@ -607,7 +607,7 @@ jobs:
   publish-crates:
     name: Publish to crates.io
     runs-on: ubuntu-latest
-    needs: [validate-version, test-wheels]
+    needs: [validate-version, test-wheels, build-cli-binaries]
     if: github.event.inputs.dry_run != 'true'
     timeout-minutes: 20
 
