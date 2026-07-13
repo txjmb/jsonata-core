@@ -1,0 +1,133 @@
+[ {
+  "scenario" : "Simple Path",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Deep Path (5 levels)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Index Access",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Arithmetic Expression",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Sum (100 elements)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Max (100 elements)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Count (100 elements)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Sum (1000 elements)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Max (1000 elements)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Sum (10000 elements)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Mapping (extract field)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Mapping + Sum",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Array Filtering (predicate)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Object Construction (simple)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Object Construction (nested)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Conditional Expression",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Multiple Nested Functions",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Deep Path (12 levels)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Nested Array Access",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "String Uppercase",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "String Lowercase",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "String Length",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "String Concatenation",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "String Substring",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "String Contains",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "$map with lambda",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "$filter with lambda",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "$reduce with lambda",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Filter by category",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Calculate total value",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Complex transformation",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Group by category (aggregate)",
+  "status" : "match",
+  "detail" : ""
+}, {
+  "scenario" : "Top rated products",
+  "status" : "mismatch",
+  "detail" : "ours=[{\"id\":2,\"name\":\"Product 2\",\"category\":\"Books\",\"price\":21,\"inStock\":true,\"rating\":4,\"reviews\":4,\"tags\":[\"tag0\",\"tag1\"],\"vendor\":{\"name\":\"Vendor 2\",\"rating\":4.4}},{\"id\":5,\"name\":\"Product 5\",\"category\":... theirs=[{\"id\":98,\"name\":\"Product 98\",\"category\":\"Books\",\"price\":549,\"inStock\":true,\"rating\":4,\"reviews\":196,\"tags\":[\"tag0\",\"tag1\",\"tag2\"],\"vendor\":{\"name\":\"Vendor 8\",\"rating\":4.6}},{\"id\":95,\"name\":\"Product 9..."
+} ]
