@@ -7039,6 +7039,9 @@ impl Evaluator {
                         "length() requires exactly 1 argument".to_string(),
                     ));
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match &evaluated_args[0] {
                     JValue::String(s) => Ok(functions::string::length(s)?),
                     _ => Err(EvaluatorError::TypeError(
@@ -7711,6 +7714,9 @@ impl Evaluator {
                         "abs() requires exactly 1 argument".to_string(),
                     ));
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match &evaluated_args[0] {
                     JValue::Null => Ok(JValue::Null),
                     JValue::Number(n) => Ok(functions::numeric::abs(*n)?),
@@ -7724,6 +7730,9 @@ impl Evaluator {
                     return Err(EvaluatorError::EvaluationError(
                         "floor() requires exactly 1 argument".to_string(),
                     ));
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::Null => Ok(JValue::Null),
@@ -7739,6 +7748,9 @@ impl Evaluator {
                         "ceil() requires exactly 1 argument".to_string(),
                     ));
                 }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
                 match &evaluated_args[0] {
                     JValue::Null => Ok(JValue::Null),
                     JValue::Number(n) => Ok(functions::numeric::ceil(*n)?),
@@ -7752,6 +7764,9 @@ impl Evaluator {
                     return Err(EvaluatorError::EvaluationError(
                         "round() requires 1 or 2 arguments".to_string(),
                     ));
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::Null => Ok(JValue::Null),
@@ -7780,6 +7795,9 @@ impl Evaluator {
                     return Err(EvaluatorError::EvaluationError(
                         "sqrt() requires exactly 1 argument".to_string(),
                     ));
+                }
+                if evaluated_args[0].is_undefined() {
+                    return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
                     JValue::Null => Ok(JValue::Null),
