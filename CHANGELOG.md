@@ -43,10 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than a fresh copy. Mutating such a result mutates the corresponding input — copy
   explicitly (e.g. `copy.deepcopy`) first if you plan to mutate. Passed-through values also keep
   their exact Python type (an `int` field the expression never reads stays an `int`); fields the
-  expression does touch still normalize numbers to Python `float`, as before.
+  expression does touch still round-trip through the engine's number representation (whole
+  values come back as Python `int`), as before.
 - **Behavior change:** an unconvertible input value (e.g. a `set`) now raises `TypeError` only
   when the expression actually touches it, instead of eagerly for the whole input at the start
-  of `evaluate()`.
+  of `evaluate()`. Any Python exception raised while lazily reading a field (e.g. `OverflowError`
+  on an integer too large to represent) is likewise normalized to `TypeError` at this boundary,
+  rather than propagating as its original exception type.
 
 ### Deprecated
 

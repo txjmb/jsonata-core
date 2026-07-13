@@ -212,7 +212,8 @@ row is comfortably under its jsonata-js column value).
   lists remain eager, so array-of-array structures still convert fully on access.
   A `LazyPyList` would fix it but multiplies the touch surface (Array matching is
   pervasive in the engine); deferred until a real workload needs it.
-- Dense-access expressions may regress; bounded by the ≤10% gate + contingency.
+- Dense-access expressions may regress; bounded by the revised absolute gate
+  (≤93µs for the dense-transformation case; see `benchmarks/python/lazy_check.py`).
 - Evaluation now reads Python objects mid-flight; code that assumes `JValue` trees
   are GIL-independent after conversion must not be given lazy values
   (`JsonataData` path guarantees this by staying eager).

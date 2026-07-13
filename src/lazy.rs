@@ -59,6 +59,14 @@ impl LazyPyDict {
     }
 
     /// Read one field, converting on first access. Absent key → Undefined.
+    ///
+    /// Any `PyErr` raised while reading or converting the value -- not just the
+    /// `PyTypeError` from `convert()`'s own unconvertible-type check, but also e.g.
+    /// `OverflowError` from a Python int too large to fit an `i64`/`f64`, or an error
+    /// from `dict.get_item` itself -- is captured here via `.to_string()` and wrapped in
+    /// `LazyConvertError`, which `From<LazyConvertError> for EvaluatorError` maps to
+    /// `PyConversionError` and ultimately a Python `TypeError` at the boundary. The
+    /// original Python exception *type* is not preserved; only its message text is.
     pub fn get_field(&self, field: &str) -> Result<JValue, LazyConvertError> {
         if let Some(m) = self.materialized.get() {
             return Ok(m.get(field).cloned().unwrap_or(JValue::Undefined));
@@ -146,8 +154,12 @@ impl LazyPyDict {
     }
 
     /// Borrow the materialized map, materializing on first call.
-    /// Returns None if conversion fails (caller treats value as non-object;
-    /// the error still surfaces on paths that use `get_field`/`to_object`).
+    /// Returns `None` if conversion fails, and the failure is dropped here --
+    /// this method has no way to report it. Callers that need the conversion
+    /// error to actually surface (e.g. equality, concatenation) must not rely
+    /// on this method; they should call `to_object()` (or the `normalize_lazy`
+    /// helper in `evaluator.rs`) instead, which returns `Result` and propagates
+    /// the error as a Python `TypeError` at the boundary.
     pub fn to_object_ref(&self) -> Option<&IndexMap<String, JValue>> {
         if self.materialized.get().is_none() {
             let _ = self.to_object();

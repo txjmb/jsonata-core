@@ -34,10 +34,10 @@ ecommerce = {"products": [{"id": i, "name": f"Product {i}",
 
 CASES = [
     ("products.price", products, 2000, 13.0),     # 11.3µs measured × 1.15
-    ('products[category = "Electronics"]', ecommerce, 1000, 27.6),  # 24.0µs measured × 1.15
-    ("$sum(products[inStock].price)", ecommerce, 1000, 20.2),       # 17.6µs measured × 1.15
+    ('products[category = "Electronics"]', ecommerce, 1000, 27.6),  # 23.4µs measured × 1.15
+    ("$sum(products[inStock].price)", ecommerce, 1000, 20.2),       # 17.1µs measured × 1.15
     ('products[price > 50 and inStock].{"name": name, "price": price, "vendor": vendor.name}',
-     ecommerce, 500, 93.0),   # 80.9µs measured × 1.15 regression gate
+     ecommerce, 500, 93.0),   # 79.0µs measured × 1.15 regression gate
 ]
 
 failed = False

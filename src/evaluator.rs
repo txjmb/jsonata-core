@@ -1034,12 +1034,20 @@ fn eval_compiled_inner(
             let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
             let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             match op {
-                CompiledCmp::Eq => Ok(JValue::Bool(crate::functions::array::values_equal(
-                    &left, &right,
-                ))),
-                CompiledCmp::Ne => Ok(JValue::Bool(!crate::functions::array::values_equal(
-                    &left, &right,
-                ))),
+                CompiledCmp::Eq => {
+                    let left = normalize_lazy(&left)?;
+                    let right = normalize_lazy(&right)?;
+                    Ok(JValue::Bool(crate::functions::array::values_equal(
+                        &left, &right,
+                    )))
+                }
+                CompiledCmp::Ne => {
+                    let left = normalize_lazy(&left)?;
+                    let right = normalize_lazy(&right)?;
+                    Ok(JValue::Bool(!crate::functions::array::values_equal(
+                        &left, &right,
+                    )))
+                }
                 CompiledCmp::Lt => compiled_ordered_cmp(
                     &left,
                     &right,
@@ -1592,6 +1600,11 @@ pub(crate) fn compiled_arithmetic(
 /// Convert a value to string for concatenation in compiled expressions.
 #[inline]
 pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
+    // Normalize a lazy operand up front: `functions::string::string`'s lazy arm maps a
+    // conversion failure to `JValue::Null` (silently stringifying to `""`), which would
+    // swallow the TypeError this must raise instead. Non-lazy values pass through
+    // unchanged (cheap clone).
+    let value = &normalize_lazy(value)?;
     match value {
         JValue::String(s) => Ok(s.to_string()),
         JValue::Null | JValue::Undefined => Ok(String::new()),
@@ -1604,22 +1617,20 @@ pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, Evalua
                 )),
             }
         }
-        #[cfg(feature = "python")]
-        JValue::LazyPyDict(_) => match crate::functions::string::string(value, None) {
-            Ok(JValue::String(s)) => Ok(s.to_string()),
-            Ok(JValue::Null) => Ok(String::new()),
-            _ => Err(EvaluatorError::TypeError(
-                "Cannot concatenate complex types".to_string(),
-            )),
-        },
         _ => Ok(String::new()),
     }
 }
 
 /// Equality comparison for the bytecode VM.
 #[inline]
-pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> JValue {
-    JValue::Bool(crate::functions::array::values_equal(lhs, rhs))
+pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, EvaluatorError> {
+    // Normalize lazy operands so a conversion failure raises TypeError here rather than
+    // being swallowed as `false` by `values_equal`'s lazy `to_object_ref` arms.
+    let lhs = &normalize_lazy(lhs)?;
+    let rhs = &normalize_lazy(rhs)?;
+    Ok(JValue::Bool(crate::functions::array::values_equal(
+        lhs, rhs,
+    )))
 }
 
 /// String concatenation for the bytecode VM.
@@ -3207,6 +3218,13 @@ impl Evaluator {
                 JValue::LazyPyDict(lazy) => match lazy.get_field(&spec.field) {
                     Ok(JValue::Number(n)) => SortKey::Num(n),
                     Ok(JValue::String(s)) => SortKey::Str(s.clone()),
+                    // Err(_) (conversion failure) and any other value fall through to
+                    // SortKey::None (treated as "missing", sorts last). This arm is only
+                    // reachable for elements that survived upstream evaluation of the sort
+                    // array (T2008 gate / a prior get_field on the same data), so a
+                    // conversion error swallowed here cannot silently mis-sort *today* --
+                    // if this specialized path is ever reached before such validation,
+                    // this arm must be revisited to propagate the error instead.
                     _ => SortKey::None,
                 },
                 _ => SortKey::None,
@@ -6804,8 +6822,16 @@ impl Evaluator {
                 self.modulo(&left, &right, left_is_explicit_null, right_is_explicit_null)
             }
 
-            BinaryOp::Equal => Ok(JValue::Bool(self.equals(&left, &right))),
-            BinaryOp::NotEqual => Ok(JValue::Bool(!self.equals(&left, &right))),
+            BinaryOp::Equal => {
+                let left = normalize_lazy(&left)?;
+                let right = normalize_lazy(&right)?;
+                Ok(JValue::Bool(self.equals(&left, &right)))
+            }
+            BinaryOp::NotEqual => {
+                let left = normalize_lazy(&left)?;
+                let right = normalize_lazy(&right)?;
+                Ok(JValue::Bool(!self.equals(&left, &right)))
+            }
             BinaryOp::LessThan => {
                 self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
             }
@@ -8303,7 +8329,6 @@ impl Evaluator {
                 // Handle partial application - if only 1 arg, use current context as object
                 if evaluated_args.len() == 1 {
                     // $sift(function) - use current context data as object
-                    #[cfg(feature = "python")]
                     let data = &normalize_lazy(data)?;
                     match data {
                         JValue::Object(o) => sift_object(self, o, &args[0], data, param_count),
@@ -8311,7 +8336,6 @@ impl Evaluator {
                             // Map sift over each object in the array
                             let mut results = Vec::new();
                             for item in arr.iter() {
-                                #[cfg(feature = "python")]
                                 let item = &normalize_lazy(item)?;
                                 if let JValue::Object(o) = item {
                                     let sifted = sift_object(self, o, &args[0], item, param_count)?;
@@ -9175,7 +9199,6 @@ impl Evaluator {
                 // Detect how many parameters the callback expects
                 let param_count = self.get_callback_param_count(func_arg);
 
-                #[cfg(feature = "python")]
                 let obj_value = normalize_lazy(&obj_value)?;
 
                 match obj_value {
@@ -9760,7 +9783,6 @@ impl Evaluator {
             // Use JValue's PartialEq for semantic equality comparison
             if targets.iter().any(|t| t == value) {
                 // Transform this object
-                #[cfg(feature = "python")]
                 let value = &normalize_lazy(value)?;
                 if let JValue::Object(map_rc) = value.clone() {
                     let mut map = (*map_rc).clone();
@@ -12009,6 +12031,11 @@ impl Evaluator {
 
     /// Convert a value to a string for concatenation
     fn value_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
+        // Normalize a lazy operand up front: `functions::string::string`'s lazy arm maps a
+        // conversion failure to `JValue::Null` (silently stringifying to `""`), which would
+        // swallow the TypeError this must raise instead. Non-lazy values pass through
+        // unchanged (cheap clone).
+        let value = &normalize_lazy(value)?;
         match value {
             JValue::String(s) => Ok(s.to_string()),
             JValue::Null => Ok(String::new()),
@@ -12021,14 +12048,6 @@ impl Evaluator {
                     )),
                 }
             }
-            #[cfg(feature = "python")]
-            JValue::LazyPyDict(_) => match crate::functions::string::string(value, None) {
-                Ok(JValue::String(s)) => Ok(s.to_string()),
-                Ok(JValue::Null) => Ok(String::new()),
-                _ => Err(EvaluatorError::TypeError(
-                    "Cannot concatenate complex types".to_string(),
-                )),
-            },
             _ => Ok(String::new()),
         }
     }
@@ -12176,8 +12195,20 @@ impl Evaluator {
             return Ok(JValue::Bool(false));
         }
 
+        // Normalize a lazy left operand once; every equality below needs a real
+        // value, not a per-comparison materialization attempt.
+        let left = &normalize_lazy(left)?;
+
         match right {
-            JValue::Array(arr) => Ok(JValue::Bool(arr.iter().any(|v| self.equals(left, v)))),
+            JValue::Array(arr) => {
+                for v in arr.iter() {
+                    let v = normalize_lazy(v)?;
+                    if self.equals(left, &v) {
+                        return Ok(JValue::Bool(true));
+                    }
+                }
+                Ok(JValue::Bool(false))
+            }
             JValue::Object(obj) => {
                 if let JValue::String(key) = left {
                     Ok(JValue::Bool(obj.contains_key(&**key)))
@@ -12185,6 +12216,8 @@ impl Evaluator {
                     Ok(JValue::Bool(false))
                 }
             }
+            // Right-side lazy-object key-presence check doesn't convert any values
+            // (`contains_field` checks the Python dict directly), so it's left as-is.
             #[cfg(feature = "python")]
             JValue::LazyPyDict(lazy) => {
                 if let JValue::String(key) = left {

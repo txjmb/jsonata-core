@@ -1754,6 +1754,11 @@ pub mod array {
     }
 
     /// Compare two JSON values for deep equality (JSONata semantics)
+    ///
+    /// Cannot return `Result`, so a lazy-conversion failure in the `LazyPyDict` arms
+    /// below is swallowed and yields `false` (not-equal), by design -- callers that need
+    /// the failure to surface as a Python `TypeError` (the `=`/`!=`/`in` operators) must
+    /// call `evaluator::normalize_lazy` on their operands *before* calling this function.
     pub fn values_equal(a: &JValue, b: &JValue) -> bool {
         match (a, b) {
             (JValue::Null, JValue::Null) => true,

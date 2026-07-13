@@ -581,7 +581,6 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<Py<PyAny>> {
 
         JValue::Lambda { .. } | JValue::Builtin { .. } | JValue::Regex { .. } => Ok(py.None()),
 
-        #[cfg(feature = "python")]
         JValue::LazyPyDict(lazy) => Ok(lazy.py_object().clone_ref(py).into_any()),
     }
 }

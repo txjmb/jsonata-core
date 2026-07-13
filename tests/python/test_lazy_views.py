@@ -37,12 +37,6 @@ def test_lazy_matches_eager_vm(expr):
     assert lazy_eval(expr, PRODUCTS) == eager_eval(expr, PRODUCTS)
 
 
-# Deferred to Task 5 (whole-object consumers: object construction over a
-# lazy element requires materializing the element as a whole, not just
-# field-by-field access):
-# - "products.{'n': name, 'p': price}"    # object construction per element
-
-
 def test_lazy_missing_field_is_undefined():
     # Field-mapping shape (VM-compiled, same route as products.price):
     # a missing key on lazy elements yields undefined -> None.
@@ -153,6 +147,7 @@ def engine(request, monkeypatch):
         ("$keys(products)", PRODUCTS),                   # keys() collected across lazy array elements
         ("$lookup(products, 'name')", PRODUCTS),         # lookup() mapped over lazy array elements
         ("$spread(products)", PRODUCTS),                 # spread() mapped over lazy array elements
+        ("products.{'n': name, 'p': price}", PRODUCTS),  # object construction per lazy element
     ],
 )
 # NOTE: the `@` tuple-binding operator is NOT implemented in this codebase
@@ -194,6 +189,11 @@ class TestPassThrough:
 
 class TestLazyErrors:
     BAD = {"good": 1, "bad": {1, 2, 3}}               # a set is not convertible
+    # An unconvertible value nested one level inside a lazy dict -- reachable
+    # only once something (concat, equality, `in`, ...) forces materialization
+    # of `x` as a whole, unlike BAD above where the bad value is a top-level
+    # field.
+    BAD_NESTED = {"x": {"s": {1, 2, 3}}}
 
     def test_untouched_bad_field_succeeds(self):
         assert jsonatapy.compile("good").evaluate(self.BAD) == 1
@@ -205,3 +205,41 @@ class TestLazyErrors:
     def test_materializing_bad_object_raises_typeerror(self):
         with pytest.raises(TypeError):
             jsonatapy.compile("$keys($)").evaluate(self.BAD)
+
+    def test_concat_swallowed_conversion_error_raises_typeerror(self, engine):
+        # Regression: `x & ''` used to stringify a nested conversion failure
+        # to the literal string "null" instead of raising. $string(x) on the
+        # same data already raised correctly (dispatch normalization); `x & ''`
+        # must behave identically.
+        with pytest.raises(TypeError):
+            jsonatapy.compile("$string(x)").evaluate(self.BAD_NESTED)
+        with pytest.raises(TypeError):
+            jsonatapy.compile("x & ''").evaluate(self.BAD_NESTED)
+
+    def test_equality_swallowed_conversion_error_raises_typeerror(self, engine):
+        # Regression: `=`/`!=` used to swallow a nested conversion failure and
+        # silently return False/True instead of raising.
+        with pytest.raises(TypeError):
+            jsonatapy.compile("x = {'s': 1}").evaluate(self.BAD_NESTED)
+        with pytest.raises(TypeError):
+            jsonatapy.compile("x != {'s': 1}").evaluate(self.BAD_NESTED)
+
+    def test_in_operator_swallowed_conversion_error_raises_typeerror(self, engine):
+        # Left-side lazy operand of `in` must normalize (and raise) too.
+        with pytest.raises(TypeError):
+            jsonatapy.compile("x in [{'s': 1}]").evaluate(self.BAD_NESTED)
+        # Right-side ARRAY case: a lazy, unconvertible element being compared
+        # via `in` must also raise rather than silently not-matching.
+        data = {"items": [{"s": {1, 2, 3}}], "one": {"s": 1}}
+        with pytest.raises(TypeError):
+            jsonatapy.compile("one in items").evaluate(data)
+
+    def test_concat_and_equality_on_convertible_lazy_values_still_work(self, engine):
+        # Control: legitimate (convertible) lazy values must keep comparing
+        # and stringifying identically after the normalize-before-compare
+        # fix -- this must not regress into raising or into a proxy/wrapper
+        # leaking through instead of a real comparison/string result.
+        data = {"x": {"s": 1}, "y": {"s": 1}}
+        assert jsonatapy.compile("x = y").evaluate(data) is True
+        assert jsonatapy.compile("x != y").evaluate(data) is False
+        assert jsonatapy.compile("'a' & $string(x)").evaluate(data) == 'a{"s":1}'

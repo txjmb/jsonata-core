@@ -380,6 +380,14 @@ impl PartialEq for JValue {
                     flags: bf,
                 },
             ) => ap == bp && af == bf,
+            // `PartialEq` cannot return `Result`, so a conversion failure on either side
+            // here is swallowed and yields `false` (not-equal) rather than raising. This
+            // is by design for this trait impl -- it must stay infallible for internal
+            // consumers (e.g. `targets.iter().any(|t| t == value)` in transform). Sites
+            // that need conversion errors to actually surface as a Python `TypeError`
+            // (the `=`/`!=` operators, the `in` operator) are responsible for calling
+            // `normalize_lazy` themselves *before* reaching here -- see the equality
+            // operator handling and `in_operator` in `evaluator.rs`.
             #[cfg(feature = "python")]
             (JValue::LazyPyDict(a), JValue::LazyPyDict(b)) => {
                 Rc::ptr_eq(a, b)
