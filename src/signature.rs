@@ -66,6 +66,8 @@ impl ParamType {
             (ParamType::Number, JValue::Number(_)) => true,
             (ParamType::Boolean, JValue::Bool(_)) => true,
             (ParamType::Object, JValue::Object(_)) => true,
+            #[cfg(feature = "python")]
+            (ParamType::Object, JValue::LazyPyDict(_)) => true,
             (ParamType::Function(_), JValue::Lambda { .. })
             | (ParamType::Function(_), JValue::Builtin { .. }) => true,
             (ParamType::Array(elem_type), JValue::Array(arr)) => {
@@ -120,6 +122,8 @@ fn type_symbol(value: &JValue) -> char {
         JValue::Lambda { .. } => 'f',
         JValue::Builtin { .. } => 'f',
         JValue::Regex { .. } => 'o',
+        #[cfg(feature = "python")]
+        JValue::LazyPyDict(_) => 'o',
     }
 }
 

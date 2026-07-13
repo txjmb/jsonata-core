@@ -972,6 +972,8 @@ fn eval_compiled_inner(
                     .cloned()
                     .unwrap_or(JValue::Undefined))
             }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field)?),
             _ => Ok(JValue::Undefined),
         },
 
@@ -987,12 +989,27 @@ fn eval_compiled_inner(
                 } else {
                     obj.get(outer.as_str())
                 };
-                Ok(outer_val
-                    .and_then(|v| match v {
-                        JValue::Object(nested) => nested.get(inner.as_str()).cloned(),
-                        _ => None,
-                    })
-                    .unwrap_or(JValue::Undefined))
+                match outer_val {
+                    Some(JValue::Object(nested)) => Ok(nested
+                        .get(inner.as_str())
+                        .cloned()
+                        .unwrap_or(JValue::Undefined)),
+                    #[cfg(feature = "python")]
+                    Some(JValue::LazyPyDict(nested)) => Ok(nested.get_field(inner.as_str())?),
+                    _ => Ok(JValue::Undefined),
+                }
+            }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => {
+                let outer_val = lazy.get_field(outer.as_str())?;
+                match outer_val {
+                    JValue::Object(nested) => Ok(nested
+                        .get(inner.as_str())
+                        .cloned()
+                        .unwrap_or(JValue::Undefined)),
+                    JValue::LazyPyDict(nested) => Ok(nested.get_field(inner.as_str())?),
+                    _ => Ok(JValue::Undefined),
+                }
             }
             _ => Ok(JValue::Undefined),
         },
@@ -1017,12 +1034,14 @@ fn eval_compiled_inner(
             let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
             let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             match op {
-                CompiledCmp::Eq => Ok(JValue::Bool(crate::functions::array::values_equal(
-                    &left, &right,
-                ))),
-                CompiledCmp::Ne => Ok(JValue::Bool(!crate::functions::array::values_equal(
-                    &left, &right,
-                ))),
+                // compiled_equal normalizes lazy operands (guarded, zero-cost when
+                // neither side is lazy) so conversion failures raise instead of
+                // silently comparing unequal.
+                CompiledCmp::Eq => compiled_equal(&left, &right),
+                CompiledCmp::Ne => match compiled_equal(&left, &right)? {
+                    JValue::Bool(b) => Ok(JValue::Bool(!b)),
+                    other => Ok(other),
+                },
                 CompiledCmp::Lt => compiled_ordered_cmp(
                     &left,
                     &right,
@@ -1575,6 +1594,17 @@ pub(crate) fn compiled_arithmetic(
 /// Convert a value to string for concatenation in compiled expressions.
 #[inline]
 pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
+    // Normalize a lazy operand up front: `functions::string::string`'s lazy arm maps a
+    // conversion failure to `JValue::Null` (silently stringifying to `""`), which would
+    // swallow the TypeError this must raise instead. Guarded by `is_lazy` so the common
+    // (non-lazy) path pays no clone.
+    let normalized;
+    let value = if value.is_lazy() {
+        normalized = normalize_lazy(value)?;
+        &normalized
+    } else {
+        value
+    };
     match value {
         JValue::String(s) => Ok(s.to_string()),
         JValue::Null | JValue::Undefined => Ok(String::new()),
@@ -1593,8 +1623,20 @@ pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, Evalua
 
 /// Equality comparison for the bytecode VM.
 #[inline]
-pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> JValue {
-    JValue::Bool(crate::functions::array::values_equal(lhs, rhs))
+pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, EvaluatorError> {
+    // Normalize lazy operands so a conversion failure raises TypeError here rather than
+    // being swallowed as `false` by `values_equal`'s lazy `to_object_ref` arms. Guarded
+    // by `is_lazy` so the common (non-lazy) path pays no clone.
+    if lhs.is_lazy() || rhs.is_lazy() {
+        let lhs = normalize_lazy(lhs)?;
+        let rhs = normalize_lazy(rhs)?;
+        return Ok(JValue::Bool(crate::functions::array::values_equal(
+            &lhs, &rhs,
+        )));
+    }
+    Ok(JValue::Bool(crate::functions::array::values_equal(
+        lhs, rhs,
+    )))
 }
 
 /// String concatenation for the bytecode VM.
@@ -1797,13 +1839,22 @@ fn compiled_field_step(
         JValue::Object(obj) => {
             // Check for tuple: extract from "@" inner object
             if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                if let Some(JValue::Object(inner)) = obj.get("@") {
-                    return Ok(inner.get(field).cloned().unwrap_or(JValue::Undefined));
+                match obj.get("@") {
+                    Some(JValue::Object(inner)) => {
+                        return Ok(inner.get(field).cloned().unwrap_or(JValue::Undefined));
+                    }
+                    #[cfg(feature = "python")]
+                    Some(JValue::LazyPyDict(lazy)) => {
+                        return Ok(lazy.get_field(field)?);
+                    }
+                    _ => {}
                 }
                 return Ok(JValue::Undefined);
             }
             Ok(obj.get(field).cloned().unwrap_or(JValue::Undefined))
         }
+        #[cfg(feature = "python")]
+        JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field)?),
         JValue::Array(arr) => {
             // Build shape cache from first plain (non-tuple) object for O(1) positional access.
             let shape: Option<ShapeCache> = arr.iter().find_map(|v| {
@@ -1915,6 +1966,22 @@ fn compiled_apply_filter(
     }
 }
 
+/// Materialize a top-level lazy dict into a plain Object. Non-lazy values
+/// pass through unchanged. Does NOT recurse into arrays/objects — element-
+/// level laziness is handled by the specific consumers that need it.
+#[cfg(feature = "python")]
+pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
+    match value {
+        JValue::LazyPyDict(lazy) => Ok(JValue::Object(lazy.to_object()?)),
+        _ => Ok(value.clone()),
+    }
+}
+
+#[cfg(not(feature = "python"))]
+pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
+    Ok(value.clone())
+}
+
 /// Dispatch a pure builtin function call.
 ///
 /// Replicates the tree-walker's evaluation for the subset of builtins in
@@ -1963,6 +2030,23 @@ fn call_pure_builtin(
         }
     } else {
         args
+    };
+
+    // Materialize top-level lazy args so every builtin sees plain Objects.
+    #[cfg(feature = "python")]
+    let lazy_storage: Vec<JValue>;
+    #[cfg(feature = "python")]
+    let effective_args: &[JValue] = if effective_args
+        .iter()
+        .any(|a| matches!(a, JValue::LazyPyDict(_)))
+    {
+        lazy_storage = effective_args
+            .iter()
+            .map(normalize_lazy)
+            .collect::<Result<Vec<_>, _>>()?;
+        &lazy_storage
+    } else {
+        effective_args
     };
 
     // Apply undefined propagation: if the first effective argument is Undefined
@@ -2151,6 +2235,10 @@ fn call_pure_builtin(
                             .to_string(),
                     ))
                 }
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(_) => Err(EvaluatorError::TypeError(
+                    "T0412: Argument 1 of function $join must be an array of String".to_string(),
+                )),
                 JValue::Array(arr) => {
                     // All elements must be strings.
                     for item in arr.iter() {
@@ -2353,7 +2441,8 @@ fn call_pure_builtin(
             Some(JValue::Array(arr)) => {
                 let mut all_keys: Vec<JValue> = Vec::new();
                 for item in arr.iter() {
-                    if let JValue::Object(obj) = item {
+                    let normalized_item = normalize_lazy(item)?;
+                    if let JValue::Object(obj) = &normalized_item {
                         for key in obj.keys() {
                             let k = JValue::string(key.clone());
                             if !all_keys.contains(&k) {
@@ -2520,10 +2609,24 @@ pub enum EvaluatorError {
 
     #[error("Evaluation error: {0}")]
     EvaluationError(String),
+
+    /// Python→JValue conversion failed during lazy field access.
+    /// Surfaces as Python TypeError at the boundary (matching what eager
+    /// conversion would have raised at call time).
+    #[cfg(feature = "python")]
+    #[error("Type error: {0}")]
+    PyConversionError(String),
 }
 
 impl From<crate::functions::FunctionError> for EvaluatorError {
     fn from(e: crate::functions::FunctionError) -> Self {
+        // `PyConversionError` must surface as a Python `TypeError` (matching what
+        // eager conversion would have raised), not the generic `ValueError` every
+        // other `FunctionError` variant maps to below -- see its doc comment.
+        #[cfg(feature = "python")]
+        if let crate::functions::FunctionError::PyConversionError(m) = &e {
+            return EvaluatorError::PyConversionError(m.clone());
+        }
         EvaluatorError::EvaluationError(e.to_string())
     }
 }
@@ -2547,7 +2650,16 @@ impl EvaluatorError {
             EvaluatorError::TypeError(m) => m,
             EvaluatorError::ReferenceError(m) => m,
             EvaluatorError::EvaluationError(m) => m,
+            #[cfg(feature = "python")]
+            EvaluatorError::PyConversionError(m) => m,
         }
+    }
+}
+
+#[cfg(feature = "python")]
+impl From<crate::lazy::LazyConvertError> for EvaluatorError {
+    fn from(e: crate::lazy::LazyConvertError) -> Self {
+        EvaluatorError::PyConversionError(e.0)
     }
 }
 
@@ -3115,6 +3227,19 @@ impl Evaluator {
                     Some(JValue::String(s)) => SortKey::Str(s.clone()),
                     _ => SortKey::None,
                 },
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(lazy) => match lazy.get_field(&spec.field) {
+                    Ok(JValue::Number(n)) => SortKey::Num(n),
+                    Ok(JValue::String(s)) => SortKey::Str(s.clone()),
+                    // Err(_) (conversion failure) and any other value fall through to
+                    // SortKey::None (treated as "missing", sorts last). This arm is only
+                    // reachable for elements that survived upstream evaluation of the sort
+                    // array (T2008 gate / a prior get_field on the same data), so a
+                    // conversion error swallowed here cannot silently mis-sort *today* --
+                    // if this specialized path is ever reached before such validation,
+                    // this arm must be revisited to propagate the error instead.
+                    _ => SortKey::None,
+                },
                 _ => SortKey::None,
             })
             .collect();
@@ -3308,6 +3433,10 @@ impl Evaluator {
                     .get(field_name)
                     .cloned()
                     .unwrap_or(JValue::Undefined))),
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(lazy) => {
+                    Some(lazy.get_field(field_name).map_err(EvaluatorError::from))
+                }
                 _ => None,
             },
             AstNode::Variable(name) if !name.is_empty() => {
@@ -3938,7 +4067,8 @@ impl Evaluator {
 
             // Wildcard: collect all values from current object
             AstNode::Wildcard => {
-                match data {
+                let normalized = normalize_lazy(data)?;
+                match &normalized {
                     JValue::Object(obj) => {
                         let mut result = Vec::new();
                         for value in obj.values() {
@@ -3961,7 +4091,7 @@ impl Evaluator {
 
             // Descendant: recursively traverse all nested values
             AstNode::Descendant => {
-                let descendants = self.collect_descendants(data);
+                let descendants = self.collect_descendants(data)?;
                 if descendants.is_empty() {
                     Ok(JValue::Null) // No descendants means undefined
                 } else {
@@ -4371,15 +4501,20 @@ impl Evaluator {
                     JValue::Object(obj) => {
                         // Check if this is a tuple - extract '@' value
                         if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                            if let Some(JValue::Object(inner)) = obj.get("@") {
-                                Ok(inner.get(field_name).cloned().unwrap_or(JValue::Undefined))
-                            } else {
-                                Ok(JValue::Undefined)
+                            match obj.get("@") {
+                                Some(JValue::Object(inner)) => {
+                                    Ok(inner.get(field_name).cloned().unwrap_or(JValue::Undefined))
+                                }
+                                #[cfg(feature = "python")]
+                                Some(JValue::LazyPyDict(lazy)) => Ok(lazy.get_field(field_name)?),
+                                _ => Ok(JValue::Undefined),
                             }
                         } else {
                             Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
                         }
                     }
+                    #[cfg(feature = "python")]
+                    JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field_name)?),
                     JValue::Array(arr) => {
                         // Array mapping: extract field from each element
                         // Optimized: use references to access fields without cloning entire objects
@@ -4415,6 +4550,19 @@ impl Evaluator {
                                         JValue::Null => {}
                                         other => result.push(other),
                                     }
+                                } else {
+                                    #[cfg(feature = "python")]
+                                    if let JValue::LazyPyDict(lazy) = item {
+                                        let val = lazy.get_field(field_name)?;
+                                        if !val.is_null() && !val.is_undefined() {
+                                            match val {
+                                                JValue::Array(arr_val) => {
+                                                    result.extend(arr_val.iter().cloned());
+                                                }
+                                                other => result.push(other),
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -4436,12 +4584,23 @@ impl Evaluator {
                                             obj.get("__tuple__") == Some(&JValue::Bool(true));
 
                                         if is_tuple {
-                                            let inner = match obj.get("@") {
-                                                Some(JValue::Object(inner)) => inner,
+                                            let field_val: Option<JValue> = match obj.get("@") {
+                                                Some(JValue::Object(inner)) => {
+                                                    inner.get(field_name).cloned()
+                                                }
+                                                #[cfg(feature = "python")]
+                                                Some(JValue::LazyPyDict(lazy)) => {
+                                                    let v = lazy.get_field(field_name)?;
+                                                    if v.is_undefined() {
+                                                        None
+                                                    } else {
+                                                        Some(v)
+                                                    }
+                                                }
                                                 _ => continue,
                                             };
 
-                                            if let Some(val) = inner.get(field_name) {
+                                            if let Some(val) = field_val.as_ref() {
                                                 if !val.is_null() {
                                                     // Build tuple wrapper - only clone bindings when needed
                                                     let wrap = |v: JValue| -> JValue {
@@ -4536,6 +4695,11 @@ impl Evaluator {
                             JValue::Object(obj) => {
                                 return Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null));
                             }
+                            #[cfg(feature = "python")]
+                            JValue::LazyPyDict(lazy) => {
+                                let v = lazy.get_field(field_name)?;
+                                return Ok(if v.is_undefined() { JValue::Null } else { v });
+                            }
                             JValue::Array(arr) => {
                                 // Map field extraction over array (same as single-step Name on Array)
                                 let mut result = Vec::with_capacity(arr.len());
@@ -4548,6 +4712,19 @@ impl Evaluator {
                                                         result.extend(inner.iter().cloned());
                                                     }
                                                     other => result.push(other.clone()),
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        #[cfg(feature = "python")]
+                                        if let JValue::LazyPyDict(lazy) = item {
+                                            let val = lazy.get_field(field_name)?;
+                                            if !val.is_null() && !val.is_undefined() {
+                                                match val {
+                                                    JValue::Array(inner) => {
+                                                        result.extend(inner.iter().cloned());
+                                                    }
+                                                    other => result.push(other),
                                                 }
                                             }
                                         }
@@ -4582,7 +4759,8 @@ impl Evaluator {
             match &steps[0].node {
                 AstNode::Wildcard => {
                     // Wildcard as first step
-                    match data {
+                    let normalized = normalize_lazy(data)?;
+                    match &normalized {
                         JValue::Object(obj) => {
                             let mut result = Vec::new();
                             for value in obj.values() {
@@ -4600,7 +4778,7 @@ impl Evaluator {
                 }
                 AstNode::Descendant => {
                     // Descendant as first step
-                    let descendants = self.collect_descendants(data);
+                    let descendants = self.collect_descendants(data)?;
                     JValue::array(descendants)
                 }
                 AstNode::ParentVariable(name) => {
@@ -4628,6 +4806,15 @@ impl Evaluator {
                         JValue::Object(obj) => {
                             let val = obj.get(field_name).cloned().unwrap_or(JValue::Undefined);
                             // Apply any stages to the extracted value
+                            if !stages.is_empty() {
+                                self.apply_stages(val, stages)?
+                            } else {
+                                val
+                            }
+                        }
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => {
+                            let val = lazy.get_field(field_name)?;
                             if !stages.is_empty() {
                                 self.apply_stages(val, stages)?
                             } else {
@@ -4680,6 +4867,30 @@ impl Evaluator {
                                             }
                                             JValue::Null => {} // Skip nulls from nested arrays
                                             other => result.push(other),
+                                        }
+                                    }
+                                    #[cfg(feature = "python")]
+                                    JValue::LazyPyDict(lazy) => {
+                                        let val = lazy.get_field(field_name)?;
+                                        if !val.is_null() && !val.is_undefined() {
+                                            if !stages.is_empty() {
+                                                let processed_val =
+                                                    self.apply_stages(val, stages)?;
+                                                match processed_val {
+                                                    JValue::Array(arr) => {
+                                                        result.extend(arr.iter().cloned())
+                                                    }
+                                                    JValue::Null => {}
+                                                    other => result.push(other),
+                                                }
+                                            } else {
+                                                match val {
+                                                    JValue::Array(arr) => {
+                                                        result.extend(arr.iter().cloned())
+                                                    }
+                                                    other => result.push(other),
+                                                }
+                                            }
                                         }
                                     }
                                     _ => {} // Skip non-object items
@@ -4970,7 +5181,8 @@ impl Evaluator {
                 AstNode::Wildcard => {
                     // Wildcard in path
                     let stages = &step.stages;
-                    let wildcard_result = match &current {
+                    let normalized_current = normalize_lazy(&current)?;
+                    let wildcard_result = match &normalized_current {
                         JValue::Object(obj) => {
                             let mut result = Vec::new();
                             for value in obj.values() {
@@ -4986,7 +5198,8 @@ impl Evaluator {
                             // Map wildcard over array
                             let mut all_values = Vec::new();
                             for item in arr.iter() {
-                                match item {
+                                let normalized_item = normalize_lazy(item)?;
+                                match &normalized_item {
                                     JValue::Object(obj) => {
                                         for value in obj.values() {
                                             // Flatten arrays
@@ -5023,13 +5236,13 @@ impl Evaluator {
                             // Collect descendants from all array elements
                             let mut all_descendants = Vec::new();
                             for item in arr.iter() {
-                                all_descendants.extend(self.collect_descendants(item));
+                                all_descendants.extend(self.collect_descendants(item)?);
                             }
                             JValue::array(all_descendants)
                         }
                         _ => {
                             // Collect descendants from current value
-                            let descendants = self.collect_descendants(&current);
+                            let descendants = self.collect_descendants(&current)?;
                             JValue::array(descendants)
                         }
                     }
@@ -5047,6 +5260,16 @@ impl Evaluator {
                             did_array_mapping = false;
                             let val = obj.get(field_name).cloned().unwrap_or(JValue::Undefined);
                             // Apply stages if present
+                            if !stages.is_empty() {
+                                self.apply_stages(val, stages)?
+                            } else {
+                                val
+                            }
+                        }
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => {
+                            did_array_mapping = false;
+                            let val = lazy.get_field(field_name)?;
                             if !stages.is_empty() {
                                 self.apply_stages(val, stages)?
                             } else {
@@ -5092,6 +5315,18 @@ impl Evaluator {
                                                 other => result.push(other),
                                             }
                                         }
+                                        #[cfg(feature = "python")]
+                                        JValue::LazyPyDict(lazy) => {
+                                            let val = lazy.get_field(field_name)?;
+                                            if !val.is_null() && !val.is_undefined() {
+                                                match val {
+                                                    JValue::Array(arr_val) => {
+                                                        result.extend(arr_val.iter().cloned())
+                                                    }
+                                                    other => result.push(other),
+                                                }
+                                            }
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -5104,30 +5339,46 @@ impl Evaluator {
                                     match item {
                                         JValue::Object(obj) => {
                                             // Check if this is a tuple stream element
-                                            let (actual_obj, tuple_bindings) = if obj
-                                                .get("__tuple__")
+                                            let (val, tuple_bindings) = if obj.get("__tuple__")
                                                 == Some(&JValue::Bool(true))
                                             {
                                                 // This is a tuple - extract '@' value and preserve bindings
-                                                if let Some(JValue::Object(inner)) = obj.get("@") {
-                                                    // Collect index bindings (variables starting with $)
-                                                    let bindings: Vec<(String, JValue)> = obj
-                                                        .iter()
-                                                        .filter(|(k, _)| k.starts_with('$'))
-                                                        .map(|(k, v)| (k.clone(), v.clone()))
-                                                        .collect();
-                                                    (inner.clone(), Some(bindings))
-                                                } else {
-                                                    continue; // Invalid tuple
+                                                // Collect index bindings (variables starting with $)
+                                                let bindings: Vec<(String, JValue)> = obj
+                                                    .iter()
+                                                    .filter(|(k, _)| k.starts_with('$'))
+                                                    .map(|(k, v)| (k.clone(), v.clone()))
+                                                    .collect();
+                                                match obj.get("@") {
+                                                    Some(JValue::Object(inner)) => (
+                                                        inner
+                                                            .get(field_name)
+                                                            .cloned()
+                                                            .unwrap_or(JValue::Null),
+                                                        Some(bindings),
+                                                    ),
+                                                    #[cfg(feature = "python")]
+                                                    Some(JValue::LazyPyDict(lazy)) => {
+                                                        let v = lazy.get_field(field_name)?;
+                                                        (
+                                                            if v.is_undefined() {
+                                                                JValue::Null
+                                                            } else {
+                                                                v
+                                                            },
+                                                            Some(bindings),
+                                                        )
+                                                    }
+                                                    _ => continue, // Invalid tuple
                                                 }
                                             } else {
-                                                (obj.clone(), None)
+                                                (
+                                                    obj.get(field_name)
+                                                        .cloned()
+                                                        .unwrap_or(JValue::Null),
+                                                    None,
+                                                )
                                             };
-
-                                            let val = actual_obj
-                                                .get(field_name)
-                                                .cloned()
-                                                .unwrap_or(JValue::Null);
 
                                             if !val.is_null() {
                                                 // Helper to wrap value in tuple if we have bindings
@@ -5241,6 +5492,34 @@ impl Evaluator {
                                                 }
                                                 JValue::Null => {}
                                                 other => result.push(other),
+                                            }
+                                        }
+                                        #[cfg(feature = "python")]
+                                        JValue::LazyPyDict(lazy) => {
+                                            // Lazy dicts are never tuples; read directly. Mirrors
+                                            // the Object arm's non-tuple branch (tuple_bindings =
+                                            // None throughout, so wrap_in_tuple would be a no-op).
+                                            let val = lazy.get_field(field_name)?;
+
+                                            if !val.is_null() && !val.is_undefined() {
+                                                if !stages.is_empty() {
+                                                    let processed_val =
+                                                        self.apply_stages(val, stages)?;
+                                                    match processed_val {
+                                                        JValue::Array(arr) => {
+                                                            result.extend(arr.iter().cloned())
+                                                        }
+                                                        JValue::Null => {} // Skip nulls from stage application
+                                                        other => result.push(other),
+                                                    }
+                                                } else {
+                                                    match val {
+                                                        JValue::Array(arr) => {
+                                                            result.extend(arr.iter().cloned())
+                                                        }
+                                                        other => result.push(other),
+                                                    }
+                                                }
                                             }
                                         }
                                         _ => {}
@@ -5987,6 +6266,8 @@ impl Evaluator {
                 (JValue::Object(obj), JValue::String(key)) => {
                     obj.get(&**key).cloned().unwrap_or(JValue::Undefined)
                 }
+                #[cfg(feature = "python")]
+                (JValue::LazyPyDict(lazy), JValue::String(key)) => lazy.get_field(key)?,
                 (JValue::Array(arr), JValue::Number(n)) => {
                     let index = *n as i64;
                     let len = arr.len() as i64;
@@ -6554,8 +6835,14 @@ impl Evaluator {
                 self.modulo(&left, &right, left_is_explicit_null, right_is_explicit_null)
             }
 
-            BinaryOp::Equal => Ok(JValue::Bool(self.equals(&left, &right))),
-            BinaryOp::NotEqual => Ok(JValue::Bool(!self.equals(&left, &right))),
+            // compiled_equal normalizes lazy operands (guarded, zero-cost when neither
+            // side is lazy) so conversion failures raise instead of silently comparing
+            // unequal.
+            BinaryOp::Equal => compiled_equal(&left, &right),
+            BinaryOp::NotEqual => match compiled_equal(&left, &right)? {
+                JValue::Bool(b) => Ok(JValue::Bool(!b)),
+                other => Ok(other),
+            },
             BinaryOp::LessThan => {
                 self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
             }
@@ -6865,8 +7152,17 @@ impl Evaluator {
             }
             // Check for simple field name (e.g., blah) that evaluates to undefined
             if let AstNode::Name(field_name) = arg {
-                let field_exists =
-                    matches!(data, JValue::Object(obj) if obj.contains_key(field_name));
+                let field_exists = matches!(data, JValue::Object(obj) if obj.contains_key(field_name))
+                    || {
+                        #[cfg(feature = "python")]
+                        {
+                            matches!(data, JValue::LazyPyDict(l) if l.contains_field(field_name))
+                        }
+                        #[cfg(not(feature = "python"))]
+                        {
+                            false
+                        }
+                    };
                 if !field_exists && propagates_undefined(name) {
                     return Ok(JValue::Null);
                 }
@@ -7008,6 +7304,13 @@ impl Evaluator {
         {
             // Context was null/undefined, so return undefined
             return Ok(JValue::Null);
+        }
+
+        #[cfg(feature = "python")]
+        for arg in evaluated_args.iter_mut() {
+            if matches!(arg, JValue::LazyPyDict(_)) {
+                *arg = normalize_lazy(arg)?;
+            }
         }
 
         match name {
@@ -8037,12 +8340,14 @@ impl Evaluator {
                 // Handle partial application - if only 1 arg, use current context as object
                 if evaluated_args.len() == 1 {
                     // $sift(function) - use current context data as object
+                    let data = &normalize_lazy(data)?;
                     match data {
                         JValue::Object(o) => sift_object(self, o, &args[0], data, param_count),
                         JValue::Array(arr) => {
                             // Map sift over each object in the array
                             let mut results = Vec::new();
                             for item in arr.iter() {
+                                let item = &normalize_lazy(item)?;
                                 if let JValue::Object(o) = item {
                                     let sifted = sift_object(self, o, &args[0], item, param_count)?;
                                     // sift_object returns undefined for empty results
@@ -8211,7 +8516,8 @@ impl Evaluator {
                             if matches!(item, JValue::Lambda { .. } | JValue::Builtin { .. }) {
                                 continue;
                             }
-                            if let JValue::Object(obj) = item {
+                            let normalized_item = normalize_lazy(item)?;
+                            if let JValue::Object(obj) = &normalized_item {
                                 for key in obj.keys() {
                                     if !all_keys.contains(&JValue::string(key.clone())) {
                                         all_keys.push(JValue::string(key.clone()));
@@ -8253,28 +8559,40 @@ impl Evaluator {
                 };
 
                 // Helper function to recursively lookup in values
-                fn lookup_recursive(val: &JValue, key: &str) -> Vec<JValue> {
+                fn lookup_recursive(
+                    val: &JValue,
+                    key: &str,
+                ) -> Result<Vec<JValue>, EvaluatorError> {
                     match val {
                         JValue::Array(arr) => {
                             let mut results = Vec::new();
                             for item in arr.iter() {
-                                let nested = lookup_recursive(item, key);
+                                let nested = lookup_recursive(item, key)?;
                                 results.extend(nested.iter().cloned());
                             }
-                            results
+                            Ok(results)
                         }
                         JValue::Object(obj) => {
                             if let Some(v) = obj.get(key) {
-                                vec![v.clone()]
+                                Ok(vec![v.clone()])
                             } else {
-                                vec![]
+                                Ok(vec![])
                             }
                         }
-                        _ => vec![],
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => {
+                            let v = lazy.get_field(key)?;
+                            if v.is_undefined() {
+                                Ok(vec![])
+                            } else {
+                                Ok(vec![v])
+                            }
+                        }
+                        _ => Ok(vec![]),
                     }
                 }
 
-                let results = lookup_recursive(&evaluated_args[0], key);
+                let results = lookup_recursive(&evaluated_args[0], key)?;
                 if results.is_empty() {
                     Ok(JValue::Null)
                 } else if results.len() == 1 {
@@ -8308,7 +8626,8 @@ impl Evaluator {
                         // Spread each object in the array
                         let mut result = Vec::new();
                         for item in arr.iter() {
-                            match item {
+                            let normalized_item = normalize_lazy(item)?;
+                            match &normalized_item {
                                 JValue::Lambda { .. } | JValue::Builtin { .. } => {
                                     // Skip lambdas in array
                                     continue;
@@ -8891,6 +9210,8 @@ impl Evaluator {
                 // Detect how many parameters the callback expects
                 let param_count = self.get_callback_param_count(func_arg);
 
+                let obj_value = normalize_lazy(&obj_value)?;
+
                 match obj_value {
                     JValue::Object(obj) => {
                         let mut result = Vec::new();
@@ -8963,6 +9284,8 @@ impl Evaluator {
                         Ok(JValue::string("function"))
                     }
                     JValue::Regex { .. } => Ok(JValue::string("regex")),
+                    #[cfg(feature = "python")]
+                    JValue::LazyPyDict(_) => Ok(JValue::string("object")),
                 }
             }
 
@@ -9425,6 +9748,8 @@ impl Evaluator {
         let targets: Vec<JValue> = match located_objects {
             JValue::Array(arr) => arr.to_vec(),
             JValue::Object(_) => vec![located_objects],
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(_) => vec![located_objects],
             JValue::Null => Vec::new(),
             other => vec![other],
         };
@@ -9469,6 +9794,7 @@ impl Evaluator {
             // Use JValue's PartialEq for semantic equality comparison
             if targets.iter().any(|t| t == value) {
                 // Transform this object
+                let value = &normalize_lazy(value)?;
                 if let JValue::Object(map_rc) = value.clone() {
                     let mut map = (*map_rc).clone();
                     let update_val = evaluator.evaluate_internal(update, value)?;
@@ -9507,6 +9833,11 @@ impl Evaluator {
                         );
                     }
                     Ok(JValue::object(new_map))
+                }
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(lazy) => {
+                    let obj = JValue::Object(lazy.to_object().map_err(EvaluatorError::from)?);
+                    apply_transform_deep(evaluator, &obj, targets, update, delete_fields)
                 }
                 JValue::Array(arr) => {
                     let mut new_arr = Vec::new();
@@ -10478,6 +10809,35 @@ impl Evaluator {
             )));
         }
 
+        // Normalize every lazy top-level argument so a conversion failure raises
+        // TypeError here rather than being swallowed by a downstream function that
+        // maps `LazyPyDict`/failed-conversion to a misleading result (e.g. `string()`'s
+        // lazy arm silently stringifying to `"null"`). This is reachable from
+        // higher-order functions passed a bare builtin reference, e.g.
+        // `$map(items, $string)` where `items` elements are lazy (first argument),
+        // or `$f := $append; $f(a, x)` where `x` is a lazy non-first argument.
+        // Mirrors the blanket normalization `evaluate_function_call` applies to
+        // ALL `evaluated_args` for inline builtin calls. Only top-level lazy
+        // values are normalized -- arrays/objects containing lazy elements are
+        // left as-is (pass-through preservation), same as every other dispatch
+        // site. Guarded by `is_lazy` so the common (no lazy operand) path pays
+        // no allocation.
+        let normalized_values: Vec<JValue>;
+        let values: &[JValue] = if values.iter().any(|v| v.is_lazy()) {
+            normalized_values = values
+                .iter()
+                .map(|v| {
+                    if v.is_lazy() {
+                        normalize_lazy(v)
+                    } else {
+                        Ok(v.clone())
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            &normalized_values
+        } else {
+            values
+        };
         let arg = &values[0];
 
         match name {
@@ -10692,13 +11052,13 @@ impl Evaluator {
     }
 
     /// Collect all descendant values recursively
-    fn collect_descendants(&self, value: &JValue) -> Vec<JValue> {
+    fn collect_descendants(&self, value: &JValue) -> Result<Vec<JValue>, EvaluatorError> {
         let mut descendants = Vec::new();
 
         match value {
             JValue::Null => {
                 // Null has no descendants, return empty
-                return descendants;
+                return Ok(descendants);
             }
             JValue::Object(obj) => {
                 // Include the current object
@@ -10706,7 +11066,17 @@ impl Evaluator {
 
                 for val in obj.values() {
                     // Recursively collect descendants
-                    descendants.extend(self.collect_descendants(val));
+                    descendants.extend(self.collect_descendants(val)?);
+                }
+            }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => {
+                // Include the current (lazy) object, mirroring the Object arm
+                descendants.push(value.clone());
+
+                let obj = lazy.to_object().map_err(EvaluatorError::from)?;
+                for val in obj.values() {
+                    descendants.extend(self.collect_descendants(val)?);
                 }
             }
             JValue::Array(arr) => {
@@ -10714,7 +11084,7 @@ impl Evaluator {
                 // This matches JavaScript behavior: arrays are traversed but not collected
                 for val in arr.iter() {
                     // Recursively collect descendants
-                    descendants.extend(self.collect_descendants(val));
+                    descendants.extend(self.collect_descendants(val)?);
                 }
             }
             _ => {
@@ -10723,7 +11093,7 @@ impl Evaluator {
             }
         }
 
-        descendants
+        Ok(descendants)
     }
 
     /// Evaluate a predicate (array filter or index)
@@ -10979,14 +11349,18 @@ impl Evaluator {
             if steps.len() == 1 && steps[0].stages.is_empty() {
                 if let AstNode::Name(field_name) = &steps[0].node {
                     // Check if the field exists in the element
-                    if let JValue::Object(obj) = &actual_element {
-                        return match obj.get(field_name) {
-                            Some(val) => Ok(val.clone()),  // Field exists (may be null)
-                            None => Ok(JValue::Undefined), // Field is missing
-                        };
-                    } else {
-                        // Not an object - return undefined
-                        return Ok(JValue::Undefined);
+                    match &actual_element {
+                        JValue::Object(obj) => {
+                            return match obj.get(field_name) {
+                                Some(val) => Ok(val.clone()),  // Field exists (may be null)
+                                None => Ok(JValue::Undefined), // Field is missing
+                            };
+                        }
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => {
+                            return Ok(lazy.get_field(field_name)?);
+                        }
+                        _ => return Ok(JValue::Undefined),
                     }
                 }
             }
@@ -11117,6 +11491,8 @@ impl Evaluator {
                     JValue::Array(_) => "array",
                     JValue::Object(_) => "object", // This catches non-undefined objects
                     JValue::Null => "null",        // Explicit null from data
+                    #[cfg(feature = "python")]
+                    JValue::LazyPyDict(_) => "object",
                     _ => "unknown",
                 };
 
@@ -11219,23 +11595,33 @@ impl Evaluator {
             (JValue::Bool(_), JValue::String(_)) => Ordering::Less,
             (JValue::Bool(_), JValue::Array(_)) => Ordering::Less,
             (JValue::Bool(_), JValue::Object(_)) => Ordering::Less,
+            #[cfg(feature = "python")]
+            (JValue::Bool(_), JValue::LazyPyDict(_)) => Ordering::Less,
 
             (JValue::Number(_), JValue::Bool(_)) => Ordering::Greater,
             (JValue::Number(_), JValue::String(_)) => Ordering::Less,
             (JValue::Number(_), JValue::Array(_)) => Ordering::Less,
             (JValue::Number(_), JValue::Object(_)) => Ordering::Less,
+            #[cfg(feature = "python")]
+            (JValue::Number(_), JValue::LazyPyDict(_)) => Ordering::Less,
 
             (JValue::String(_), JValue::Bool(_)) => Ordering::Greater,
             (JValue::String(_), JValue::Number(_)) => Ordering::Greater,
             (JValue::String(_), JValue::Array(_)) => Ordering::Less,
             (JValue::String(_), JValue::Object(_)) => Ordering::Less,
+            #[cfg(feature = "python")]
+            (JValue::String(_), JValue::LazyPyDict(_)) => Ordering::Less,
 
             (JValue::Array(_), JValue::Bool(_)) => Ordering::Greater,
             (JValue::Array(_), JValue::Number(_)) => Ordering::Greater,
             (JValue::Array(_), JValue::String(_)) => Ordering::Greater,
             (JValue::Array(_), JValue::Object(_)) => Ordering::Less,
+            #[cfg(feature = "python")]
+            (JValue::Array(_), JValue::LazyPyDict(_)) => Ordering::Less,
 
             (JValue::Object(_), _) => Ordering::Greater,
+            #[cfg(feature = "python")]
+            (JValue::LazyPyDict(_), _) => Ordering::Greater,
             _ => Ordering::Equal,
         }
     }
@@ -11249,6 +11635,8 @@ impl Evaluator {
             JValue::String(s) => !s.is_empty(),
             JValue::Array(arr) => !arr.is_empty(),
             JValue::Object(obj) => !obj.is_empty(),
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => !lazy.is_empty(),
             _ => false,
         }
     }
@@ -11539,6 +11927,8 @@ impl Evaluator {
             JValue::String(_) => "string",
             JValue::Array(_) => "array",
             JValue::Object(_) => "object",
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(_) => "object",
             _ => "unknown",
         }
     }
@@ -11681,6 +12071,17 @@ impl Evaluator {
 
     /// Convert a value to a string for concatenation
     fn value_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
+        // Normalize a lazy operand up front: `functions::string::string`'s lazy arm maps a
+        // conversion failure to `JValue::Null` (silently stringifying to `""`), which would
+        // swallow the TypeError this must raise instead. Guarded by `is_lazy` so the
+        // common (non-lazy) path pays no clone.
+        let normalized;
+        let value = if value.is_lazy() {
+            normalized = normalize_lazy(value)?;
+            &normalized
+        } else {
+            value
+        };
         match value {
             JValue::String(s) => Ok(s.to_string()),
             JValue::Null => Ok(String::new()),
@@ -11840,11 +12241,41 @@ impl Evaluator {
             return Ok(JValue::Bool(false));
         }
 
+        // Normalize a lazy left operand once; every equality below needs a real
+        // value, not a per-comparison materialization attempt. Guarded by `is_lazy`
+        // so the common (non-lazy) path pays no clone.
+        let normalized_left;
+        let left = if left.is_lazy() {
+            normalized_left = normalize_lazy(left)?;
+            &normalized_left
+        } else {
+            left
+        };
+
         match right {
-            JValue::Array(arr) => Ok(JValue::Bool(arr.iter().any(|v| self.equals(left, v)))),
+            JValue::Array(arr) => {
+                for v in arr.iter() {
+                    // compiled_equal normalizes a lazy element (guarded) so a
+                    // conversion failure raises instead of silently not matching.
+                    if matches!(compiled_equal(left, v)?, JValue::Bool(true)) {
+                        return Ok(JValue::Bool(true));
+                    }
+                }
+                Ok(JValue::Bool(false))
+            }
             JValue::Object(obj) => {
                 if let JValue::String(key) = left {
                     Ok(JValue::Bool(obj.contains_key(&**key)))
+                } else {
+                    Ok(JValue::Bool(false))
+                }
+            }
+            // Right-side lazy-object key-presence check doesn't convert any values
+            // (`contains_field` checks the Python dict directly), so it's left as-is.
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => {
+                if let JValue::String(key) = left {
+                    Ok(JValue::Bool(lazy.contains_field(key)))
                 } else {
                     Ok(JValue::Bool(false))
                 }

@@ -355,13 +355,13 @@ fn run_inner(
             Instr::CmpEq => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_equal(&lhs, &rhs));
+                stack.push(compiled_equal(&lhs, &rhs)?);
                 ip += 1;
             }
             Instr::CmpNe => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                let eq = compiled_equal(&lhs, &rhs);
+                let eq = compiled_equal(&lhs, &rhs)?;
                 let ne = match eq {
                     JValue::Bool(b) => JValue::Bool(!b),
                     other => other,
@@ -669,6 +669,8 @@ fn get_field_cached(
                 Ok(JValue::Undefined)
             }
         }
+        #[cfg(feature = "python")]
+        JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field)?),
         JValue::Array(arr) => {
             // Array: map field access over elements (implicit array mapping).
             // Mirrors `compiled_field_step`: flatten nested arrays one level.

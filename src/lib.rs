@@ -35,6 +35,8 @@ mod compiler;
 mod datetime;
 pub mod evaluator;
 pub mod functions;
+#[cfg(feature = "python")]
+pub mod lazy;
 pub mod parser;
 mod signature;
 pub mod value;
@@ -83,13 +85,11 @@ const JSONATA_REFERENCE_VERSION: &str = "2.1.0";
 #[cfg(feature = "python")]
 use crate::value::JValue;
 #[cfg(feature = "python")]
-use indexmap::IndexMap;
-#[cfg(feature = "python")]
 use pyo3::exceptions::{PyTypeError, PyValueError};
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 #[cfg(feature = "python")]
-use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use pyo3::types::{PyDict, PyList, PyString};
 
 /// Pre-converted data handle for efficient repeated evaluation.
 ///
@@ -165,6 +165,15 @@ struct JsonataExpression {
     default_options: evaluator::EvaluatorOptions,
 }
 
+/// Test-support toggle: set JSONATAPY_FORCE_TREE_WALKER=1 to bypass the
+/// bytecode VM and exercise the tree-walking evaluator on every call.
+/// Read per-call (not cached) so tests can flip it via monkeypatch.setenv;
+/// the ~100ns env read is noise next to a µs-scale evaluation.
+#[cfg(feature = "python")]
+fn force_tree_walker() -> bool {
+    std::env::var_os("JSONATAPY_FORCE_TREE_WALKER").is_some_and(|v| !v.is_empty() && v != "0")
+}
+
 #[cfg(feature = "python")]
 impl JsonataExpression {
     /// Evaluate the compiled expression against pre-converted data.
@@ -176,7 +185,7 @@ impl JsonataExpression {
         bindings: Option<Py<PyAny>>,
         options: evaluator::EvaluatorOptions,
     ) -> PyResult<JValue> {
-        if bindings.is_none() {
+        if bindings.is_none() && !force_tree_walker() {
             let bytecode = self.bytecode.get_or_init(|| {
                 evaluator::try_compile_expr(&self.ast)
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
@@ -211,7 +220,7 @@ impl JsonataExpression {
         max_stack_depth: Option<usize>,
         max_sequence_length: Option<usize>,
     ) -> PyResult<Py<PyAny>> {
-        let json_data = python_to_json(py, &data)?;
+        let json_data = lazy::convert(data.bind(py), true)?;
         let options = evaluator::EvaluatorOptions {
             timeout_ms: timeout.or(self.default_options.timeout_ms),
             max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
@@ -474,64 +483,12 @@ fn python_to_json(py: Python, obj: &Py<PyAny>) -> PyResult<JValue> {
     python_to_json_bound(obj.bind(py))
 }
 
-/// Inner conversion using Bound API for zero-overhead type checks.
-///
-/// Uses is_instance_of::<T>() which compiles to C-level type pointer comparisons
-/// (PyBool_Check, PyLong_Check, etc.) — single pointer comparison vs qualname()
-/// which allocates a Python string and does string comparison.
+/// Inner conversion using the Bound API. Delegates to `lazy::convert` with
+/// `lazy=false` for today's eager, fully-materialized conversion (see
+/// `src/lazy.rs` for the zero-overhead type-check details and the lazy path).
 #[cfg(feature = "python")]
 fn python_to_json_bound(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
-    if obj.is_none() {
-        return Ok(JValue::Null);
-    }
-
-    // Check bool before int — Python bool is a subclass of int
-    if obj.is_instance_of::<PyBool>() {
-        return Ok(JValue::Bool(obj.extract::<bool>()?));
-    }
-    if obj.is_instance_of::<PyInt>() {
-        return Ok(JValue::Number(obj.extract::<i64>()? as f64));
-    }
-    if obj.is_instance_of::<PyFloat>() {
-        return Ok(JValue::Number(obj.extract::<f64>()?));
-    }
-    if obj.is_instance_of::<PyString>() {
-        return Ok(JValue::string(obj.extract::<String>()?));
-    }
-    if let Ok(list) = obj.cast::<PyList>() {
-        let mut result = Vec::with_capacity(list.len());
-        for item in list.iter() {
-            result.push(python_to_json_bound(&item)?);
-        }
-        return Ok(JValue::array(result));
-    }
-    if let Ok(dict) = obj.cast::<PyDict>() {
-        let mut result = IndexMap::with_capacity(dict.len());
-        for (key, value) in dict.iter() {
-            let key_str = key.extract::<String>()?;
-            result.insert(key_str, python_to_json_bound(&value)?);
-        }
-        return Ok(JValue::object(result));
-    }
-
-    // Fallback for subclasses, numpy types, etc.
-    if let Ok(b) = obj.extract::<bool>() {
-        return Ok(JValue::Bool(b));
-    }
-    if let Ok(i) = obj.extract::<i64>() {
-        return Ok(JValue::Number(i as f64));
-    }
-    if let Ok(f) = obj.extract::<f64>() {
-        return Ok(JValue::Number(f));
-    }
-    if let Ok(s) = obj.extract::<String>() {
-        return Ok(JValue::string(s));
-    }
-
-    Err(PyTypeError::new_err(format!(
-        "Cannot convert Python object to JSON: {}",
-        obj.get_type().name()?
-    )))
+    lazy::convert(obj, false)
 }
 
 /// Convert a JValue to a Python object.
@@ -623,6 +580,8 @@ fn json_to_python(py: Python, value: &JValue) -> PyResult<Py<PyAny>> {
         }
 
         JValue::Lambda { .. } | JValue::Builtin { .. } | JValue::Regex { .. } => Ok(py.None()),
+
+        JValue::LazyPyDict(lazy) => Ok(lazy.py_object().clone_ref(py).into_any()),
     }
 }
 
@@ -665,7 +624,10 @@ fn create_evaluator(
 /// Convert an EvaluatorError to a PyErr
 #[cfg(feature = "python")]
 fn evaluator_error_to_py(e: evaluator::EvaluatorError) -> PyErr {
-    PyValueError::new_err(e.message().to_string())
+    match e {
+        evaluator::EvaluatorError::PyConversionError(m) => PyTypeError::new_err(m),
+        other => PyValueError::new_err(other.message().to_string()),
+    }
 }
 
 /// Convert a ParserError to a PyErr
