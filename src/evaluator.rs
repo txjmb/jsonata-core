@@ -2502,6 +2502,11 @@ const UNDEFINED_PROPAGATING_FUNCTIONS: &[&str] = &[
     "substringBefore",
     "substringAfter",
     "string",
+    "abs",
+    "ceil",
+    "floor",
+    "round",
+    "sqrt",
 ];
 
 /// Check whether a function propagates undefined values
