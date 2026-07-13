@@ -165,6 +165,15 @@ struct JsonataExpression {
     default_options: evaluator::EvaluatorOptions,
 }
 
+/// Test-support toggle: set JSONATAPY_FORCE_TREE_WALKER=1 to bypass the
+/// bytecode VM and exercise the tree-walking evaluator on every call.
+/// Read per-call (not cached) so tests can flip it via monkeypatch.setenv;
+/// the ~100ns env read is noise next to a µs-scale evaluation.
+#[cfg(feature = "python")]
+fn force_tree_walker() -> bool {
+    std::env::var_os("JSONATAPY_FORCE_TREE_WALKER").is_some_and(|v| !v.is_empty() && v != "0")
+}
+
 #[cfg(feature = "python")]
 impl JsonataExpression {
     /// Evaluate the compiled expression against pre-converted data.
@@ -176,7 +185,7 @@ impl JsonataExpression {
         bindings: Option<Py<PyAny>>,
         options: evaluator::EvaluatorOptions,
     ) -> PyResult<JValue> {
-        if bindings.is_none() {
+        if bindings.is_none() && !force_tree_walker() {
             let bytecode = self.bytecode.get_or_init(|| {
                 evaluator::try_compile_expr(&self.ast)
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
