@@ -1,7 +1,8 @@
 """Lazy Python views (LazyPyDict) behavior tests.
 
-Written against the temporary JsonataExpression._evaluate_lazy hook while
-the lazy path is being built out; Task 8 switches these to evaluate().
+evaluate() converts data lazily by default. `eager_eval` below uses a
+pre-converted JsonataData handle (which is always eager) as the reference
+point for parity checks against the lazy default.
 """
 import pytest
 import jsonatapy
@@ -16,11 +17,12 @@ PRODUCTS = {
 
 
 def lazy_eval(expr, data):
-    return jsonatapy.compile(expr)._evaluate_lazy(data)
+    return jsonatapy.compile(expr).evaluate(data)
 
 
 def eager_eval(expr, data):
-    return jsonatapy.compile(expr).evaluate(data)
+    # Eager reference behavior via the pre-converted data handle.
+    return jsonatapy.compile(expr).evaluate_with_data(jsonatapy.JsonataData(data))
 
 
 @pytest.mark.parametrize(
@@ -173,33 +175,33 @@ class TestPassThrough:
     def test_filter_returns_original_dict_objects(self):
         data = {"products": [{"id": 1, "big": list(range(100))}, {"id": 2}]}
         expr = jsonatapy.compile("products[id = 1]")
-        result = expr._evaluate_lazy(data)
+        result = expr.evaluate(data)
         assert result is data["products"][0]          # identity, not a copy
 
     def test_pass_through_preserves_int_fidelity(self):
         data = {"items": [{"n": 1}]}
-        result = jsonatapy.compile("items[n = 1]")._evaluate_lazy(data)
+        result = jsonatapy.compile("items[n = 1]").evaluate(data)
         assert result is data["items"][0]
         assert isinstance(result["n"], int)
 
     def test_mutation_visible_between_calls(self):
         data = {"a": 1}
         expr = jsonatapy.compile("a")
-        assert expr._evaluate_lazy(data) == 1
+        assert expr.evaluate(data) == 1
         data["a"] = 2
-        assert expr._evaluate_lazy(data) == 2         # no implicit caching
+        assert expr.evaluate(data) == 2         # no implicit caching
 
 
 class TestLazyErrors:
     BAD = {"good": 1, "bad": {1, 2, 3}}               # a set is not convertible
 
     def test_untouched_bad_field_succeeds(self):
-        assert jsonatapy.compile("good")._evaluate_lazy(self.BAD) == 1
+        assert jsonatapy.compile("good").evaluate(self.BAD) == 1
 
     def test_touched_bad_field_raises_typeerror(self):
         with pytest.raises(TypeError):
-            jsonatapy.compile("bad")._evaluate_lazy(self.BAD)
+            jsonatapy.compile("bad").evaluate(self.BAD)
 
     def test_materializing_bad_object_raises_typeerror(self):
         with pytest.raises(TypeError):
-            jsonatapy.compile("$keys($)")._evaluate_lazy(self.BAD)
+            jsonatapy.compile("$keys($)").evaluate(self.BAD)

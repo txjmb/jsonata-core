@@ -141,28 +141,6 @@ class JsonataExpression:
         """
         self._expr = expr
 
-    def _evaluate_lazy(
-        self,
-        data: Any,
-        bindings: dict[str, Any] | None = None,
-    ) -> Any:
-        """
-        TEMPORARY (removed when lazy becomes the default): evaluate with lazy data conversion.
-
-        Private test hook for the lazy-views rollout.
-
-        Args:
-            data: The data to query/transform (typically a dict or list)
-            bindings: Optional additional variable bindings
-
-        Returns:
-            The result of evaluating the expression
-
-        Raises:
-            ValueError: If evaluation fails
-        """
-        return self._expr._evaluate_lazy(data, bindings)
-
     def evaluate(
         self,
         data: Any,

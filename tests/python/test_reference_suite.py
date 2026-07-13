@@ -11,7 +11,6 @@ operators, and the array-constructor/distinct stragglers) was closed.
 """
 
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -169,10 +168,7 @@ def test_reference_suite(test_id: str, group_name: str, spec: dict[str, Any]):
         compiled = jsonatapy.compile(expr)
 
         # Evaluate with optional bindings
-        if os.environ.get("JSONATAPY_TEST_LAZY") == "1":
-            result = compiled._evaluate_lazy(data, bindings) if bindings else compiled._evaluate_lazy(data)
-        else:
-            result = compiled.evaluate(data, bindings) if bindings else compiled.evaluate(data)
+        result = compiled.evaluate(data, bindings) if bindings else compiled.evaluate(data)
 
         # Check for expected result
         if has_result:
