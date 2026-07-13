@@ -972,6 +972,8 @@ fn eval_compiled_inner(
                     .cloned()
                     .unwrap_or(JValue::Undefined))
             }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field)?),
             _ => Ok(JValue::Undefined),
         },
 
@@ -987,12 +989,25 @@ fn eval_compiled_inner(
                 } else {
                     obj.get(outer.as_str())
                 };
-                Ok(outer_val
-                    .and_then(|v| match v {
-                        JValue::Object(nested) => nested.get(inner.as_str()).cloned(),
-                        _ => None,
-                    })
-                    .unwrap_or(JValue::Undefined))
+                match outer_val {
+                    Some(JValue::Object(nested)) => {
+                        Ok(nested.get(inner.as_str()).cloned().unwrap_or(JValue::Undefined))
+                    }
+                    #[cfg(feature = "python")]
+                    Some(JValue::LazyPyDict(nested)) => Ok(nested.get_field(inner.as_str())?),
+                    _ => Ok(JValue::Undefined),
+                }
+            }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => {
+                let outer_val = lazy.get_field(outer.as_str())?;
+                match outer_val {
+                    JValue::Object(nested) => {
+                        Ok(nested.get(inner.as_str()).cloned().unwrap_or(JValue::Undefined))
+                    }
+                    JValue::LazyPyDict(nested) => Ok(nested.get_field(inner.as_str())?),
+                    _ => Ok(JValue::Undefined),
+                }
             }
             _ => Ok(JValue::Undefined),
         },
@@ -1804,6 +1819,8 @@ fn compiled_field_step(
             }
             Ok(obj.get(field).cloned().unwrap_or(JValue::Undefined))
         }
+        #[cfg(feature = "python")]
+        JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field)?),
         JValue::Array(arr) => {
             // Build shape cache from first plain (non-tuple) object for O(1) positional access.
             let shape: Option<ShapeCache> = arr.iter().find_map(|v| {
@@ -3324,6 +3341,10 @@ impl Evaluator {
                     .get(field_name)
                     .cloned()
                     .unwrap_or(JValue::Undefined))),
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(lazy) => {
+                    Some(lazy.get_field(field_name).map_err(EvaluatorError::from))
+                }
                 _ => None,
             },
             AstNode::Variable(name) if !name.is_empty() => {
@@ -4396,6 +4417,8 @@ impl Evaluator {
                             Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
                         }
                     }
+                    #[cfg(feature = "python")]
+                    JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field_name)?),
                     JValue::Array(arr) => {
                         // Array mapping: extract field from each element
                         // Optimized: use references to access fields without cloning entire objects
@@ -4430,6 +4453,19 @@ impl Evaluator {
                                         }
                                         JValue::Null => {}
                                         other => result.push(other),
+                                    }
+                                } else {
+                                    #[cfg(feature = "python")]
+                                    if let JValue::LazyPyDict(lazy) = item {
+                                        let val = lazy.get_field(field_name)?;
+                                        if !val.is_null() && !val.is_undefined() {
+                                            match val {
+                                                JValue::Array(arr_val) => {
+                                                    result.extend(arr_val.iter().cloned());
+                                                }
+                                                other => result.push(other),
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -4552,6 +4588,11 @@ impl Evaluator {
                             JValue::Object(obj) => {
                                 return Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null));
                             }
+                            #[cfg(feature = "python")]
+                            JValue::LazyPyDict(lazy) => {
+                                let v = lazy.get_field(field_name)?;
+                                return Ok(if v.is_undefined() { JValue::Null } else { v });
+                            }
                             JValue::Array(arr) => {
                                 // Map field extraction over array (same as single-step Name on Array)
                                 let mut result = Vec::with_capacity(arr.len());
@@ -4564,6 +4605,19 @@ impl Evaluator {
                                                         result.extend(inner.iter().cloned());
                                                     }
                                                     other => result.push(other.clone()),
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        #[cfg(feature = "python")]
+                                        if let JValue::LazyPyDict(lazy) = item {
+                                            let val = lazy.get_field(field_name)?;
+                                            if !val.is_null() && !val.is_undefined() {
+                                                match val {
+                                                    JValue::Array(inner) => {
+                                                        result.extend(inner.iter().cloned());
+                                                    }
+                                                    other => result.push(other),
                                                 }
                                             }
                                         }
@@ -4650,6 +4704,15 @@ impl Evaluator {
                                 val
                             }
                         }
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => {
+                            let val = lazy.get_field(field_name)?;
+                            if !stages.is_empty() {
+                                self.apply_stages(val, stages)?
+                            } else {
+                                val
+                            }
+                        }
                         JValue::Array(arr) => {
                             // Array mapping: extract field from each element and apply stages
                             let mut result = Vec::new();
@@ -4696,6 +4759,30 @@ impl Evaluator {
                                             }
                                             JValue::Null => {} // Skip nulls from nested arrays
                                             other => result.push(other),
+                                        }
+                                    }
+                                    #[cfg(feature = "python")]
+                                    JValue::LazyPyDict(lazy) => {
+                                        let val = lazy.get_field(field_name)?;
+                                        if !val.is_null() && !val.is_undefined() {
+                                            if !stages.is_empty() {
+                                                let processed_val =
+                                                    self.apply_stages(val, stages)?;
+                                                match processed_val {
+                                                    JValue::Array(arr) => {
+                                                        result.extend(arr.iter().cloned())
+                                                    }
+                                                    JValue::Null => {}
+                                                    other => result.push(other),
+                                                }
+                                            } else {
+                                                match val {
+                                                    JValue::Array(arr) => {
+                                                        result.extend(arr.iter().cloned())
+                                                    }
+                                                    other => result.push(other),
+                                                }
+                                            }
                                         }
                                     }
                                     _ => {} // Skip non-object items
@@ -5069,6 +5156,16 @@ impl Evaluator {
                                 val
                             }
                         }
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => {
+                            did_array_mapping = false;
+                            let val = lazy.get_field(field_name)?;
+                            if !stages.is_empty() {
+                                self.apply_stages(val, stages)?
+                            } else {
+                                val
+                            }
+                        }
                         JValue::Array(arr) => {
                             // Array mapping: extract field from each element and apply stages
                             did_array_mapping = true; // Track that we did array mapping
@@ -5106,6 +5203,18 @@ impl Evaluator {
                                                 }
                                                 JValue::Null => {}
                                                 other => result.push(other),
+                                            }
+                                        }
+                                        #[cfg(feature = "python")]
+                                        JValue::LazyPyDict(lazy) => {
+                                            let val = lazy.get_field(field_name)?;
+                                            if !val.is_null() && !val.is_undefined() {
+                                                match val {
+                                                    JValue::Array(arr_val) => {
+                                                        result.extend(arr_val.iter().cloned())
+                                                    }
+                                                    other => result.push(other),
+                                                }
                                             }
                                         }
                                         _ => {}
@@ -5257,6 +5366,34 @@ impl Evaluator {
                                                 }
                                                 JValue::Null => {}
                                                 other => result.push(other),
+                                            }
+                                        }
+                                        #[cfg(feature = "python")]
+                                        JValue::LazyPyDict(lazy) => {
+                                            // Lazy dicts are never tuples; read directly. Mirrors
+                                            // the Object arm's non-tuple branch (tuple_bindings =
+                                            // None throughout, so wrap_in_tuple would be a no-op).
+                                            let val = lazy.get_field(field_name)?;
+
+                                            if !val.is_null() && !val.is_undefined() {
+                                                if !stages.is_empty() {
+                                                    let processed_val =
+                                                        self.apply_stages(val, stages)?;
+                                                    match processed_val {
+                                                        JValue::Array(arr) => {
+                                                            result.extend(arr.iter().cloned())
+                                                        }
+                                                        JValue::Null => {} // Skip nulls from stage application
+                                                        other => result.push(other),
+                                                    }
+                                                } else {
+                                                    match val {
+                                                        JValue::Array(arr) => {
+                                                            result.extend(arr.iter().cloned())
+                                                        }
+                                                        other => result.push(other),
+                                                    }
+                                                }
                                             }
                                         }
                                         _ => {}
@@ -6003,6 +6140,8 @@ impl Evaluator {
                 (JValue::Object(obj), JValue::String(key)) => {
                     obj.get(&**key).cloned().unwrap_or(JValue::Undefined)
                 }
+                #[cfg(feature = "python")]
+                (JValue::LazyPyDict(lazy), JValue::String(key)) => lazy.get_field(key)?,
                 (JValue::Array(arr), JValue::Number(n)) => {
                     let index = *n as i64;
                     let len = arr.len() as i64;
