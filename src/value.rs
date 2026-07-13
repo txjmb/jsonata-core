@@ -87,6 +87,21 @@ impl JValue {
         }
     }
 
+    /// True only for the lazy Python-dict wrapper variant (always false when
+    /// the `python` feature is off). Used to guard `normalize_lazy` calls so
+    /// hot paths pay nothing when no lazy value is involved.
+    #[inline]
+    pub fn is_lazy(&self) -> bool {
+        #[cfg(feature = "python")]
+        {
+            matches!(self, JValue::LazyPyDict(_))
+        }
+        #[cfg(not(feature = "python"))]
+        {
+            false
+        }
+    }
+
     #[inline]
     pub fn is_lambda(&self) -> bool {
         matches!(self, JValue::Lambda { .. })

@@ -234,6 +234,15 @@ class TestLazyErrors:
         with pytest.raises(TypeError):
             jsonatapy.compile("one in items").evaluate(data)
 
+    def test_builtin_by_reference_swallowed_conversion_error_raises_typeerror(self, engine):
+        # Regression: a builtin passed BY REFERENCE to a HOF (`$map(items, $string)`)
+        # dispatches through `call_builtin_with_values`, a separate code path from
+        # the inline `$string(...)` call above -- it had its own unnormalized direct
+        # `functions::string::string(arg, ...)` call and needed the same fix.
+        data = {"items": [{"s": {1, 2, 3}}]}
+        with pytest.raises(TypeError):
+            jsonatapy.compile("$map(items, $string)").evaluate(data)
+
     def test_concat_and_equality_on_convertible_lazy_values_still_work(self, engine):
         # Control: legitimate (convertible) lazy values must keep comparing
         # and stringifying identically after the normalize-before-compare

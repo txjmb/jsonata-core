@@ -1034,20 +1034,14 @@ fn eval_compiled_inner(
             let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
             let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             match op {
-                CompiledCmp::Eq => {
-                    let left = normalize_lazy(&left)?;
-                    let right = normalize_lazy(&right)?;
-                    Ok(JValue::Bool(crate::functions::array::values_equal(
-                        &left, &right,
-                    )))
-                }
-                CompiledCmp::Ne => {
-                    let left = normalize_lazy(&left)?;
-                    let right = normalize_lazy(&right)?;
-                    Ok(JValue::Bool(!crate::functions::array::values_equal(
-                        &left, &right,
-                    )))
-                }
+                // compiled_equal normalizes lazy operands (guarded, zero-cost when
+                // neither side is lazy) so conversion failures raise instead of
+                // silently comparing unequal.
+                CompiledCmp::Eq => compiled_equal(&left, &right),
+                CompiledCmp::Ne => match compiled_equal(&left, &right)? {
+                    JValue::Bool(b) => Ok(JValue::Bool(!b)),
+                    other => Ok(other),
+                },
                 CompiledCmp::Lt => compiled_ordered_cmp(
                     &left,
                     &right,
@@ -1602,9 +1596,15 @@ pub(crate) fn compiled_arithmetic(
 pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
     // Normalize a lazy operand up front: `functions::string::string`'s lazy arm maps a
     // conversion failure to `JValue::Null` (silently stringifying to `""`), which would
-    // swallow the TypeError this must raise instead. Non-lazy values pass through
-    // unchanged (cheap clone).
-    let value = &normalize_lazy(value)?;
+    // swallow the TypeError this must raise instead. Guarded by `is_lazy` so the common
+    // (non-lazy) path pays no clone.
+    let normalized;
+    let value = if value.is_lazy() {
+        normalized = normalize_lazy(value)?;
+        &normalized
+    } else {
+        value
+    };
     match value {
         JValue::String(s) => Ok(s.to_string()),
         JValue::Null | JValue::Undefined => Ok(String::new()),
@@ -1625,9 +1625,15 @@ pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, Evalua
 #[inline]
 pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, EvaluatorError> {
     // Normalize lazy operands so a conversion failure raises TypeError here rather than
-    // being swallowed as `false` by `values_equal`'s lazy `to_object_ref` arms.
-    let lhs = &normalize_lazy(lhs)?;
-    let rhs = &normalize_lazy(rhs)?;
+    // being swallowed as `false` by `values_equal`'s lazy `to_object_ref` arms. Guarded
+    // by `is_lazy` so the common (non-lazy) path pays no clone.
+    if lhs.is_lazy() || rhs.is_lazy() {
+        let lhs = normalize_lazy(lhs)?;
+        let rhs = normalize_lazy(rhs)?;
+        return Ok(JValue::Bool(crate::functions::array::values_equal(
+            &lhs, &rhs,
+        )));
+    }
     Ok(JValue::Bool(crate::functions::array::values_equal(
         lhs, rhs,
     )))
@@ -6822,16 +6828,14 @@ impl Evaluator {
                 self.modulo(&left, &right, left_is_explicit_null, right_is_explicit_null)
             }
 
-            BinaryOp::Equal => {
-                let left = normalize_lazy(&left)?;
-                let right = normalize_lazy(&right)?;
-                Ok(JValue::Bool(self.equals(&left, &right)))
-            }
-            BinaryOp::NotEqual => {
-                let left = normalize_lazy(&left)?;
-                let right = normalize_lazy(&right)?;
-                Ok(JValue::Bool(!self.equals(&left, &right)))
-            }
+            // compiled_equal normalizes lazy operands (guarded, zero-cost when neither
+            // side is lazy) so conversion failures raise instead of silently comparing
+            // unequal.
+            BinaryOp::Equal => compiled_equal(&left, &right),
+            BinaryOp::NotEqual => match compiled_equal(&left, &right)? {
+                JValue::Bool(b) => Ok(JValue::Bool(!b)),
+                other => Ok(other),
+            },
             BinaryOp::LessThan => {
                 self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
             }
@@ -10798,7 +10802,13 @@ impl Evaluator {
             )));
         }
 
-        let arg = &values[0];
+        // Normalize a lazy first argument so a conversion failure raises TypeError
+        // here rather than being swallowed by a downstream function that maps
+        // `LazyPyDict`/failed-conversion to a misleading result (e.g. `string()`'s
+        // lazy arm silently stringifying to `"null"`). This is reachable from
+        // higher-order functions passed a bare builtin reference, e.g.
+        // `$map(items, $string)` where `items` elements are lazy.
+        let arg = &normalize_lazy(&values[0])?;
 
         match name {
             "string" => Ok(functions::string::string(arg, None)?),
@@ -12033,9 +12043,15 @@ impl Evaluator {
     fn value_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
         // Normalize a lazy operand up front: `functions::string::string`'s lazy arm maps a
         // conversion failure to `JValue::Null` (silently stringifying to `""`), which would
-        // swallow the TypeError this must raise instead. Non-lazy values pass through
-        // unchanged (cheap clone).
-        let value = &normalize_lazy(value)?;
+        // swallow the TypeError this must raise instead. Guarded by `is_lazy` so the
+        // common (non-lazy) path pays no clone.
+        let normalized;
+        let value = if value.is_lazy() {
+            normalized = normalize_lazy(value)?;
+            &normalized
+        } else {
+            value
+        };
         match value {
             JValue::String(s) => Ok(s.to_string()),
             JValue::Null => Ok(String::new()),
@@ -12196,14 +12212,22 @@ impl Evaluator {
         }
 
         // Normalize a lazy left operand once; every equality below needs a real
-        // value, not a per-comparison materialization attempt.
-        let left = &normalize_lazy(left)?;
+        // value, not a per-comparison materialization attempt. Guarded by `is_lazy`
+        // so the common (non-lazy) path pays no clone.
+        let normalized_left;
+        let left = if left.is_lazy() {
+            normalized_left = normalize_lazy(left)?;
+            &normalized_left
+        } else {
+            left
+        };
 
         match right {
             JValue::Array(arr) => {
                 for v in arr.iter() {
-                    let v = normalize_lazy(v)?;
-                    if self.equals(left, &v) {
+                    // compiled_equal normalizes a lazy element (guarded) so a
+                    // conversion failure raises instead of silently not matching.
+                    if matches!(compiled_equal(left, v)?, JValue::Bool(true)) {
                         return Ok(JValue::Bool(true));
                     }
                 }
