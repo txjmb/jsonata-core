@@ -169,10 +169,10 @@ identical data:
 
 | Case (100 objects) | Today `evaluate(dict)` | Target | jsonata-js |
 |---|---|---|---|
-| `products.price` | 34.9µs | ≤10µs | 14.6µs |
-| `products[category="Electronics"]` | 129.3µs | ≤15µs | 93.7µs |
-| `$sum(products[inStock].price)` | 116.4µs | ≤20µs | 67.6µs |
-| Complex transformation (dense access) | 160.9µs (wins today) | **regression ≤10%** | 415.1µs |
+| `products.price` | 34.9µs | ≤13.0µs | 14.6µs |
+| `products[category="Electronics"]` | 129.3µs | ≤27.6µs | 93.7µs |
+| `$sum(products[inStock].price)` | 116.4µs | ≤20.2µs | 67.6µs |
+| Complex transformation (dense access) | 160.9µs (wins today) | ≤93.0µs | 415.1µs |
 
 The ecommerce rows convert 9 fields per product (including a nested vendor dict
 and a tags list) on every call today; the lazy path touches only the 1–4 fields
@@ -182,6 +182,13 @@ The dense-access row is the guardrail: the earlier prototype regressed dense fie
 access ~2x. If that reproduces, the contingency is a compile-time field-usage
 analysis choosing eager conversion for provably-dense/unanalyzable expressions —
 added only if measurement demands it.
+
+The original target column above was a pre-implementation estimate; it was
+revised to measured post-implementation reality (Task 9b, selective field
+caching in `LazyPyDict::get_field` — cache only heap-typed conversions,
+2026-07-13) per user decision 2026-07-13, with the acceptance bar being that
+the implementation beats jsonata-js on all four measured rows (met — every
+row is comfortably under its jsonata-js column value).
 
 ## Testing
 

@@ -25,8 +25,9 @@ pub struct LazyConvertError(pub String);
 
 pub struct LazyPyDict {
     obj: Py<PyDict>,
-    /// Converted-on-first-access fields. `JValue::Undefined` marks a key
-    /// known to be absent (so repeat misses skip the Python lookup).
+    /// Converted-on-first-access fields, heap-typed values only (String,
+    /// Array, Object, LazyPyDict). Scalars and absent-key `Undefined` are
+    /// deliberately not cached — see `get_field`.
     field_cache: RefCell<HashMap<String, JValue>>,
     /// Memoized full materialization (for consumers that need a real object).
     materialized: OnceCell<Rc<IndexMap<String, JValue>>>,
@@ -74,9 +75,21 @@ impl LazyPyDict {
                 Some(v) => convert(&v, true).map_err(|e| LazyConvertError(e.to_string()))?,
                 None => JValue::Undefined,
             };
-            self.field_cache
-                .borrow_mut()
-                .insert(field.to_string(), val.clone());
+            // Cache only heap-typed conversions. Scalars (Number/Bool/Null) are
+            // cheaper to reconvert (~one C-API call) than to cache (String key
+            // alloc + HashMap insert), and Undefined (missing key) repeats are
+            // rare. Heap values keep conversion reuse, and nested dicts MUST stay
+            // cached so repeated access yields the same Rc-wrapped wrapper
+            // (identity for PartialEq's Rc::ptr_eq fast path and transform target
+            // detection).
+            if matches!(
+                val,
+                JValue::String(_) | JValue::Array(_) | JValue::Object(_) | JValue::LazyPyDict(_)
+            ) {
+                self.field_cache
+                    .borrow_mut()
+                    .insert(field.to_string(), val.clone());
+            }
             Ok(val)
         })
     }
@@ -101,11 +114,12 @@ impl LazyPyDict {
     }
 
     /// Full materialization. Iterates the Python dict in insertion order,
-    /// reusing per-field cached conversions. Memoized.
+    /// reusing per-field cached (heap-typed) conversions where available and
+    /// reconverting uncached (scalar) fields directly. Memoized.
     ///
-    /// Absent-key `Undefined` markers in `field_cache` are naturally
-    /// excluded: iteration is over the dict's actual keys, and a present
-    /// key never caches as Undefined (conversion never yields Undefined).
+    /// Iteration is over the dict's actual keys, so absent keys never
+    /// appear here regardless of caching — `field_cache` only ever holds
+    /// present-key values (scalars aren't cached at all; see `get_field`).
     pub fn to_object(&self) -> Result<Rc<IndexMap<String, JValue>>, LazyConvertError> {
         if let Some(m) = self.materialized.get() {
             return Ok(m.clone());
