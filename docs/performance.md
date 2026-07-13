@@ -32,11 +32,11 @@ Benchmarks run on 2026-07-13.
 |----------|----------------|
 | Simple Paths | **2.7x faster** |
 | Array Operations | **2.7x faster** |
-| Complex Transformations | **4.8x faster** |
+| Complex Transformations | **4.9x faster** |
 | Deep Nesting | **1.4x faster** |
 | String Operations | **4.5x faster** |
-| Higher-Order Functions | **8.3x faster** |
-| Realistic Workload | **5.6x faster** |
+| Higher-Order Functions | **8.4x faster** |
+| Realistic Workload | **5.7x faster** |
 
 ## Detailed Results
 
@@ -44,80 +44,80 @@ Benchmarks run on 2026-07-13.
 
 | Operation | Data Size | jsonatapy | jsonatapy (rust) | jsonata-js | jsonata-python | jsonata-rs | vs JS |
 |-----------|-----------|-----------|------------------|------------|----------------|------------|-------|
-| Simple Path | tiny | 6.417 | 7.216 | 14.550 | 1833.677 | 61.511 | **2.3x faster** |
-| Deep Path (5 levels) | tiny | 8.712 | 10.301 | 22.590 | 3048.156 | 72.126 | **2.6x faster** |
-| Array Index Access | 100 elements | 6.909 | 9.949 | 9.420 | 948.388 | 86.643 | **1.4x faster** |
-| Arithmetic Expression | tiny | 4.302 | 5.926 | 19.110 | 2636.091 | 56.729 | **4.4x faster** |
+| Simple Path | tiny | 6.384 | 7.073 | 14.600 | 1838.379 | 61.814 | **2.3x faster** |
+| Deep Path (5 levels) | tiny | 8.750 | 10.322 | 22.880 | 3021.317 | 72.248 | **2.6x faster** |
+| Array Index Access | 100 elements | 6.928 | 10.065 | 9.520 | 941.509 | 86.874 | **1.4x faster** |
+| Arithmetic Expression | tiny | 4.285 | 5.833 | 19.080 | 2615.682 | 56.603 | **4.5x faster** |
 
 ### Array Operations
 
 | Operation | Data Size | jsonatapy | jsonatapy (rust) | jsonata-js | jsonata-python | jsonata-rs | vs JS |
 |-----------|-----------|-----------|------------------|------------|----------------|------------|-------|
-| Array Sum (100 elements) | 100 elements | 1.748 | 2.341 | 5.950 | 306.621 | 17.932 | **3.4x faster** |
-| Array Max (100 elements) | 100 elements | 1.493 | 2.094 | 5.580 | 300.206 | 17.907 | **3.7x faster** |
-| Array Count (100 elements) | 100 elements | 2.788 | 4.004 | 7.360 | 532.966 | 34.977 | **2.6x faster** |
-| Array Sum (1000 elements) | 1000 elements | 2.764 | 4.063 | 4.520 | 179.076 | 24.463 | **1.6x faster** |
-| Array Max (1000 elements) | 1000 elements | 2.268 | 3.541 | 3.740 | 166.493 | 24.450 | **1.6x faster** |
-| Array Sum (10000 elements) | 10000 elements | 6.569 | 10.070 | 8.810 | 353.859 | 59.966 | **1.3x faster** |
-| Array Mapping (extract field) | 100 objects | 11.723 | 35.586 | 18.290 | 2685.749 | 208.914 | **1.6x faster** |
-| Array Mapping + Sum | 100 objects | 11.052 | 34.570 | 21.660 | 2992.943 | 209.623 | **2.0x faster** |
-| Array Filtering (predicate) | 100 objects | 7.568 | 21.653 | 45.290 | 6766.535 | 108.938 | **6.0x faster** |
+| Array Sum (100 elements) | 100 elements | 1.740 | 2.360 | 5.960 | 305.940 | 17.932 | **3.4x faster** |
+| Array Max (100 elements) | 100 elements | 1.487 | 2.104 | 5.530 | 299.300 | 17.954 | **3.7x faster** |
+| Array Count (100 elements) | 100 elements | 2.775 | 4.020 | 7.530 | 532.231 | 34.980 | **2.7x faster** |
+| Array Sum (1000 elements) | 1000 elements | 2.761 | 4.040 | 4.540 | 179.058 | 24.490 | **1.6x faster** |
+| Array Max (1000 elements) | 1000 elements | 2.261 | 3.525 | 3.710 | 166.978 | 24.488 | **1.6x faster** |
+| Array Sum (10000 elements) | 10000 elements | 6.551 | 10.104 | 8.820 | 355.566 | 59.935 | **1.3x faster** |
+| Array Mapping (extract field) | 100 objects | 11.632 | 35.524 | 18.450 | 2681.594 | 209.872 | **1.6x faster** |
+| Array Mapping + Sum | 100 objects | 10.887 | 34.485 | 21.420 | 2989.225 | 210.399 | **2.0x faster** |
+| Array Filtering (predicate) | 100 objects | 7.620 | 21.603 | 45.410 | 6750.763 | 108.913 | **6.0x faster** |
 
 ### Complex Transformations
 
 | Operation | Data Size | jsonatapy | jsonatapy (rust) | jsonata-js | jsonata-python | jsonata-rs | vs JS |
 |-----------|-----------|-----------|------------------|------------|----------------|------------|-------|
-| Object Construction (simple) | tiny | 6.301 | 5.785 | 24.340 | 2547.324 | 33.880 | **3.9x faster** |
-| Object Construction (nested) | tiny | 8.506 | 6.976 | 30.660 | 2914.864 | 36.655 | **3.6x faster** |
-| Conditional Expression | tiny | 1.846 | 2.476 | 11.540 | 1362.177 | 26.250 | **6.3x faster** |
-| Multiple Nested Functions | tiny | 3.103 | 3.124 | 17.380 | 1782.651 | 27.651 | **5.6x faster** |
+| Object Construction (simple) | tiny | 6.101 | 5.579 | 24.760 | 2543.278 | 33.785 | **4.1x faster** |
+| Object Construction (nested) | tiny | 8.363 | 6.814 | 30.720 | 2912.100 | 36.642 | **3.7x faster** |
+| Conditional Expression | tiny | 1.811 | 2.454 | 11.530 | 1362.430 | 26.335 | **6.4x faster** |
+| Multiple Nested Functions | tiny | 3.103 | 3.113 | 17.290 | 1783.805 | 27.725 | **5.6x faster** |
 
 ### Deep Nesting
 
 | Operation | Data Size | jsonatapy | jsonatapy (rust) | jsonata-js | jsonata-python | jsonata-rs | vs JS |
 |-----------|-----------|-----------|------------------|------------|----------------|------------|-------|
-| Deep Path (12 levels) | 12 levels | 9.287 | 9.336 | 23.230 | 2926.390 | 55.400 | **2.5x faster** |
-| Nested Array Access | 4-level nested arrays | 17.207 | 18.627 | 6.500 | 613.555 | 108.591 | 2.6x slower |
+| Deep Path (12 levels) | 12 levels | 9.336 | 9.283 | 23.310 | 2921.408 | 55.658 | **2.5x faster** |
+| Nested Array Access | 4-level nested arrays | 17.028 | 18.663 | 6.410 | 613.160 | 108.202 | 2.7x slower |
 
 ### String Operations
 
 | Operation | Data Size | jsonatapy | jsonatapy (rust) | jsonata-js | jsonata-python | jsonata-rs | vs JS |
 |-----------|-----------|-----------|------------------|------------|----------------|------------|-------|
-| String Uppercase | tiny | 5.488 | 5.989 | 19.880 | 2409.003 | 53.224 | **3.6x faster** |
-| String Lowercase | tiny | 5.524 | 6.046 | 19.570 | 2409.619 | 53.190 | **3.5x faster** |
-| String Length | tiny | 4.966 | 5.594 | 22.150 | 2608.713 | 54.413 | **4.5x faster** |
-| String Concatenation | tiny | 4.541 | 4.124 | 23.500 | 1929.474 | 30.141 | **5.2x faster** |
-| String Substring | tiny | 3.808 | 3.877 | 17.480 | 1692.159 | 28.358 | **4.6x faster** |
-| String Contains | tiny | 2.572 | 2.813 | 14.090 | 1424.230 | 28.186 | **5.5x faster** |
+| String Uppercase | tiny | 5.451 | 5.937 | 20.300 | 2412.908 | 53.083 | **3.7x faster** |
+| String Lowercase | tiny | 5.494 | 5.970 | 19.590 | 2410.855 | 53.147 | **3.6x faster** |
+| String Length | tiny | 4.943 | 5.593 | 22.080 | 2611.875 | 54.454 | **4.5x faster** |
+| String Concatenation | tiny | 4.505 | 4.048 | 23.420 | 1932.914 | 30.190 | **5.2x faster** |
+| String Substring | tiny | 3.893 | 3.854 | 17.820 | 1694.911 | 28.283 | **4.6x faster** |
+| String Contains | tiny | 2.560 | 2.871 | 14.260 | 1426.273 | 28.108 | **5.6x faster** |
 
 ### Higher-Order Functions
 
 | Operation | Data Size | jsonatapy | jsonatapy (rust) | jsonata-js | jsonata-python | jsonata-rs | vs JS |
 |-----------|-----------|-----------|------------------|------------|----------------|------------|-------|
-| $map with lambda | 100 elements | 2.464 | 2.564 | 21.650 | 2696.672 | 7.192 | **8.8x faster** |
-| $filter with lambda | 100 elements | 1.988 | 2.078 | 21.530 | 2696.940 | 7.116 | **10.8x faster** |
-| $reduce with lambda | 100 elements | 3.974 | 4.074 | 20.650 | 2709.486 | 7.710 | **5.2x faster** |
+| $map with lambda | 100 elements | 2.483 | 2.557 | 21.730 | 2694.330 | 7.146 | **8.8x faster** |
+| $filter with lambda | 100 elements | 1.989 | 2.062 | 21.550 | 2695.176 | 7.054 | **10.8x faster** |
+| $reduce with lambda | 100 elements | 3.803 | 3.945 | 20.780 | 2706.515 | 7.744 | **5.5x faster** |
 
 ### Realistic Workload
 
 | Operation | Data Size | jsonatapy | jsonatapy (rust) | jsonata-js | jsonata-python | jsonata-rs | vs JS |
 |-----------|-----------|-----------|------------------|------------|----------------|------------|-------|
-| Filter by category | 100 products | 15.102 | 56.038 | 45.530 | 7474.232 | 318.242 | **3.0x faster** |
-| Calculate total value | 100 products | 8.832 | 55.450 | 33.840 | 5172.220 | 317.715 | **3.8x faster** |
-| Complex transformation | 100 products | 19.981 | 31.916 | 79.620 | 9332.391 | 137.000 | **4.0x faster** |
-| Group by category (aggregate) | 100 products | 14.037 | 29.793 | 78.810 | N/A | 134.683 | **5.6x faster** |
-| Top rated products | 100 products | 2.974 | 13.156 | 34.350 | 4537.937 | 67.534 | **11.6x faster** |
+| Filter by category | 100 products | 15.242 | 56.146 | 45.590 | 7466.944 | 317.414 | **3.0x faster** |
+| Calculate total value | 100 products | 8.942 | 55.666 | 33.450 | 5157.552 | 318.061 | **3.7x faster** |
+| Complex transformation | 100 products | 19.795 | 31.955 | 80.760 | 9324.558 | 137.296 | **4.1x faster** |
+| Group by category (aggregate) | 100 products | 13.453 | 29.844 | 79.580 | N/A | 135.065 | **5.9x faster** |
+| Top rated products | 100 products | 2.959 | 13.190 | 35.000 | 4534.602 | 67.659 | **11.8x faster** |
 
 ### Path Comparison
 
 | Operation | jsonatapy (ms) | Iterations |
 |-----------|---------------|------------|
-| Filter by category (data handle) | 12.886 | 500 |
-| Filter by category (data→json) | 6.284 | 500 |
-| Complex transformation (data handle) | 33.857 | 500 |
-| Complex transformation (data→json) | 29.345 | 500 |
-| Aggregate (data handle) | 5.899 | 500 |
-| Aggregate (data→json) | 5.924 | 500 |
+| Filter by category (data handle) | 12.748 | 500 |
+| Filter by category (data→json) | 6.293 | 500 |
+| Complex transformation (data handle) | 33.980 | 500 |
+| Complex transformation (data→json) | 29.565 | 500 |
+| Aggregate (data handle) | 5.931 | 500 |
+| Aggregate (data→json) | 5.888 | 500 |
 
 ## Performance Characteristics
 
@@ -125,11 +125,11 @@ Benchmarks run on 2026-07-13.
 
 - Simple Paths (**2.7x faster**)
 - Array Operations (**2.7x faster**)
-- Complex Transformations (**4.8x faster**)
+- Complex Transformations (**4.9x faster**)
 - Deep Nesting (**1.4x faster**)
 - String Operations (**4.5x faster**)
-- Higher-Order Functions (**8.3x faster**)
-- Realistic Workload (**5.6x faster**)
+- Higher-Order Functions (**8.4x faster**)
+- Realistic Workload (**5.7x faster**)
 
 **Comparable to JavaScript:**
 
