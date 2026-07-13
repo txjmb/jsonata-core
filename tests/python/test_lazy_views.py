@@ -55,26 +55,27 @@ def force_tree_walker(monkeypatch):
     monkeypatch.setenv("JSONATAPY_FORCE_TREE_WALKER", "1")
 
 
-# Deferred to Task 5 (whole-object/whole-stream consumers, not fixable by
-# adding field-access arms at sites a-h):
+# Activated in Task 5 (were deferred pending whole-object/whole-stream
+# consumer fixes):
 #
-# - "products^(price).name" (sort by field). `evaluate_sort_term`'s
-#   single-Name-path shortcut does `if let JValue::Object(obj) = &actual_element
-#   { obj.get(field) } else { Undefined }`, bypassing paths a-h entirely, so
-#   every lazy element's sort key comes back Undefined -> the sort is a no-op.
-#   Masked with PRODUCTS because price happens to already be in ascending
-#   insertion order there. Proven broken with decorrelated data:
-#     data = {"products": [{"id": i, "price": 100 - i} for i in range(5)]}
-#     jsonatapy.compile("products^(price).id")._evaluate_lazy(data)  # [0, 1, 2, 3, 4]
-#     jsonatapy.compile("products^(price).id").evaluate(data)        # [4, 3, 2, 1, 0]
-#
-# - "products#$i.name" (index binding / tuple stream). `create_tuple_stream`
-#   wraps each lazy element as {"@": <LazyPyDict>, "__tuple__": true, "$i": ...}.
-#   The multi-step consumer's existing (unmodified) Object-arm tuple extraction
-#   does `if let Some(JValue::Object(inner)) = obj.get("@")`, which doesn't match
-#   a LazyPyDict `@` value, so it falls into the "Invalid tuple" `continue` branch
-#   and the whole record is silently dropped. Observed: lazy_eval returns None,
-#   eager_eval returns the full ['Product 0', ..., 'Product 9'] list.
+# - "products^(price).id" (sort by field) using DECORRELATED data (price
+#   descending while id is ascending), so a no-op sort would be caught --
+#   PRODUCTS itself has price already in ascending insertion order, which
+#   would mask a broken sort (see git history for the original repro).
+DECORRELATED = {"products": [{"id": i, "price": 100 - i} for i in range(5)]}
+
+
+def test_lazy_sort_by_field_matches_eager(force_tree_walker):
+    expr = "products^(price).id"
+    assert lazy_eval(expr, DECORRELATED) == eager_eval(expr, DECORRELATED)
+
+
+def test_lazy_tuple_stream_matches_eager(force_tree_walker):
+    # "products#$i.name" (index binding / tuple stream): each lazy element
+    # gets wrapped as {"@": <LazyPyDict>, "__tuple__": true, "$i": ...}; the
+    # tuple-unwrap sites must handle a LazyPyDict `@` value, not just Object.
+    expr = "products#$i.name"
+    assert lazy_eval(expr, PRODUCTS) == eager_eval(expr, PRODUCTS)
 
 
 @pytest.mark.parametrize(
@@ -106,3 +107,52 @@ def test_lazy_missing_field_tree_walker(force_tree_walker):
     assert lazy_eval("products[0].nosuch", PRODUCTS) == eager_eval(
         "products[0].nosuch", PRODUCTS
     )
+
+
+# ── Task 5: whole-object consumers ──────────────────────────────────────
+
+OBJ = {"a": 1, "b": {"c": 2}, "d": [1, 2]}
+
+
+@pytest.fixture(params=["vm", "tree"])
+def engine(request, monkeypatch):
+    if request.param == "tree":
+        monkeypatch.setenv("JSONATAPY_FORCE_TREE_WALKER", "1")
+    return request.param
+
+
+@pytest.mark.parametrize(
+    "expr,data",
+    [
+        ("$keys($)", OBJ),
+        ("$spread($)", OBJ),
+        ("$lookup($, 'a')", OBJ),
+        ("$merge([$, {'e': 5}])", OBJ),
+        ("$each($, function($v, $k) { $k })", OBJ),
+        ("$sift($, function($v) { $v = 1 })", OBJ),
+        ("$string($)", OBJ),
+        ("$type($)", OBJ),
+        ("$boolean($)", OBJ),
+        ("$boolean($)", {}),                      # empty dict → false
+        ("$exists(b.c)", OBJ),
+        ("'a' in $", OBJ),
+        ("$ = {'a': 1, 'b': {'c': 2}, 'd': [1, 2]}", OBJ),   # deep equality lazy vs constructed
+        ("$distinct([b, b, {'c': 2}])", OBJ),
+        ("products^(price)", PRODUCTS),           # specialized sort comparator keys
+        ("$sort(products, function($l, $r) { $l.price > $r.price })", PRODUCTS),
+        ("$ ~> | b | {'c': 99} |", OBJ),          # transform operator
+        ("products#$i.($i & ':' & name)", PRODUCTS),  # tuple stream (# index binding) over lazy elements
+    ],
+)
+# NOTE: the `@` tuple-binding operator is NOT implemented in this codebase
+# (deferred work) — do not add `@` expressions to these tests.
+#
+# NOTE: PRODUCTS' `price` field is already ascending in insertion order, so
+# the "products^(price)" case above does not by itself discriminate a broken
+# sort (a no-op sort coincidentally matches a correct ascending sort here) --
+# same masking risk documented for the sort fix generally. The
+# merge_sort_specialized/evaluate_sort_term fix is independently verified by
+# test_lazy_sort_by_field_matches_eager below, which uses decorrelated data
+# (price descending, id ascending) and was confirmed to fail without the fix.
+def test_lazy_consumers_match_eager(expr, data, engine):
+    assert lazy_eval(expr, data) == eager_eval(expr, data)

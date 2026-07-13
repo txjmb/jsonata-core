@@ -140,6 +140,15 @@ pub mod string {
                 };
                 stringify_value_custom(value, indent)?
             }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(_) => {
+                let indent = if prettify.unwrap_or(false) {
+                    Some(2)
+                } else {
+                    None
+                };
+                stringify_value_custom(value, indent)?
+            }
             _ => String::new(),
         };
         Ok(JValue::string(result))
@@ -276,6 +285,22 @@ pub mod string {
                     .collect();
                 JValue::object(transformed)
             }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => match lazy.to_object_ref() {
+                Some(obj) => {
+                    let transformed: IndexMap<String, JValue> = obj
+                        .iter()
+                        .map(|(k, v)| {
+                            if v.is_function() {
+                                return (k.clone(), JValue::string(""));
+                            }
+                            (k.clone(), transform_for_stringify(v))
+                        })
+                        .collect();
+                    JValue::object(transformed)
+                }
+                None => JValue::Null,
+            },
             _ => value.clone(),
         }
     }
@@ -1743,6 +1768,31 @@ pub mod array {
                     && a.iter()
                         .all(|(k, v)| b.get(k).is_some_and(|v2| values_equal(v, v2)))
             }
+            #[cfg(feature = "python")]
+            (JValue::LazyPyDict(x), JValue::Object(bm)) => x.to_object_ref().is_some_and(|am| {
+                am.len() == bm.len()
+                    && am
+                        .iter()
+                        .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
+            }),
+            #[cfg(feature = "python")]
+            (JValue::Object(am), JValue::LazyPyDict(y)) => y.to_object_ref().is_some_and(|bm| {
+                am.len() == bm.len()
+                    && am
+                        .iter()
+                        .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
+            }),
+            #[cfg(feature = "python")]
+            (JValue::LazyPyDict(x), JValue::LazyPyDict(y)) => {
+                x.to_object_ref().is_some_and(|am| {
+                    y.to_object_ref().is_some_and(|bm| {
+                        am.len() == bm.len()
+                            && am
+                                .iter()
+                                .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
+                    })
+                })
+            }
             _ => false,
         }
     }
@@ -1798,6 +1848,22 @@ pub mod object {
         let mut result = IndexMap::new();
 
         for obj in objects {
+            #[cfg(feature = "python")]
+            if let JValue::LazyPyDict(lazy) = obj {
+                match lazy.to_object_ref() {
+                    Some(map) => {
+                        for (k, v) in map.iter() {
+                            result.insert(k.clone(), v.clone());
+                        }
+                        continue;
+                    }
+                    None => {
+                        return Err(FunctionError::TypeError(
+                            "merge() argument could not be converted".to_string(),
+                        ))
+                    }
+                }
+            }
             match obj {
                 JValue::Object(map) => {
                     for (k, v) in map.iter() {
