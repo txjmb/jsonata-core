@@ -1452,11 +1452,11 @@ git commit -m "bench(lazy): performance gate for spec targets (all passing)"
 **Files:**
 - Modify: `docs/changelog.md` (new entry at top; follow the existing entry format exactly)
 - Modify: `docs/optimization-tips.md` and `docs/usage.md` (aliasing + laziness callouts)
-- Modify: `Cargo.toml` (version `2.2.3` → `2.3.0`); run `grep -rn "2\.2\.3" pyproject.toml python/ docs/` and update any other hardcoded version the repo convention updates on bump (check how commit 9a431a2 "chore: Bump version to 2.2.3" did it: `git show 9a431a2 --stat`)
+- Modify: `Cargo.toml` (version `2.2.3` → `2.2.4` — POINT release only: this project's version numbering tracks jsonata-js, minor bumps happen only when jsonata-js does one); run `grep -rn "2\.2\.3" pyproject.toml python/ docs/` and update any other hardcoded version the repo convention updates on bump (check how commit 9a431a2 "chore: Bump version to 2.2.3" did it: `git show 9a431a2 --stat`)
 
 - [ ] **Step 1: Changelog entry**
 
-Add a `## 2.3.0` entry covering, in the file's established style:
+Add a `## 2.2.4` entry covering, in the file's established style:
 - `evaluate(dict)` now converts Python data lazily — fields the expression never touches are never converted; large speedups on array workloads (cite the Task 9 numbers).
 - **Behavior change:** results containing unmodified input subtrees now reference the caller's original dicts (aliasing, matches jsonata-js). Mutating a result mutates the input. Passed-through values keep exact Python types (`int` stays `int`).
 - **Behavior change:** unconvertible values (e.g. a `set`) now raise `TypeError` only when the expression actually touches them.
@@ -1479,7 +1479,7 @@ uv run maturin develop --release && uv run pytest tests/python/ -q && cargo test
 
 ```bash
 git add -A
-git commit -m "chore: bump version to 2.3.0; changelog and docs for lazy Python views"
+git commit -m "chore: bump version to 2.2.4; changelog and docs for lazy Python views"
 ```
 
 ---

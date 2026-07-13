@@ -152,7 +152,10 @@ call time. With lazy input, conversion errors surface at **first access**:
 
 1. **Result aliasing.** Results containing unmodified input subtrees now reference
    the caller's original dicts (no deep copy). Mutating the result mutates the
-   input. Matches jsonata-js. Changelog + docs callout; **minor version bump**.
+   input. Matches jsonata-js. Changelog + docs callout. Version: **point release
+   only** (2.2.3 → 2.2.4) — this project's version numbering tracks jsonata-js,
+   so minor/major bumps happen only when jsonata-js releases one; the aliasing
+   change is called out prominently in the changelog instead.
 2. **Value fidelity.** Passed-through dicts preserve original Python values exactly
    (`int` stays `int`); converted paths still normalize numbers to float. Net
    improvement; the inconsistency between paths is documented.
