@@ -287,6 +287,18 @@ See [Error Handling](error-handling.md#guardrail-errors) for the full list of gu
 
 ## Performance Optimization
 
+### Lazy Conversion by Default (2.2.4+)
+
+`evaluate(dict)` converts Python data lazily: only the fields your expression actually touches
+are converted, so simple filters and aggregations over large arrays are several times faster with
+no code changes. `JsonataData` remains the fastest option when you evaluate the *same* data
+repeatedly — its conversion happens once and is reused across every query, while a plain
+`evaluate(dict)` call still converts touched fields on each call.
+
+**Result aliasing:** parts of a result that come from untouched input subtrees now reference the
+*original* Python objects (matches jsonata-js) rather than copies — mutating the result can
+mutate the input. Use `copy.deepcopy(result)` first if you need an independent copy.
+
 ### Compile Once
 
 ```python

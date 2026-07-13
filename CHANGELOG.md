@@ -19,6 +19,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [2.2.4] - 2026-07-13
+
+### Added
+- `JSONATAPY_FORCE_TREE_WALKER=1` environment variable (testing/debugging): forces every
+  evaluation through the tree-walking evaluator, bypassing the default lazy/VM-preferred path.
+
+### Changed
+- `evaluate(dict)` now converts Python data lazily by default. Previously every call eagerly
+  converted the entire input `dict` (and nested structures) to the internal value tree before
+  evaluation began; now only the fields an expression actually touches are converted, and
+  untouched input subtrees pass straight through to the output unchanged. Measured on the dev
+  machine (min-of-5, vs. the prior eager `evaluate(dict)`):
+  - `products.price` (100 objects): 34.9µs → 11.3µs (3.1x)
+  - Filter by category (100 products, 9 fields each): 129.3µs → 23.4µs (5.5x)
+  - `$sum(products[inStock].price)`: 116.4µs → 17.1µs (6.8x)
+  - Complex dense transformation: 160.9µs → 79µs (2.0x)
+
+  Every measured row now beats jsonata-js on identical data and machine (14.6/93.7/67.6/415.1µs
+  respectively). See `benchmarks/python/lazy_check.py` for the reproducible gate.
+- **Behavior change:** results containing an unmodified input subtree now reference the
+  caller's *original* Python `dict`/`list` objects (result aliasing, matching jsonata-js),
+  rather than a fresh copy. Mutating such a result mutates the corresponding input — copy
+  explicitly (e.g. `copy.deepcopy`) first if you plan to mutate. Passed-through values also keep
+  their exact Python type (an `int` field the expression never reads stays an `int`); fields the
+  expression does touch still normalize numbers to Python `float`, as before.
+- **Behavior change:** an unconvertible input value (e.g. a `set`) now raises `TypeError` only
+  when the expression actually touches it, instead of eagerly for the whole input at the start
+  of `evaluate()`.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [2.2.3] - 2026-07-12
 
 ### Added

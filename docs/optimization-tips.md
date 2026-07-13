@@ -13,6 +13,17 @@ Best practices for maximizing jsonatapy performance.
 
 ## Quick Wins
 
+**New in 2.2.4 — `evaluate(dict)` is lazy by default:** Only the fields an expression actually
+touches get converted from Python to the internal value tree; untouched input subtrees pass
+straight through to the output as the *original* Python objects. This makes plain `evaluate(dict)`
+calls several times faster on sparse-access, array-heavy queries (filters, aggregations) without
+any code changes.
+
+**Behavior change to be aware of:** because untouched subtrees pass through unchanged, a result
+that contains an unmodified part of your input now references the *same* Python objects as the
+input (result aliasing, matching jsonata-js) — mutating the result can mutate your input. Copy
+explicitly (e.g. `copy.deepcopy(result)`) before mutating if that matters for your use case.
+
 ### 1. Compile Once, Evaluate Many Times
 
 **Impact:** 10-1000x faster for repeated evaluations
@@ -39,6 +50,11 @@ for record in records:
 ### 2. Use JsonataData for Repeated Queries
 
 **Impact:** Eliminates Python-to-Rust conversion overhead
+
+Even with lazy conversion, `evaluate(dict)` still walks/converts the touched fields on *every*
+call. `JsonataData` still wins whenever you evaluate the *same* data with *multiple* expressions
+or *many* times — the conversion happens once, up front, and is reused across every subsequent
+query.
 
 ```python
 import jsonatapy
