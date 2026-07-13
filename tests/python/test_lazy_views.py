@@ -142,6 +142,15 @@ def engine(request, monkeypatch):
         ("$sort(products, function($l, $r) { $l.price > $r.price })", PRODUCTS),
         ("$ ~> | b | {'c': 99} |", OBJ),          # transform operator
         ("products#$i.($i & ':' & name)", PRODUCTS),  # tuple stream (# index binding) over lazy elements
+        # ── Task 6: whole-suite triage fixes ────────────────────────────
+        # Wildcard/descendant steps over ARRAYS of lazy elements (e.g.
+        # `Account.Order.Product.*`-shaped paths in the reference suite),
+        # not just a single lazy object.
+        ("products.*", PRODUCTS),                       # wildcard mapped over lazy array elements
+        ("**.name", PRODUCTS),                           # descendant operator recursing through lazy elements
+        ("$keys(products)", PRODUCTS),                   # keys() collected across lazy array elements
+        ("$lookup(products, 'name')", PRODUCTS),         # lookup() mapped over lazy array elements
+        ("$spread(products)", PRODUCTS),                 # spread() mapped over lazy array elements
     ],
 )
 # NOTE: the `@` tuple-binding operator is NOT implemented in this codebase

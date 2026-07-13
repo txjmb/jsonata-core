@@ -2422,7 +2422,8 @@ fn call_pure_builtin(
             Some(JValue::Array(arr)) => {
                 let mut all_keys: Vec<JValue> = Vec::new();
                 for item in arr.iter() {
-                    if let JValue::Object(obj) = item {
+                    let normalized_item = normalize_lazy(item)?;
+                    if let JValue::Object(obj) = &normalized_item {
                         for key in obj.keys() {
                             let k = JValue::string(key.clone());
                             if !all_keys.contains(&k) {
@@ -4033,7 +4034,8 @@ impl Evaluator {
 
             // Wildcard: collect all values from current object
             AstNode::Wildcard => {
-                match data {
+                let normalized = normalize_lazy(data)?;
+                match &normalized {
                     JValue::Object(obj) => {
                         let mut result = Vec::new();
                         for value in obj.values() {
@@ -4056,7 +4058,7 @@ impl Evaluator {
 
             // Descendant: recursively traverse all nested values
             AstNode::Descendant => {
-                let descendants = self.collect_descendants(data);
+                let descendants = self.collect_descendants(data)?;
                 if descendants.is_empty() {
                     Ok(JValue::Null) // No descendants means undefined
                 } else {
@@ -4721,7 +4723,8 @@ impl Evaluator {
             match &steps[0].node {
                 AstNode::Wildcard => {
                     // Wildcard as first step
-                    match data {
+                    let normalized = normalize_lazy(data)?;
+                    match &normalized {
                         JValue::Object(obj) => {
                             let mut result = Vec::new();
                             for value in obj.values() {
@@ -4739,7 +4742,7 @@ impl Evaluator {
                 }
                 AstNode::Descendant => {
                     // Descendant as first step
-                    let descendants = self.collect_descendants(data);
+                    let descendants = self.collect_descendants(data)?;
                     JValue::array(descendants)
                 }
                 AstNode::ParentVariable(name) => {
@@ -5142,7 +5145,8 @@ impl Evaluator {
                 AstNode::Wildcard => {
                     // Wildcard in path
                     let stages = &step.stages;
-                    let wildcard_result = match &current {
+                    let normalized_current = normalize_lazy(&current)?;
+                    let wildcard_result = match &normalized_current {
                         JValue::Object(obj) => {
                             let mut result = Vec::new();
                             for value in obj.values() {
@@ -5158,7 +5162,8 @@ impl Evaluator {
                             // Map wildcard over array
                             let mut all_values = Vec::new();
                             for item in arr.iter() {
-                                match item {
+                                let normalized_item = normalize_lazy(item)?;
+                                match &normalized_item {
                                     JValue::Object(obj) => {
                                         for value in obj.values() {
                                             // Flatten arrays
@@ -5195,13 +5200,13 @@ impl Evaluator {
                             // Collect descendants from all array elements
                             let mut all_descendants = Vec::new();
                             for item in arr.iter() {
-                                all_descendants.extend(self.collect_descendants(item));
+                                all_descendants.extend(self.collect_descendants(item)?);
                             }
                             JValue::array(all_descendants)
                         }
                         _ => {
                             // Collect descendants from current value
-                            let descendants = self.collect_descendants(&current);
+                            let descendants = self.collect_descendants(&current)?;
                             JValue::array(descendants)
                         }
                     }
@@ -8470,7 +8475,8 @@ impl Evaluator {
                             if matches!(item, JValue::Lambda { .. } | JValue::Builtin { .. }) {
                                 continue;
                             }
-                            if let JValue::Object(obj) = item {
+                            let normalized_item = normalize_lazy(item)?;
+                            if let JValue::Object(obj) = &normalized_item {
                                 for key in obj.keys() {
                                     if !all_keys.contains(&JValue::string(key.clone())) {
                                         all_keys.push(JValue::string(key.clone()));
@@ -8512,28 +8518,40 @@ impl Evaluator {
                 };
 
                 // Helper function to recursively lookup in values
-                fn lookup_recursive(val: &JValue, key: &str) -> Vec<JValue> {
+                fn lookup_recursive(
+                    val: &JValue,
+                    key: &str,
+                ) -> Result<Vec<JValue>, EvaluatorError> {
                     match val {
                         JValue::Array(arr) => {
                             let mut results = Vec::new();
                             for item in arr.iter() {
-                                let nested = lookup_recursive(item, key);
+                                let nested = lookup_recursive(item, key)?;
                                 results.extend(nested.iter().cloned());
                             }
-                            results
+                            Ok(results)
                         }
                         JValue::Object(obj) => {
                             if let Some(v) = obj.get(key) {
-                                vec![v.clone()]
+                                Ok(vec![v.clone()])
                             } else {
-                                vec![]
+                                Ok(vec![])
                             }
                         }
-                        _ => vec![],
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => {
+                            let v = lazy.get_field(key)?;
+                            if v.is_undefined() {
+                                Ok(vec![])
+                            } else {
+                                Ok(vec![v])
+                            }
+                        }
+                        _ => Ok(vec![]),
                     }
                 }
 
-                let results = lookup_recursive(&evaluated_args[0], key);
+                let results = lookup_recursive(&evaluated_args[0], key)?;
                 if results.is_empty() {
                     Ok(JValue::Null)
                 } else if results.len() == 1 {
@@ -8567,7 +8585,8 @@ impl Evaluator {
                         // Spread each object in the array
                         let mut result = Vec::new();
                         for item in arr.iter() {
-                            match item {
+                            let normalized_item = normalize_lazy(item)?;
+                            match &normalized_item {
                                 JValue::Lambda { .. } | JValue::Builtin { .. } => {
                                     // Skip lambdas in array
                                     continue;
@@ -10965,13 +10984,13 @@ impl Evaluator {
     }
 
     /// Collect all descendant values recursively
-    fn collect_descendants(&self, value: &JValue) -> Vec<JValue> {
+    fn collect_descendants(&self, value: &JValue) -> Result<Vec<JValue>, EvaluatorError> {
         let mut descendants = Vec::new();
 
         match value {
             JValue::Null => {
                 // Null has no descendants, return empty
-                return descendants;
+                return Ok(descendants);
             }
             JValue::Object(obj) => {
                 // Include the current object
@@ -10979,7 +10998,17 @@ impl Evaluator {
 
                 for val in obj.values() {
                     // Recursively collect descendants
-                    descendants.extend(self.collect_descendants(val));
+                    descendants.extend(self.collect_descendants(val)?);
+                }
+            }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => {
+                // Include the current (lazy) object, mirroring the Object arm
+                descendants.push(value.clone());
+
+                let obj = lazy.to_object().map_err(EvaluatorError::from)?;
+                for val in obj.values() {
+                    descendants.extend(self.collect_descendants(val)?);
                 }
             }
             JValue::Array(arr) => {
@@ -10987,7 +11016,7 @@ impl Evaluator {
                 // This matches JavaScript behavior: arrays are traversed but not collected
                 for val in arr.iter() {
                     // Recursively collect descendants
-                    descendants.extend(self.collect_descendants(val));
+                    descendants.extend(self.collect_descendants(val)?);
                 }
             }
             _ => {
@@ -10996,7 +11025,7 @@ impl Evaluator {
             }
         }
 
-        descendants
+        Ok(descendants)
     }
 
     /// Evaluate a predicate (array filter or index)
