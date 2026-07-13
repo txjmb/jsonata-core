@@ -2375,6 +2375,15 @@
 <li><a href="#advanced-techniques">Advanced Techniques</a></li>
 </ul>
 <h2 id="quick-wins">Quick Wins<a class="headerlink" href="#quick-wins" title="Permanent link">&para;</a></h2>
+<p><strong>New in 2.2.4 — <code>evaluate(dict)</code> is lazy by default:</strong> Only the fields an expression actually
+touches get converted from Python to the internal value tree; untouched input subtrees pass
+straight through to the output as the <em>original</em> Python objects. This makes plain <code>evaluate(dict)</code>
+calls several times faster on sparse-access, array-heavy queries (filters, aggregations) without
+any code changes.</p>
+<p><strong>Behavior change to be aware of:</strong> because untouched subtrees pass through unchanged, a result
+that contains an unmodified part of your input now references the <em>same</em> Python objects as the
+input (result aliasing, matching jsonata-js) — mutating the result can mutate your input. Copy
+explicitly (e.g. <code>copy.deepcopy(result)</code>) before mutating if that matters for your use case.</p>
 <h3 id="1-compile-once-evaluate-many-times">1. Compile Once, Evaluate Many Times<a class="headerlink" href="#1-compile-once-evaluate-many-times" title="Permanent link">&para;</a></h3>
 <p><strong>Impact:</strong> 10-1000x faster for repeated evaluations</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
@@ -2395,6 +2404,10 @@
 - ETL pipelines</p>
 <h3 id="2-use-jsonatadata-for-repeated-queries">2. Use JsonataData for Repeated Queries<a class="headerlink" href="#2-use-jsonatadata-for-repeated-queries" title="Permanent link">&para;</a></h3>
 <p><strong>Impact:</strong> Eliminates Python-to-Rust conversion overhead</p>
+<p>Even with lazy conversion, <code>evaluate(dict)</code> still walks/converts the touched fields on <em>every</em>
+call. <code>JsonataData</code> still wins whenever you evaluate the <em>same</em> data with <em>multiple</em> expressions
+or <em>many</em> times — the conversion happens once, up front, and is reused across every subsequent
+query.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="c1"># Convert data once</span>

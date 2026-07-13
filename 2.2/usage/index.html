@@ -850,6 +850,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#lazy-conversion-by-default-224" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lazy Conversion by Default (2.2.4+)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#compile-once" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2123,6 +2134,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#lazy-conversion-by-default-224" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lazy Conversion by Default (2.2.4+)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#compile-once" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2455,6 +2477,15 @@ behavior exactly when unspecified.</p>
 </span></code></pre></div>
 <p>See <a href="../error-handling/#guardrail-errors">Error Handling</a> for the full list of guardrail error codes.</p>
 <h2 id="performance-optimization">Performance Optimization<a class="headerlink" href="#performance-optimization" title="Permanent link">&para;</a></h2>
+<h3 id="lazy-conversion-by-default-224">Lazy Conversion by Default (2.2.4+)<a class="headerlink" href="#lazy-conversion-by-default-224" title="Permanent link">&para;</a></h3>
+<p><code>evaluate(dict)</code> converts Python data lazily: only the fields your expression actually touches
+are converted, so simple filters and aggregations over large arrays are several times faster with
+no code changes. <code>JsonataData</code> remains the fastest option when you evaluate the <em>same</em> data
+repeatedly — its conversion happens once and is reused across every query, while a plain
+<code>evaluate(dict)</code> call still converts touched fields on each call.</p>
+<p><strong>Result aliasing:</strong> parts of a result that come from untouched input subtrees now reference the
+<em>original</em> Python objects (matches jsonata-js) rather than copies — mutating the result can
+mutate the input. Use <code>copy.deepcopy(result)</code> first if you need an independent copy.</p>
 <h3 id="compile-once">Compile Once<a class="headerlink" href="#compile-once" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Slow - compiles every time</span>
 </span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="k">for</span> <span class="n">data</span> <span class="ow">in</span> <span class="n">dataset</span><span class="p">:</span>

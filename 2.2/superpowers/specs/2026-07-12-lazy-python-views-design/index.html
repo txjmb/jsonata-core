@@ -12,31 +12,27 @@
         <meta name="author" content="jsonatapy contributors">
       
       
-        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.2/performance/">
+        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-12-lazy-python-views-design/">
       
       
-        <link rel="prev" href="../error-handling/">
-      
-      
-        <link rel="next" href="../benchmarks/">
       
       
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
-        <title>Performance Overview - jsonata-core + jsonatapy</title>
+        <title>Lazy Python Views (LazyPyDict) — Design - jsonata-core + jsonatapy</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.484c7ddc.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -55,9 +51,9 @@
       
     
     
-      <link rel="stylesheet" href="../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
   
@@ -92,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#performance-benchmarks" class="md-skip">
+        <a href="#lazy-python-views-lazypydict-design" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +106,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -130,7 +126,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Performance Overview
+              Lazy Python Views (LazyPyDict) — Design
             
           </span>
         </div>
@@ -243,7 +239,7 @@
   
   
     <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
+      <a href="../../.." class="md-tabs__link">
         
   
   
@@ -264,7 +260,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../installation/" class="md-tabs__link">
+        <a href="../../../installation/" class="md-tabs__link">
           
   
   
@@ -284,7 +280,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../rust-crate/" class="md-tabs__link">
+        <a href="../../../rust-crate/" class="md-tabs__link">
           
   
   
@@ -304,7 +300,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/" class="md-tabs__link">
+        <a href="../../../api/" class="md-tabs__link">
           
   
   
@@ -320,13 +316,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="./" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../../performance/" class="md-tabs__link">
           
   
   
@@ -346,7 +340,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../compatibility/" class="md-tabs__link">
+        <a href="../../../compatibility/" class="md-tabs__link">
           
   
   
@@ -366,7 +360,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../development/building/" class="md-tabs__link">
+        <a href="../../../development/building/" class="md-tabs__link">
           
   
   
@@ -386,7 +380,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../changelog/" class="md-tabs__link">
+        <a href="../../../changelog/" class="md-tabs__link">
           
   
   
@@ -420,7 +414,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -450,7 +444,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../../.." class="md-nav__link">
         
   
   
@@ -531,7 +525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../installation/" class="md-nav__link">
+      <a href="../../../installation/" class="md-nav__link">
         
   
   
@@ -559,7 +553,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../usage/" class="md-nav__link">
+      <a href="../../../usage/" class="md-nav__link">
         
   
   
@@ -587,7 +581,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../examples/" class="md-nav__link">
+      <a href="../../../examples/" class="md-nav__link">
         
   
   
@@ -676,7 +670,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rust-crate/" class="md-nav__link">
+      <a href="../../../rust-crate/" class="md-nav__link">
         
   
   
@@ -765,7 +759,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/" class="md-nav__link">
+      <a href="../../../api/" class="md-nav__link">
         
   
   
@@ -793,7 +787,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../jsonata-language/" class="md-nav__link">
+      <a href="../../../jsonata-language/" class="md-nav__link">
         
   
   
@@ -821,7 +815,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../error-handling/" class="md-nav__link">
+      <a href="../../../error-handling/" class="md-nav__link">
         
   
   
@@ -853,31 +847,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -895,7 +886,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -910,37 +901,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Performance Overview
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../../performance/" class="md-nav__link">
         
   
   
@@ -956,209 +920,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#implementations-tested" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Implementations Tested
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Implementations Tested">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#methodology-compile-once-evaluate-many" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Methodology: compile-once, evaluate-many
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#summary-by-category" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Summary by Category
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#detailed-results" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Detailed Results
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Detailed Results">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#simple-paths" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Simple Paths
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#array-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Array Operations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complex-transformations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complex Transformations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deep-nesting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deep Nesting
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#string-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        String Operations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#higher-order-functions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Higher-Order Functions
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#realistic-workload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Realistic Workload
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#path-comparison" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Path Comparison
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#performance-characteristics" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Performance Characteristics
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Performance Characteristics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#optimizing-array-workloads" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optimizing Array Workloads
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#methodology" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Methodology
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1171,7 +932,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../benchmarks/" class="md-nav__link">
+      <a href="../../../benchmarks/" class="md-nav__link">
         
   
   
@@ -1199,7 +960,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../optimization-tips/" class="md-nav__link">
+      <a href="../../../optimization-tips/" class="md-nav__link">
         
   
   
@@ -1288,7 +1049,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../compatibility/" class="md-nav__link">
+      <a href="../../../compatibility/" class="md-nav__link">
         
   
   
@@ -1316,7 +1077,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../migration-from-js/" class="md-nav__link">
+      <a href="../../../migration-from-js/" class="md-nav__link">
         
   
   
@@ -1344,7 +1105,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../migration-from-jsonata-python/" class="md-nav__link">
+      <a href="../../../migration-from-jsonata-python/" class="md-nav__link">
         
   
   
@@ -1433,7 +1194,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/building/" class="md-nav__link">
+      <a href="../../../development/building/" class="md-nav__link">
         
   
   
@@ -1461,7 +1222,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/parser/" class="md-nav__link">
+      <a href="../../../development/parser/" class="md-nav__link">
         
   
   
@@ -1489,7 +1250,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/contributing/" class="md-nav__link">
+      <a href="../../../development/contributing/" class="md-nav__link">
         
   
   
@@ -1517,7 +1278,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/testing/" class="md-nav__link">
+      <a href="../../../development/testing/" class="md-nav__link">
         
   
   
@@ -1545,7 +1306,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/architecture/" class="md-nav__link">
+      <a href="../../../development/architecture/" class="md-nav__link">
         
   
   
@@ -1573,7 +1334,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/releasing/" class="md-nav__link">
+      <a href="../../../development/releasing/" class="md-nav__link">
         
   
   
@@ -1662,7 +1423,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="../../../changelog/" class="md-nav__link">
         
   
   
@@ -1690,7 +1451,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../license/" class="md-nav__link">
+      <a href="../../../license/" class="md-nav__link">
         
   
   
@@ -1718,7 +1479,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../credits/" class="md-nav__link">
+      <a href="../../../credits/" class="md-nav__link">
         
   
   
@@ -1773,22 +1534,110 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#implementations-tested" class="md-nav__link">
+  <a href="#problem" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Implementations Tested
+        Problem
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Implementations Tested">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#non-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Non-goals
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#methodology-compile-once-evaluate-many" class="md-nav__link">
+  <a href="#core-data-structure" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Methodology: compile-once, evaluate-many
+        Core data structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#input-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#evaluation-touch-points-choke-point-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation touch points — choke-point strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output-path-pass-through" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output path — pass-through
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gil" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GIL
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error handling
       
     </span>
   </a>
@@ -1801,10 +1650,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#summary-by-category" class="md-nav__link">
+  <a href="#documented-behavior-changes" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Summary by Category
+        Documented behavior changes
       
     </span>
   </a>
@@ -1812,143 +1661,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#detailed-results" class="md-nav__link">
+  <a href="#performance-targets" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Detailed Results
+        Performance targets
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Detailed Results">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#simple-paths" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Simple Paths
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#array-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Array Operations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#complex-transformations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Complex Transformations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#deep-nesting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Deep Nesting
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#string-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        String Operations
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#higher-order-functions" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Higher-Order Functions
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#realistic-workload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Realistic Workload
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#path-comparison" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Path Comparison
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#performance-characteristics" class="md-nav__link">
+  <a href="#testing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Performance Characteristics
+        Testing
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Performance Characteristics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#optimizing-array-workloads" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optimizing Array Workloads
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#methodology" class="md-nav__link">
+  <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Methodology
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alternatives-considered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alternatives considered
       
     </span>
   </a>
@@ -1975,633 +1724,255 @@
   
 
 
-<h1 id="performance-benchmarks">Performance Benchmarks<a class="headerlink" href="#performance-benchmarks" title="Permanent link">&para;</a></h1>
-<p>jsonatapy is a high-performance Rust implementation of JSONata with Python bindings. This page presents benchmark comparisons against other JSONata implementations.</p>
-<p><strong>These numbers come from a dedicated, self-hosted Mac Mini (Apple Silicon), not a shared cloud CI runner</strong> — single-tenant physical hardware with no other workloads competing for CPU. This matters: single-sample measurements on a shared/virtualized runner were previously noisy enough that identical code, measured twice, swung -66% to +120%. Every number below is also the <em>minimum</em> of 5 independent measurement trials per test (not an average) — for CPU-bound microbenchmarks, interference can only make a run slower than the code's true achievable speed, never faster, so the minimum across repeated trials is the best available estimate of that true speed.</p>
-<h2 id="implementations-tested">Implementations Tested<a class="headerlink" href="#implementations-tested" title="Permanent link">&para;</a></h2>
+<h1 id="lazy-python-views-lazypydict-design">Lazy Python Views (<code>LazyPyDict</code>) — Design<a class="headerlink" href="#lazy-python-views-lazypydict-design" title="Permanent link">&para;</a></h1>
+<p><strong>Date:</strong> 2026-07-12
+<strong>Status:</strong> Approved
+<strong>Approach:</strong> "Approach A — lazy Python views + pass-through output" (chosen over projection push-down and a hybrid; see Alternatives)</p>
+<h2 id="problem">Problem<a class="headerlink" href="#problem" title="Permanent link">&para;</a></h2>
+<p>The published benchmarks show jsonatapy losing to jsonata-js on array workloads
+(<code>products.price</code> 2.3x slower, <code>Filter by category</code> 1.7x slower, etc.). Measurement
+shows the engine is not the cause:</p>
 <table>
 <thead>
 <tr>
-<th>Implementation</th>
-<th>Language</th>
-<th>Version</th>
-<th>Description</th>
+<th>Path (<code>products.price</code>, 100 objects)</th>
+<th>Time/call</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>jsonatapy</strong></td>
-<td>Rust + Python</td>
-<td>2.2.3</td>
-<td>This project (compiled Rust extension via PyO3)</td>
+<td><code>evaluate(dict)</code> — what benchmarks measure</td>
+<td>34.9µs</td>
 </tr>
 <tr>
-<td><strong>jsonatapy</strong> (rust-only)</td>
-<td>Rust + Python</td>
-<td>2.2.3</td>
-<td>Same library, JSON string I/O path (bypasses Python object conversion)</td>
+<td><code>evaluate_with_data(JsonataData)</code> — pre-converted</td>
+<td>2.8µs</td>
 </tr>
 <tr>
-<td><strong>jsonata-js</strong></td>
-<td>JavaScript</td>
-<td>2.1.0</td>
-<td>Reference implementation (Node.js v20.20.2)</td>
-</tr>
-<tr>
-<td><strong>jsonata-python</strong></td>
-<td>Python</td>
-<td>unknown</td>
-<td>Pure Python implementation</td>
-</tr>
-<tr>
-<td><strong>jsonata-rs</strong></td>
-<td>Rust</td>
-<td>0.3</td>
-<td>Pure Rust implementation (CLI benchmark, no Python overhead)</td>
+<td>jsonata-js (native JS objects, no conversion)</td>
+<td>14.6µs</td>
 </tr>
 </tbody>
 </table>
-<h3 id="methodology-compile-once-evaluate-many">Methodology: compile-once, evaluate-many<a class="headerlink" href="#methodology-compile-once-evaluate-many" title="Permanent link">&para;</a></h3>
-<p>Every implementation below is measured the way a real caller who evaluates the same expression repeatedly would use it, not its slowest possible one-off call:</p>
+<p>~93% of <code>evaluate(dict)</code> time is the eager, recursive Python→<code>JValue</code> conversion in
+<code>python_to_json_bound</code> (src/lib.rs), paid on every call, scaling linearly with data
+size (93% share measured at 100, 1k, and 10k objects). The native Rust engine beats
+jsonata-js by 7–20x on every losing benchmark row when measured without the Python
+boundary (compile-once/parse-once/evaluate-many, same machine). Passing JSON strings
+instead of dicts does not help: <code>evaluate_json</code> time is dominated by building the
+<code>JValue</code> tree, not by reading input (simd-json makes only the cheap part cheaper).</p>
+<p>The fix must therefore avoid <em>building the tree</em>, not accelerate building it.</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>Eliminate most of the per-call conversion tax in <code>evaluate(dict)</code> by:</p>
+<ol>
+<li><strong>Lazy input:</strong> read Python dict fields on demand; never convert fields the
+   expression doesn't touch.</li>
+<li><strong>Pass-through output:</strong> when a result value is an untouched input subtree,
+   return the original Python object instead of rebuilding it.</li>
+</ol>
+<h2 id="non-goals">Non-goals<a class="headerlink" href="#non-goals" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>jsonatapy</strong> — <code>jsonatapy.compile(expr)</code> once, then <code>.evaluate(data)</code> in the timed loop. No further reuse is available; the compiled bytecode is already cached on the expression object.</li>
-<li>
-<p><strong>jsonata-js</strong> — <code>jsonata(expr)</code> once, then <code>.evaluate(data)</code> in the timed loop. Same story: this is already the library's fastest repeated-call path.</p>
-</li>
-<li>
-<p><strong>jsonata-python</strong> — uses its documented <code>Context</code> object (<code>ctx = jsonata.Context()</code>, then <code>ctx(expr, data)</code> in the loop) rather than the one-off <code>transform()</code> convenience function. <code>transform()</code> re-bootstraps an embedded Duktape engine — reloading the <code>jsonata.js</code> library into it — on every single call; reusing a <code>Context</code> keeps that engine warm and is the library's own documented path for repeated evaluation. It is <em>not</em> a true compile-once equivalent, since <code>Context.__call__</code> still re-parses the expression string on every call, so some of the remaining gap to jsonatapy/jsonata-js is real parsing cost this library doesn't let a caller amortize away.</p>
-</li>
+<li>No implicit cross-call caching of converted data. Every <code>evaluate()</code> call sees
+  live data; mutation between calls is always visible. (<code>JsonataData</code> remains the
+  explicit opt-in for amortizing conversion.)</li>
+<li>No engine/VM changes beyond lazy-value handling — the engine already beats JS.</li>
+<li>No lazy wrapper for Python <strong>lists</strong> in v1 (see Limitations).</li>
 </ul>
-<p>Benchmarks run on 2026-07-12.</p>
-<h2 id="summary-by-category">Summary by Category<a class="headerlink" href="#summary-by-category" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Category</th>
-<th>jsonatapy vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Simple Paths</td>
-<td><strong>2.7x faster</strong></td>
-</tr>
-<tr>
-<td>Array Operations</td>
-<td><strong>1.9x faster</strong></td>
-</tr>
-<tr>
-<td>Complex Transformations</td>
-<td><strong>5.5x faster</strong></td>
-</tr>
-<tr>
-<td>Deep Nesting</td>
-<td><strong>1.4x faster</strong></td>
-</tr>
-<tr>
-<td>String Operations</td>
-<td><strong>5.4x faster</strong></td>
-</tr>
-<tr>
-<td>Higher-Order Functions</td>
-<td><strong>9.6x faster</strong></td>
-</tr>
-<tr>
-<td>Realistic Workload</td>
-<td><strong>1.5x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h2 id="detailed-results">Detailed Results<a class="headerlink" href="#detailed-results" title="Permanent link">&para;</a></h2>
-<h3 id="simple-paths">Simple Paths<a class="headerlink" href="#simple-paths" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Simple Path</td>
-<td>tiny</td>
-<td>6.237</td>
-<td>6.457</td>
-<td>14.700</td>
-<td>1835.106</td>
-<td>61.758</td>
-<td><strong>2.4x faster</strong></td>
-</tr>
-<tr>
-<td>Deep Path (5 levels)</td>
-<td>tiny</td>
-<td>9.261</td>
-<td>9.504</td>
-<td>22.680</td>
-<td>3015.204</td>
-<td>73.094</td>
-<td><strong>2.4x faster</strong></td>
-</tr>
-<tr>
-<td>Array Index Access</td>
-<td>100 elements</td>
-<td>6.769</td>
-<td>10.603</td>
-<td>9.710</td>
-<td>938.867</td>
-<td>86.804</td>
-<td><strong>1.4x faster</strong></td>
-</tr>
-<tr>
-<td>Arithmetic Expression</td>
-<td>tiny</td>
-<td>4.163</td>
-<td>5.141</td>
-<td>19.040</td>
-<td>2606.022</td>
-<td>56.756</td>
-<td><strong>4.6x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="array-operations">Array Operations<a class="headerlink" href="#array-operations" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Array Sum (100 elements)</td>
-<td>100 elements</td>
-<td>1.665</td>
-<td>2.314</td>
-<td>5.970</td>
-<td>305.129</td>
-<td>17.970</td>
-<td><strong>3.6x faster</strong></td>
-</tr>
-<tr>
-<td>Array Max (100 elements)</td>
-<td>100 elements</td>
-<td>1.409</td>
-<td>2.063</td>
-<td>5.540</td>
-<td>298.254</td>
-<td>18.007</td>
-<td><strong>3.9x faster</strong></td>
-</tr>
-<tr>
-<td>Array Count (100 elements)</td>
-<td>100 elements</td>
-<td>2.589</td>
-<td>3.926</td>
-<td>7.340</td>
-<td>530.227</td>
-<td>35.056</td>
-<td><strong>2.8x faster</strong></td>
-</tr>
-<tr>
-<td>Array Sum (1000 elements)</td>
-<td>1000 elements</td>
-<td>2.795</td>
-<td>4.282</td>
-<td>4.550</td>
-<td>178.364</td>
-<td>24.397</td>
-<td><strong>1.6x faster</strong></td>
-</tr>
-<tr>
-<td>Array Max (1000 elements)</td>
-<td>1000 elements</td>
-<td>2.280</td>
-<td>3.774</td>
-<td>3.700</td>
-<td>166.380</td>
-<td>24.416</td>
-<td><strong>1.6x faster</strong></td>
-</tr>
-<tr>
-<td>Array Sum (10000 elements)</td>
-<td>10000 elements</td>
-<td>6.641</td>
-<td>10.478</td>
-<td>8.780</td>
-<td>354.275</td>
-<td>59.910</td>
-<td><strong>1.3x faster</strong></td>
-</tr>
-<tr>
-<td>Array Mapping (extract field)</td>
-<td>100 objects</td>
-<td>43.081</td>
-<td>35.646</td>
-<td>18.370</td>
-<td>2671.036</td>
-<td>209.100</td>
-<td>2.3x slower</td>
-</tr>
-<tr>
-<td>Array Mapping + Sum</td>
-<td>100 objects</td>
-<td>42.333</td>
-<td>34.476</td>
-<td>21.730</td>
-<td>2977.095</td>
-<td>209.341</td>
-<td>1.9x slower</td>
-</tr>
-<tr>
-<td>Array Filtering (predicate)</td>
-<td>100 objects</td>
-<td>30.586</td>
-<td>21.339</td>
-<td>44.730</td>
-<td>6731.095</td>
-<td>108.713</td>
-<td><strong>1.5x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="complex-transformations">Complex Transformations<a class="headerlink" href="#complex-transformations" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Object Construction (simple)</td>
-<td>tiny</td>
-<td>5.537</td>
-<td>5.224</td>
-<td>24.540</td>
-<td>2534.029</td>
-<td>33.875</td>
-<td><strong>4.4x faster</strong></td>
-</tr>
-<tr>
-<td>Object Construction (nested)</td>
-<td>tiny</td>
-<td>7.740</td>
-<td>6.568</td>
-<td>30.540</td>
-<td>2901.421</td>
-<td>36.969</td>
-<td><strong>3.9x faster</strong></td>
-</tr>
-<tr>
-<td>Conditional Expression</td>
-<td>tiny</td>
-<td>1.720</td>
-<td>2.098</td>
-<td>11.570</td>
-<td>1357.944</td>
-<td>26.282</td>
-<td><strong>6.7x faster</strong></td>
-</tr>
-<tr>
-<td>Multiple Nested Functions</td>
-<td>tiny</td>
-<td>2.448</td>
-<td>2.707</td>
-<td>17.210</td>
-<td>1780.800</td>
-<td>27.899</td>
-<td><strong>7.0x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="deep-nesting">Deep Nesting<a class="headerlink" href="#deep-nesting" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Deep Path (12 levels)</td>
-<td>12 levels</td>
-<td>9.429</td>
-<td>8.767</td>
-<td>23.100</td>
-<td>2912.070</td>
-<td>55.236</td>
-<td><strong>2.4x faster</strong></td>
-</tr>
-<tr>
-<td>Nested Array Access</td>
-<td>4-level nested arrays</td>
-<td>16.915</td>
-<td>18.975</td>
-<td>6.480</td>
-<td>611.807</td>
-<td>108.467</td>
-<td>2.6x slower</td>
-</tr>
-</tbody>
-</table>
-<h3 id="string-operations">String Operations<a class="headerlink" href="#string-operations" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>String Uppercase</td>
-<td>tiny</td>
-<td>4.721</td>
-<td>5.182</td>
-<td>19.940</td>
-<td>2401.853</td>
-<td>53.229</td>
-<td><strong>4.2x faster</strong></td>
-</tr>
-<tr>
-<td>String Lowercase</td>
-<td>tiny</td>
-<td>4.691</td>
-<td>5.151</td>
-<td>19.630</td>
-<td>2401.833</td>
-<td>53.340</td>
-<td><strong>4.2x faster</strong></td>
-</tr>
-<tr>
-<td>String Length</td>
-<td>tiny</td>
-<td>4.062</td>
-<td>4.809</td>
-<td>21.750</td>
-<td>2600.960</td>
-<td>54.637</td>
-<td><strong>5.4x faster</strong></td>
-</tr>
-<tr>
-<td>String Concatenation</td>
-<td>tiny</td>
-<td>3.637</td>
-<td>3.702</td>
-<td>23.680</td>
-<td>1925.406</td>
-<td>30.183</td>
-<td><strong>6.5x faster</strong></td>
-</tr>
-<tr>
-<td>String Substring</td>
-<td>tiny</td>
-<td>3.260</td>
-<td>3.485</td>
-<td>17.780</td>
-<td>1687.054</td>
-<td>28.418</td>
-<td><strong>5.5x faster</strong></td>
-</tr>
-<tr>
-<td>String Contains</td>
-<td>tiny</td>
-<td>2.155</td>
-<td>2.458</td>
-<td>14.030</td>
-<td>1420.293</td>
-<td>28.178</td>
-<td><strong>6.5x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="higher-order-functions">Higher-Order Functions<a class="headerlink" href="#higher-order-functions" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>$map with lambda</td>
-<td>100 elements</td>
-<td>1.879</td>
-<td>1.999</td>
-<td>21.650</td>
-<td>2683.356</td>
-<td>7.136</td>
-<td><strong>11.5x faster</strong></td>
-</tr>
-<tr>
-<td>$filter with lambda</td>
-<td>100 elements</td>
-<td>1.874</td>
-<td>1.969</td>
-<td>21.620</td>
-<td>2686.865</td>
-<td>7.067</td>
-<td><strong>11.5x faster</strong></td>
-</tr>
-<tr>
-<td>$reduce with lambda</td>
-<td>100 elements</td>
-<td>3.555</td>
-<td>3.694</td>
-<td>20.620</td>
-<td>2697.090</td>
-<td>7.725</td>
-<td><strong>5.8x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="realistic-workload">Realistic Workload<a class="headerlink" href="#realistic-workload" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Data Size</th>
-<th>jsonatapy</th>
-<th>jsonatapy (rust)</th>
-<th>jsonata-js</th>
-<th>jsonata-python</th>
-<th>jsonata-rs</th>
-<th>vs JS</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Filter by category</td>
-<td>100 products</td>
-<td>76.652</td>
-<td>55.306</td>
-<td>45.000</td>
-<td>7439.112</td>
-<td>317.477</td>
-<td>1.7x slower</td>
-</tr>
-<tr>
-<td>Calculate total value</td>
-<td>100 products</td>
-<td>69.813</td>
-<td>55.126</td>
-<td>33.450</td>
-<td>5152.369</td>
-<td>316.801</td>
-<td>2.1x slower</td>
-</tr>
-<tr>
-<td>Complex transformation</td>
-<td>100 products</td>
-<td>38.850</td>
-<td>31.347</td>
-<td>78.720</td>
-<td>9293.462</td>
-<td>136.910</td>
-<td><strong>2.0x faster</strong></td>
-</tr>
-<tr>
-<td>Group by category (aggregate)</td>
-<td>100 products</td>
-<td>35.630</td>
-<td>29.684</td>
-<td>79.710</td>
-<td>N/A</td>
-<td>134.567</td>
-<td><strong>2.2x faster</strong></td>
-</tr>
-<tr>
-<td>Top rated products</td>
-<td>100 products</td>
-<td>17.706</td>
-<td>13.173</td>
-<td>34.300</td>
-<td>4519.983</td>
-<td>67.399</td>
-<td><strong>1.9x faster</strong></td>
-</tr>
-</tbody>
-</table>
-<h3 id="path-comparison">Path Comparison<a class="headerlink" href="#path-comparison" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>jsonatapy (ms)</th>
-<th>Iterations</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Filter by category (data handle)</td>
-<td>12.401</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Filter by category (data→json)</td>
-<td>5.832</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Complex transformation (data handle)</td>
-<td>32.895</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Complex transformation (data→json)</td>
-<td>28.856</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Aggregate (data handle)</td>
-<td>5.861</td>
-<td>500</td>
-</tr>
-<tr>
-<td>Aggregate (data→json)</td>
-<td>5.976</td>
-<td>500</td>
-</tr>
-</tbody>
-</table>
-<h2 id="performance-characteristics">Performance Characteristics<a class="headerlink" href="#performance-characteristics" title="Permanent link">&para;</a></h2>
-<p><strong>Faster than JavaScript:</strong></p>
-<ul>
-<li>Simple Paths (<strong>2.7x faster</strong>)</li>
-<li>Array Operations (<strong>1.9x faster</strong>)</li>
-<li>Complex Transformations (<strong>5.5x faster</strong>)</li>
-<li>Deep Nesting (<strong>1.4x faster</strong>)</li>
-<li>String Operations (<strong>5.4x faster</strong>)</li>
-<li>Higher-Order Functions (<strong>9.6x faster</strong>)</li>
-<li>Realistic Workload (<strong>1.5x faster</strong>)</li>
-</ul>
-<p><strong>Comparable to JavaScript:</strong></p>
-<ul>
-<li>(none this run)</li>
-</ul>
-<h3 id="optimizing-array-workloads">Optimizing Array Workloads<a class="headerlink" href="#optimizing-array-workloads" title="Permanent link">&para;</a></h3>
-<p>For array-heavy workloads, the dominant cost is converting Python dicts to Rust values on every call. Use <code>JsonataData</code> to pre-convert data once and reuse across multiple evaluations:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="o">...</span><span class="p">}</span>  <span class="c1"># your data</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">expr</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="s2">&quot;products[price &gt; 100]&quot;</span><span class="p">)</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Pre-convert once</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">jdata</span> <span class="o">=</span> <span class="n">jsonatapy</span><span class="o">.</span><span class="n">JsonataData</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Reuse many times (3-15x faster than evaluate(dict))</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">result</span> <span class="o">=</span> <span class="n">expr</span><span class="o">.</span><span class="n">evaluate_with_data</span><span class="p">(</span><span class="n">jdata</span><span class="p">)</span>
+<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">&para;</a></h2>
+<h3 id="core-data-structure">Core data structure<a class="headerlink" href="#core-data-structure" title="Permanent link">&para;</a></h3>
+<p>New file <code>src/lazy.rs</code>, entirely behind the <code>python</code> feature:</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">LazyPyDict</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="n">obj</span><span class="p">:</span><span class="w"> </span><span class="nc">Py</span><span class="o">&lt;</span><span class="n">PyDict</span><span class="o">&gt;</span><span class="p">,</span><span class="w">                                  </span><span class="c1">// original Python dict</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="n">field_cache</span><span class="p">:</span><span class="w"> </span><span class="nc">RefCell</span><span class="o">&lt;</span><span class="n">HashMap</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="n">JValue</span><span class="o">&gt;&gt;</span><span class="p">,</span><span class="w">     </span><span class="c1">// converted on first access</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="n">materialized</span><span class="p">:</span><span class="w"> </span><span class="nc">OnceCell</span><span class="o">&lt;</span><span class="n">Rc</span><span class="o">&lt;</span><span class="n">IndexMap</span><span class="o">&lt;</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="n">JValue</span><span class="o">&gt;&gt;&gt;</span><span class="p">,</span><span class="w"> </span><span class="c1">// memoized to_object()</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">}</span>
 </span></code></pre></div>
-<h2 id="methodology">Methodology<a class="headerlink" href="#methodology" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Date:</strong> 2026-07-12</li>
-<li><strong>Platform:</strong> GitHub Actions (self-hosted Michaels-Mini, physical/dedicated hardware, macOS ARM64)</li>
-<li><strong>Python:</strong> 3.14.6</li>
-<li><strong>Node.js:</strong> v20.20.2</li>
-<li>All times are total wall-clock time for the stated number of iterations</li>
-<li>Each benchmark includes a warmup phase before measurement</li>
-<li>'vs JS' column shows jsonatapy speedup relative to the JavaScript reference implementation</li>
-<li>Values &gt; 1x mean jsonatapy is faster; &lt; 1x means JavaScript is faster</li>
+<li><code>get_field(&amp;self, name) -&gt; Result&lt;JValue, LazyError&gt;</code> — cache hit, else
+  <code>Python::with_gil</code> → <code>PyDict.get_item(name)</code> → convert via <code>python_to_json_bound</code>
+  (nested dicts become lazy wrappers themselves) → cache. Absent keys cache
+  <code>JValue::Undefined</code>.</li>
+<li><code>to_object(&amp;self) -&gt; Result&lt;Rc&lt;IndexMap&lt;String, JValue&gt;&gt;, LazyError&gt;</code> — full
+  materialization for consumers needing a real object. Iterates the PyDict in
+  insertion order, reusing cached conversions. <strong>Skips cache entries that are
+  <code>Undefined</code></strong> (absent-field markers must not become object keys). Memoized.</li>
+<li><code>py_object(&amp;self) -&gt; &amp;Py&lt;PyDict&gt;</code> — for output pass-through.</li>
+</ul>
+<p>New variant in <code>src/value.rs</code>:</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">#[cfg(feature = </span><span class="s">&quot;python&quot;</span><span class="cp">)]</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">LazyPyDict</span><span class="p">(</span><span class="n">Rc</span><span class="o">&lt;</span><span class="n">lazy</span><span class="p">::</span><span class="n">LazyPyDict</span><span class="o">&gt;</span><span class="p">),</span>
+</span></code></pre></div>
+<p>The pure-Rust crate (<code>jsonata-core</code> on crates.io, the CLI, <code>cargo test</code> without the
+<code>python</code> feature) compiles the variant away and is unaffected.</p>
+<h3 id="input-path">Input path<a class="headerlink" href="#input-path" title="Permanent link">&para;</a></h3>
+<p>In <code>python_to_json_bound</code> (src/lib.rs):</p>
+<ul>
+<li><code>PyDict</code> arm: wrap in <code>LazyPyDict</code> (O(1)) instead of recursively converting.</li>
+<li><code>PyList</code> arm: unchanged shape (eager <code>Vec</code>), but dict elements now become lazy
+  wrappers — <code>products</code> (100 dicts) costs 100 wrapper allocations instead of 100
+  full IndexMap conversions.</li>
+<li><code>JsonataData::new</code> keeps <strong>eager deep conversion</strong> (new internal entry point or a
+  <code>lazy: bool</code> flag). Its contract is "pay conversion once, evaluate many times";
+  lazy wrappers would re-read Python objects on every evaluation and hold the GIL
+  during evaluation for no benefit.</li>
+</ul>
+<h3 id="evaluation-touch-points-choke-point-strategy">Evaluation touch points — choke-point strategy<a class="headerlink" href="#evaluation-touch-points-choke-point-strategy" title="Permanent link">&para;</a></h3>
+<p>evaluator.rs has ~101 <code>JValue::Object(...)</code> match sites. We do <strong>not</strong> edit them
+all. Lazy values are handled where they are <em>consumed</em>; everywhere else they flow
+opaquely (JValue clone is O(1) either way). Consumption points:</p>
+<ol>
+<li><strong>Field-access hot paths</strong> (perf-critical; add a <code>LazyPyDict</code> arm calling
+   <code>get_field</code>):</li>
+<li>VM: <code>get_field_cached</code> / <code>GetField</code> / <code>GetDataField</code> / <code>GetVarField</code>
+     (src/vm.rs)</li>
+<li>Tree-walker: <code>compiled_field_step</code>, the single-step and multi-step path
+     loops, first-step handling, the 2-step <code>$var.field</code> fast path
+     (src/evaluator.rs)</li>
+<li><strong>Function dispatch normalization</strong> (one edit covers all of functions.rs):
+   materialize lazy args to real Objects in <code>call_pure_builtin</code> and
+   <code>evaluate_function_call</code> before dispatch.</li>
+<li><strong>Known stragglers</strong> that evaluate their own arguments or poke into objects
+   directly (list carried over from the earlier prototype of this design):</li>
+<li><code>$each</code> / <code>$sift</code> (evaluate their object arg outside <code>evaluated_args</code>)</li>
+<li>Sort key extraction: <code>evaluate_sort_term</code> single-step path and the
+     specialized comparator path</li>
+<li>Tuple <code>@</code> field binding</li>
+<li><code>apply_transform_deep</code> (materialize at entry, then compare to targets)</li>
+<li>Deep equality (<code>=</code>, <code>in</code>, <code>$distinct</code>): materialize both sides when either
+     is lazy</li>
+<li>Object construction / merge paths that iterate an existing object's entries</li>
+<li><strong>Type predicates:</strong> <code>is_object()</code>-style checks, truthiness/boolean coercion of
+   objects, and <code>signature.rs::validate_and_coerce</code> treat <code>LazyPyDict</code> as Object.</li>
+</ol>
+<p>A lazy value reaching an unhandled site behaves as "not an object" and produces a
+wrong result — caught by the full-suite runs (Testing) rather than silently
+tolerated.</p>
+<h3 id="output-path-pass-through">Output path — pass-through<a class="headerlink" href="#output-path-pass-through" title="Permanent link">&para;</a></h3>
+<p><code>json_to_python</code> (src/lib.rs) gets a <code>LazyPyDict</code> arm returning a clone of the
+original <code>Py&lt;PyDict&gt;</code> reference. Filter-shaped queries
+(<code>products[category="Electronics"]</code>) return the caller's own product dicts; output
+conversion becomes near-free. This matches jsonata-js semantics (its results alias
+input objects).</p>
+<h3 id="gil">GIL<a class="headerlink" href="#gil" title="Permanent link">&para;</a></h3>
+<p><code>evaluate(dict)</code> already runs under the GIL (PyO3 <code>#[pymethods]</code>); lazy accesses
+use <code>Python::with_gil</code>, which is cheap when the GIL is already held. No evaluation
+code gains a <code>Python</code> token parameter.</p>
+<h3 id="error-handling">Error handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h3>
+<p>Today, a non-convertible Python value anywhere in the input raises <code>TypeError</code> at
+call time. With lazy input, conversion errors surface at <strong>first access</strong>:</p>
+<ul>
+<li><code>get_field</code> / <code>to_object</code> return a conversion error; a new <code>EvaluatorError</code>
+  variant carries the message through the engine; the boundary converts it back to
+  the same Python <code>TypeError</code>.</li>
+<li>Expressions that never touch the bad field now succeed instead of failing —
+  strictly more permissive, documented.</li>
+</ul>
+<h2 id="documented-behavior-changes">Documented behavior changes<a class="headerlink" href="#documented-behavior-changes" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Result aliasing.</strong> Results containing unmodified input subtrees now reference
+   the caller's original dicts (no deep copy). Mutating the result mutates the
+   input. Matches jsonata-js. Changelog + docs callout. Version: <strong>point release
+   only</strong> (2.2.3 → 2.2.4) — this project's version numbering tracks jsonata-js,
+   so minor/major bumps happen only when jsonata-js releases one; the aliasing
+   change is called out prominently in the changelog instead.</li>
+<li><strong>Value fidelity.</strong> Passed-through dicts preserve original Python values exactly
+   (<code>int</code> stays <code>int</code>); converted paths still normalize numbers to float. Net
+   improvement; the inconsistency between paths is documented.</li>
+<li><strong>Lazy errors.</strong> Conversion <code>TypeError</code>s surface only if the offending field is
+   touched (same exception type).</li>
+</ol>
+<h2 id="performance-targets">Performance targets<a class="headerlink" href="#performance-targets" title="Permanent link">&para;</a></h2>
+<p>Measured on the dev machine (WSL2), min-of-5-trials methodology, vs jsonata-js on
+identical data:</p>
+<table>
+<thead>
+<tr>
+<th>Case (100 objects)</th>
+<th>Today <code>evaluate(dict)</code></th>
+<th>Target</th>
+<th>jsonata-js</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>products.price</code></td>
+<td>34.9µs</td>
+<td>≤13.0µs</td>
+<td>14.6µs</td>
+</tr>
+<tr>
+<td><code>products[category="Electronics"]</code></td>
+<td>129.3µs</td>
+<td>≤27.6µs</td>
+<td>93.7µs</td>
+</tr>
+<tr>
+<td><code>$sum(products[inStock].price)</code></td>
+<td>116.4µs</td>
+<td>≤20.2µs</td>
+<td>67.6µs</td>
+</tr>
+<tr>
+<td>Complex transformation (dense access)</td>
+<td>160.9µs (wins today)</td>
+<td>≤93.0µs</td>
+<td>415.1µs</td>
+</tr>
+</tbody>
+</table>
+<p>The ecommerce rows convert 9 fields per product (including a nested vendor dict
+and a tags list) on every call today; the lazy path touches only the 1–4 fields
+each expression references and never converts the rest.</p>
+<p>The dense-access row is the guardrail: the earlier prototype regressed dense field
+access ~2x. If that reproduces, the contingency is a compile-time field-usage
+analysis choosing eager conversion for provably-dense/unanalyzable expressions —
+added only if measurement demands it.</p>
+<p>The original target column above was a pre-implementation estimate; it was
+revised to measured post-implementation reality (Task 9b, selective field
+caching in <code>LazyPyDict::get_field</code> — cache only heap-typed conversions,
+2026-07-13) per user decision 2026-07-13, with the acceptance bar being that
+the implementation beats jsonata-js on all four measured rows (met — every
+row is comfortably under its jsonata-js column value).</p>
+<h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Full reference suite (1682 tests as of 2026-07-12) via <code>evaluate(dict)</code> (exercises lazy path on the
+  VM engine), <strong>plus a run with <code>JSONATAPY_FORCE_TREE_WALKER=1</code></strong> covering the
+  tree-walker engine. (An earlier draft assumed non-empty <code>bindings</code> forces the
+  tree-walker suite-wide; in reality only 7 suite cases carry non-empty
+  bindings, so an explicit env toggle was added in <code>run_eval</code>.)</li>
+<li><code>cargo test</code> without the <code>python</code> feature — pure-Rust crate unaffected.</li>
+<li>New Python unit tests: absent-field caching; <code>$keys</code>/<code>$spread</code>/<code>$merge</code>/
+  <code>$each</code>/<code>$sift</code>/<code>$lookup</code> on lazy values; <code>$sort</code> with lazy elements;
+  pass-through identity (<code>result[0] is data["products"][2]</code>); mutation visible
+  between calls; deep equality lazy-vs-eager; lazy conversion error surfacing;
+  <code>Undefined</code> cache entries excluded from materialization.</li>
+<li>Benchmark suite before/after with min-of-5 methodology; targets above are the
+  acceptance bar.</li>
+</ul>
+<h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Nested pure-array data</strong> (<code>data[1][1][1][1]</code> benchmark row) barely improves:
+  lists remain eager, so array-of-array structures still convert fully on access.
+  A <code>LazyPyList</code> would fix it but multiplies the touch surface (Array matching is
+  pervasive in the engine); deferred until a real workload needs it.</li>
+<li>Dense-access expressions may regress; bounded by the revised absolute gate
+  (≤93µs for the dense-transformation case; see <code>benchmarks/python/lazy_check.py</code>).</li>
+<li>Evaluation now reads Python objects mid-flight; code that assumes <code>JValue</code> trees
+  are GIL-independent after conversion must not be given lazy values
+  (<code>JsonataData</code> path guarantees this by staying eager).</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered<a class="headerlink" href="#alternatives-considered" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Projection push-down</strong> (analyze expression, convert only referenced fields):
+  simpler, never regresses, but cannot help filter-shaped queries — their results
+  contain whole input objects, so the projection is "everything". Rejected as a
+  standalone; survives as the contingency heuristic for dense access.</li>
+<li><strong>Implicit identity cache</strong> (pointer-keyed converted-data cache): fastest repeat
+  calls but silently stale when the caller mutates the dict between calls.
+  Rejected on semantics (user decision).</li>
+<li><strong>Execution-plan / vectorized engine:</strong> attacks the 7% of runtime that is already
+  7–20x faster than jsonata-js natively. Rejected as not the bottleneck; revisit
+  only if pre-converted-data workloads on large arrays become a priority.</li>
 </ul>
 
 
@@ -2691,10 +2062,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
     
   </body>
