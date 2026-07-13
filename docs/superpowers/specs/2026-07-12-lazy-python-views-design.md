@@ -185,10 +185,10 @@ added only if measurement demands it.
 
 ## Testing
 
-- Full 1258-test reference suite via `evaluate(dict)` (exercises lazy path on the
+- Full reference suite (1682 tests as of 2026-07-12) via `evaluate(dict)` (exercises lazy path on the
   VM engine), **plus a run with `JSONATAPY_FORCE_TREE_WALKER=1`** covering the
   tree-walker engine. (An earlier draft assumed non-empty `bindings` forces the
-  tree-walker suite-wide; in reality only 7 of 1289 suite cases carry non-empty
+  tree-walker suite-wide; in reality only 7 suite cases carry non-empty
   bindings, so an explicit env toggle was added in `run_eval`.)
 - `cargo test` without the `python` feature — pure-Rust crate unaffected.
 - New Python unit tests: absent-field caching; `$keys`/`$spread`/`$merge`/
