@@ -1783,16 +1783,14 @@ pub mod array {
                         .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
             }),
             #[cfg(feature = "python")]
-            (JValue::LazyPyDict(x), JValue::LazyPyDict(y)) => {
-                x.to_object_ref().is_some_and(|am| {
-                    y.to_object_ref().is_some_and(|bm| {
-                        am.len() == bm.len()
-                            && am
-                                .iter()
-                                .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
-                    })
+            (JValue::LazyPyDict(x), JValue::LazyPyDict(y)) => x.to_object_ref().is_some_and(|am| {
+                y.to_object_ref().is_some_and(|bm| {
+                    am.len() == bm.len()
+                        && am
+                            .iter()
+                            .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
                 })
-            }
+            }),
             _ => false,
         }
     }

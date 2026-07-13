@@ -990,9 +990,10 @@ fn eval_compiled_inner(
                     obj.get(outer.as_str())
                 };
                 match outer_val {
-                    Some(JValue::Object(nested)) => {
-                        Ok(nested.get(inner.as_str()).cloned().unwrap_or(JValue::Undefined))
-                    }
+                    Some(JValue::Object(nested)) => Ok(nested
+                        .get(inner.as_str())
+                        .cloned()
+                        .unwrap_or(JValue::Undefined)),
                     #[cfg(feature = "python")]
                     Some(JValue::LazyPyDict(nested)) => Ok(nested.get_field(inner.as_str())?),
                     _ => Ok(JValue::Undefined),
@@ -1002,9 +1003,10 @@ fn eval_compiled_inner(
             JValue::LazyPyDict(lazy) => {
                 let outer_val = lazy.get_field(outer.as_str())?;
                 match outer_val {
-                    JValue::Object(nested) => {
-                        Ok(nested.get(inner.as_str()).cloned().unwrap_or(JValue::Undefined))
-                    }
+                    JValue::Object(nested) => Ok(nested
+                        .get(inner.as_str())
+                        .cloned()
+                        .unwrap_or(JValue::Undefined)),
                     JValue::LazyPyDict(nested) => Ok(nested.get_field(inner.as_str())?),
                     _ => Ok(JValue::Undefined),
                 }
@@ -4469,10 +4471,9 @@ impl Evaluator {
                         // Check if this is a tuple - extract '@' value
                         if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
                             match obj.get("@") {
-                                Some(JValue::Object(inner)) => Ok(inner
-                                    .get(field_name)
-                                    .cloned()
-                                    .unwrap_or(JValue::Undefined)),
+                                Some(JValue::Object(inner)) => {
+                                    Ok(inner.get(field_name).cloned().unwrap_or(JValue::Undefined))
+                                }
                                 #[cfg(feature = "python")]
                                 Some(JValue::LazyPyDict(lazy)) => Ok(lazy.get_field(field_name)?),
                                 _ => Ok(JValue::Undefined),
@@ -4559,7 +4560,11 @@ impl Evaluator {
                                                 #[cfg(feature = "python")]
                                                 Some(JValue::LazyPyDict(lazy)) => {
                                                     let v = lazy.get_field(field_name)?;
-                                                    if v.is_undefined() { None } else { Some(v) }
+                                                    if v.is_undefined() {
+                                                        None
+                                                    } else {
+                                                        Some(v)
+                                                    }
                                                 }
                                                 _ => continue,
                                             };
@@ -5303,8 +5308,7 @@ impl Evaluator {
                                     match item {
                                         JValue::Object(obj) => {
                                             // Check if this is a tuple stream element
-                                            let (val, tuple_bindings) = if obj
-                                                .get("__tuple__")
+                                            let (val, tuple_bindings) = if obj.get("__tuple__")
                                                 == Some(&JValue::Bool(true))
                                             {
                                                 // This is a tuple - extract '@' value and preserve bindings
@@ -5338,7 +5342,9 @@ impl Evaluator {
                                                 }
                                             } else {
                                                 (
-                                                    obj.get(field_name).cloned().unwrap_or(JValue::Null),
+                                                    obj.get(field_name)
+                                                        .cloned()
+                                                        .unwrap_or(JValue::Null),
                                                     None,
                                                 )
                                             };
