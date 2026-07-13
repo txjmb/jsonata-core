@@ -38,6 +38,10 @@ pub enum JValue {
         pattern: Rc<str>,
         flags: Rc<str>,
     },
+
+    /// Lazily-converted Python dict (see src/lazy.rs). Python-builds only.
+    #[cfg(feature = "python")]
+    LazyPyDict(Rc<crate::lazy::LazyPyDict>),
 }
 
 // ── Type checks ──────────────────────────────────────────────────────────────
@@ -75,7 +79,12 @@ impl JValue {
 
     #[inline]
     pub fn is_object(&self) -> bool {
-        matches!(self, JValue::Object(_))
+        match self {
+            JValue::Object(_) => true,
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(_) => true,
+            _ => false,
+        }
     }
 
     #[inline]
@@ -153,6 +162,8 @@ impl JValue {
     pub fn as_object(&self) -> Option<&IndexMap<String, JValue>> {
         match self {
             JValue::Object(map) => Some(map),
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => lazy.to_object_ref(),
             _ => None,
         }
     }
@@ -369,6 +380,20 @@ impl PartialEq for JValue {
                     flags: bf,
                 },
             ) => ap == bp && af == bf,
+            #[cfg(feature = "python")]
+            (JValue::LazyPyDict(a), JValue::LazyPyDict(b)) => {
+                Rc::ptr_eq(a, b)
+                    || a.same_object(b)
+                    || matches!((a.to_object_ref(), b.to_object_ref()), (Some(x), Some(y)) if x == y)
+            }
+            #[cfg(feature = "python")]
+            (JValue::LazyPyDict(a), JValue::Object(b)) => {
+                a.to_object_ref().is_some_and(|x| x == &**b)
+            }
+            #[cfg(feature = "python")]
+            (JValue::Object(a), JValue::LazyPyDict(b)) => {
+                b.to_object_ref().is_some_and(|x| &**a == x)
+            }
             _ => false,
         }
     }
@@ -407,6 +432,11 @@ impl fmt::Display for JValue {
             JValue::Lambda { lambda_id, .. } => write!(f, "\"<lambda:{}>\"", lambda_id),
             JValue::Builtin { name } => write!(f, "\"<builtin:{}>\"", name),
             JValue::Regex { pattern, flags } => write!(f, "\"<regex:/{}/{}>\"", pattern, flags),
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => match lazy.to_object() {
+                Ok(map) => write!(f, "{}", JValue::Object(map)),
+                Err(_) => write!(f, "{{}}"),
+            },
         }
     }
 }
@@ -484,6 +514,17 @@ impl Serialize for JValue {
                 m.serialize_entry("flags", &**flags)?;
                 m.end()
             }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => match lazy.to_object() {
+                Ok(map) => {
+                    let mut m = serializer.serialize_map(Some(map.len()))?;
+                    for (k, v) in map.iter() {
+                        m.serialize_entry(k, v)?;
+                    }
+                    m.end()
+                }
+                Err(e) => Err(serde::ser::Error::custom(e.0)),
+            },
         }
     }
 }
@@ -666,6 +707,17 @@ impl From<&JValue> for serde_json::Value {
                 );
                 serde_json::Value::Object(m)
             }
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => match lazy.to_object() {
+                Ok(map) => {
+                    let m: serde_json::Map<String, serde_json::Value> = map
+                        .iter()
+                        .map(|(k, v)| (k.clone(), serde_json::Value::from(v)))
+                        .collect();
+                    serde_json::Value::Object(m)
+                }
+                Err(_) => serde_json::Value::Object(serde_json::Map::new()),
+            },
         }
     }
 }

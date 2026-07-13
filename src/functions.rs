@@ -711,6 +711,8 @@ pub mod boolean {
             JValue::Object(obj) => !obj.is_empty(),
             JValue::Lambda { .. } | JValue::Builtin { .. } => false,
             JValue::Regex { .. } => true,
+            #[cfg(feature = "python")]
+            JValue::LazyPyDict(lazy) => !lazy.is_empty(),
         }
     }
 }

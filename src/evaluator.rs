@@ -2520,6 +2520,13 @@ pub enum EvaluatorError {
 
     #[error("Evaluation error: {0}")]
     EvaluationError(String),
+
+    /// Python→JValue conversion failed during lazy field access.
+    /// Surfaces as Python TypeError at the boundary (matching what eager
+    /// conversion would have raised at call time).
+    #[cfg(feature = "python")]
+    #[error("Type error: {0}")]
+    PyConversionError(String),
 }
 
 impl From<crate::functions::FunctionError> for EvaluatorError {
@@ -2547,7 +2554,16 @@ impl EvaluatorError {
             EvaluatorError::TypeError(m) => m,
             EvaluatorError::ReferenceError(m) => m,
             EvaluatorError::EvaluationError(m) => m,
+            #[cfg(feature = "python")]
+            EvaluatorError::PyConversionError(m) => m,
         }
+    }
+}
+
+#[cfg(feature = "python")]
+impl From<crate::lazy::LazyConvertError> for EvaluatorError {
+    fn from(e: crate::lazy::LazyConvertError) -> Self {
+        EvaluatorError::PyConversionError(e.0)
     }
 }
 
@@ -8963,6 +8979,8 @@ impl Evaluator {
                         Ok(JValue::string("function"))
                     }
                     JValue::Regex { .. } => Ok(JValue::string("regex")),
+                    #[cfg(feature = "python")]
+                    JValue::LazyPyDict(_) => Ok(JValue::string("object")),
                 }
             }
 
