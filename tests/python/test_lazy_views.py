@@ -252,3 +252,46 @@ class TestLazyErrors:
         assert jsonatapy.compile("x = y").evaluate(data) is True
         assert jsonatapy.compile("x != y").evaluate(data) is False
         assert jsonatapy.compile("'a' & $string(x)").evaluate(data) == 'a{"s":1}'
+
+    def test_distinct_swallowed_conversion_error_raises_typeerror(self, engine):
+        # Regression: $distinct compared elements via values_equal, whose lazy
+        # arms return False (not-equal) on conversion failure by design (see
+        # its doc comment) -- two references to the SAME unconvertible value
+        # therefore both survived dedup instead of raising. Confirmed by
+        # reverting the fix: pre-fix `$count($distinct([x, x]))` returned `2`
+        # instead of raising.
+        data = {"x": {"s": {1, 2, 3}}}
+        with pytest.raises(TypeError):
+            jsonatapy.compile("$distinct([x, x])").evaluate(data)
+
+    def test_distinct_on_convertible_lazy_values_still_dedupes(self, engine):
+        # Control: two references to the SAME convertible lazy dict must still
+        # collapse to one element -- the fix must not turn every lazy element
+        # into "always distinct" nor break legitimate dedup.
+        data = {"b": {"s": 1}}
+        assert jsonatapy.compile("$count($distinct([b, b]))").evaluate(data) == 1
+
+    def test_builtin_by_reference_second_arg_swallowed_conversion_error_raises_typeerror(
+        self, engine
+    ):
+        # Regression: `call_builtin_with_values` only normalized `values[0]`.
+        # `$f := $append; $f(...)` binds `$f` to a `Builtin` reference and
+        # dispatches through `call_builtin_with_values` (confirmed by
+        # reverting the fix, see below); `append`'s own match arm reads
+        # `values[0]`/`values[1]` directly (bypassing even the normalized
+        # `arg` local used for the first argument by every other branch), so
+        # a lazy, unconvertible SECOND argument reached it unnormalized and
+        # was silently pushed into the result array instead of raising.
+        # Confirmed by reverting the fix: pre-fix this returned
+        # `[{'a': 1}, {'s': {1, 2, 3}}]` instead of raising.
+        data = {"x": {"s": {1, 2, 3}}}
+        with pytest.raises(TypeError):
+            jsonatapy.compile("($f := $append; $f({'a':1}, x))").evaluate(data)
+
+    def test_builtin_by_reference_second_arg_convertible_matches_eager(self, engine):
+        # Control: a convertible lazy second argument to the same
+        # by-reference dispatch must still work and match the eager
+        # reference result after the blanket normalization.
+        data = {"x": {"s": 1}}
+        expr = "($f := $append; $f({'a':1}, x))"
+        assert lazy_eval(expr, data) == eager_eval(expr, data)

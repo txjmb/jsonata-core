@@ -2620,6 +2620,13 @@ pub enum EvaluatorError {
 
 impl From<crate::functions::FunctionError> for EvaluatorError {
     fn from(e: crate::functions::FunctionError) -> Self {
+        // `PyConversionError` must surface as a Python `TypeError` (matching what
+        // eager conversion would have raised), not the generic `ValueError` every
+        // other `FunctionError` variant maps to below -- see its doc comment.
+        #[cfg(feature = "python")]
+        if let crate::functions::FunctionError::PyConversionError(m) = &e {
+            return EvaluatorError::PyConversionError(m.clone());
+        }
         EvaluatorError::EvaluationError(e.to_string())
     }
 }
@@ -10802,13 +10809,36 @@ impl Evaluator {
             )));
         }
 
-        // Normalize a lazy first argument so a conversion failure raises TypeError
-        // here rather than being swallowed by a downstream function that maps
-        // `LazyPyDict`/failed-conversion to a misleading result (e.g. `string()`'s
+        // Normalize every lazy top-level argument so a conversion failure raises
+        // TypeError here rather than being swallowed by a downstream function that
+        // maps `LazyPyDict`/failed-conversion to a misleading result (e.g. `string()`'s
         // lazy arm silently stringifying to `"null"`). This is reachable from
         // higher-order functions passed a bare builtin reference, e.g.
-        // `$map(items, $string)` where `items` elements are lazy.
-        let arg = &normalize_lazy(&values[0])?;
+        // `$map(items, $string)` where `items` elements are lazy (first argument),
+        // or `$f := $append; $f(a, x)` where `x` is a lazy non-first argument.
+        // Mirrors the blanket normalization `evaluate_function_call` applies to
+        // ALL `evaluated_args` for inline builtin calls. Only top-level lazy
+        // values are normalized -- arrays/objects containing lazy elements are
+        // left as-is (pass-through preservation), same as every other dispatch
+        // site. Guarded by `is_lazy` so the common (no lazy operand) path pays
+        // no allocation.
+        let normalized_values: Vec<JValue>;
+        let values: &[JValue] = if values.iter().any(|v| v.is_lazy()) {
+            normalized_values = values
+                .iter()
+                .map(|v| {
+                    if v.is_lazy() {
+                        normalize_lazy(v)
+                    } else {
+                        Ok(v.clone())
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            &normalized_values
+        } else {
+            values
+        };
+        let arg = &values[0];
 
         match name {
             "string" => Ok(functions::string::string(arg, None)?),

@@ -19,6 +19,16 @@ pub enum FunctionError {
 
     #[error("Runtime error: {0}")]
     RuntimeError(String),
+
+    /// Python→JValue conversion failed while comparing/materializing a lazy
+    /// element (e.g. inside `$distinct`). Mirrors `EvaluatorError::PyConversionError`
+    /// -- `impl From<FunctionError> for EvaluatorError` maps this specific
+    /// variant to `EvaluatorError::PyConversionError` (surfacing as Python
+    /// `TypeError` at the boundary) instead of the generic `EvaluationError`
+    /// (`ValueError`) every other `FunctionError` variant collapses to.
+    #[cfg(feature = "python")]
+    #[error("Type error: {0}")]
+    PyConversionError(String),
 }
 
 /// Built-in string functions
@@ -1728,18 +1738,36 @@ pub mod array {
     /// $distinct(array) - Get unique elements
     pub fn distinct(arr: &[JValue]) -> Result<JValue, FunctionError> {
         let mut result = Vec::new();
-        let mut seen = Vec::new();
+        let mut seen: Vec<JValue> = Vec::new();
 
         for value in arr {
+            // Materialize a lazy element before comparing so an unconvertible
+            // Python value raises `TypeError` here instead of being silently
+            // treated as "always distinct from everything else" -- `values_equal`'s
+            // lazy arms return `false` (not-equal) on conversion failure, by
+            // design (see its doc comment), which would let two references to
+            // the very same unconvertible value (e.g. two aliases of one
+            // Python `set`-valued field) both survive dedup.
+            #[cfg(feature = "python")]
+            let compare_value = match value {
+                JValue::LazyPyDict(lazy) => JValue::Object(
+                    lazy.to_object()
+                        .map_err(|e| FunctionError::PyConversionError(e.0))?,
+                ),
+                other => other.clone(),
+            };
+            #[cfg(not(feature = "python"))]
+            let compare_value = value.clone();
+
             let mut is_new = true;
             for seen_value in &seen {
-                if values_equal(value, seen_value) {
+                if values_equal(&compare_value, seen_value) {
                     is_new = false;
                     break;
                 }
             }
             if is_new {
-                seen.push(value.clone());
+                seen.push(compare_value);
                 result.push(value.clone());
             }
         }
@@ -1788,14 +1816,21 @@ pub mod array {
                         .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
             }),
             #[cfg(feature = "python")]
-            (JValue::LazyPyDict(x), JValue::LazyPyDict(y)) => x.to_object_ref().is_some_and(|am| {
-                y.to_object_ref().is_some_and(|bm| {
-                    am.len() == bm.len()
-                        && am
-                            .iter()
-                            .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
-                })
-            }),
+            (JValue::LazyPyDict(x), JValue::LazyPyDict(y)) => {
+                // Pointer-identity fast path (mirrors `PartialEq for JValue`): the same
+                // wrapped Python dict is trivially equal to itself without touching any
+                // (possibly unconvertible) field content.
+                std::rc::Rc::ptr_eq(x, y)
+                    || x.same_object(y)
+                    || x.to_object_ref().is_some_and(|am| {
+                        y.to_object_ref().is_some_and(|bm| {
+                            am.len() == bm.len()
+                                && am
+                                    .iter()
+                                    .all(|(k, v)| bm.get(k).is_some_and(|v2| values_equal(v, v2)))
+                        })
+                    })
+            }
             _ => false,
         }
     }
