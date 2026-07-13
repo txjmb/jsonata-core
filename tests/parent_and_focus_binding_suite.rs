@@ -26,6 +26,8 @@ fn error_message(e: &EvaluatorError) -> &str {
         EvaluatorError::TypeError(m) => m,
         EvaluatorError::ReferenceError(m) => m,
         EvaluatorError::EvaluationError(m) => m,
+        #[cfg(feature = "python")]
+        EvaluatorError::PyConversionError(m) => m,
     }
 }
 

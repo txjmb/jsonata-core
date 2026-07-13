@@ -4,9 +4,11 @@ evaluate() converts data lazily by default. `eager_eval` below uses a
 pre-converted JsonataData handle (which is always eager) as the reference
 point for parity checks against the lazy default.
 """
-import pytest
-import jsonatapy
 
+from typing import ClassVar
+
+import jsonatapy
+import pytest
 
 PRODUCTS = {
     "products": [
@@ -28,9 +30,9 @@ def eager_eval(expr, data):
 @pytest.mark.parametrize(
     "expr",
     [
-        "products.price",                      # array field mapping
-        "$sum(products.price)",                # fused aggregate
-        "$count(products)",                    # array passthrough
+        "products.price",  # array field mapping
+        "$sum(products.price)",  # fused aggregate
+        "$count(products)",  # array passthrough
     ],
 )
 def test_lazy_matches_eager_vm(expr):
@@ -81,7 +83,7 @@ def test_lazy_tuple_stream_matches_eager(force_tree_walker):
         "$sum(products.price)",
         "products[price > 20].id",
         "products[0].name",
-        "products.name[0]",                    # stage on mapped field
+        "products.name[0]",  # stage on mapped field
     ],
 )
 def test_lazy_matches_eager_tree_walker(expr, force_tree_walker):
@@ -100,9 +102,7 @@ def test_lazy_dynamic_key_lookup(force_tree_walker):
 
 
 def test_lazy_missing_field_tree_walker(force_tree_walker):
-    assert lazy_eval("products[0].nosuch", PRODUCTS) == eager_eval(
-        "products[0].nosuch", PRODUCTS
-    )
+    assert lazy_eval("products[0].nosuch", PRODUCTS) == eager_eval("products[0].nosuch", PRODUCTS)
 
 
 # ── Task 5: whole-object consumers ──────────────────────────────────────
@@ -129,24 +129,27 @@ def engine(request, monkeypatch):
         ("$string($)", OBJ),
         ("$type($)", OBJ),
         ("$boolean($)", OBJ),
-        ("$boolean($)", {}),                      # empty dict → false
+        ("$boolean($)", {}),  # empty dict → false
         ("$exists(b.c)", OBJ),
         ("'a' in $", OBJ),
-        ("$ = {'a': 1, 'b': {'c': 2}, 'd': [1, 2]}", OBJ),   # deep equality lazy vs constructed
+        ("$ = {'a': 1, 'b': {'c': 2}, 'd': [1, 2]}", OBJ),  # deep equality lazy vs constructed
         ("$distinct([b, b, {'c': 2}])", OBJ),
-        ("products^(price)", PRODUCTS),           # specialized sort comparator keys
+        ("products^(price)", PRODUCTS),  # specialized sort comparator keys
         ("$sort(products, function($l, $r) { $l.price > $r.price })", PRODUCTS),
-        ("$ ~> | b | {'c': 99} |", OBJ),          # transform operator
-        ("products#$i.($i & ':' & name)", PRODUCTS),  # tuple stream (# index binding) over lazy elements
+        ("$ ~> | b | {'c': 99} |", OBJ),  # transform operator
+        (
+            "products#$i.($i & ':' & name)",
+            PRODUCTS,
+        ),  # tuple stream (# index binding) over lazy elements
         # ── Task 6: whole-suite triage fixes ────────────────────────────
         # Wildcard/descendant steps over ARRAYS of lazy elements (e.g.
         # `Account.Order.Product.*`-shaped paths in the reference suite),
         # not just a single lazy object.
-        ("products.*", PRODUCTS),                       # wildcard mapped over lazy array elements
-        ("**.name", PRODUCTS),                           # descendant operator recursing through lazy elements
-        ("$keys(products)", PRODUCTS),                   # keys() collected across lazy array elements
-        ("$lookup(products, 'name')", PRODUCTS),         # lookup() mapped over lazy array elements
-        ("$spread(products)", PRODUCTS),                 # spread() mapped over lazy array elements
+        ("products.*", PRODUCTS),  # wildcard mapped over lazy array elements
+        ("**.name", PRODUCTS),  # descendant operator recursing through lazy elements
+        ("$keys(products)", PRODUCTS),  # keys() collected across lazy array elements
+        ("$lookup(products, 'name')", PRODUCTS),  # lookup() mapped over lazy array elements
+        ("$spread(products)", PRODUCTS),  # spread() mapped over lazy array elements
         ("products.{'n': name, 'p': price}", PRODUCTS),  # object construction per lazy element
     ],
 )
@@ -166,12 +169,13 @@ def test_lazy_consumers_match_eager(expr, data, engine):
 
 # ── Task 7: Pass-through identity, value fidelity, and lazy-error semantics ──
 
+
 class TestPassThrough:
     def test_filter_returns_original_dict_objects(self):
         data = {"products": [{"id": 1, "big": list(range(100))}, {"id": 2}]}
         expr = jsonatapy.compile("products[id = 1]")
         result = expr.evaluate(data)
-        assert result is data["products"][0]          # identity, not a copy
+        assert result is data["products"][0]  # identity, not a copy
 
     def test_pass_through_preserves_int_fidelity(self):
         data = {"items": [{"n": 1}]}
@@ -184,16 +188,16 @@ class TestPassThrough:
         expr = jsonatapy.compile("a")
         assert expr.evaluate(data) == 1
         data["a"] = 2
-        assert expr.evaluate(data) == 2         # no implicit caching
+        assert expr.evaluate(data) == 2  # no implicit caching
 
 
 class TestLazyErrors:
-    BAD = {"good": 1, "bad": {1, 2, 3}}               # a set is not convertible
+    BAD: ClassVar[dict] = {"good": 1, "bad": {1, 2, 3}}  # a set is not convertible
     # An unconvertible value nested one level inside a lazy dict -- reachable
     # only once something (concat, equality, `in`, ...) forces materialization
     # of `x` as a whole, unlike BAD above where the bad value is a top-level
     # field.
-    BAD_NESTED = {"x": {"s": {1, 2, 3}}}
+    BAD_NESTED: ClassVar[dict] = {"x": {"s": {1, 2, 3}}}
 
     def test_untouched_bad_field_succeeds(self):
         assert jsonatapy.compile("good").evaluate(self.BAD) == 1
