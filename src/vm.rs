@@ -669,6 +669,8 @@ fn get_field_cached(
                 Ok(JValue::Undefined)
             }
         }
+        #[cfg(feature = "python")]
+        JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field)?),
         JValue::Array(arr) => {
             // Array: map field access over elements (implicit array mapping).
             // Mirrors `compiled_field_step`: flatten nested arrays one level.

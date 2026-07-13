@@ -229,6 +229,22 @@ impl JsonataExpression {
         json_to_python(py, &self.run_eval(py, &json_data, bindings, options)?)
     }
 
+    /// TEMPORARY (removed when lazy becomes the default): evaluate with
+    /// lazy data conversion. Private test hook for the lazy-views rollout.
+    #[pyo3(signature = (data, bindings = None))]
+    fn _evaluate_lazy(
+        &self,
+        py: Python,
+        data: Py<PyAny>,
+        bindings: Option<Py<PyAny>>,
+    ) -> PyResult<Py<PyAny>> {
+        let json_data = lazy::convert(data.bind(py), true)?;
+        json_to_python(
+            py,
+            &self.run_eval(py, &json_data, bindings, self.default_options.clone())?,
+        )
+    }
+
     /// Evaluate with a pre-converted data handle (fastest for repeated evaluation).
     ///
     /// # Arguments
