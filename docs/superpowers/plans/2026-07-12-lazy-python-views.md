@@ -14,7 +14,8 @@
 
 - Branch: `feature/lazy-python-views` (already exists; all commits go here).
 - ALL lazy code is behind the `python` cargo feature. `cargo test` (no python feature) and `cargo build --features cli` must stay green after every task.
-- The reference suite must stay green on the DEFAULT path after every task: `uv run pytest tests/python/test_reference_suite.py -q` → 1258 passed.
+- The reference suite must stay green on the DEFAULT path after every task: `uv run pytest tests/python/test_reference_suite.py -q` → **1682 passed** (plan text elsewhere says "1258" — the suite has grown; read every "1258" as "the full current suite").
+- **Forced-tree-walker baseline (measured in Task 1): 1676/1682.** The 6 failures are PRE-EXISTING tree-walker bugs (`$abs`/math builtins on undefined raise instead of propagating undefined), confirmed present on main before this project. "Tree-walker suite green" in later tasks means **no NEW failures beyond these 6** (`JSONATAPY_FORCE_TREE_WALKER=1` → 1676 passed, same 6 failing tests).
 - Build the extension before any pytest run: `uv run maturin develop --release` (from repo root). If `uv run` re-builds on its own, that is fine — but never test against a stale build.
 - Lazy dicts are NEVER tuple wrappers. Tuple objects (`__tuple__: true`) are constructed by the engine as plain `JValue::Object`s; a `LazyPyDict` wraps caller data only. Therefore lazy arms never need `__tuple__` checks, and existing `matches!(x, JValue::Object(o) if o.get("__tuple__") …)` tuple probes are automatically correct for lazy values (they return false).
 - `JValue` numbers: Python ints convert to `JValue::Number(f64)` (existing behavior — do not change).
