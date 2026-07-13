@@ -63,6 +63,7 @@ simd = ["dep:simd-json"]
 python = ["dep:pyo3"]
 cli = ["dep:clap"]
 bench = []   # exposes _bench facade for Criterion benchmarks
+capi = []
 
 [dev-dependencies]
 criterion = "0.8"
