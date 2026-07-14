@@ -41,7 +41,10 @@ jobs:
           key: capi
 
       - name: Rust unit tests (capi feature)
-        run: 'cargo test --features capi capi::'
+        # --lib: the capi tests live in the lib target; integration-test
+        # binaries include_str! the jsonata-js submodule, which this job
+        # deliberately doesn't check out
+        run: 'cargo test --lib --features capi capi::'
 
       - name: Build shared library
         run: cargo build --release --features capi
