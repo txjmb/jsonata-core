@@ -1,11 +1,11 @@
 # jsonata-core + jsonatapy
 
-High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python bindings.
+High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python binding and C ABI/library.
 
 Much of this project was built using Claude Code with significant human oversight. There was no performant
 JSONata implementation in Python, so the goal was to port JSONata to Rust (with a PyO3 wrapper
 for Python) and see how fast it could go. The answer: faster than V8 for most expression
-workloads, and faster than the next pure-Rust implementation.  The rust versions are published on crates.io, and the python wheels on pypi.
+workloads, and faster than the next pure-Rust implementation.  The rust versions are published on crates.io, and the python wheels on pypi.  There is also a command-line binary and Python command-line available for use in scripting.  The Python library is also usable in a command-line fashion, and a C-compatible library is available for those who want to easily use jsonata in C/++.
 
 Many, many thanks to the incredible work of all the maintainers of the [JSONata](https://github.com/jsonata-js/jsonata) reference library.  JSONata is a very powerful, well-designed, and useful language that has made an impact on many projects.  This project leverages their outstanding work to extend that capability to Python and Rust and would not be possible without that project.  The implementation in Rust was strongly influenced by their implementation.  The 1600+ tests they created provided the scaffolding and validation for all of this project.  This project will continue to follow and be a derivative of the reference project as the JSONata reference library evolves.
 
