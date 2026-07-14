@@ -31,6 +31,8 @@
 
 pub mod ast;
 pub mod ast_transform;
+#[cfg(feature = "capi")]
+pub mod capi;
 mod compiler;
 mod datetime;
 pub mod evaluator;
@@ -41,8 +43,6 @@ pub mod parser;
 mod signature;
 pub mod value;
 mod vm;
-#[cfg(feature = "capi")]
-pub mod capi;
 
 // ── Benchmarking facade (only when the "bench" feature is enabled) ────────────
 //
