@@ -31,6 +31,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # lib-target #[cfg(test)] modules include_str! reference-suite
+          # datasets from the jsonata-js submodule
+          submodules: true
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
