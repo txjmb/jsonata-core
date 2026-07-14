@@ -152,6 +152,13 @@ jobs:
 
           if git show FETCH_HEAD:results/ubuntu-latest/latest.json > benchmarks/baseline/baseline.json.tmp; then
             mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
+            # Capture provenance for the PR comment: the recording commit's
+            # subject names the main commit these numbers were measured for
+            # ("chore: record benchmark results for <sha> (ubuntu-latest)").
+            PROV_SUBJECT=$(git log -1 --format='%s' FETCH_HEAD -- results/ubuntu-latest/latest.json)
+            PROV_DATE=$(git log -1 --format='%cs' FETCH_HEAD -- results/ubuntu-latest/latest.json)
+            PROV_COMMIT=$(echo "$PROV_SUBJECT" | sed -n 's/.*for \([0-9a-f]\{7,40\}\).*/\1/p')
+            echo "last \`main\` benchmark run (main commit \`${PROV_COMMIT:-unknown}\`, recorded ${PROV_DATE}, ubuntu-latest runner)" > benchmarks/baseline/provenance.txt
             echo "Baseline results downloaded from benchmark-data"
           else
             rm -f benchmarks/baseline/baseline.json.tmp
@@ -232,26 +239,34 @@ jobs:
             let comparisonText = '';
             try {
               const comparison = JSON.parse(fs.readFileSync('benchmarks/comparison.json', 'utf8'));
-              if (comparison.regressions.length > 0 || comparison.improvements.length > 0) {
-                comparisonText = '\n## 📊 Comparison with Baseline\n\n';
+              // Baseline provenance written by the "Download baseline" step;
+              // fall back to a generic label if it's missing.
+              let provenance = 'last `main` benchmark run (see the benchmark-data branch)';
+              try {
+                provenance = fs.readFileSync('benchmarks/baseline/provenance.txt', 'utf8').trim();
+              } catch (e) { /* keep generic label */ }
 
-                if (comparison.regressions.length > 0) {
-                  comparisonText += '### ⚠️ Performance Regressions (>10% slower)\n\n';
-                  comparisonText += '| Test | Baseline | Current | Change |\n';
-                  comparisonText += '|------|----------|---------|--------|\n';
-                  for (const r of comparison.regressions) {
-                    comparisonText += `| ${r.name} | ${r.baseline_ms.toFixed(2)}ms | ${r.current_ms.toFixed(2)}ms | **${r.change_pct.toFixed(1)}%** |\n`;
-                  }
-                  comparisonText += '\n';
+              comparisonText = '\n## 📊 Comparison with Baseline\n\n';
+              comparisonText += `**Baseline:** ${provenance}. This is the regression check for this PR; the vs-JavaScript numbers above compare against the jsonata-js reference implementation instead, not against this baseline.\n\n`;
+
+              if (comparison.regressions.length > 0) {
+                comparisonText += '### ⚠️ Performance Regressions (>10% slower than baseline)\n\n';
+                comparisonText += '| Test | Baseline | Current | Change |\n';
+                comparisonText += '|------|----------|---------|--------|\n';
+                for (const r of comparison.regressions) {
+                  comparisonText += `| ${r.name} | ${r.baseline_ms.toFixed(2)}ms | ${r.current_ms.toFixed(2)}ms | **${r.change_pct.toFixed(1)}%** |\n`;
                 }
+                comparisonText += '\n';
+              } else {
+                comparisonText += '✅ No regressions (>10% slower) vs baseline.\n\n';
+              }
 
-                if (comparison.improvements.length > 0) {
-                  comparisonText += '### ✅ Performance Improvements (>10% faster)\n\n';
-                  comparisonText += '| Test | Baseline | Current | Change |\n';
-                  comparisonText += '|------|----------|---------|--------|\n';
-                  for (const i of comparison.improvements) {
-                    comparisonText += `| ${i.name} | ${i.baseline_ms.toFixed(2)}ms | ${i.current_ms.toFixed(2)}ms | **${i.change_pct.toFixed(1)}%** |\n`;
-                  }
+              if (comparison.improvements.length > 0) {
+                comparisonText += '### ✅ Performance Improvements (>10% faster than baseline)\n\n';
+                comparisonText += '| Test | Baseline | Current | Change |\n';
+                comparisonText += '|------|----------|---------|--------|\n';
+                for (const i of comparison.improvements) {
+                  comparisonText += `| ${i.name} | ${i.baseline_ms.toFixed(2)}ms | ${i.current_ms.toFixed(2)}ms | **${i.change_pct.toFixed(1)}%** |\n`;
                 }
               }
             } catch (e) {
@@ -273,8 +288,8 @@ jobs:
 
             **Overall Performance:** ${avgSpeedup.toFixed(2)}x average speedup vs JavaScript
 
-            - ✅ **Faster:** ${fasterCount}/${allResults.length} tests
-            - ⚠️ **Slower:** ${slowerCount}/${allResults.length} tests
+            - ✅ **Faster than jsonata-js:** ${fasterCount}/${allResults.length} tests
+            - ⚠️ **Slower than jsonata-js:** ${slowerCount}/${allResults.length} tests
 
             ${comparisonText}
 
