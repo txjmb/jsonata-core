@@ -188,3 +188,13 @@ def jsonatapy():
     import jsonatapy
 
     return jsonatapy
+
+
+@pytest.fixture()
+def force_tree_walker_toggle():
+    """Yields jsonatapy's private tree-walker toggle setter; always resets to
+    off at teardown (including on test failure)."""
+    import jsonatapy
+
+    yield jsonatapy._set_force_tree_walker
+    jsonatapy._set_force_tree_walker(False)
