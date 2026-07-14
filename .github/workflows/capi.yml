@@ -41,7 +41,7 @@ jobs:
           key: capi
 
       - name: Rust unit tests (capi feature)
-        run: cargo test --features capi capi::
+        run: 'cargo test --features capi capi::'
 
       - name: Build shared library
         run: cargo build --release --features capi
