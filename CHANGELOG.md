@@ -19,6 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [2.2.5] - 2026-07-14
+
+### Added
+- C API (`capi` cargo feature): use the engine from C, C++, or any language with C interop.
+  Eight functions, JSON text in/out (`jsonata_compile`, `jsonata_evaluate`, `jsonata_bind_var`,
+  `jsonata_free_expr`, `jsonata_free_string`, `jsonata_last_error_message`,
+  `jsonata_last_error_code`, `jsonata_version`), thread-local error slot, and engine panics
+  caught at the boundary instead of aborting the host process. Ships with a hand-written
+  header (`bindings/c/jsonata.h`), build/link/CMake documentation (`bindings/c/README.md`),
+  and a CI-gated smoke test compiled as both C and C++. Build with
+  `cargo build --release --features capi`.
+
+### Fixed
+- Performance regression in v2.2.4 on small/fast expressions (issue #74): the
+  `JSONATAPY_FORCE_TREE_WALKER` test toggle read the environment variable on every
+  evaluation (both `evaluate()` and `evaluate_json()`), costing ~100-200ns per call —
+  10-30% of a sub-microsecond expression. The toggle is now a process-wide atomic seeded
+  from the environment once at import (whole-process forcing works unchanged) and flippable
+  via a private test hook. Small-expression benchmarks recover 5-16%; the remaining few
+  percent vs v2.2.3 on tiny payloads is the documented cost of lazy conversion (which makes
+  realistic workloads up to 48% faster, see 2.2.4 notes).
+
+### Changed
+- Benchmark tooling: PR benchmark comments and release regression issues now state their
+  comparison baseline explicitly (which commit/release, recorded when, on which runner),
+  and the vs-jsonata-js comparison is labeled as such.
+
 ## [2.2.4] - 2026-07-13
 
 ### Added
