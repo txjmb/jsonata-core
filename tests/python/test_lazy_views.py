@@ -49,8 +49,10 @@ def test_lazy_missing_field_is_undefined():
 
 
 @pytest.fixture()
-def force_tree_walker(monkeypatch):
-    monkeypatch.setenv("JSONATAPY_FORCE_TREE_WALKER", "1")
+def force_tree_walker():
+    jsonatapy._set_force_tree_walker(True)
+    yield
+    jsonatapy._set_force_tree_walker(False)
 
 
 # Activated in Task 5 (were deferred pending whole-object/whole-stream
@@ -111,10 +113,10 @@ OBJ = {"a": 1, "b": {"c": 2}, "d": [1, 2]}
 
 
 @pytest.fixture(params=["vm", "tree"])
-def engine(request, monkeypatch):
-    if request.param == "tree":
-        monkeypatch.setenv("JSONATAPY_FORCE_TREE_WALKER", "1")
-    return request.param
+def engine(request):
+    jsonatapy._set_force_tree_walker(request.param == "tree")
+    yield request.param
+    jsonatapy._set_force_tree_walker(False)
 
 
 @pytest.mark.parametrize(

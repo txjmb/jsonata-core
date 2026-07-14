@@ -28,6 +28,11 @@ from ._jsonatapy import (
     __jsonata_version__,
     __version__,
 )
+
+# Private test hooks (not public API): runtime toggle forcing the
+# tree-walking evaluator; seeded from JSONATAPY_FORCE_TREE_WALKER at import.
+from ._jsonatapy import _get_force_tree_walker as _get_force_tree_walker
+from ._jsonatapy import _set_force_tree_walker as _set_force_tree_walker
 from ._jsonatapy import (
     compile as _compile,
 )

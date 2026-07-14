@@ -167,13 +167,37 @@ struct JsonataExpression {
     default_options: evaluator::EvaluatorOptions,
 }
 
-/// Test-support toggle: set JSONATAPY_FORCE_TREE_WALKER=1 to bypass the
-/// bytecode VM and exercise the tree-walking evaluator on every call.
-/// Read per-call (not cached) so tests can flip it via monkeypatch.setenv;
-/// the ~100ns env read is noise next to a µs-scale evaluation.
+/// Test-support toggle: bypass the bytecode VM and exercise the tree-walking
+/// evaluator on every call. Seeded once at module import from the
+/// JSONATAPY_FORCE_TREE_WALKER env var (whole-process forcing, e.g. the CI
+/// tree-walker reference-suite job), and flippable at runtime through the
+/// private `_set_force_tree_walker` pyfunction (what the Python tests use).
+///
+/// This was previously a per-call `env::var_os` read (~100-200ns), which is
+/// NOT noise next to a sub-microsecond evaluation: it showed up as a 10-30%
+/// regression on tiny expressions in v2.2.4 (issue #74). A relaxed atomic
+/// load is ~1ns and preserves the flip-mid-test capability.
+#[cfg(feature = "python")]
+static FORCE_TREE_WALKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(feature = "python")]
 fn force_tree_walker() -> bool {
-    std::env::var_os("JSONATAPY_FORCE_TREE_WALKER").is_some_and(|v| !v.is_empty() && v != "0")
+    FORCE_TREE_WALKER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Private test hook: force (or unforce) the tree-walking evaluator for all
+/// subsequent evaluations in this process. Not part of the public API.
+#[cfg(feature = "python")]
+#[pyfunction]
+fn _set_force_tree_walker(on: bool) {
+    FORCE_TREE_WALKER.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Private test hook: current state of the tree-walker toggle.
+#[cfg(feature = "python")]
+#[pyfunction]
+fn _get_force_tree_walker() -> bool {
+    force_tree_walker()
 }
 
 #[cfg(feature = "python")]
@@ -642,8 +666,15 @@ fn parser_error_to_py(e: parser::ParserError) -> PyErr {
 #[cfg(feature = "python")]
 #[pymodule]
 fn _jsonatapy(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Seed the tree-walker toggle from the environment once, at import time.
+    FORCE_TREE_WALKER.store(
+        std::env::var_os("JSONATAPY_FORCE_TREE_WALKER").is_some_and(|v| !v.is_empty() && v != "0"),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     m.add_function(wrap_pyfunction!(compile, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate, m)?)?;
+    m.add_function(wrap_pyfunction!(_set_force_tree_walker, m)?)?;
+    m.add_function(wrap_pyfunction!(_get_force_tree_walker, m)?)?;
     m.add_class::<JsonataExpression>()?;
     m.add_class::<JsonataData>()?;
 

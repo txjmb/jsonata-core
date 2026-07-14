@@ -15,7 +15,7 @@ invisible there. It becomes observable in object construction: object keys
 with an `Undefined` value are dropped, but keys with an explicit `Null`
 value are kept. So `{"x": $abs(nothing)}` (nothing = missing field) produced
 `{"x": None}` on the VM (default) path but the spec-correct `{}` on the
-tree-walker path (`JSONATAPY_FORCE_TREE_WALKER=1`) -- and per the jsonata-js
+tree-walker path (via the private `_set_force_tree_walker` toggle) -- and per the jsonata-js
 oracle, `{}` is correct.
 
 Fix: add "abs", "ceil", "floor", "round", "sqrt" to the shared
@@ -35,8 +35,6 @@ migration (missing-field paths already evaluate to `Undefined`, not
 compilation for too-many-args calls before the VM ever runs, so both paths
 fall back to the tree-walker and raise the identical arity error.
 """
-
-import os
 
 import jsonatapy
 import pytest
@@ -58,16 +56,16 @@ def test_default_vm_path_drops_undefined_key(fn):
 
 
 @pytest.mark.parametrize("fn", MATH_FUNCTIONS)
-def test_default_matches_forced_tree_walker(fn, monkeypatch):
+def test_default_matches_forced_tree_walker(fn, force_tree_walker_toggle):
     """Default (VM) path and forced-tree-walker path must agree on object construction."""
     expr_src = f'{{"x": ${fn}(nothing)}}'
     expr = jsonatapy.compile(expr_src)
 
     default_result = expr.evaluate(DATA)
 
-    monkeypatch.setenv("JSONATAPY_FORCE_TREE_WALKER", "1")
+    force_tree_walker_toggle(True)
     tree_walker_result = expr.evaluate(DATA)
-    monkeypatch.delenv("JSONATAPY_FORCE_TREE_WALKER")
+    force_tree_walker_toggle(False)
 
     assert default_result == tree_walker_result == {}
 
@@ -90,16 +88,16 @@ def test_explicit_null_argument_still_passes_through_as_null(fn):
     default_result = expr.evaluate(data)
     assert default_result == {"x": None}
 
-    os.environ["JSONATAPY_FORCE_TREE_WALKER"] = "1"
+    jsonatapy._set_force_tree_walker(True)
     try:
         tw_result = expr.evaluate(data)
     finally:
-        del os.environ["JSONATAPY_FORCE_TREE_WALKER"]
+        jsonatapy._set_force_tree_walker(False)
     assert tw_result == {"x": None}
 
 
 @pytest.mark.parametrize("fn", MATH_FUNCTIONS)
-def test_arity_error_unaffected_by_undefined_first_arg(fn, monkeypatch):
+def test_arity_error_unaffected_by_undefined_first_arg(fn, force_tree_walker_toggle):
     """Calling with too many args and an undefined first arg must still raise the
     arity error identically on both paths (not short-circuit to undefined).
     round() accepts an optional precision arg, so it needs 3 args to overflow;
@@ -110,9 +108,9 @@ def test_arity_error_unaffected_by_undefined_first_arg(fn, monkeypatch):
     with pytest.raises(Exception) as default_exc_info:
         expr.evaluate(DATA)
 
-    monkeypatch.setenv("JSONATAPY_FORCE_TREE_WALKER", "1")
+    force_tree_walker_toggle(True)
     with pytest.raises(Exception) as tw_exc_info:
         expr.evaluate(DATA)
-    monkeypatch.delenv("JSONATAPY_FORCE_TREE_WALKER")
+    force_tree_walker_toggle(False)
 
     assert str(default_exc_info.value) == str(tw_exc_info.value)

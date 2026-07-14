@@ -157,6 +157,9 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install --system -e ".[dev]" || uv pip install --system pytest ruff mypy
+          # Audit-environment tool, not a project dependency: the runner image
+          # ships an older setuptools flagged by PYSEC-2026-3447 (fixed in 83.0.0)
+          uv pip install --system --upgrade "setuptools>=83.0.0"
 
       - name: Run pip-audit
         id: pip_audit
