@@ -31,6 +31,8 @@
 
 pub mod ast;
 pub mod ast_transform;
+#[cfg(feature = "capi")]
+pub mod capi;
 mod compiler;
 mod datetime;
 pub mod evaluator;

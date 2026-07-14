@@ -102,6 +102,24 @@ echo '{"orders":[{"product":"Laptop","price":1200}]}' | jsonatapy 'orders[price 
 
 See [CLI Reference](docs/cli.md) for the full flag/exit-code contract.
 
+## C / C++ quick start
+
+The engine exposes a small C ABI (8 functions, JSON text in/out), usable
+from C, C++, or any language with C interop:
+
+```c
+JsonataExpr *expr = jsonata_compile("$sum(items.price)");
+char *result = jsonata_evaluate(expr, "{\"items\":[{\"price\":2},{\"price\":3}]}");
+// result: "5"
+jsonata_free_string(result);
+jsonata_free_expr(expr);
+```
+
+Build with `cargo build --release --features capi` and include
+[`bindings/c/jsonata.h`](bindings/c/jsonata.h). See the
+[C API guide](bindings/c/README.md) for linking (gcc/clang, Makefile,
+CMake), the memory/threading contract, and error handling.
+
 ---
 
 ## What is JSONata?

@@ -1,0 +1,66 @@
+name: C ABI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/capi.rs'
+      - 'bindings/c/**'
+      - 'Cargo.toml'
+      - '.github/workflows/capi.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'src/capi.rs'
+      - 'bindings/c/**'
+      - 'Cargo.toml'
+      - '.github/workflows/capi.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: capi-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  capi-smoke:
+    name: C ABI tests + smoke (C and C++)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # lib-target #[cfg(test)] modules include_str! reference-suite
+          # datasets from the jsonata-js submodule
+          submodules: true
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: capi
+
+      - name: Rust unit tests (capi feature)
+        # --lib: the capi tests live in the lib target; integration-test
+        # binaries include_str! the jsonata-js submodule, which this job
+        # deliberately doesn't check out
+        run: 'cargo test --lib --features capi capi::'
+
+      - name: Build shared library
+        run: cargo build --release --features capi
+
+      - name: Compile and run smoke test (C)
+        run: |
+          gcc -Wall -Wextra -Werror -o smoke bindings/c/examples/smoke.c \
+              -Ltarget/release -ljsonata_core
+          LD_LIBRARY_PATH=target/release ./smoke
+
+      - name: Compile and run smoke test (C++)
+        run: |
+          g++ -Wall -Wextra -Werror -x c++ -o smoke_cpp bindings/c/examples/smoke.c \
+              -Ltarget/release -ljsonata_core
+          LD_LIBRARY_PATH=target/release ./smoke_cpp
