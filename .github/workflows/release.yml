@@ -917,6 +917,13 @@ jobs:
 
           if git show FETCH_HEAD:results/macos-arm64/latest.json > benchmarks/baseline/baseline.json.tmp; then
             mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
+            # Capture provenance for the regression issue: the recording
+            # commit's subject names the release these numbers belong to
+            # ("chore: record benchmark results for vX.Y.Z (macos-arm64)").
+            PREV_SUBJECT=$(git log -1 --format='%s' FETCH_HEAD -- results/macos-arm64/latest.json)
+            PREV_DATE=$(git log -1 --format='%cs' FETCH_HEAD -- results/macos-arm64/latest.json)
+            PREV_VERSION=$(echo "$PREV_SUBJECT" | sed -n 's/.*for \(v[0-9][^ ]*\).*/\1/p')
+            echo "${PREV_VERSION:-unknown previous release} (recorded ${PREV_DATE}, macos-arm64 self-hosted runner)" > benchmarks/baseline/provenance.txt
             echo "has_baseline=true" >> $GITHUB_OUTPUT
             echo "Baseline results downloaded from benchmark-data"
           else
@@ -974,7 +981,13 @@ jobs:
             const comparison = JSON.parse(fs.readFileSync('benchmarks/comparison.json', 'utf8'));
             const version = '${{ needs.validate-version.outputs.version }}';
 
+            let baseline = 'the previous release';
+            try {
+              baseline = fs.readFileSync('benchmarks/baseline/provenance.txt', 'utf8').trim();
+            } catch (e) { /* keep generic label */ }
+
             let body = `Release v${version} is more than 10% slower than the previous release on the following benchmarks:\n\n`;
+            body += `**Baseline:** ${baseline}. Both sides were measured by this workflow's release benchmark job on the same runner; threshold is >10% on mean time.\n\n`;
             body += '| Test | Previous | Current | Change |\n';
             body += '|------|----------|---------|--------|\n';
             for (const r of comparison.regressions) {
