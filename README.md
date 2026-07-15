@@ -1,6 +1,6 @@
 # jsonata-core + jsonatapy
 
-High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python binding and C ABI/library.
+High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python binding and C ABI/library.  If you use this library, please add a star!
 
 Much of this project was built using Claude Code with significant human oversight. There was no performant
 JSONata implementation in Python, so the goal was to port JSONata to Rust (with a PyO3 wrapper
