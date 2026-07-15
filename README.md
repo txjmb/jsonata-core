@@ -92,7 +92,7 @@ Supports Python 3.10, 3.11, 3.12, 3.13, 3.14 on Linux, macOS (Intel & ARM), and 
 
 ## Command-line quick start
 
-Both packages also ship a CLI, `jq`-shaped, with an identical contract:
+Both packages also ship a binary CLI and a Python-based CLI, `jq`-shaped, with an identical contract:
 
 ```bash
 pip install jsonatapy
