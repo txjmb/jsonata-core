@@ -12,7 +12,7 @@ This file provides context and guidelines for AI assistants working on this proj
 
 **Tech Stack:**
 - **Extension Language:** Rust (using PyO3 for Python bindings)
-- **Python:** 3.8+ (target latest stable versions)
+- **Python:** 3.10+ (target latest stable versions)
 - **Build System:** maturin (Rust-Python bridge)
 - **Testing:** pytest (Python), cargo test (Rust)
 - **CI/CD:** GitHub Actions
@@ -201,7 +201,7 @@ maturin develop --release
 maturin build --release
 
 # Build for multiple Python versions
-maturin build --release --interpreter python3.8 python3.9 python3.10 python3.11 python3.12
+maturin build --release --interpreter python3.10 python3.11 python3.12
 ```
 
 ### Benchmarking
@@ -274,7 +274,7 @@ python benches/compare_js.py
    - Parallel evaluation where safe
 
 ### Constraints
-- Must maintain compatibility with Python 3.8+
+- Must maintain compatibility with Python 3.10+
 - Rust stable channel only (no nightly features)
 - Zero unsafe code in initial implementation (use only where profiled as necessary)
 - Cross-platform support: Windows, Linux, macOS, aarch64, x86_64
