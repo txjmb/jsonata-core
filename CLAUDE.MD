@@ -16,7 +16,7 @@ This file provides context and guidelines for AI assistants working on this proj
 - **Build System:** maturin (Rust-Python bridge)
 - **Testing:** pytest (Python), cargo test (Rust)
 - **CI/CD:** GitHub Actions
-- **Documentation:** Sphinx (Python docs) + rustdoc (Rust docs)
+- **Documentation:** MkDocs (Python docs) + rustdoc (Rust docs)
 
 ## Design Goals
 
