@@ -1,6 +1,9 @@
 # jsonata-core (rust) + jsonatapy + jsonata C-ABI library + jsonata cli
-## Pypi stats
+#### Pypi stats
 [![jsonatapy Downloads Last Month](https://assets.piptrends.com/get-last-month-downloads-badge/jsonatapy.svg 'jsonatapy Downloads Last Month by pip Trends')](https://piptrends.com/package/jsonatapy) [![jsonatapy Downloads Last Week](https://assets.piptrends.com/get-last-week-downloads-badge/jsonatapy.svg 'jsonatapy Downloads Last Week by pip Trends')](https://piptrends.com/package/jsonatapy) [![jsonatapy Average Daily Downloads](https://assets.piptrends.com/get-average-downloads-badge/jsonatapy.svg 'jsonatapy Average Daily Downloads by pip Trends')](https://piptrends.com/package/jsonatapy)
+
+#### Crates.io stats
+![downloads](https://shieldcn.dev/crates/d/tokio.svg)
 
 High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python binding and C ABI/library.  If you use this library, please add a star!
 
