@@ -126,6 +126,51 @@ let mut ev = Evaluator::with_context(ctx);
 let result = ev.evaluate(&ast, &data)?;  // $threshold available in expression
 ```
 
+### Host (custom) functions
+
+Register native Rust functions that an expression can call as `$name(...)` —
+the equivalent of jsonata-js's `registerFunction`. This is how you expose
+enrichment/lookup functions, host-owned formatting, or scoring logic to an
+expression that is otherwise pure. Evaluation stays synchronous: a host function
+that does I/O simply blocks (run evaluations across threads for concurrency).
+
+```rust
+pub trait HostFn { /* blanket-impl'd for Fn(&[JValue]) -> Result<JValue, EvaluatorError> */ }
+
+impl Evaluator {
+    pub fn register_fn(&mut self, name: impl Into<String>, f: impl HostFn + 'static)
+        -> Result<(), EvaluatorError>;
+    pub fn register_fn_override(&mut self, name: impl Into<String>, f: impl HostFn + 'static)
+        -> Result<(), EvaluatorError>;
+}
+```
+
+```rust
+let mut ev = Evaluator::new();
+ev.register_fn("productName", |args: &[JValue]| {
+    let sku = args.first().and_then(|v| v.as_str()).unwrap_or("");
+    Ok(JValue::from(lookup_name(sku)))
+})?;
+
+let ast = parse("items.{ 'sku': sku, 'name': $productName(sku) }")?;
+let out = ev.evaluate(&ast, &data)?;
+```
+
+Resolution and shadowing rules:
+
+- A host function resolves **after** the expression's own `:=` bindings and
+  language-defined functions, and **before** built-ins.
+- `register_fn` **rejects a name that collides with a built-in**. To replace a
+  built-in deliberately — e.g. a frozen `$now`/seeded `$random` for reproducible
+  tests, or a disabled `$eval` for sandboxing — use `register_fn_override`.
+- `register_fn_override` refuses to override a *compilable* built-in (those on
+  the bytecode fast path); the impure built-ins that motivate overriding
+  (`$now`, `$millis`, `$random`, `$eval`) are all overridable.
+- Arguments arrive already evaluated. A host function that does I/O blocks;
+  parallelise across threads (one `Evaluator` per thread).
+
+See `examples/host_functions.rs` for a runnable walkthrough.
+
 ## Performance
 
 Criterion benchmark results (pure Rust, no Python, release build):

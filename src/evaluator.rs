@@ -3177,6 +3177,25 @@ impl Evaluator {
     /// Returns an error if `name` collides with a built-in function; to replace
     /// a built-in deliberately (e.g. a frozen `$now`), use
     /// [`register_fn_override`](Self::register_fn_override).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jsonata_core::evaluator::Evaluator;
+    /// use jsonata_core::parser::parse;
+    /// use jsonata_core::value::JValue;
+    ///
+    /// let mut ev = Evaluator::new();
+    /// ev.register_fn("shout", |args: &[JValue]| {
+    ///     let s = args.first().and_then(|v| v.as_str()).unwrap_or("");
+    ///     Ok(JValue::from(s.to_uppercase()))
+    /// })
+    /// .expect("`shout` does not collide with a built-in");
+    ///
+    /// let ast = parse("$shout(greeting)").unwrap();
+    /// let data = JValue::from_json_str(r#"{"greeting": "hi"}"#).unwrap();
+    /// assert_eq!(ev.evaluate(&ast, &data).unwrap(), JValue::from("HI"));
+    /// ```
     pub fn register_fn(
         &mut self,
         name: impl Into<String>,
