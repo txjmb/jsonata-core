@@ -288,6 +288,11 @@ thread with `loop.run_in_executor(...)`. Both patterns keep the fast synchronous
 intact while letting the async work live where it belongs — in your application, not
 in the expression engine.
 
+Synchronous execution was chosen for speed on the majority of use cases, which are
+CPU-bound data transformations that never touch I/O. If enough users need genuinely
+asynchronous host functions, we will consider adding that capability — but it would be
+an opt-in path alongside the synchronous default, not a replacement for it.
+
 ## JsonataData Class
 
 Pre-converted data handle for efficient repeated evaluation. Convert Python data
