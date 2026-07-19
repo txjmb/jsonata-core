@@ -264,6 +264,30 @@ expr.evaluate(None)
 
 See `examples/host_functions.py` for a runnable walkthrough.
 
+#### Why host functions are synchronous
+
+Host functions run synchronously: the callable is invoked mid-evaluation, and if
+it does I/O it simply blocks until it returns. This is a deliberate design choice,
+not a limitation. The evaluator is a synchronous, single-threaded engine — that is
+where its speed comes from — and a blocking call stack (your code → `evaluate()` →
+your host function → I/O) is a correct, ordinary way to run it. Concurrency comes
+from running independent evaluations across threads or processes, exactly as you
+would parallelize any other CPU-bound work. This is why an `async def` is rejected:
+the synchronous core has no event loop to await a coroutine on, so a coroutine
+return has no meaningful value. (jsonata-js is async only because JavaScript has no
+threads and no blocking I/O — its event loop is the *only* concurrency primitive
+available, so it had no choice. Python has real threads, so it does not inherit that
+constraint.)
+
+If a host function genuinely needs async I/O, do the I/O **outside** the expression
+rather than inside a callback. Gather what the transform needs with `asyncio` up
+front, then pass the results in through `bindings` (or bake them into small
+synchronous lookups closed over that data) and run `evaluate()` normally. If you are
+inside an event loop and don't want to block it, run the whole `evaluate()` call in a
+thread with `loop.run_in_executor(...)`. Both patterns keep the fast synchronous core
+intact while letting the async work live where it belongs — in your application, not
+in the expression engine.
+
 ## JsonataData Class
 
 Pre-converted data handle for efficient repeated evaluation. Convert Python data
