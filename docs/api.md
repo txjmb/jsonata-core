@@ -217,6 +217,51 @@ result_str = expr.evaluate_data_to_json(data)
 result = json.loads(result_str)
 ```
 
+### `register(name, func)` / `register_override(name, func)`
+
+Register a Python callable that the expression can invoke as `$name(...)` — the
+equivalent of jsonata-js's `registerFunction`. Use it to expose enrichment/lookup,
+formatting, or scoring logic to an otherwise-pure expression. Both methods return the
+expression, so calls can be chained.
+
+**Parameters:**
+- `name` (str): The function name, called as `$name(...)` in the expression.
+- `func` (Callable): Receives the already-evaluated arguments as positional Python
+  values and must return a JSON-compatible value **synchronously**.
+
+**Returns:** the `JsonataExpression` (for chaining)
+
+**Raises:**
+- `TypeError` — if `func` is not callable.
+- `ValueError` — if `name` collides with a built-in (`register`), or if the built-in
+  cannot be safely overridden (`register_override`).
+
+**Behavior:**
+- Host functions resolve **after** the expression's own `:=` bindings and lambdas, and
+  **before** built-ins.
+- `register` rejects a name that collides with a built-in; `register_override` replaces
+  one deliberately — the intended uses being determinism injection for the impure
+  built-ins (`$now`, `$millis`, `$random`) and sandboxing (disabling `$eval`).
+- Evaluation is synchronous, so an `async def` (which returns a coroutine) is rejected
+  at call time. For async I/O, await it outside jsonata and pass the result via
+  `bindings`.
+
+**Example:**
+```python
+# Enrichment lookup backed by host-owned data
+catalog = {"A-1": "Widget", "B-2": "Gadget"}
+expr = jsonatapy.compile("items.{ 'sku': sku, 'name': $productName(sku) }")
+expr.register("productName", lambda sku: catalog.get(sku, "Unknown"))
+expr.evaluate({"items": [{"sku": "A-1"}, {"sku": "B-2"}]})
+# [{'sku': 'A-1', 'name': 'Widget'}, {'sku': 'B-2', 'name': 'Gadget'}]
+
+# Determinism injection: freeze $now() for reproducible output
+expr = jsonatapy.compile("{ 'generatedAt': $now() }")
+expr.register_override("now", lambda: "2020-01-01T00:00:00.000Z")
+expr.evaluate(None)
+# {'generatedAt': '2020-01-01T00:00:00.000Z'}
+```
+
 ## JsonataData Class
 
 Pre-converted data handle for efficient repeated evaluation. Convert Python data
