@@ -272,7 +272,11 @@ not a limitation. The evaluator is a synchronous, single-threaded engine — tha
 where its speed comes from — and a blocking call stack (your code → `evaluate()` →
 your host function → I/O) is a correct, ordinary way to run it. Concurrency comes
 from running independent evaluations across threads or processes, exactly as you
-would parallelize any other CPU-bound work. This is why an `async def` is rejected:
+would parallelize any other CPU-bound work. Async would only ever help a host
+function that is *I/O-bound* — a CPU-bound one gains nothing from it — and even an
+I/O-bound host function can run concurrently by dispatching evaluations to a thread
+pool (a blocked thread waiting on I/O lets others proceed), so blocking is rarely a
+real constraint. This is why an `async def` is rejected:
 the synchronous core has no event loop to await a coroutine on, so a coroutine
 return has no meaningful value. (jsonata-js is async only because JavaScript has no
 threads and no blocking I/O — its event loop is the *only* concurrency primitive
