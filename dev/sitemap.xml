@@ -160,4 +160,8 @@
          <loc>https://txjmb.github.io/jsonata-core/dev/superpowers/specs/2026-07-12-lazy-python-views-design/</loc>
          <lastmod>2026-07-19</lastmod>
     </url>
+    <url>
+         <loc>https://txjmb.github.io/jsonata-core/dev/superpowers/specs/2026-07-19-host-callable-functions-design/</loc>
+         <lastmod>2026-07-19</lastmod>
+    </url>
 </urlset>
