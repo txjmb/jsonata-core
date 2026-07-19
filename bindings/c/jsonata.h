@@ -75,6 +75,41 @@ char *jsonata_evaluate(JsonataExpr *expr, const char *json_utf8);
 int jsonata_bind_var(JsonataExpr *expr, const char *name,
                      const char *json_value_utf8);
 
+/*
+ * A host function callback, callable from the expression as $name(...).
+ *   user_data: the pointer supplied at registration (opaque to jsonata).
+ *   args_json: a NUL-terminated UTF-8 JSON ARRAY of the (already evaluated)
+ *              arguments.
+ * Returns a NUL-terminated UTF-8 JSON string with the result, which must stay
+ * valid until the call returns — jsonata COPIES it and does NOT free it — or
+ * NULL to signal an error.
+ */
+typedef const char *(*jsonata_host_fn)(void *user_data, const char *args_json);
+
+/*
+ * Register a host function callable from the expression as $name(...) — the
+ * C equivalent of jsonata-js's registerFunction. Applies to every subsequent
+ * jsonata_evaluate() on this handle. A leading '$' in name is accepted and
+ * stripped; re-registering a name replaces it. Host functions resolve after
+ * the expression's own bindings/lambdas and before built-ins.
+ *
+ * user_data is passed back to the callback unchanged and must remain valid for
+ * the lifetime of the handle. Returns 0 on success, -1 on error (slot set) —
+ * including when name collides with a built-in (use
+ * jsonata_register_fn_override to replace a built-in deliberately).
+ */
+int jsonata_register_fn(JsonataExpr *expr, const char *name,
+                        jsonata_host_fn fn, void *user_data);
+
+/*
+ * Like jsonata_register_fn, but deliberately replaces a built-in of the same
+ * name — for determinism injection (a frozen $now, seeded $random) or
+ * sandboxing (disabling $eval). Overriding a built-in that participates in the
+ * compiled fast path returns -1 with an error.
+ */
+int jsonata_register_fn_override(JsonataExpr *expr, const char *name,
+                                 jsonata_host_fn fn, void *user_data);
+
 /* Free a handle returned by jsonata_compile(). NULL is a no-op. */
 void jsonata_free_expr(JsonataExpr *expr);
 
