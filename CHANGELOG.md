@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Host-callable custom functions (Rust core): `Evaluator::register_fn` and
+  `Evaluator::register_fn_override` let a host register native functions callable
+  from an expression as `$name(...)` — the equivalent of jsonata-js's
+  `registerFunction`. Functions are plain closures
+  (`Fn(&[JValue]) -> Result<JValue, EvaluatorError>`) and resolve after the
+  expression's own bindings/lambdas and before built-ins. `register_fn` rejects
+  collisions with built-ins; `register_fn_override` allows deliberately replacing
+  the impure built-ins (`$now`, `$millis`, `$random`, `$eval`) for determinism
+  injection or sandboxing. Evaluation stays synchronous. See
+  `examples/host_functions.rs` and the Rust crate docs. (Not yet exposed through
+  the Python or C bindings.)
 
 ### Changed
 

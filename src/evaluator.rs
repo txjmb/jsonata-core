@@ -3042,6 +3042,47 @@ pub(crate) fn check_loop_timeout(
     Ok(())
 }
 
+/// Result type returned by a host-registered function.
+pub type HostFnResult = Result<JValue, EvaluatorError>;
+
+/// Per-call context handed to a host function.
+///
+/// In v1 this is intentionally opaque: a host function takes data and returns
+/// data. It exists so a later phase can add re-entrancy (invoking a JSONata
+/// lambda passed as an argument) by widening this type, without changing the
+/// [`HostFn`] signature or breaking existing callers.
+#[non_exhaustive]
+pub struct HostCtx {
+    _private: (),
+}
+
+impl HostCtx {
+    fn new() -> Self {
+        HostCtx { _private: () }
+    }
+}
+
+/// A function implemented by the host and callable from an expression as
+/// `$name(...)`.
+///
+/// Most host functions are pure leaves: write them as a plain closure
+/// `Fn(&[JValue]) -> Result<JValue, EvaluatorError>` (the blanket impl below
+/// applies) and ignore the [`HostCtx`]. The trait form exists so a later phase
+/// can hand the function a re-entrancy handle through [`HostCtx`] without an
+/// API break.
+pub trait HostFn {
+    fn call(&self, args: &[JValue], ctx: &mut HostCtx) -> HostFnResult;
+}
+
+impl<F> HostFn for F
+where
+    F: Fn(&[JValue]) -> HostFnResult,
+{
+    fn call(&self, args: &[JValue], _ctx: &mut HostCtx) -> HostFnResult {
+        self(args)
+    }
+}
+
 /// Evaluator for JSONata expressions
 pub struct Evaluator {
     context: Context,
@@ -3073,6 +3114,10 @@ pub struct Evaluator {
     /// Set in `evaluate()` (only when `options.timeout_ms` is configured) and
     /// checked in `evaluate_internal`'s per-node checkpoint for D1012.
     start_time: Option<Instant>,
+    /// Host-registered custom functions, dispatched by name from the call
+    /// position (`$name(...)`). Empty for the overwhelming majority of
+    /// evaluators, which pay nothing. See `register_fn`/`register_fn_override`.
+    host_fns: HashMap<String, Rc<dyn HostFn>>,
 }
 
 impl Evaluator {
@@ -3088,6 +3133,7 @@ impl Evaluator {
             keep_tuple_stream: false,
             options: EvaluatorOptions::default(),
             start_time: None,
+            host_fns: HashMap::new(),
         }
     }
 
@@ -3101,6 +3147,7 @@ impl Evaluator {
             keep_tuple_stream: false,
             options: EvaluatorOptions::default(),
             start_time: None,
+            host_fns: HashMap::new(),
         }
     }
 
@@ -3116,7 +3163,79 @@ impl Evaluator {
             keep_tuple_stream: false,
             options,
             start_time: None,
+            host_fns: HashMap::new(),
         }
+    }
+
+    /// Register a host function callable from an expression as `$name(...)`.
+    ///
+    /// `f` may be any plain closure `Fn(&[JValue]) -> Result<JValue,
+    /// EvaluatorError>` (via the blanket [`HostFn`] impl) or any [`HostFn`]
+    /// implementor. Host functions resolve *after* the expression's own `:=`
+    /// bindings and language-defined functions, and *before* built-ins.
+    ///
+    /// Returns an error if `name` collides with a built-in function; to replace
+    /// a built-in deliberately (e.g. a frozen `$now`), use
+    /// [`register_fn_override`](Self::register_fn_override).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jsonata_core::evaluator::Evaluator;
+    /// use jsonata_core::parser::parse;
+    /// use jsonata_core::value::JValue;
+    ///
+    /// let mut ev = Evaluator::new();
+    /// ev.register_fn("shout", |args: &[JValue]| {
+    ///     let s = args.first().and_then(|v| v.as_str()).unwrap_or("");
+    ///     Ok(JValue::from(s.to_uppercase()))
+    /// })
+    /// .expect("`shout` does not collide with a built-in");
+    ///
+    /// let ast = parse("$shout(greeting)").unwrap();
+    /// let data = JValue::from_json_str(r#"{"greeting": "hi"}"#).unwrap();
+    /// assert_eq!(ev.evaluate(&ast, &data).unwrap(), JValue::from("HI"));
+    /// ```
+    pub fn register_fn(
+        &mut self,
+        name: impl Into<String>,
+        f: impl HostFn + 'static,
+    ) -> Result<(), EvaluatorError> {
+        let name = name.into();
+        if self.is_builtin_function(&name) {
+            return Err(EvaluatorError::EvaluationError(format!(
+                "cannot register host function '{name}': it shadows a built-in; \
+                 use register_fn_override to replace a built-in deliberately"
+            )));
+        }
+        self.host_fns.insert(name, Rc::new(f));
+        Ok(())
+    }
+
+    /// Register a host function that deliberately replaces a built-in of the same
+    /// name — the two legitimate cases being determinism injection for the impure
+    /// built-ins (`$now`, `$millis`, `$random`) and sandboxing/hardening (e.g.
+    /// disabling `$eval`).
+    ///
+    /// Overriding a *compilable* built-in is rejected: those names can be folded
+    /// into the bytecode fast path, which has no visibility into the host
+    /// registry, so the override could be silently bypassed. The impure built-ins
+    /// that motivate overriding are all non-compilable, so this restriction never
+    /// blocks a legitimate use.
+    pub fn register_fn_override(
+        &mut self,
+        name: impl Into<String>,
+        f: impl HostFn + 'static,
+    ) -> Result<(), EvaluatorError> {
+        let name = name.into();
+        if is_compilable_builtin(&name) {
+            return Err(EvaluatorError::EvaluationError(format!(
+                "cannot override built-in '{name}': it participates in the compiled \
+                 fast path and cannot be safely shadowed in this version"
+            )));
+        }
+        self.host_fns.insert(name, Rc::new(f));
+        Ok(())
     }
 
     /// Allocate a fresh, process-unique-per-Evaluator id for a new lambda instance.
@@ -7092,6 +7211,23 @@ impl Evaluator {
             return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
         }
 
+        // THEN a host-registered custom function (register_fn / register_fn_override).
+        // Resolves after the expression's own bindings and lambdas (checked above)
+        // and before built-ins, so an explicit override replaces the built-in in
+        // call position. Non-override names never collide with a built-in
+        // (register_fn rejects that), so the ordering is only observable for
+        // overrides. The `is_empty` guard keeps the common (no host fns) path free.
+        if !self.host_fns.is_empty() {
+            if let Some(f) = self.host_fns.get(name).cloned() {
+                let mut evaluated_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    evaluated_args.push(self.evaluate_internal(arg, data)?);
+                }
+                let mut ctx = HostCtx::new();
+                return f.call(&evaluated_args, &mut ctx);
+            }
+        }
+
         // If the function was called without $ prefix and it's not a stored lambda,
         // it's an error (unknown function without $ prefix)
         if !is_builtin && name != "__lambda__" {
@@ -10824,6 +10960,18 @@ impl Evaluator {
         values: &[JValue],
     ) -> Result<JValue, EvaluatorError> {
         use crate::functions;
+
+        // A host override applied in value position (e.g. `$f := $now; $f()`) or
+        // passed to a higher-order function reaches dispatch here rather than
+        // through `evaluate_function_call`. Check the registry first so the
+        // override is honoured consistently in both positions. Runs before the
+        // arity guard below so a zero-arg override (`$now`/`$uuid`) is allowed.
+        if !self.host_fns.is_empty() {
+            if let Some(f) = self.host_fns.get(name).cloned() {
+                let mut ctx = HostCtx::new();
+                return f.call(values, &mut ctx);
+            }
+        }
 
         if values.is_empty() {
             return Err(EvaluatorError::EvaluationError(format!(
