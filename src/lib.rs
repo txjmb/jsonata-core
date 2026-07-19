@@ -91,7 +91,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 #[cfg(feature = "python")]
-use pyo3::types::{PyDict, PyList, PyString};
+use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 
 /// Pre-converted data handle for efficient repeated evaluation.
 ///
@@ -165,6 +165,11 @@ struct JsonataExpression {
     /// kwargs override these on a field-by-field basis (see the `.or(...)` merges
     /// in the `#[pymethods]` impl below).
     default_options: evaluator::EvaluatorOptions,
+    /// Python callables registered via `register`/`register_override`, callable
+    /// from the expression as `$name(...)`. Empty by default; when non-empty,
+    /// evaluation is routed through the tree-walker (the bytecode VM has no host
+    /// registry) and these are registered onto the per-call evaluator.
+    host_fns: Vec<HostFnReg>,
 }
 
 /// Test-support toggle: bypass the bytecode VM and exercise the tree-walking
@@ -211,7 +216,10 @@ impl JsonataExpression {
         bindings: Option<Py<PyAny>>,
         options: evaluator::EvaluatorOptions,
     ) -> PyResult<JValue> {
-        if bindings.is_none() && !force_tree_walker() {
+        // Host functions, like bindings, require the tree-walker: the bytecode VM
+        // has no view of the host registry. Take the fast path only when neither
+        // is in play.
+        if bindings.is_none() && self.host_fns.is_empty() && !force_tree_walker() {
             let bytecode = self.bytecode.get_or_init(|| {
                 evaluator::try_compile_expr(&self.ast)
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
@@ -226,8 +234,28 @@ impl JsonataExpression {
             }
         } else {
             let mut ev = create_evaluator(py, bindings, options)?;
+            self.register_host_fns(py, &mut ev)?;
             ev.evaluate(&self.ast, data).map_err(evaluator_error_to_py)
         }
+    }
+
+    /// Register the stored Python callables onto a freshly built evaluator.
+    /// The collision/override rules were already validated at `register()` time,
+    /// so these calls are not expected to fail; any error is still surfaced.
+    fn register_host_fns(&self, py: Python, ev: &mut evaluator::Evaluator) -> PyResult<()> {
+        for reg in &self.host_fns {
+            let hf = PyHostFn {
+                func: reg.func.clone_ref(py),
+            };
+            if reg.is_override {
+                ev.register_fn_override(reg.name.clone(), hf)
+                    .map_err(evaluator_error_to_py)?;
+            } else {
+                ev.register_fn(reg.name.clone(), hf)
+                    .map_err(evaluator_error_to_py)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -253,6 +281,67 @@ impl JsonataExpression {
             max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
         };
         json_to_python(py, &self.run_eval(py, &json_data, bindings, options)?)
+    }
+
+    /// Register a Python callable, callable from the expression as `$name(...)`.
+    ///
+    /// The callable receives the (already-evaluated) arguments as positional
+    /// Python values and must return a JSON-compatible value synchronously. An
+    /// `async def` (which returns a coroutine) is rejected at call time. Raises
+    /// ValueError if `name` collides with a built-in — use `register_override`
+    /// to replace a built-in deliberately.
+    fn register(&mut self, py: Python, name: String, func: Py<PyAny>) -> PyResult<()> {
+        if !func.bind(py).is_callable() {
+            return Err(PyTypeError::new_err(format!(
+                "host function '{name}' must be callable"
+            )));
+        }
+        // Validate the collision rule now (fail at register-time, not evaluate-time)
+        // by exercising the same core registration on a throwaway evaluator.
+        let mut probe = evaluator::Evaluator::new();
+        probe
+            .register_fn(
+                name.clone(),
+                PyHostFn {
+                    func: func.clone_ref(py),
+                },
+            )
+            .map_err(evaluator_error_to_py)?;
+        self.host_fns.retain(|r| r.name != name);
+        self.host_fns.push(HostFnReg {
+            name,
+            func,
+            is_override: false,
+        });
+        Ok(())
+    }
+
+    /// Register a Python callable that deliberately replaces a built-in of the
+    /// same name — for determinism injection (a frozen `$now`, seeded `$random`)
+    /// or sandboxing (a disabled `$eval`). Raises ValueError when the built-in is
+    /// on the compiled fast path and cannot be safely overridden.
+    fn register_override(&mut self, py: Python, name: String, func: Py<PyAny>) -> PyResult<()> {
+        if !func.bind(py).is_callable() {
+            return Err(PyTypeError::new_err(format!(
+                "host function '{name}' must be callable"
+            )));
+        }
+        let mut probe = evaluator::Evaluator::new();
+        probe
+            .register_fn_override(
+                name.clone(),
+                PyHostFn {
+                    func: func.clone_ref(py),
+                },
+            )
+            .map_err(evaluator_error_to_py)?;
+        self.host_fns.retain(|r| r.name != name);
+        self.host_fns.push(HostFnReg {
+            name,
+            func,
+            is_override: true,
+        });
+        Ok(())
     }
 
     /// Evaluate with a pre-converted data handle (fastest for repeated evaluation).
@@ -441,6 +530,7 @@ fn compile(
         ast,
         bytecode: std::cell::OnceCell::new(),
         default_options: build_evaluator_options(timeout, max_stack_depth, max_sequence_length),
+        host_fns: Vec::new(),
     })
 }
 
@@ -623,6 +713,67 @@ fn build_evaluator_options(
         timeout_ms: timeout,
         max_stack_depth,
         max_sequence_length,
+    }
+}
+
+/// A Python callable registered as a host function (see
+/// `JsonataExpression.register`). Stored on the expression and re-registered
+/// onto the fresh evaluator built for each `evaluate*()` call.
+#[cfg(feature = "python")]
+struct HostFnReg {
+    name: String,
+    func: Py<PyAny>,
+    is_override: bool,
+}
+
+/// Bridges a Python callable to the core [`evaluator::HostFn`] trait. On each
+/// call it re-acquires the GIL, marshals the JSONata arguments to Python,
+/// invokes the callable, and marshals the result back.
+#[cfg(feature = "python")]
+struct PyHostFn {
+    func: Py<PyAny>,
+}
+
+#[cfg(feature = "python")]
+fn pyerr_to_evaluator_error(e: PyErr) -> evaluator::EvaluatorError {
+    evaluator::EvaluatorError::EvaluationError(format!("host function raised {e}"))
+}
+
+#[cfg(feature = "python")]
+impl evaluator::HostFn for PyHostFn {
+    fn call(
+        &self,
+        args: &[JValue],
+        _ctx: &mut evaluator::HostCtx,
+    ) -> Result<JValue, evaluator::EvaluatorError> {
+        Python::attach(|py| {
+            let py_args: Vec<Bound<'_, PyAny>> = args
+                .iter()
+                .map(|a| json_to_python(py, a).map(|o| o.into_bound(py)))
+                .collect::<PyResult<_>>()
+                .map_err(pyerr_to_evaluator_error)?;
+            let args_tuple = PyTuple::new(py, &py_args).map_err(pyerr_to_evaluator_error)?;
+
+            let result = self
+                .func
+                .bind(py)
+                .call1(&args_tuple)
+                .map_err(pyerr_to_evaluator_error)?;
+
+            // The synchronous core cannot await, so an `async def` (which returns
+            // a coroutine) has no meaningful result. Reject it with actionable
+            // guidance rather than silently converting the coroutine object.
+            if result.hasattr("__await__").unwrap_or(false) {
+                return Err(evaluator::EvaluatorError::EvaluationError(
+                    "host function returned a coroutine; async functions are not \
+                     supported. Use a synchronous function, or perform the async I/O \
+                     outside jsonata and pass the result in via bindings."
+                        .to_string(),
+                ));
+            }
+
+            python_to_json_bound(&result).map_err(pyerr_to_evaluator_error)
+        })
     }
 }
 
