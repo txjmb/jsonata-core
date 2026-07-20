@@ -237,7 +237,7 @@ jobs:
       # release-macos-backfill.yml, which already uses this working pattern.
       - name: Set up Python
         if: matrix.platform.os != 'macOS'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
@@ -377,7 +377,7 @@ jobs:
           submodules: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
@@ -419,7 +419,7 @@ jobs:
       # actions/setup-python doesn't work on the self-hosted macOS runner.
       - name: Set up Python
         if: matrix.platform.os != 'macOS'
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
@@ -1019,7 +1019,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
