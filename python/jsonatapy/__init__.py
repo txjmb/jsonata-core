@@ -16,6 +16,7 @@ Example:
 """
 
 import json as _json
+from collections.abc import Callable
 from typing import Any
 
 from ._jsonatapy import (
@@ -184,6 +185,73 @@ class JsonataExpression:
             1
         """
         return self._expr.evaluate(data, bindings, timeout, max_stack_depth, max_sequence_length)
+
+    def register(self, name: str, func: Callable[..., Any]) -> "JsonataExpression":
+        """
+        Register a Python function callable from the expression as ``$name(...)``.
+
+        The function receives the (already-evaluated) arguments as positional
+        Python values and must return a JSON-compatible value **synchronously**.
+        This is the equivalent of jsonata-js's ``registerFunction`` — use it to
+        expose enrichment/lookup, formatting, or scoring logic to an expression.
+
+        Host functions resolve after the expression's own bindings/lambdas and
+        before built-ins. A name that collides with a built-in is rejected; use
+        :meth:`register_override` to replace a built-in deliberately.
+
+        Note:
+            The evaluator is synchronous, so an ``async def`` (which returns a
+            coroutine) is rejected at call time. For async I/O, await it outside
+            jsonata and pass the result in via ``bindings``.
+
+        Args:
+            name: The function name, called as ``$name(...)`` in the expression.
+            func: A callable ``(*args) -> JSON-compatible value``.
+
+        Returns:
+            self, to allow chaining.
+
+        Raises:
+            TypeError: If ``func`` is not callable.
+            ValueError: If ``name`` collides with a built-in function.
+
+        Example:
+            >>> expr = compile("$greet(name)")
+            >>> expr.register("greet", lambda n: f"hello {n}")
+            >>> expr.evaluate({"name": "Ada"})
+            'hello Ada'
+        """
+        self._expr.register(name, func)
+        return self
+
+    def register_override(self, name: str, func: Callable[..., Any]) -> "JsonataExpression":
+        """
+        Register a Python function that deliberately replaces a built-in.
+
+        The two legitimate uses are determinism injection for the impure
+        built-ins (``$now``, ``$millis``, ``$random``) — e.g. a frozen clock for
+        reproducible output — and sandboxing (disabling ``$eval``). Overriding a
+        built-in that participates in the compiled fast path is rejected.
+
+        Args:
+            name: The built-in name to replace (e.g. ``"now"``).
+            func: A callable ``(*args) -> JSON-compatible value``.
+
+        Returns:
+            self, to allow chaining.
+
+        Raises:
+            TypeError: If ``func`` is not callable.
+            ValueError: If the built-in cannot be safely overridden.
+
+        Example:
+            >>> expr = compile("$now()")
+            >>> expr.register_override("now", lambda: "2020-01-01T00:00:00.000Z")
+            >>> expr.evaluate(None)
+            '2020-01-01T00:00:00.000Z'
+        """
+        self._expr.register_override(name, func)
+        return self
 
     def evaluate_json(
         self,

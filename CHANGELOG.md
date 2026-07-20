@@ -17,8 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collisions with built-ins; `register_fn_override` allows deliberately replacing
   the impure built-ins (`$now`, `$millis`, `$random`, `$eval`) for determinism
   injection or sandboxing. Evaluation stays synchronous. See
-  `examples/host_functions.rs` and the Rust crate docs. (Not yet exposed through
-  the Python or C bindings.)
+  `examples/host_functions.rs` and the Rust crate docs.
+- Host-callable custom functions (Python binding): `JsonataExpression.register(name,
+  func)` and `.register_override(name, func)` expose the above to Python. The callable
+  receives already-evaluated positional arguments and must return a JSON-compatible
+  value synchronously; an `async def` (coroutine) is rejected at call time with
+  guidance to await I/O outside jsonata and pass results via `bindings`. Collision and
+  compilable-builtin-override rules are validated at `register()` time.
+- Host-callable custom functions (C ABI): `jsonata_register_fn(expr, name, fn, user_data)`
+  and `jsonata_register_fn_override(...)` expose the feature to C and any language with C
+  interop. The callback receives its arguments as a JSON array string and returns a JSON
+  result string (jsonata copies it; the host retains ownership), or NULL to signal an error.
+  See `bindings/c/jsonata.h`, `bindings/c/README.md`, and `bindings/c/examples/smoke.c`.
 
 ### Changed
 

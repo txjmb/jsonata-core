@@ -217,6 +217,86 @@ result_str = expr.evaluate_data_to_json(data)
 result = json.loads(result_str)
 ```
 
+### `register(name, func)` / `register_override(name, func)`
+
+Register a Python callable that the expression can invoke as `$name(...)` — the
+equivalent of jsonata-js's `registerFunction`. Use it to expose enrichment/lookup,
+formatting, or scoring logic to an otherwise-pure expression. Both methods return the
+expression, so calls can be chained.
+
+**Parameters:**
+- `name` (str): The function name, called as `$name(...)` in the expression.
+- `func` (Callable): Receives the already-evaluated arguments as positional Python
+  values and must return a JSON-compatible value **synchronously**.
+
+**Returns:** the `JsonataExpression` (for chaining)
+
+**Raises:**
+- `TypeError` — if `func` is not callable.
+- `ValueError` — if `name` collides with a built-in (`register`), or if the built-in
+  cannot be safely overridden (`register_override`).
+
+**Behavior:**
+- Host functions resolve **after** the expression's own `:=` bindings and lambdas, and
+  **before** built-ins.
+- `register` rejects a name that collides with a built-in; `register_override` replaces
+  one deliberately — the intended uses being determinism injection for the impure
+  built-ins (`$now`, `$millis`, `$random`) and sandboxing (disabling `$eval`).
+- Evaluation is synchronous, so an `async def` (which returns a coroutine) is rejected
+  at call time. For async I/O, await it outside jsonata and pass the result via
+  `bindings`.
+
+**Example:**
+```python
+# Enrichment lookup backed by host-owned data
+catalog = {"A-1": "Widget", "B-2": "Gadget"}
+expr = jsonatapy.compile("items.{ 'sku': sku, 'name': $productName(sku) }")
+expr.register("productName", lambda sku: catalog.get(sku, "Unknown"))
+expr.evaluate({"items": [{"sku": "A-1"}, {"sku": "B-2"}]})
+# [{'sku': 'A-1', 'name': 'Widget'}, {'sku': 'B-2', 'name': 'Gadget'}]
+
+# Determinism injection: freeze $now() for reproducible output
+expr = jsonatapy.compile("{ 'generatedAt': $now() }")
+expr.register_override("now", lambda: "2020-01-01T00:00:00.000Z")
+expr.evaluate(None)
+# {'generatedAt': '2020-01-01T00:00:00.000Z'}
+```
+
+See `examples/host_functions.py` for a runnable walkthrough.
+
+#### Why host functions are synchronous
+
+Host functions run synchronously: the callable is invoked mid-evaluation, and if
+it does I/O it simply blocks until it returns. This is a deliberate design choice,
+not a limitation. The evaluator is a synchronous, single-threaded engine — that is
+where its speed comes from — and a blocking call stack (your code → `evaluate()` →
+your host function → I/O) is a correct, ordinary way to run it. Concurrency comes
+from running independent evaluations across threads or processes, exactly as you
+would parallelize any other CPU-bound work. Async would only ever help a host
+function that is *I/O-bound* — a CPU-bound one gains nothing from it — and even an
+I/O-bound host function can run concurrently by dispatching evaluations to a thread
+pool (a blocked thread waiting on I/O lets others proceed), so blocking is rarely a
+real constraint. This is why an `async def` is rejected:
+the synchronous core has no event loop to await a coroutine on, so a coroutine
+return has no meaningful value. (jsonata-js is async only because JavaScript has no
+threads and no blocking I/O — its event loop is the *only* concurrency primitive
+available, so it had no choice. Python has real threads, so it does not inherit that
+constraint.)
+
+If a host function genuinely needs async I/O, do the I/O **outside** the expression
+rather than inside a callback. Gather what the transform needs with `asyncio` up
+front, then pass the results in through `bindings` (or bake them into small
+synchronous lookups closed over that data) and run `evaluate()` normally. If you are
+inside an event loop and don't want to block it, run the whole `evaluate()` call in a
+thread with `loop.run_in_executor(...)`. Both patterns keep the fast synchronous core
+intact while letting the async work live where it belongs — in your application, not
+in the expression engine.
+
+Synchronous execution was chosen for speed on the majority of use cases, which are
+CPU-bound data transformations that never touch I/O. If enough users need genuinely
+asynchronous host functions, we will consider adding that capability — but it would be
+an opt-in path alongside the synchronous default, not a replacement for it.
+
 ## JsonataData Class
 
 Pre-converted data handle for efficient repeated evaluation. Convert Python data

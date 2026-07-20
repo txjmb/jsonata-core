@@ -27,6 +27,31 @@ static int failures = 0;
 
 static char *take_error(void) { return jsonata_last_error_message(); }
 
+/*
+ * Host function: given the JSON array ["<name>"], returns "hello <name>".
+ * Uses a static buffer — valid until the next call, which is all jsonata needs
+ * (it copies the result before returning to the expression).
+ */
+static char host_buf[256];
+static const char *greet_cb(void *user_data, const char *args_json) {
+    (void)user_data;
+    const char *open = strchr(args_json, '"');
+    if (!open) return NULL;
+    const char *start = open + 1;
+    const char *end = strchr(start, '"');
+    if (!end) return NULL;
+    int len = (int)(end - start);
+    snprintf(host_buf, sizeof(host_buf), "\"hello %.*s\"", len, start);
+    return host_buf;
+}
+
+/* Host override for $now(): a frozen timestamp (static string, always valid). */
+static const char *frozen_now_cb(void *user_data, const char *args_json) {
+    (void)user_data;
+    (void)args_json;
+    return "\"2020-01-01T00:00:00.000Z\"";
+}
+
 int main(void) {
     /* version */
     const char *v = jsonata_version();
@@ -116,6 +141,39 @@ int main(void) {
         CHECK(r != NULL && strcmp(r, "\"H\xC3\x89LLO \xE2\x9C\x93\"") == 0,
               "multibyte UTF-8 round trip");
         jsonata_free_string(r);
+        jsonata_free_expr(e);
+    }
+
+    /* host function registration + call */
+    {
+        JsonataExpr *e = jsonata_compile("$greet(name)");
+        int rc = jsonata_register_fn(e, "greet", greet_cb, NULL);
+        CHECK(rc == 0, "register_fn succeeds");
+        char *r = jsonata_evaluate(e, "{\"name\":\"Ada\"}");
+        CHECK(r != NULL && strcmp(r, "\"hello Ada\"") == 0, "host function call");
+        jsonata_free_string(r);
+        jsonata_free_expr(e);
+    }
+
+    /* host function override of an impure built-in ($now) */
+    {
+        JsonataExpr *e = jsonata_compile("$now()");
+        int rc = jsonata_register_fn_override(e, "now", frozen_now_cb, NULL);
+        CHECK(rc == 0, "register_fn_override succeeds");
+        char *r = jsonata_evaluate(e, "null");
+        CHECK(r != NULL && strcmp(r, "\"2020-01-01T00:00:00.000Z\"") == 0,
+              "override $now");
+        jsonata_free_string(r);
+        jsonata_free_expr(e);
+    }
+
+    /* collision with a built-in is rejected */
+    {
+        JsonataExpr *e = jsonata_compile("$sum(x)");
+        int rc = jsonata_register_fn(e, "sum", greet_cb, NULL);
+        char *err = take_error();
+        CHECK(rc == -1 && err != NULL, "register_fn collision rejected");
+        jsonata_free_string(err);
         jsonata_free_expr(e);
     }
 

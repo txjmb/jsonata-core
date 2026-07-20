@@ -132,7 +132,16 @@ Rust library rebuilds with your project.)
 6. **Variables:** `jsonata_bind_var(expr, "x", "[1,2,3]")` binds `$x` for
    all subsequent evaluations on that handle (values are JSON text;
    re-binding replaces).
-7. **Panics:** internal engine panics are caught at the boundary and
+7. **Host functions:** `jsonata_register_fn(expr, "name", fn, user_data)`
+   exposes a C callback to the expression as `$name(...)`. The callback
+   receives its arguments as a JSON array string and returns a JSON result
+   string that jsonata copies (you keep ownership — do not expect jsonata to
+   free it); returning NULL signals an error. A name colliding with a
+   built-in is rejected; `jsonata_register_fn_override` replaces a built-in
+   deliberately (e.g. a frozen `$now`, or a disabled `$eval`). `user_data`
+   must outlive the handle. Registering a host function routes evaluation
+   through the tree-walker, like variable bindings.
+8. **Panics:** internal engine panics are caught at the boundary and
    surface as errors prefixed `internal error:` — they will not abort
    your process.
 

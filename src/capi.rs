@@ -24,7 +24,7 @@
 //!   caller or abort the host process.
 
 use std::cell::{OnceCell, RefCell};
-use std::ffi::{c_char, c_int, CStr, CString};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::evaluator::{self, EvaluatorOptions};
@@ -39,6 +39,65 @@ pub struct JsonataExpr {
     /// tree-walker (the VM path takes no user context), mirroring the
     /// Python bindings' behavior in `lib.rs::run_eval`.
     bindings: Vec<(String, JValue)>,
+    /// Host functions registered via `jsonata_register_fn`, applied on every
+    /// subsequent `jsonata_evaluate`. Like bindings, a non-empty list forces
+    /// the tree-walker (the VM has no host registry).
+    host_fns: Vec<CHostFnReg>,
+}
+
+/// A host function callback.
+///
+/// - `user_data` is the pointer supplied at registration, opaque to jsonata.
+/// - `args_json` is a NUL-terminated UTF-8 JSON *array* of the (already
+///   evaluated) arguments.
+///
+/// It returns a NUL-terminated UTF-8 JSON string with the result — which must
+/// stay valid until the call returns (jsonata copies it and does **not** free
+/// it) — or NULL to signal an error.
+pub type JsonataHostFn = unsafe extern "C" fn(*mut c_void, *const c_char) -> *const c_char;
+
+/// A registered C host function stored on the expression.
+struct CHostFnReg {
+    name: String,
+    func: JsonataHostFn,
+    user_data: *mut c_void,
+    is_override: bool,
+}
+
+/// Bridges a C function pointer to the core [`evaluator::HostFn`] trait: it
+/// serializes the arguments to a JSON array, invokes the callback, and parses
+/// the returned JSON string.
+struct CHostFn {
+    func: JsonataHostFn,
+    user_data: *mut c_void,
+}
+
+impl evaluator::HostFn for CHostFn {
+    fn call(
+        &self,
+        args: &[JValue],
+        _ctx: &mut evaluator::HostCtx,
+    ) -> Result<JValue, evaluator::EvaluatorError> {
+        let err = |m: String| evaluator::EvaluatorError::EvaluationError(m);
+        let args_json = JValue::from(args.to_vec())
+            .to_json_string()
+            .map_err(|e| err(format!("could not serialize host function arguments: {e}")))?;
+        let args_c = CString::new(args_json)
+            .map_err(|_| err("host function arguments contained interior NUL".to_string()))?;
+
+        // SAFETY: `func`/`user_data` came from `jsonata_register_fn`; the caller
+        // guarantees the pointer stays valid for the expression's lifetime. The
+        // returned pointer is borrowed (copied below), never freed by us.
+        let ret = unsafe { (self.func)(self.user_data, args_c.as_ptr()) };
+        if ret.is_null() {
+            return Err(err("host function returned an error (NULL)".to_string()));
+        }
+        let ret_str = unsafe { CStr::from_ptr(ret) }
+            .to_str()
+            .map_err(|_| err("host function result is not valid UTF-8".to_string()))?;
+        JValue::from_json_str(ret_str)
+            .map_err(|e| err(format!("host function returned invalid JSON: {e}")))
+    }
 }
 
 thread_local! {
@@ -95,6 +154,7 @@ pub unsafe extern "C" fn jsonata_compile(expr_utf8: *const c_char) -> *mut Jsona
                 ast,
                 bytecode: OnceCell::new(),
                 bindings: Vec::new(),
+                host_fns: Vec::new(),
             }))
         }
         Err(e) => {
@@ -151,6 +211,105 @@ pub unsafe extern "C" fn jsonata_bind_var(
     0
 }
 
+/// Register a host function callable from the expression as `$name(...)`.
+/// Applies to every subsequent `jsonata_evaluate` on this handle. A leading
+/// `$` on `name` is accepted and stripped; re-registering a name replaces it.
+/// Returns 0 on success, -1 on error (error slot set) — including when `name`
+/// collides with a built-in (use `jsonata_register_fn_override` to replace a
+/// built-in deliberately).
+///
+/// `user_data` is passed back to the callback unchanged and must remain valid
+/// for the lifetime of the expression handle. See [`JsonataHostFn`] for the
+/// callback contract.
+///
+/// # Safety
+/// `expr` must be a live pointer from `jsonata_compile`; `name` must be a valid
+/// NUL-terminated C string or NULL; `func` must be a valid function pointer or
+/// NULL.
+#[no_mangle]
+pub unsafe extern "C" fn jsonata_register_fn(
+    expr: *mut JsonataExpr,
+    name: *const c_char,
+    func: Option<JsonataHostFn>,
+    user_data: *mut c_void,
+) -> c_int {
+    register_host_fn(expr, name, func, user_data, false)
+}
+
+/// Like [`jsonata_register_fn`], but deliberately replaces a built-in of the
+/// same name — the intended uses being determinism injection for the impure
+/// built-ins (`$now`, `$millis`, `$random`) and sandboxing (disabling `$eval`).
+/// Overriding a built-in on the compiled fast path returns -1 with an error.
+///
+/// # Safety
+/// Same as [`jsonata_register_fn`].
+#[no_mangle]
+pub unsafe extern "C" fn jsonata_register_fn_override(
+    expr: *mut JsonataExpr,
+    name: *const c_char,
+    func: Option<JsonataHostFn>,
+    user_data: *mut c_void,
+) -> c_int {
+    register_host_fn(expr, name, func, user_data, true)
+}
+
+/// Shared body for the two registration entry points.
+///
+/// # Safety
+/// See [`jsonata_register_fn`].
+unsafe fn register_host_fn(
+    expr: *mut JsonataExpr,
+    name: *const c_char,
+    func: Option<JsonataHostFn>,
+    user_data: *mut c_void,
+    is_override: bool,
+) -> c_int {
+    if expr.is_null() || name.is_null() {
+        set_error("jsonata_register_fn: NULL argument".to_string());
+        return -1;
+    }
+    let Some(func) = func else {
+        set_error("jsonata_register_fn: function pointer is NULL".to_string());
+        return -1;
+    };
+    let name = match CStr::from_ptr(name).to_str() {
+        Ok(n) => n,
+        Err(_) => {
+            set_error("jsonata_register_fn: name is not valid UTF-8".to_string());
+            return -1;
+        }
+    };
+    let name = name.strip_prefix('$').unwrap_or(name).to_string();
+
+    guard(-1, || {
+        // Validate the collision/override rules now (fail at register-time, not
+        // evaluate-time) by exercising the same core registration on a
+        // throwaway evaluator.
+        let mut probe = evaluator::Evaluator::new();
+        let probed = CHostFn { func, user_data };
+        let res = if is_override {
+            probe.register_fn_override(name.clone(), probed)
+        } else {
+            probe.register_fn(name.clone(), probed)
+        };
+        if let Err(e) = res {
+            set_error(e.message().to_string());
+            return -1;
+        }
+
+        let expr = &mut *expr;
+        expr.host_fns.retain(|r| r.name != name);
+        expr.host_fns.push(CHostFnReg {
+            name,
+            func,
+            user_data,
+            is_override,
+        });
+        clear_error();
+        0
+    })
+}
+
 /// # Safety
 /// `expr` must be a pointer returned by `jsonata_compile` (not yet freed);
 /// `json_utf8` must be a valid NUL-terminated C string pointer or NULL.
@@ -185,9 +344,10 @@ pub unsafe extern "C" fn jsonata_evaluate(
             }
         };
         // Same dispatch as JsonataExpression::run_eval in lib.rs: VM when the
-        // expression compiles to bytecode AND no user bindings exist,
-        // tree-walker otherwise.
-        let result = if expr.bindings.is_empty() {
+        // expression compiles to bytecode AND no user bindings or host
+        // functions exist, tree-walker otherwise (the VM takes no host
+        // registry).
+        let result = if expr.bindings.is_empty() && expr.host_fns.is_empty() {
             let bytecode = expr.bytecode.get_or_init(|| {
                 evaluator::try_compile_expr(&expr.ast)
                     .map(|ce| compiler::BytecodeCompiler::compile(&ce))
@@ -207,6 +367,21 @@ pub unsafe extern "C" fn jsonata_evaluate(
                 context.bind(name.clone(), value.clone());
             }
             let mut ev = evaluator::Evaluator::with_options(context, EvaluatorOptions::default());
+            for reg in &expr.host_fns {
+                let hf = CHostFn {
+                    func: reg.func,
+                    user_data: reg.user_data,
+                };
+                let res = if reg.is_override {
+                    ev.register_fn_override(reg.name.clone(), hf)
+                } else {
+                    ev.register_fn(reg.name.clone(), hf)
+                };
+                if let Err(e) = res {
+                    set_error(e.message().to_string());
+                    return std::ptr::null_mut();
+                }
+            }
             ev.evaluate(&expr.ast, &data)
         };
         match result {
@@ -539,5 +714,178 @@ mod tests {
         assert_eq!(extract_error_code("invalid input JSON: x"), None);
         assert_eq!(extract_error_code("T20: short"), None);
         assert_eq!(extract_error_code(""), None);
+    }
+
+    // ── Host functions ──────────────────────────────────────────────────────
+
+    thread_local! {
+        // Holds the most recent callback result so the returned pointer stays
+        // valid until jsonata copies it (jsonata never frees host results).
+        static CB_RESULT: RefCell<CString> = RefCell::new(CString::new("").unwrap());
+    }
+
+    unsafe fn store_result(json: String) -> *const c_char {
+        CB_RESULT.with(|r| {
+            *r.borrow_mut() = CString::new(json).unwrap();
+            r.borrow().as_ptr()
+        })
+    }
+
+    fn arg0(args_json: *const c_char) -> serde_json::Value {
+        let s = unsafe { CStr::from_ptr(args_json) }.to_str().unwrap();
+        let v: serde_json::Value = serde_json::from_str(s).unwrap();
+        v.get(0).cloned().unwrap_or(serde_json::Value::Null)
+    }
+
+    unsafe extern "C" fn greet_cb(_ud: *mut c_void, args: *const c_char) -> *const c_char {
+        let name = arg0(args);
+        let name = name.as_str().unwrap_or("world");
+        store_result(format!("\"hello {name}\""))
+    }
+
+    unsafe extern "C" fn double_cb(_ud: *mut c_void, args: *const c_char) -> *const c_char {
+        let n = arg0(args).as_f64().unwrap_or(0.0);
+        store_result(format!("{}", n * 2.0))
+    }
+
+    unsafe extern "C" fn frozen_now_cb(_ud: *mut c_void, _args: *const c_char) -> *const c_char {
+        store_result("\"2020-01-01T00:00:00.000Z\"".to_string())
+    }
+
+    unsafe extern "C" fn boom_cb(_ud: *mut c_void, _args: *const c_char) -> *const c_char {
+        std::ptr::null()
+    }
+
+    #[test]
+    fn host_fn_round_trip() {
+        unsafe {
+            let ce = CString::new("$greet(name)").unwrap();
+            let h = jsonata_compile(ce.as_ptr());
+            let name = CString::new("greet").unwrap();
+            assert_eq!(
+                jsonata_register_fn(h, name.as_ptr(), Some(greet_cb), std::ptr::null_mut()),
+                0
+            );
+            let cd = CString::new(r#"{"name":"Ada"}"#).unwrap();
+            let r = jsonata_evaluate(h, cd.as_ptr());
+            assert!(!r.is_null(), "evaluate failed: {:?}", last_error());
+            assert_eq!(CStr::from_ptr(r).to_str().unwrap(), r#""hello Ada""#);
+            jsonata_free_string(r);
+            jsonata_free_expr(h);
+        }
+    }
+
+    #[test]
+    fn host_fn_maps_over_sequence() {
+        unsafe {
+            let ce = CString::new("items.$double(qty)").unwrap();
+            let h = jsonata_compile(ce.as_ptr());
+            let name = CString::new("double").unwrap();
+            assert_eq!(
+                jsonata_register_fn(h, name.as_ptr(), Some(double_cb), std::ptr::null_mut()),
+                0
+            );
+            let cd = CString::new(r#"{"items":[{"qty":2},{"qty":5}]}"#).unwrap();
+            let r = jsonata_evaluate(h, cd.as_ptr());
+            assert!(!r.is_null(), "evaluate failed: {:?}", last_error());
+            assert_eq!(CStr::from_ptr(r).to_str().unwrap(), "[4,10]");
+            jsonata_free_string(r);
+            jsonata_free_expr(h);
+        }
+    }
+
+    #[test]
+    fn host_fn_override_now() {
+        unsafe {
+            let ce = CString::new("$now()").unwrap();
+            let h = jsonata_compile(ce.as_ptr());
+            let name = CString::new("now").unwrap();
+            assert_eq!(
+                jsonata_register_fn_override(
+                    h,
+                    name.as_ptr(),
+                    Some(frozen_now_cb),
+                    std::ptr::null_mut()
+                ),
+                0
+            );
+            let cd = CString::new("null").unwrap();
+            let r = jsonata_evaluate(h, cd.as_ptr());
+            assert!(!r.is_null(), "evaluate failed: {:?}", last_error());
+            assert_eq!(
+                CStr::from_ptr(r).to_str().unwrap(),
+                r#""2020-01-01T00:00:00.000Z""#
+            );
+            jsonata_free_string(r);
+            jsonata_free_expr(h);
+        }
+    }
+
+    #[test]
+    fn host_fn_collision_rejected() {
+        unsafe {
+            let ce = CString::new("$sum(x)").unwrap();
+            let h = jsonata_compile(ce.as_ptr());
+            let name = CString::new("sum").unwrap();
+            assert_eq!(
+                jsonata_register_fn(h, name.as_ptr(), Some(greet_cb), std::ptr::null_mut()),
+                -1
+            );
+            assert!(last_error().unwrap().contains("shadows a built-in"));
+            jsonata_free_expr(h);
+        }
+    }
+
+    #[test]
+    fn host_fn_override_compilable_rejected() {
+        unsafe {
+            let ce = CString::new("$round(x)").unwrap();
+            let h = jsonata_compile(ce.as_ptr());
+            let name = CString::new("round").unwrap();
+            assert_eq!(
+                jsonata_register_fn_override(
+                    h,
+                    name.as_ptr(),
+                    Some(double_cb),
+                    std::ptr::null_mut()
+                ),
+                -1
+            );
+            assert!(last_error().unwrap().contains("compiled fast path"));
+            jsonata_free_expr(h);
+        }
+    }
+
+    #[test]
+    fn host_fn_null_return_is_error() {
+        unsafe {
+            let ce = CString::new("$boom()").unwrap();
+            let h = jsonata_compile(ce.as_ptr());
+            let name = CString::new("boom").unwrap();
+            assert_eq!(
+                jsonata_register_fn(h, name.as_ptr(), Some(boom_cb), std::ptr::null_mut()),
+                0
+            );
+            let cd = CString::new("null").unwrap();
+            let r = jsonata_evaluate(h, cd.as_ptr());
+            assert!(r.is_null());
+            assert!(last_error().unwrap().contains("host function"));
+            jsonata_free_expr(h);
+        }
+    }
+
+    #[test]
+    fn host_fn_null_func_rejected() {
+        unsafe {
+            let ce = CString::new("$x()").unwrap();
+            let h = jsonata_compile(ce.as_ptr());
+            let name = CString::new("x").unwrap();
+            assert_eq!(
+                jsonata_register_fn(h, name.as_ptr(), None, std::ptr::null_mut()),
+                -1
+            );
+            assert!(last_error().unwrap().contains("NULL"));
+            jsonata_free_expr(h);
+        }
     }
 }
