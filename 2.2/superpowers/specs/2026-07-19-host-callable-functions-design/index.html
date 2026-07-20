@@ -12,31 +12,27 @@
         <meta name="author" content="jsonatapy contributors">
       
       
-        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.2/benchmarks/">
+        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-19-host-callable-functions-design/">
       
       
-        <link rel="prev" href="../performance/">
-      
-      
-        <link rel="next" href="../optimization-tips/">
       
       
         
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+      <link rel="icon" href="../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Benchmarks - jsonata-core + jsonatapy</title>
+        <title>Host-callable custom functions - jsonata-core + jsonatapy</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -55,9 +51,9 @@
       
     
     
-      <link rel="stylesheet" href="../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
   
@@ -92,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#benchmarks" class="md-skip">
+        <a href="#host-callable-custom-functions" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +106,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href=".." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -130,7 +126,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Benchmarks
+              Host-callable custom functions
             
           </span>
         </div>
@@ -243,7 +239,7 @@
   
   
     <li class="md-tabs__item">
-      <a href=".." class="md-tabs__link">
+      <a href="../../.." class="md-tabs__link">
         
   
   
@@ -264,7 +260,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../installation/" class="md-tabs__link">
+        <a href="../../../installation/" class="md-tabs__link">
           
   
   
@@ -284,7 +280,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../rust-crate/" class="md-tabs__link">
+        <a href="../../../rust-crate/" class="md-tabs__link">
           
   
   
@@ -304,7 +300,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../api/" class="md-tabs__link">
+        <a href="../../../api/" class="md-tabs__link">
           
   
   
@@ -320,13 +316,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../performance/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../../performance/" class="md-tabs__link">
           
   
   
@@ -346,7 +340,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../compatibility/" class="md-tabs__link">
+        <a href="../../../compatibility/" class="md-tabs__link">
           
   
   
@@ -366,7 +360,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../development/building/" class="md-tabs__link">
+        <a href="../../../development/building/" class="md-tabs__link">
           
   
   
@@ -386,7 +380,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../changelog/" class="md-tabs__link">
+        <a href="../../../changelog/" class="md-tabs__link">
           
   
   
@@ -420,7 +414,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href=".." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -450,7 +444,7 @@
   
   
     <li class="md-nav__item">
-      <a href=".." class="md-nav__link">
+      <a href="../../.." class="md-nav__link">
         
   
   
@@ -531,7 +525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../installation/" class="md-nav__link">
+      <a href="../../../installation/" class="md-nav__link">
         
   
   
@@ -559,7 +553,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../usage/" class="md-nav__link">
+      <a href="../../../usage/" class="md-nav__link">
         
   
   
@@ -587,7 +581,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../examples/" class="md-nav__link">
+      <a href="../../../examples/" class="md-nav__link">
         
   
   
@@ -676,7 +670,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rust-crate/" class="md-nav__link">
+      <a href="../../../rust-crate/" class="md-nav__link">
         
   
   
@@ -765,7 +759,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/" class="md-nav__link">
+      <a href="../../../api/" class="md-nav__link">
         
   
   
@@ -793,7 +787,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../jsonata-language/" class="md-nav__link">
+      <a href="../../../jsonata-language/" class="md-nav__link">
         
   
   
@@ -821,7 +815,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../error-handling/" class="md-nav__link">
+      <a href="../../../error-handling/" class="md-nav__link">
         
   
   
@@ -853,31 +847,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
             
   
   
@@ -895,7 +886,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -913,7 +904,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../performance/" class="md-nav__link">
+      <a href="../../../performance/" class="md-nav__link">
         
   
   
@@ -938,37 +929,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Benchmarks
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../../benchmarks/" class="md-nav__link">
         
   
   
@@ -984,164 +948,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#running-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running Benchmarks
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#implementations-compared" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Implementations Compared
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#benchmark-categories" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Benchmark Categories
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#results" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Results
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pure-rust-criterion-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pure-Rust Criterion Benchmarks
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Pure-Rust Criterion Benchmarks">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Running
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#what-is-measured" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What is measured
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#results-release-build-amd-ryzen-intel-core-simd-enabled" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Results (release build, AMD Ryzen / Intel Core, SIMD enabled)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#comparison-with-jsonata-rs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Comparison with jsonata-rs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#clarification-rust-only-in-the-python-benchmark-suite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Clarification: "rust-only" in the Python benchmark suite
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#key-findings" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Key Findings
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#custom-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Custom Benchmarks
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1154,7 +960,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../optimization-tips/" class="md-nav__link">
+      <a href="../../../optimization-tips/" class="md-nav__link">
         
   
   
@@ -1243,7 +1049,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../compatibility/" class="md-nav__link">
+      <a href="../../../compatibility/" class="md-nav__link">
         
   
   
@@ -1271,7 +1077,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../migration-from-js/" class="md-nav__link">
+      <a href="../../../migration-from-js/" class="md-nav__link">
         
   
   
@@ -1299,7 +1105,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../migration-from-jsonata-python/" class="md-nav__link">
+      <a href="../../../migration-from-jsonata-python/" class="md-nav__link">
         
   
   
@@ -1388,7 +1194,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/building/" class="md-nav__link">
+      <a href="../../../development/building/" class="md-nav__link">
         
   
   
@@ -1416,7 +1222,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/parser/" class="md-nav__link">
+      <a href="../../../development/parser/" class="md-nav__link">
         
   
   
@@ -1444,7 +1250,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/contributing/" class="md-nav__link">
+      <a href="../../../development/contributing/" class="md-nav__link">
         
   
   
@@ -1472,7 +1278,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/testing/" class="md-nav__link">
+      <a href="../../../development/testing/" class="md-nav__link">
         
   
   
@@ -1500,7 +1306,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/architecture/" class="md-nav__link">
+      <a href="../../../development/architecture/" class="md-nav__link">
         
   
   
@@ -1528,7 +1334,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/releasing/" class="md-nav__link">
+      <a href="../../../development/releasing/" class="md-nav__link">
         
   
   
@@ -1617,7 +1423,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="../../../changelog/" class="md-nav__link">
         
   
   
@@ -1645,7 +1451,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../license/" class="md-nav__link">
+      <a href="../../../license/" class="md-nav__link">
         
   
   
@@ -1673,7 +1479,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../credits/" class="md-nav__link">
+      <a href="../../../credits/" class="md-nav__link">
         
   
   
@@ -1728,66 +1534,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#running-benchmarks" class="md-nav__link">
+  <a href="#context" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Running Benchmarks
+        Context
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#implementations-compared" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Implementations Compared
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#benchmark-categories" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Benchmark Categories
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#results" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Results
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pure-rust-criterion-benchmarks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pure-Rust Criterion Benchmarks
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Pure-Rust Criterion Benchmarks">
+    <nav class="md-nav" aria-label="Context">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
+  <a href="#why-this-and-not-async" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Running
+        Why this and not async
       
     </span>
   </a>
@@ -1795,43 +1557,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#what-is-measured" class="md-nav__link">
+  <a href="#what-other-rust-implementations-do" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What is measured
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#results-release-build-amd-ryzen-intel-core-simd-enabled" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Results (release build, AMD Ryzen / Intel Core, SIMD enabled)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#comparison-with-jsonata-rs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Comparison with jsonata-rs
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#clarification-rust-only-in-the-python-benchmark-suite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Clarification: "rust-only" in the Python benchmark suite
+        What other Rust implementations do
       
     </span>
   </a>
@@ -1844,10 +1573,38 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-findings" class="md-nav__link">
+  <a href="#the-reuse-seam-confirmed-against-source" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Key Findings
+        The reuse seam (confirmed against source)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The reuse seam (confirmed against source)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reentrancy-is-a-phase-2-widening-not-a-redesign" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reentrancy is a phase-2 widening, not a redesign
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#python-surface-specifics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python surface specifics
       
     </span>
   </a>
@@ -1855,10 +1612,43 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#custom-benchmarks" class="md-nav__link">
+  <a href="#scope" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Custom Benchmarks
+        Scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phasing-estimate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phasing &amp; estimate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
       
     </span>
   </a>
@@ -1885,177 +1675,241 @@
   
 
 
-<h1 id="benchmarks">Benchmarks<a class="headerlink" href="#benchmarks" title="Permanent link">&para;</a></h1>
-<p>jsonatapy includes a comprehensive benchmark suite comparing performance across multiple JSONata implementations.</p>
-<h2 id="running-benchmarks">Running Benchmarks<a class="headerlink" href="#running-benchmarks" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Build jsonatapy</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>maturin<span class="w"> </span>develop<span class="w"> </span>--release
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Install benchmark dependencies</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>bench
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Run full benchmark suite</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/python/benchmark.py
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># Update docs/performance.md with latest results</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/update_docs.py
-</span></code></pre></div>
-<h2 id="implementations-compared">Implementations Compared<a class="headerlink" href="#implementations-compared" title="Permanent link">&para;</a></h2>
-<p>Latest benchmark results (2026-02-21) compare:</p>
+<h1 id="host-callable-custom-functions">Host-callable custom functions<a class="headerlink" href="#host-callable-custom-functions" title="Permanent link">&para;</a></h1>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>jsonata-core today has <strong>no way for a host application to register its own function</strong> that a
+JSONata expression can call. The <code>bindings</code> argument (Rust <code>Context::bind</code>, the Python
+<code>bindings=</code> dict, the C ABI) is converted to JSON <em>data</em> eagerly — a callable value passed
+in is dropped, not retained as a callable. So an expression can only call:</p>
 <ol>
-<li><strong>jsonatapy</strong> - Rust-based Python extension (this project), <code>evaluate(dict)</code> path</li>
-<li><strong>jsonatapy (rust-only)</strong> - Same library, <code>evaluate_json(str)</code> path (bypasses Python object conversion)</li>
-<li><strong>jsonata-js</strong> - Official JavaScript reference implementation (Node.js v24.13.1)</li>
-<li><strong>jsonata-python</strong> - Pure Python implementation</li>
-<li><strong>jsonata-rs</strong> - Pure Rust CLI implementation (optional, requires building the binary)</li>
+<li>built-in functions (<code>$sum</code>, <code>$map</code>, …), dispatched by name, and</li>
+<li>user-defined functions written <strong>in the JSONata language itself</strong> (<code>function($x){…}</code>),
+   which are pure and evaluated entirely inside the engine.</li>
 </ol>
-<p>To include jsonata-rs in benchmarks:
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>benchmarks/rust
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cargo<span class="w"> </span>build<span class="w"> </span>--release
-</span></code></pre></div></p>
-<h2 id="benchmark-categories">Benchmark Categories<a class="headerlink" href="#benchmark-categories" title="Permanent link">&para;</a></h2>
+<p>This is the gap versus jsonata-js's <code>registerFunction</code>/<code>assign</code>. It is invisible in CI
+because the portable reference suite (<code>tests/jsonata-js/test/test-suite/groups</code>) can only
+express pure-language cases — a host closure cannot live in a JSON fixture — so nothing in
+the ported suite exercises or requires host functions. Conformance (language) and
+extensibility (host callbacks) are orthogonal axes; we pass the first and don't implement
+the second.</p>
+<p>"Custom functions" is two different features and only the language one is tested:</p>
 <ul>
-<li><strong>Simple Paths</strong> - Basic field access and arithmetic (<code>name</code>, <code>a.b.c</code>, <code>x + y</code>)</li>
-<li><strong>Array Operations</strong> - Aggregation and filtering on arrays of scalars and objects</li>
-<li><strong>Complex Transformations</strong> - Object construction, conditionals, nested function calls</li>
-<li><strong>Deep Nesting</strong> - Paths 12+ levels deep, nested array access</li>
-<li><strong>String Operations</strong> - <code>$uppercase</code>, <code>$substring</code>, <code>$contains</code>, etc.</li>
-<li><strong>Higher-Order Functions</strong> - <code>$map</code>, <code>$filter</code>, <code>$reduce</code> with lambdas</li>
-<li><strong>Realistic Workload</strong> - E-commerce dataset queries: filter, aggregate, transform, sort</li>
-<li><strong>Path Comparison</strong> - Same expressions across all four evaluation paths (<code>evaluate</code>, <code>evaluate_json</code>, <code>evaluate_with_data</code>, <code>evaluate_data_to_json</code>)</li>
+<li><strong>Language user-functions</strong> (<code>function(){}</code>, and HOF builtins like <code>$map</code>/<code>$filter</code>/
+  <code>$reduce</code> that take a lambda arg) — implemented, <code>JValue::Lambda</code> / <code>StoredLambda</code>.</li>
+<li><strong>Host extension functions</strong> (the app injecting native Rust/Python/C code) — this spec.</li>
 </ul>
-<h2 id="results">Results<a class="headerlink" href="#results" title="Permanent link">&para;</a></h2>
-<p>See <a href="../performance/">Performance</a> for detailed benchmark results, charts, and analysis of the performance characteristics of each category.</p>
-<hr />
-<h2 id="pure-rust-criterion-benchmarks">Pure-Rust Criterion Benchmarks<a class="headerlink" href="#pure-rust-criterion-benchmarks" title="Permanent link">&para;</a></h2>
-<p>The Python benchmark suite measures end-to-end performance including the Python↔Rust
-boundary cost. To measure the Rust evaluator in isolation — with no Python interpreter,
-no PyO3, no GIL, no object conversion — the crate includes a
-<a href="https://bheisler.github.io/criterion.rs/book/">Criterion</a> benchmark suite.</p>
-<p>This is the most direct measure of what <code>jsonata-core</code> costs as a Rust library.</p>
-<h3 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span>bench<span class="w"> </span>--no-default-features<span class="w"> </span>--features<span class="w"> </span>simd
+<h3 id="why-this-and-not-async">Why this and not async<a class="headerlink" href="#why-this-and-not-async" title="Permanent link">&para;</a></h3>
+<p>The recurring question is whether host functions require making the engine async. They do
+not. The motivating case is I/O inside a host function (<code>$fxRate</code>, <code>$productName</code>,
+<code>$riskScore</code>). With a synchronous core the call stack is simply:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>caller ─▶ evaluate() ─▶ host_fn(args) ─▶ [blocking I/O] ─▶ value ─▶ … ─▶ result
 </span></code></pre></div>
-<p>Results are written to <code>target/criterion/</code>. Open
-<code>target/criterion/report/index.html</code> for the full HTML report.</p>
-<h3 id="what-is-measured">What is measured<a class="headerlink" href="#what-is-measured" title="Permanent link">&para;</a></h3>
-<p>Each benchmark parses the expression once (outside the timed loop), then measures
-repeated <code>Evaluator::new().evaluate(&amp;ast, &amp;data)</code> calls using Criterion's statistical
-framework (outlier detection, confidence intervals, automatically tuned sample count).</p>
-<h3 id="results-release-build-amd-ryzen-intel-core-simd-enabled">Results (release build, AMD Ryzen / Intel Core, SIMD enabled)<a class="headerlink" href="#results-release-build-amd-ryzen-intel-core-simd-enabled" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Benchmark</th>
-<th>Time</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Simple field lookup (<code>name</code>)</td>
-<td>81 ns</td>
-</tr>
-<tr>
-<td>Deep path 5 levels (<code>a.b.c.d.e</code>)</td>
-<td>140 ns</td>
-</tr>
-<tr>
-<td>Arithmetic (<code>price * quantity</code>)</td>
-<td>140 ns</td>
-</tr>
-<tr>
-<td>Conditional (<code>price &gt; 100 ? "expensive" : "affordable"</code>)</td>
-<td>106 ns</td>
-</tr>
-<tr>
-<td>String operations (<code>$uppercase</code>, <code>$substring</code>)</td>
-<td>126–284 ns</td>
-</tr>
-<tr>
-<td><code>$sum</code> (100 elements)</td>
-<td>287 ns</td>
-</tr>
-<tr>
-<td><code>$sum</code> (1000 elements)</td>
-<td>1.88 µs</td>
-</tr>
-<tr>
-<td>Filter predicate (100 objects)</td>
-<td>7.9 µs</td>
-</tr>
-<tr>
-<td>Filter by category (100-product dataset)</td>
-<td>9.3 µs</td>
-</tr>
-<tr>
-<td>Complex transformation (100-product dataset)</td>
-<td>44 µs</td>
-</tr>
-<tr>
-<td><code>$sort</code> / top-rated (100-product dataset)</td>
-<td>18 µs</td>
-</tr>
-</tbody>
-</table>
-<h3 id="comparison-with-jsonata-rs">Comparison with jsonata-rs<a class="headerlink" href="#comparison-with-jsonata-rs" title="Permanent link">&para;</a></h3>
-<p><a href="https://crates.io/crates/jsonata-rs">jsonata-rs</a> is the only other pure-Rust JSONata
-implementation. Based on its published benchmarks, <code>jsonata-core</code> is approximately
-<strong>40x faster</strong> across typical workloads:</p>
-<table>
-<thead>
-<tr>
-<th>Category</th>
-<th>jsonata-core</th>
-<th>jsonata-rs (est.)</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Simple path lookup</td>
-<td>81 ns</td>
-<td>~3 µs</td>
-</tr>
-<tr>
-<td><code>$sum</code> (100 elements)</td>
-<td>287 ns</td>
-<td>~20 µs</td>
-</tr>
-<tr>
-<td>Filter predicate (100 objects)</td>
-<td>7.9 µs</td>
-<td>~385 µs</td>
-</tr>
-</tbody>
-</table>
-<p>The gap comes from <code>jsonata-core</code>'s JValue type (O(1) <code>Rc</code> clones, no heap allocation
-for common operations) and a compile-once expression cache that eliminates repeated
-predicate recompilation.</p>
-<h3 id="clarification-rust-only-in-the-python-benchmark-suite">Clarification: "rust-only" in the Python benchmark suite<a class="headerlink" href="#clarification-rust-only-in-the-python-benchmark-suite" title="Permanent link">&para;</a></h3>
-<p>The Python benchmark suite labels the <code>evaluate_json(json_string)</code> path as
-"rust-only". This is <strong>not</strong> the same as the Criterion benchmarks above. Both paths
-use the Rust evaluator; the difference is how data enters and exits:</p>
+<p>One thread, blocked top-to-bottom while the I/O is in flight. That is <em>correct</em>, not a bug.
+Concurrency is obtained by running N such stacks on N threads (a thread/process pool in
+Python, native threads in Rust). This matches the guidance already in
+<code>docs/migration-from-js.md</code> ("replace Promise patterns with threading").</p>
+<p>Async is only needed to avoid <em>occupying a thread while waiting</em>, which matters in exactly
+one deployment shape: an async-native host (e.g. tokio) doing async I/O inside host
+functions <strong>at high concurrency</strong>, where one blocked thread per in-flight evaluation is too
+many. Even that shape is served <em>without</em> touching the core: wrap the whole synchronous
+evaluation in <code>tokio::task::spawn_blocking</code> (or the Python event-loop equivalent) and
+<code>.await</code> the join handle — the host stays async, jsonata-core stays sync, one blocked
+pool thread per concurrent eval. Only at extreme concurrency (thousands of simultaneous
+I/O-bound evals) would true async-inside-the-core win, and buying that means the
+<code>Rc → Arc</code> / <code>Send + Sync</code> / boxed-recursion teardown the core has so far avoided. Verdict:
+<strong>sync core + blocking host functions; document the <code>spawn_blocking</code> pattern; revisit true
+async only if a concrete extreme-concurrency deployment proves it, and prefer an async
+wrapper over a core rewrite even then.</strong></p>
+<p>This is the reason jsonata-js is async at all: JavaScript has no threads and no blocking
+I/O, so an event loop is its <em>only</em> concurrency primitive — async was forced by the host
+language, not by JSONata. Rust and Python have threads, so we do not inherit the constraint.</p>
+<h3 id="what-other-rust-implementations-do">What other Rust implementations do<a class="headerlink" href="#what-other-rust-implementations-do" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong><code>evaluate(dict)</code></strong> — PyO3 walks the Python dict tree → JValue → evaluate → JValue → Python object</li>
-<li><strong><code>evaluate_json(str)</code></strong> — serde_json parses the JSON string → JValue → evaluate → JValue → serde_json serializes</li>
+<li><strong><code>jsonata-rs</code> (Stedi)</strong> — alpha, "all interfaces unstable." Exposes <code>register_function</code>
+  and is <strong>synchronous</strong>; no async <code>evaluate</code> variant.</li>
+<li><strong><code>jsonata</code></strong> — incomplete ("panics in unexpected places"), synchronous.</li>
+<li><strong><code>async_jsonata_rust</code> (LajaSoft)</strong> — the async-end-to-end project. <code>evaluate_async</code>
+  returns a future; runtime-agnostic (tokio / async-std / any executor); <strong>also ships a
+  sync <code>evaluate</code> facade</strong>. Custom functions are registered via a <code>FunctionRegistry</code> and
+  <strong>may themselves be async</strong> ("awaited cooperatively"). Mature: 1651/1653 on the official
+  suite. Streaming is <strong>not</strong> mentioned in its docs (despite the feature sometimes being
+  attributed to it).</li>
 </ul>
-<p>For small payloads, serde_json parse+serialize overhead can exceed the PyO3 traversal
-cost, so <code>evaluate_json</code> is sometimes <em>slower</em> than <code>evaluate(dict)</code> on tiny inputs.
-Neither path eliminates the Python boundary; they just cross it differently.</p>
-<p>The Criterion benchmarks are the only measurements that eliminate the Python boundary
-entirely.</p>
-<h2 id="key-findings">Key Findings<a class="headerlink" href="#key-findings" title="Permanent link">&para;</a></h2>
-<p>jsonatapy is the fastest Python JSONata implementation available, and faster than the JavaScript reference for pure expression workloads. The performance ceiling for array-heavy workloads is set by Python's object model: converting Python dicts to Rust values costs roughly 1µs per field, which dominates evaluation time for large datasets. The <code>JsonataData</code> API and <code>evaluate_json</code> path avoid this cost.</p>
-<h2 id="custom-benchmarks">Custom Benchmarks<a class="headerlink" href="#custom-benchmarks" title="Permanent link">&para;</a></h2>
-<p>To add new benchmark cases, edit <code>benchmarks/python/benchmark.py</code> and add entries to the benchmark list:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;My custom test&quot;</span><span class="p">,</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;Custom&quot;</span><span class="p">,</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="s2">&quot;expression&quot;</span><span class="p">:</span> <span class="s2">&quot;items[price &gt; 100].name&quot;</span><span class="p">,</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="s2">&quot;data&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;items&quot;</span><span class="p">:</span> <span class="p">[</span><span class="o">...</span><span class="p">]},</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="s2">&quot;iterations&quot;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="s2">&quot;warmup&quot;</span><span class="p">:</span> <span class="mi">100</span><span class="p">,</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">}</span>
+<p>Takeaway for our decision: <code>async_jsonata_rust</code> confirms — rather than contradicts — the
+sync-core plan. Its single reason to be async end-to-end is exactly the case analyzed above
+(user functions that do I/O and are awaited); it pays for that with an evaluator where every
+node is a polled (boxed) future — overhead the pure-CPU common case eats on every
+evaluation. That is antithetical to jsonata-core's identity (SIMD-accelerated parse,
+bytecode VM, benchmark focus, PyO3/C bindings). The async niche is therefore already
+occupied and served well; jsonata-core's differentiation is <strong>the fastest <em>sync</em> engine with
+real language bindings</strong>. Adding <em>sync</em> host functions closes the extensibility gap without
+leaving that lane. A user who genuinely needs awaited async host functions at high
+concurrency already has <code>async_jsonata_rust</code> — we neither need to duplicate it nor should
+pay its per-node future cost to do so. (That even the async-first project keeps a sync
+<code>evaluate</code> facade underscores that sync is the common path.)</p>
+<h2 id="the-reuse-seam-confirmed-against-source">The reuse seam (confirmed against source)<a class="headerlink" href="#the-reuse-seam-confirmed-against-source" title="Permanent link">&para;</a></h2>
+<p>Host functions are the <strong>builtin analog, not the lambda analog</strong>: they are name-dispatched
+callables that receive already-evaluated arguments. That is exactly how <code>apply_function</code>
+resolves a <code>$foo(...)</code> call today (<code>src/evaluator.rs:9660</code>, the <code>AstNode::Variable</code> arm):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>lookup_lambda(name)      → StoredLambda        → invoke_stored_lambda
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>else lookup(name)        → lambda-valued JValue → invoke_stored_lambda
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>else is_builtin_function → call_builtin_with_values(name, values)   ← host fns slot here
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>else                     → unknown
 </span></code></pre></div>
+<p><code>call_builtin_with_values(name, &amp;[JValue])</code> already receives the <strong>evaluated</strong> argument
+slice — the precise shape of a leaf host callback <code>Fn(&amp;[JValue]) -&gt; Result&lt;JValue, _&gt;</code>. So
+the integration is: add a host-function registry and consult it in the same
+<code>is_builtin_function</code> / <code>call_builtin_with_values</code> seam (and its compiled-<code>BuiltinCall</code>
+equivalent at <code>src/evaluator.rs:1211</code>). No new <code>JValue</code> variant is required for the leaf
+case; the registry is keyed by name exactly like the builtin table.</p>
+<p><code>Context</code> (<code>src/evaluator.rs:2759</code>) already keeps a <code>scope_stack</code> of <code>Scope { bindings,
+lambdas }</code>. The host registry lives one level up on the evaluator (it is process/config
+state, not per-scope), or on <code>Context</code> alongside the scopes; either way it is consulted
+only at the unresolved-name step, so it cannot shadow user <code>:=</code> bindings or builtins unless
+we choose the precedence (see Decisions).</p>
+<h3 id="reentrancy-is-a-phase-2-widening-not-a-redesign">Reentrancy is a phase-2 widening, not a redesign<a class="headerlink" href="#reentrancy-is-a-phase-2-widening-not-a-redesign" title="Permanent link">&para;</a></h3>
+<p>The evaluated <code>values: &amp;[JValue]</code> handed to a name-dispatched call <strong>can already contain a
+lambda value</strong> — that is how <code>$map(arr, function($x){…})</code> works: the builtin invokes the
+lambda via <code>lookup_lambda_from_value</code> + <code>invoke_stored_lambda</code>. So the machinery for a
+host function to invoke a passed-in lambda already exists in the engine; what a v1 leaf
+callback lacks is a <em>handle</em> to reach it. jsonata-js supports exactly this (it wraps every
+function-typed argument in a callable closure before handing it to a native function —
+<code>apply(arg, params, null, environment)</code>), enabling host-defined higher-order functions;
+it does <strong>not</strong> expose a public API for arbitrary re-evaluation (issue #259).</p>
+<p>We match that split by choosing a <strong>forward-compatible callback type now</strong> so re-entry is
+an additive change later:</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">trait</span><span class="w"> </span><span class="n">HostFn</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">    </span><span class="k">fn</span><span class="w"> </span><span class="nf">call</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">args</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="p">[</span><span class="n">JValue</span><span class="p">],</span><span class="w"> </span><span class="n">ctx</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">mut</span><span class="w"> </span><span class="n">HostCtx</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">JValue</span><span class="p">,</span><span class="w"> </span><span class="n">EvaluatorError</span><span class="o">&gt;</span><span class="p">;</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="p">}</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1">// Ergonomic blanket impl: leaf closures never touch ctx.</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">impl</span><span class="o">&lt;</span><span class="n">F</span><span class="o">&gt;</span><span class="w"> </span><span class="n">HostFn</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">F</span><span class="w"> </span><span class="k">where</span><span class="w"> </span><span class="n">F</span><span class="p">:</span><span class="w"> </span><span class="nb">Fn</span><span class="p">(</span><span class="o">&amp;</span><span class="p">[</span><span class="n">JValue</span><span class="p">])</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">JValue</span><span class="p">,</span><span class="w"> </span><span class="n">EvaluatorError</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">…</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<ul>
+<li><strong>v1:</strong> <code>HostCtx</code> is opaque (maybe read-only options). Simple closures use the blanket
+  <code>Fn</code> impl and ignore it entirely.</li>
+<li><strong>phase 2:</strong> add <code>HostCtx::apply(&amp;mut self, f: &amp;JValue, args: &amp;[JValue]) -&gt; Result&lt;JValue,
+  _&gt;</code> that routes back through <code>apply_function</code>/<code>invoke_stored_lambda</code>. Because re-entry
+  goes through the existing guarded path, the recursion/stack-depth guards (<code>stacker</code>,
+  <code>max_stack_depth</code>, <code>D1011</code>) are preserved automatically — a re-entering host fn cannot
+  bypass them. No signature change for existing callers.</li>
+</ul>
+<h2 id="python-surface-specifics">Python surface specifics<a class="headerlink" href="#python-surface-specifics" title="Permanent link">&para;</a></h2>
+<p>Extending to Python (Phase 2) is confirmed intent, not new scope, but Python — unlike the
+Rust-only competitor — has <code>asyncio</code>, so it is where the async temptation actually has
+teeth. It does not change the sync-core decision; it adds three realities to bake in.</p>
+<ul>
+<li><strong>The GIL matches the sync core, and there is precedent.</strong> The core is <code>Rc</code>
+  single-threaded; Python is GIL single-threaded — same shape. The evaluator <em>already</em>
+  re-enters Python mid-evaluation with the GIL held, to materialize lazy dict views
+  (<code>JValue::LazyPyDict</code>, <code>src/lazy.rs</code>, spec <code>2026-07-12-lazy-python-views-design.md</code>). A
+  Python host function is the same move, so the GIL-handling patterns already exist. This is
+  a point in favor.</li>
+<li><strong><code>async def</code> is the wrinkle.</strong> Python devs reach for <code>async def</code> for I/O; the sync core
+  <strong>cannot await</strong> a returned coroutine. v1 <strong>rejects a coroutine return with a clear
+  error</strong>. The documented pattern for async-Python users is <em>do the async I/O outside
+  jsonata</em> — <code>await</code> lookups in the host, pass results in as <code>bindings</code>, then run the sync
+  transform — or run the sync <code>evaluate()</code> in <code>loop.run_in_executor(...)</code> with sync-blocking
+  host fns inside (the Python <code>spawn_blocking</code>). Making the Python <code>evaluate</code> truly async
+  would require the sync core to suspend at a host-fn call, i.e. making the core async (the
+  jsonata-js generator/trampoline path) — rejected: a Python-only benefit for the full core
+  teardown. Note there is <strong>no async-Python JSONata to punt to</strong> (<code>async_jsonata_rust</code> is
+  Rust), but the gap is narrow (next point) and is closed with a pattern, not a rewrite.</li>
+<li><strong>The GIL caps the async payoff anyway.</strong> A blocking Python host fn holds the GIL and
+  stalls all Python threads, so "threads for concurrency" is weaker in Python than Rust —
+  but async would not rescue CPU-bound work either (GIL serializes it). The slice where
+  async-Python host fns would truly win (thousands of concurrent I/O-bound <code>async def</code>
+  callbacks) is narrow; gather-then-bind covers most of it.</li>
+<li><strong>Boundary cost → coarse-grained only.</strong> Each call crosses Rust↔Python (marshal args →
+  call → marshal result → GIL). Cheap once, expensive 100k times. Python host fns are for a
+  handful of enrichment lookups, <strong>not</strong> per-element callbacks inside a <code>$map</code> over a large
+  array. Document this; the existing lazy-view work shows the codebase already minimizes
+  Py-boundary crossings.</li>
+</ul>
+<h2 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h2>
+<p>In scope (v1):
+- A host-function registry consulted in the <code>apply_function</code> name-resolution seam and the
+  compiled <code>BuiltinCall</code> path.
+- The <code>HostFn</code> trait + <code>Fn(&amp;[JValue]) -&gt; Result&lt;JValue, EvaluatorError&gt;</code> blanket impl,
+  typed so phase-2 reentrancy is additive.
+- <strong>Rust crate API</strong>: <code>register_fn(name, closure)</code> — the reference implementation.
+- <strong>Python (PyO3) API</strong>: register a Python callable; marshal args via the existing
+  <code>json_to_python</code> / <code>python_to_json</code> (<code>src/lib.rs</code>); map a Python exception →
+  <code>EvaluatorError</code>; detect an <code>async def</code> (coroutine return) and reject with a clear error.
+- Bespoke unit tests per binding (nothing in the portable suite covers this).</p>
+<p>Out of scope (later phases / explicitly not v1):
+- <strong>Reentrancy / host-defined higher-order functions</strong> — phase 2; the callback type is
+  chosen now so this does not break API.
+- <strong>C ABI registration</strong> (function pointer + <code>void* userdata</code>) — phase 3.
+- <strong>Signature strings</strong> for host fns (reusing <code>signature.rs</code>) — optional; v1 host fns
+  validate their own arity/types.
+- <strong>VM support</strong> — v1 forces the tree-walker fallback for any expression containing a
+  host-fn call (the engine already falls back for some lambda cases); teach the bytecode
+  compiler later only if profiling warrants.
+- <strong>Async anything</strong> — see "Why this and not async."</p>
+<h2 id="phasing-estimate">Phasing &amp; estimate<a class="headerlink" href="#phasing-estimate" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Phase 1 — core registry + dispatch + Rust API (usable MVP): IMPLEMENTED.</strong>
+  <code>Evaluator::register_fn</code> / <code>register_fn_override</code>, a <code>HostFn</code> trait with an
+  <code>Fn(&amp;[JValue]) -&gt; Result&lt;JValue, EvaluatorError&gt;</code> blanket impl, and an opaque <code>HostCtx</code>
+  reserved for phase-2 reentrancy (<code>src/evaluator.rs</code>). Dispatch is hooked in
+  <code>evaluate_function_call</code> (direct <code>$name(...)</code> calls, resolving after the expression's own
+  bindings/lambdas and before built-ins) and defensively in <code>call_builtin_with_values</code>
+  (so a host <em>override</em> also wins in value position, e.g. <code>$f := $now; $f()</code>). Tests:
+  <code>tests/host_functions_test.rs</code> (12 cases). Notes from implementation:</li>
+<li><strong>Tree-walker fallback is automatic</strong> for novel host-fn names: <code>try_compile_hof_expr</code>
+    already returns <code>None</code> for any non-<code>map</code>/<code>filter</code>/<code>reduce</code> name, so every compile site
+    bails to the tree-walker with no compiler change.</li>
+<li><strong>Overriding a <em>compilable</em> built-in is rejected at registration</strong> (the bytecode path
+    can't see the registry). The impure targets that motivate overriding — <code>$now</code>,
+    <code>$millis</code>, <code>$random</code>, <code>$eval</code> — are all non-compilable, so this never blocks a
+    legitimate use.</li>
+<li><strong>Deferred from v1:</strong> host-fn-as-first-class-value (<code>$map(arr, $greet)</code>,
+    <code>$f := $greet</code>) — pairs with reentrancy in a later phase; direct calls cover every
+    practical use case enumerated in this design.</li>
+<li><strong>Phase 2 — Python (PyO3) binding:</strong> ~1–2 days. Highest-value surface here; marshalling
+  helpers already exist. → ~1 week for Rust + Python end-to-end.</li>
+<li><strong>Phase 3 — C ABI + signatures + docs polish:</strong> ~1 week more. → ~2 weeks fully polished.</li>
+<li><strong>Reentrancy</strong> is folded into whichever later phase needs host-defined HOFs; not on the
+  critical path.</li>
+</ul>
+<h2 id="decisions">Decisions<a class="headerlink" href="#decisions" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Host fns are the builtin analog</strong> (name-dispatched, pre-evaluated args), not lambdas
+  bound into a scope. Registry keyed by name, consulted at the unresolved-name step.</li>
+<li><strong>Precedence &amp; shadowing.</strong> User <code>:=</code> bindings and language lambdas win over host fns
+  (avoid surprising capture). For builtins, <strong>do not</strong> silently resolve host fns "after
+  builtins" — that turns a registered <code>$now</code> into a silent no-op. Instead: <strong>a host name
+  colliding with a builtin is a registration-time error by default</strong>, with an explicit
+  opt-in override API (<code>register_fn_override(name, …)</code> / <code>.allow_override()</code>). Rationale:
+  the only legitimate shadow cases cluster into two deliberate, small-set categories, and
+  both want a loud, self-documenting opt-in rather than default-allow (which is a
+  portability landmine) or a blanket ban (which forecloses real needs):</li>
+<li><strong>(A) Determinism injection</strong> for impure builtins that exist here — <code>$now</code>
+    (<code>evaluator.rs:9542</code>), <code>$millis</code> (<code>:9551</code>), <code>$random</code> (<code>:10797</code>): frozen clock / seeded
+    RNG for reproducible tests, golden files, replay, or event/logical time in prod.</li>
+<li><strong>(B) Sandboxing/hardening</strong> — override <code>$eval</code> (<code>evaluator.rs:9479</code>, dynamic
+    string-eval, the riskiest builtin) to disable it, or wrap a builtin to add
+    auditing/limits when running semi-trusted expressions.
+  Overriding <em>pure</em> builtins (<code>$sum</code>, <code>$map</code>, string/array ops) has no legitimate case and
+  should use a differently-named function instead. This default is safer than jsonata-js,
+  where a user binding can silently shadow a builtin.</li>
+<li><strong>Sync, blocking host fns.</strong> Blocking is the intended model; threads provide concurrency;
+  <code>spawn_blocking</code> bridges async hosts without touching the core.</li>
+<li><strong>Forward-compatible <code>HostFn</code> trait now</strong>, ergonomic <code>Fn</code> blanket impl, so phase-2
+  reentrancy adds <code>HostCtx::apply</code> without an API break.</li>
+<li><strong>Tree-walker only in v1</strong>; host-fn presence forces fallback.</li>
+</ul>
+<h2 id="open-questions">Open questions<a class="headerlink" href="#open-questions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Precedence vs. builtins: <strong>resolved</strong> — collision is an error unless the explicit override
+  API is used (see Decisions). Remaining detail: override granularity (per-call
+  <code>register_fn_override</code> vs. a builder-wide <code>.allow_override()</code> flag).</li>
+<li>Python: reject <code>async def</code> outright, or accept and run it to completion on a private loop?
+  (Lean reject in v1 — clearer, no hidden event loop.)</li>
+<li>Whether to expose read-only <code>options</code>/context to leaf host fns in v1 (<code>HostCtx</code> non-opaque
+  from day one) or keep it fully opaque until phase 2.</li>
+</ul>
 
 
 
@@ -2144,10 +1998,10 @@ entirely.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
