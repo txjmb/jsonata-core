@@ -10,12 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- Dependabot no longer auto-bumps the `tests/jsonata-js` reference submodule (removed the
+  `gitsubmodule` ecosystem entry). Reference-suite updates are handled by the
+  `sync-jsonata.yml` workflow, which runs the conformance suite against each new jsonata-js
+  release and opens a tracking issue (or a clean PR) — avoiding context-free failing bump
+  PRs like #82.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- JSONata 2.2.2 conformance (reference submodule bumped to `6c7e95f`):
+  - `$contains(str, token)` now returns `undefined` when either argument is undefined,
+    instead of raising a type error (jsonata-js #809).
+  - `$each(obj, fn)` now returns `undefined` when its first argument is undefined, instead
+    of raising `each() first argument must be an object`.
+  - An object constructor (group-by) applied to an empty or undefined sequence now yields
+    an empty object `{}` instead of `undefined` (jsonata-js #817, "correctly handle empty
+    joins"); `null` input still returns `null` and non-empty grouping is unchanged.
 
 ### Security
 

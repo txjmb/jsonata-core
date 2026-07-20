@@ -33,12 +33,11 @@ updates:
       - "dependencies"
       - "github-actions"
 
-  # Git submodules (jsonata-js reference)
-  - package-ecosystem: "gitsubmodule"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    labels:
-      - "dependencies"
-      - "submodule"
+  # NOTE: the jsonata-js reference submodule (tests/jsonata-js) is deliberately
+  # NOT managed by Dependabot. A raw submodule bump is a JSONata-version change
+  # that can shift expected behavior and fail the conformance suite with no
+  # context (see PR #82). Reference-suite updates are handled by the purpose-built
+  # `.github/workflows/sync-jsonata.yml`, which detects new jsonata-js releases,
+  # runs the reference suite against the bump, and opens a tracking *issue* (plus a
+  # WIP PR) when cases fail — or a clean PR when they all pass. Do not re-add a
+  # `gitsubmodule` ecosystem entry here.

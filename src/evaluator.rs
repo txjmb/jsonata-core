@@ -2177,8 +2177,13 @@ fn call_pure_builtin(
                     "contains() requires exactly 2 arguments".to_string(),
                 ));
             }
+            // jsonata-js #809: $contains returns undefined when either argument
+            // (the string OR the pattern) is undefined.
+            if effective_args[0].is_undefined() || effective_args[1].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
             match &effective_args[0] {
-                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                JValue::Null => Ok(JValue::Null),
                 JValue::String(s) => Ok(functions::string::contains(s, &effective_args[1])?),
                 _ => Err(EvaluatorError::TypeError(
                     "contains() requires a string as the first argument".to_string(),
@@ -3900,15 +3905,20 @@ impl Evaluator {
                 self.keep_tuple_stream = saved_keep;
                 let input_value = input_value?;
 
-                // If input is undefined, return undefined (not empty object)
-                if input_value.is_undefined() {
-                    return Ok(JValue::Undefined);
-                }
-
-                // Handle array input - process each item
+                // Handle array input - process each item.
+                //
+                // jsonata-js #817 ("correctly handle empty joins"): an object
+                // constructor (group-by) applied to an empty or undefined
+                // sequence must yield an empty object `{}`, not undefined.
+                // jsonata-js wraps the input via `createSequence`, so an
+                // undefined input becomes an *empty* sequence that flows through
+                // grouping and produces `{}`. We mirror that by mapping undefined
+                // to an empty item list here (rather than short-circuiting), and
+                // let the empty-input handling below generate the `{}`.
                 let items: Vec<JValue> = match input_value {
                     JValue::Array(ref arr) => (**arr).clone(),
                     JValue::Null => return Ok(JValue::Null),
+                    JValue::Undefined => Vec::new(),
                     other => vec![other],
                 };
 
@@ -7742,7 +7752,9 @@ impl Evaluator {
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
-                if evaluated_args[0].is_undefined() {
+                // jsonata-js #809: $contains returns undefined when either argument
+                // (the string OR the pattern) is undefined.
+                if evaluated_args[0].is_undefined() || evaluated_args[1].is_undefined() {
                     return Ok(JValue::Undefined);
                 }
                 match &evaluated_args[0] {
@@ -9392,6 +9404,9 @@ impl Evaluator {
                         Ok(JValue::array(result))
                     }
                     JValue::Null => Ok(JValue::Null),
+                    // jsonata-js: $each returns undefined when its first argument
+                    // is undefined (e.g. a path that resolves to nothing).
+                    JValue::Undefined => Ok(JValue::Undefined),
                     _ => Err(EvaluatorError::TypeError(
                         "each() first argument must be an object".to_string(),
                     )),
