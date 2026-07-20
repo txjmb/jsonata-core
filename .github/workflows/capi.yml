@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # lib-target #[cfg(test)] modules include_str! reference-suite
           # datasets from the jsonata-js submodule
