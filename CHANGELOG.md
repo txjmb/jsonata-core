@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.6] - 2026-07-20
+
+### Added
 - Host-callable custom functions (Rust core): `Evaluator::register_fn` and
   `Evaluator::register_fn_override` let a host register native functions callable
   from an expression as `$name(...)` — the equivalent of jsonata-js's
