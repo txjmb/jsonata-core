@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
-- JSONata 2.2.2 conformance (reference submodule bumped to `6c7e95f`):
+- Ensures compliance with the **jsonata-js 2.2.2** reference test suite (reference submodule
+  bumped to `6c7e95f`); the full reference suite — 1686 cases — passes. Three behavior
+  changes were required to match jsonata-js 2.2.2:
   - `$contains(str, token)` now returns `undefined` when either argument is undefined,
     instead of raising a type error (jsonata-js #809).
   - `$each(obj, fn)` now returns `undefined` when its first argument is undefined, instead
