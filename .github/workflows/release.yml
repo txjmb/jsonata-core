@@ -107,7 +107,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
@@ -224,7 +224,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           submodules: true
@@ -311,7 +311,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           submodules: true
@@ -371,7 +371,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           submodules: true
@@ -411,7 +411,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: true
 
@@ -510,7 +510,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -613,7 +613,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           submodules: true
@@ -641,7 +641,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -761,7 +761,7 @@ jobs:
 
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           submodules: true
@@ -1013,7 +1013,7 @@ jobs:
 
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           fetch-depth: 0
