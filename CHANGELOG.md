@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.7] - 2026-07-21
+
+### Added
+
+### Changed
 - Dependabot no longer auto-bumps the `tests/jsonata-js` reference submodule (removed the
   `gitsubmodule` ecosystem entry). Reference-suite updates are handled by the
   `sync-jsonata.yml` workflow, which runs the conformance suite against each new jsonata-js
