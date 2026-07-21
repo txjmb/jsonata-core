@@ -16,7 +16,7 @@ Many, many thanks to the incredible work of all the maintainers of the [JSONata]
 
 Release versions will follow the reference jsonata-js project major and minor release numbers, but not necessarily patches.  This will make it easier for adopters of this library to understand each release's JSONata API compatibility.  As an example, 2.1.7 should be compliant with 2.1.x jsonata-js tests, but may have fixes specific to this library.  If a patch release for jsonata-js is relevant for this project, it will be included in a patch release that may or may not follow the patch numbers of the upstream project.
 
-This project currently chooses not to implement async, because it has limited value for most of the most common use-cases.  We 
+This project currently chooses not to implement async at this time, because it has limited value for most of the most common use-cases and the overhead of the async functionality would slow down synchronous use cases.  We focused on sync performance instead.
 
 [![Crates.io](https://img.shields.io/crates/v/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
 [![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
