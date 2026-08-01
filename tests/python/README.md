@@ -196,7 +196,7 @@ import jsonatapy
 import json
 
 # Load dataset
-with open('tests/jsonata-js/test/test-suite/datasets/dataset0.json') as f:
+with open("tests/jsonata-js/test/test-suite/datasets/dataset0.json") as f:
     data = json.load(f)
 
 # Test expression
