@@ -264,7 +264,7 @@ suite.benchmark(
     expression="$.products[price > 100]",
     data={"products": [...]},
     data_size="custom",
-    iterations=1000
+    iterations=1000,
 )
 ```
 
@@ -281,7 +281,7 @@ data once with `jsonatapy.JsonataData` and reuse it across queries:
 
 ```python
 data = jsonatapy.JsonataData(large_dataset)
-result = expr.evaluate_with_data(data)   # 3–15x faster than evaluate(dict)
+result = expr.evaluate_with_data(data)  # 3–15x faster than evaluate(dict)
 ```
 
 ## Troubleshooting
@@ -360,9 +360,7 @@ for file in sorted(glob.glob("benchmarks/results/*.json")):
 for r in results:
     timestamp = r["timestamp"]
     avg_speedup = sum(
-        res["jsonatapy_speedup"]
-        for res in r["results"]
-        if res["jsonatapy_speedup"]
+        res["jsonatapy_speedup"] for res in r["results"] if res["jsonatapy_speedup"]
     ) / len([res for res in r["results"] if res["jsonatapy_speedup"]])
     print(f"{timestamp}: {avg_speedup:.2f}x average speedup")
 ```
