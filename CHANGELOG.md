@@ -98,6 +98,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comparison and arithmetic operands, and the fused aggregates, which now raise `T0412`
   on a null element rather than silently summing around it.
   ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 1)
+- Filter predicates now unwrap a single-element result, so `arr[p = 1]` is `{"p": 1}` rather
+  than `[{"p": 1}]`. The tree-walker decided this from `step.stages` alone, but `arr[p = 1]`
+  parses its predicate as a `Predicate` step *node* with empty stages, so no filter written
+  that way was ever recognised as an array operation. Numeric-literal predicates are excluded:
+  those are index access and already return the selected element, so counting them would
+  unwrap twice and turn `a[0]` over `[[5]]` into `5`.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 2)
 
 ### Security
 

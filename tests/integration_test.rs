@@ -1884,3 +1884,69 @@ fn test_path_null_is_counted_and_constructed() {
         JValue::from(json!([1, null]))
     );
 }
+
+// ── Singleton unwrapping after a predicate step (issue #98, root cause 2) ────
+//
+// A predicate is an array operation, so a result sequence of one unwraps to
+// that element. `arr[p = 1]` is `{"p": 1}`, not `[{"p": 1}]`. The tree-walker
+// decided this from `step.stages` alone, but `arr[p = 1]` parses the predicate
+// as a `Predicate` step *node* with empty stages, so the check never saw it.
+
+#[test]
+fn test_predicate_unwraps_singleton_result() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 2}]}).into();
+    let ast = parse("arr[p = 1]").unwrap();
+
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!({"p": 1}))
+    );
+}
+
+#[test]
+fn test_predicate_keeps_multi_element_result() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 2}]}).into();
+    let ast = parse("arr[p > 0]").unwrap();
+
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([{"p": 1}, {"p": 2}]))
+    );
+}
+
+#[test]
+fn test_predicate_singleton_that_is_itself_an_array() {
+    // Unwrapping is uniform: the sequence [[5]] has one element, [5], so the
+    // result is [5] -- not 5, and not [[5]].
+    let data: JValue = json!({"a": [[5]]}).into();
+
+    for expr in ["a[0]", "a[$[0] = 5]"] {
+        let ast = parse(expr).unwrap();
+        assert_eq!(
+            Evaluator::new().evaluate(&ast, &data).unwrap(),
+            JValue::from(json!([5])),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_predicate_no_match_is_undefined() {
+    let data: JValue = json!({"arr": [{"p": 1}]}).into();
+    let ast = parse("arr[p = 99]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_empty_predicate_still_keeps_array() {
+    // `[]` must survive the unwrap rule -- it is an explicit keep-array.
+    let data: JValue = json!({"arr": [{"p": 1}]}).into();
+    let ast = parse("arr[].p").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([1]))
+    );
+}

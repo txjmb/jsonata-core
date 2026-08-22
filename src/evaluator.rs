@@ -5903,7 +5903,10 @@ impl Evaluator {
         let has_explicit_array_keep = Self::path_keeps_singleton_array(steps);
 
         // Unwrap when:
-        // 1. Any step has stages (predicates, sorts, etc.) which are array operations, OR
+        // 1. Any step is an array operation -- a stage (sort, filter) or a
+        //    `Predicate` step node. Both spellings must count: `arr[p = 1]`
+        //    parses the predicate as a step *node* with empty stages, so
+        //    checking `stages` alone missed every filter written that way.
         // 2. We did array mapping during step evaluation (tracked via did_array_mapping flag)
         //    Note: did_array_mapping is reset to false when extracting from a single object,
         //    so a[0].b where a[0] returns a single object and .b extracts a field will NOT unwrap.
@@ -5911,8 +5914,16 @@ impl Evaluator {
         //
         // Important: We DON'T unwrap just because original data was an array - what matters is
         // whether the final extraction was from an array mapping context or a single object.
-        let should_unwrap = !has_explicit_array_keep
-            && (steps.iter().any(|step| !step.stages.is_empty()) || did_array_mapping);
+        // A numeric-literal predicate is index access: `evaluate_predicate`
+        // returns the selected element itself, already final. A filter
+        // predicate returns a sequence, which is what the singleton rule
+        // unwraps. Counting index access here would unwrap it a second time
+        // and turn `a[0]` over `[[5]]` into `5` instead of `[5]`.
+        let has_array_op = steps.iter().any(|step| {
+            !step.stages.is_empty()
+                || matches!(&step.node, AstNode::Predicate(p) if !matches!(**p, AstNode::Number(_)))
+        });
+        let should_unwrap = !has_explicit_array_keep && (has_array_op || did_array_mapping);
 
         let result = match &current {
             // An empty result sequence is "no value" -> undefined (jsonata-js
