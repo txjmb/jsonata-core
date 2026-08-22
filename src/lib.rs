@@ -2,32 +2,128 @@
 // Copyright (c) 2025 jsonatapy contributors
 // Licensed under the MIT License
 
-//! # jsonatapy
+//! # jsonata-core
 //!
-//! A high-performance Rust implementation of JSONata - the JSON query and
-//! transformation language - with optional Python bindings via PyO3.
+//! A high-performance Rust implementation of [JSONata](https://jsonata.org) — the
+//! JSON query and transformation language — with optional Python bindings via PyO3.
 //!
-//! ## Rust API
+//! ## Quick start
 //!
-//! ```rust,ignore
-//! use jsonata_core::parser;
-//! use jsonata_core::evaluator::Evaluator;
-//! use jsonata_core::value::JValue;
+//! Parsing produces an [`AstNode`](ast::AstNode); evaluating it against a
+//! [`value::JValue`] produces another `JValue`.
 //!
-//! let ast = parser::parse("user.name").unwrap();
-//! let data = JValue::from_json_str(r#"{"user":{"name":"Alice"}}"#).unwrap();
-//! let result = Evaluator::new().evaluate(&ast, &data).unwrap();
+//! ```
+//! use jsonata_core::{evaluator::Evaluator, parser, value::JValue};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let ast = parser::parse("Account.Order.Product.(Price * Quantity)")?;
+//! let data = JValue::from_json_str(
+//!     r#"{"Account": {"Order": [{"Product": [
+//!            {"Price": 34.45, "Quantity": 2},
+//!            {"Price": 21.67, "Quantity": 1}
+//!        ]}]}}"#,
+//! )?;
+//!
+//! let line_totals = Evaluator::new().evaluate(&ast, &data)?;
+//! assert_eq!(line_totals.to_json_string()?, "[68.9,21.67]");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Compile once, evaluate many times
+//!
+//! Parsing is the expensive step, and an `AstNode` is immutable once built — so
+//! hoist it out of your hot loop and reuse it across payloads.
+//!
+//! ```
+//! use jsonata_core::{evaluator::Evaluator, parser, value::JValue};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let ast = parser::parse("orders[price > 100].product")?;
+//! let mut ev = Evaluator::new();
+//!
+//! let payloads = [
+//!     r#"{"orders": [{"product": "widget", "price": 150}]}"#,
+//!     r#"{"orders": [{"product": "gizmo", "price": 50}]}"#,
+//! ];
+//!
+//! let mut matched = Vec::new();
+//! for payload in payloads {
+//!     let data = JValue::from_json_str(payload)?;
+//!     if let Some(product) = ev.evaluate(&ast, &data)?.as_str() {
+//!         matched.push(product.to_string());
+//!     }
+//! }
+//!
+//! assert_eq!(matched, ["widget"]);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Handling errors
+//!
+//! The two phases fail with two distinct error types, so you can tell a bad
+//! expression apart from a bad evaluation. Both implement [`std::error::Error`],
+//! so `?` into a boxed error works when you do not need to distinguish them.
+//!
+//! ```
+//! use jsonata_core::{evaluator::Evaluator, parser, value::JValue};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // A malformed expression fails at parse time.
+//! let err = parser::parse("orders[price > ").unwrap_err();
+//! println!("could not parse: {err}");
+//!
+//! // A well-formed expression can still fail against the data it is given.
+//! let ast = parser::parse("orders.price * 2")?;
+//! let data = JValue::from_json_str(r#"{"orders": [{"price": "free"}]}"#)?;
+//!
+//! let outcome = Evaluator::new().evaluate(&ast, &data);
+//! match &outcome {
+//!     Ok(total) => println!("total: {}", total.to_json_string()?),
+//!     Err(e) => println!("could not evaluate: {e}"),
+//! }
+//! // The left side of `*` is a string in this payload, so evaluation fails.
+//! assert!(outcome.is_err());
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Extending expressions with host functions
+//!
+//! [`Evaluator::register_fn`](evaluator::Evaluator::register_fn) exposes your own
+//! Rust closures to an expression as `$name(...)`. See its documentation for
+//! resolution order and for overriding built-ins.
+//!
+//! ```
+//! use jsonata_core::{evaluator::Evaluator, parser, value::JValue};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut ev = Evaluator::new();
+//! ev.register_fn("initials", |args: &[JValue]| {
+//!     let name = args.first().and_then(|v| v.as_str()).unwrap_or("");
+//!     let initials: String = name.split_whitespace().filter_map(|w| w.chars().next()).collect();
+//!     Ok(JValue::from(initials))
+//! })?;
+//!
+//! let ast = parser::parse("$initials(user.name)")?;
+//! let data = JValue::from_json_str(r#"{"user": {"name": "Ada Lovelace"}}"#)?;
+//! assert_eq!(ev.evaluate(&ast, &data)?, JValue::from("AL"));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Architecture
 //!
-//! - `parser` - Expression parser (converts JSONata strings to AST)
-//! - `evaluator` - Expression evaluator (executes AST against data)
-//! - `functions` - Built-in function implementations
-//! - `datetime` - Date/time handling functions
-//! - `signature` - Function signature validation
-//! - `ast` - Abstract Syntax Tree definitions
-//! - `value` - JValue type (the runtime value representation)
+//! - [`parser`] — expression parser (JSONata source to AST)
+//! - [`evaluator`] — expression evaluator (executes an AST against data)
+//! - [`value`] — the runtime value representation, [`value::JValue`]
+//! - [`functions`] — built-in function implementations
+//! - [`ast`] — Abstract Syntax Tree definitions
+//! - [`ast_transform`] — AST rewriting used by the compilation layer
+//!
+//! Two further modules are feature-gated: `lazy` (zero-copy views over Python
+//! objects, with `python`) and `capi` (the C ABI surface, with `capi`).
 
 pub mod ast;
 pub mod ast_transform;
