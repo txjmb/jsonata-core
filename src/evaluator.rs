@@ -5427,14 +5427,16 @@ impl Evaluator {
                                 for item in arr.iter() {
                                     match item {
                                         JValue::Object(obj) => {
+                                            // `None` is an absent field (undefined -> drops out);
+                                            // `Some(Null)` is a present null, which is a value and
+                                            // stays in the sequence. Mirrors compiled_field_step.
                                             if let Some(val) = obj.get(field_name) {
-                                                if !val.is_null() {
-                                                    match val {
-                                                        JValue::Array(arr_val) => {
-                                                            result.extend(arr_val.iter().cloned())
-                                                        }
-                                                        other => result.push(other.clone()),
+                                                match val {
+                                                    JValue::Undefined => {}
+                                                    JValue::Array(arr_val) => {
+                                                        result.extend(arr_val.iter().cloned())
                                                     }
+                                                    other => result.push(other.clone()),
                                                 }
                                             }
                                         }
@@ -5452,7 +5454,8 @@ impl Evaluator {
                                         #[cfg(feature = "python")]
                                         JValue::LazyPyDict(lazy) => {
                                             let val = lazy.get_field(field_name)?;
-                                            if !val.is_null() && !val.is_undefined() {
+                                            // A present null is a value; only an absent field (Undefined) drops out.
+                                            if !val.is_undefined() {
                                                 match val {
                                                     JValue::Array(arr_val) => {
                                                         result.extend(arr_val.iter().cloned())

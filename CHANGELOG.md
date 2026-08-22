@@ -89,6 +89,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- Path expressions no longer drop explicit `null` values from query-result sequences.
+  `evaluate_path`'s array-mapping fast path predates the null/undefined migration in #32
+  and skipped both, so `arr.p` over `[{"p": 1}, {"p": null}]` returned `1` instead of
+  `[1, null]`. Only an *absent* field is undefined and drops out; a present `null` is a
+  value and stays. Fixed for both the JSON and Python-dict (lazy view) routes. This
+  corrects everything downstream of such a sequence — `$count`, array construction,
+  comparison and arithmetic operands, and the fused aggregates, which now raise `T0412`
+  on a null element rather than silently summing around it.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 1)
 
 ### Security
 

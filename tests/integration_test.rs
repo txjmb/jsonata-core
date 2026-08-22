@@ -1817,3 +1817,70 @@ fn test_fused_aggregate_still_aggregates_valid_input() {
     // A literal empty array is still 0.
     assert_eq!(fused_eval("$sum([])", json!({})), Ok(JValue::Number(0.0)));
 }
+
+// ── Explicit null in path results (issue #98, root cause 1) ──────────────────
+//
+// An explicit JSON `null` is a value: it stays in a query-result sequence.
+// Only *undefined* (an absent field) drops out. `evaluate_path`'s array-mapping
+// fast path predates the null/undefined migration in #32 and skipped both,
+// which silently shortened sequences and changed the answers of everything
+// downstream of them.
+
+#[test]
+fn test_path_keeps_explicit_null_in_sequence() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+    let ast = parse("arr.p").unwrap();
+    let result = Evaluator::new().evaluate(&ast, &data).unwrap();
+
+    assert_eq!(result, JValue::from(json!([1, null])));
+}
+
+#[test]
+fn test_path_keeps_lone_explicit_null() {
+    // A single null is still a value, so the singleton unwraps to null itself
+    // rather than collapsing to undefined.
+    let data: JValue = json!({"arr": [{"p": null}]}).into();
+    let ast = parse("arr.p").unwrap();
+
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Null
+    );
+}
+
+#[test]
+fn test_path_still_drops_missing_fields() {
+    // The other half of the distinction: an absent field is undefined and must
+    // still drop out, so this fix must not turn missing into null.
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    let ast = parse("arr.p").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!(1))
+    );
+
+    // Nothing present at all is undefined, not a sequence of nulls.
+    let ast = parse("arr.nope").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_path_null_is_counted_and_constructed() {
+    // Downstream consumers see the full sequence.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+
+    let ast = parse("$count(arr.p)").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Number(2.0)
+    );
+
+    let ast = parse("[arr.p]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([1, null]))
+    );
+}
