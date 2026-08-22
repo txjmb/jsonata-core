@@ -201,7 +201,7 @@ impl JValue {
         }
     }
 
-    /// Get a reference to the Rc<str> for the string variant.
+    /// Get a reference to the `Rc<str>` for the string variant.
     #[inline]
     pub fn as_rc_str(&self) -> Option<&Rc<str>> {
         match self {

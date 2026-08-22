@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// during the extraction process, not as separate steps.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Stage {
-    /// Filter/predicate stage [expr]
+    /// Filter/predicate stage `[expr]`
     Filter(Box<AstNode>),
     /// Positional index stage `#$var` that lands on a step already carrying an
     /// index/stages (jsonata-js's `{type: 'index', value}` stage). Binds the
@@ -169,11 +169,11 @@ pub enum AstNode {
     /// fills every occurrence with a real label or raises S0217.
     Parent(String),
 
-    /// Array filter/predicate [condition]
+    /// Array filter/predicate `[condition]`
     /// Can be an index (number) or a predicate (boolean expression)
     Predicate(Box<AstNode>),
 
-    /// Array grouping in path expression .[expr]
+    /// Array grouping in path expression `.[expr]`
     /// Like Array but doesn't flatten when used in paths
     ArrayGroup(Vec<AstNode>),
 
@@ -191,7 +191,7 @@ pub enum AstNode {
         terms: Vec<(AstNode, bool)>,
     },
 
-    /// Transform operator |location|update[,delete]|
+    /// Transform operator `|location|update[,delete]|`
     /// Creates a function that transforms objects by:
     /// 1. Evaluating location to find objects to modify
     /// 2. Applying update (object constructor) to each matched object

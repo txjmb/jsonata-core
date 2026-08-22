@@ -1173,7 +1173,7 @@ wheels = [
 
 [[package]]
 name = "jsonatapy"
-version = "2.2.5"
+version = "2.2.7"
 source = { editable = "." }
 
 [package.optional-dependencies]
