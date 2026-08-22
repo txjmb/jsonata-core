@@ -1950,3 +1950,104 @@ fn test_empty_predicate_still_keeps_array() {
         JValue::from(json!([1]))
     );
 }
+
+// ── Numeric predicates select by index (issue #98, root cause 3) ─────────────
+//
+// `arr[p]` does not mean "keep elements where p is truthy". When the predicate
+// evaluates to a number, jsonata-js compares it against the element's *index*
+// and keeps the element only on a match; negative values wrap from the end,
+// and fractional values floor. Only a non-numeric result falls back to
+// truthiness. All four filter implementations shared a copy of the truthiness
+// rule, so all four were wrong the same way.
+
+fn filter_eval(expr: &str, data: serde_json::Value) -> JValue {
+    let ast = parse(expr).unwrap();
+    let data: JValue = data.into();
+    Evaluator::new().evaluate(&ast, &data).unwrap()
+}
+
+#[test]
+fn test_numeric_predicate_matches_element_index() {
+    // 0 == index 0 and 1 == index 1, so both survive.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": 0}, {"p": 1}]})),
+        JValue::from(json!([{"p": 0}, {"p": 1}]))
+    );
+    // Neither value equals its own index.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": 1}, {"p": 0}]})),
+        JValue::Undefined
+    );
+    // Only the first matches; the singleton then unwraps.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": 0}, {"p": 9}]})),
+        JValue::from(json!({"p": 0}))
+    );
+}
+
+#[test]
+fn test_numeric_predicate_negative_wraps_and_fractional_floors() {
+    // -1 wraps to index 1, which is where the second element lives.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": -1}, {"p": 1}]})),
+        JValue::from(json!({"p": 1}))
+    );
+    // floor(0.7) == 0 and floor(1.2) == 1.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": 0.7}, {"p": 1.2}]})),
+        JValue::from(json!([{"p": 0.7}, {"p": 1.2}]))
+    );
+}
+
+#[test]
+fn test_array_of_numbers_predicate_matches_any() {
+    // An array of numbers is a set of indices; any match keeps the element.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": [0, 1]}, {"p": [5]}]})),
+        JValue::from(json!({"p": [0, 1]}))
+    );
+    // An empty array is vacuously "all numbers" and matches no index.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": []}, {"p": []}]})),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_non_numeric_predicate_still_uses_truthiness() {
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": "x"}, {"p": ""}]})),
+        JValue::from(json!({"p": "x"}))
+    );
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": true}, {"p": false}]})),
+        JValue::from(json!({"p": true}))
+    );
+    // A mixed array is not an index selector, and a non-empty array is truthy.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": [1, "x"]}]})),
+        JValue::from(json!({"p": [1, "x"]}))
+    );
+    // Missing and null are falsy and drop out.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"q": 9}, {"p": null}]})),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_comparison_predicates_unaffected() {
+    // Guard: ordinary boolean filters must keep working.
+    assert_eq!(
+        filter_eval("a[$ = 20]", json!({"a": [10, 20, 30]})),
+        JValue::from(json!(20))
+    );
+    assert_eq!(
+        filter_eval("a[1]", json!({"a": [10, 20, 30]})),
+        JValue::from(json!(20))
+    );
+    assert_eq!(
+        filter_eval("arr[p > 1]", json!({"arr": [{"p": 1}, {"p": 5}]})),
+        JValue::from(json!({"p": 5}))
+    );
+}

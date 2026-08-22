@@ -1463,6 +1463,44 @@ pub(crate) fn compiled_is_truthy(value: &JValue) -> bool {
     }
 }
 
+/// Decide whether a filter predicate result selects the element at `index`.
+///
+/// In JSONata a predicate that evaluates to a number is an *index selector*,
+/// not a truthiness test: the element is kept only when the number equals its
+/// own position. Negative values count from the end and fractional values
+/// floor, matching jsonata-js's `evaluateFilter`. An array whose elements are
+/// all numbers is a set of such indices, and any match keeps the element --
+/// which makes an empty array vacuously numeric and matching nothing.
+///
+/// Returns `None` when the result is not an index selector, leaving the caller
+/// to apply its own truthiness rule.
+///
+/// This exists so the four filter implementations (the tree-walker's predicate
+/// step and stage forms, the compiled path, and the VM) share one copy of the
+/// decision while keeping their own evaluation strategies. Each previously
+/// carried its own `is_truthy` call and so was wrong in the same way.
+#[inline]
+pub(crate) fn predicate_index_match(pred: &JValue, index: usize, len: usize) -> Option<bool> {
+    fn matches_index(n: f64, index: usize, len: usize) -> bool {
+        let mut i = n.floor() as i64;
+        if i < 0 {
+            i += len as i64;
+        }
+        i >= 0 && i as usize == index
+    }
+
+    match pred {
+        JValue::Number(n) => Some(matches_index(*n, index, len)),
+        JValue::Array(arr) if arr.iter().all(|v| matches!(v, JValue::Number(_))) => {
+            Some(arr.iter().any(|v| match v {
+                JValue::Number(n) => matches_index(*n, index, len),
+                _ => false,
+            }))
+        }
+        _ => None,
+    }
+}
+
 /// Returns true if the compiled expression is a literal `null` (from `AstNode::Null`).
 /// Used to replicate the tree-walker's `explicit_null` flag in comparisons/arithmetic.
 #[inline]
@@ -1929,6 +1967,11 @@ fn compiled_apply_filter(
                 None
             };
             let effective_shape = shape.or(local_shape.as_ref());
+            // NOTE: no index-selector rule here. This helper serves filters in
+            // *stage* position (`a.b[pred]`), where a numeric predicate maps the
+            // index over each extracted sub-array rather than matching element
+            // positions -- `foo.blah.baz.fud[-1]` takes the last of every group.
+            // Standalone predicates get the index rule in `evaluate_predicate`.
             for item in arr.iter() {
                 check_loop_timeout(options, start_time)?;
                 let pred = eval_compiled_inner(
@@ -4563,9 +4606,15 @@ impl Evaluator {
 
                 // It's a filter expression
                 let mut filtered = Vec::new();
-                for item in arr.iter() {
+                let len = arr.len();
+                for (index, item) in arr.iter().enumerate() {
                     let item_result = self.evaluate_internal(predicate, item)?;
-                    if self.is_truthy(&item_result) {
+                    // A numeric predicate selects by position, not truthiness.
+                    let keep = match predicate_index_match(&item_result, index, len) {
+                        Some(matched) => matched,
+                        None => self.is_truthy(&item_result),
+                    };
+                    if keep {
                         filtered.push(item.clone());
                     }
                 }
@@ -11319,155 +11368,59 @@ impl Evaluator {
 
         match current {
             JValue::Array(_arr) => {
-                // Standalone predicates do simple array operations (no mapping over sub-arrays)
+                // Standalone predicates: jsonata-js evaluates the predicate once
+                // per element and decides from the result. A numeric result is an
+                // index selector compared against that element's own position; any
+                // other result is a truthiness test. This one loop subsumes the
+                // multi-index selector form too -- a constant `[0, 1]` predicate
+                // evaluates to the same array for every element and matches
+                // positions 0 and 1 -- so there is no separate whole-array path.
 
-                // First, try to evaluate predicate as a simple number (array index)
+                // Literal numeric index keeps its direct route: array_index returns
+                // the selected element itself rather than a one-element sequence,
+                // which the caller's singleton-unwrap rule depends on.
                 if let AstNode::Number(n) = predicate {
-                    // Direct array indexing
                     return self.array_index(current, &JValue::Number(*n));
                 }
 
-                // Fast path: if predicate is definitely a filter expression (comparison/logical),
-                // skip speculative numeric evaluation and go directly to filter logic
-                if Self::is_filter_predicate(predicate) {
-                    // Try CompiledExpr fast path
-                    if let Some(compiled) = try_compile_expr(predicate) {
-                        let shape = _arr.first().and_then(build_shape_cache);
-                        let mut filtered = Vec::with_capacity(_arr.len());
-                        for item in _arr.iter() {
-                            let result = if let Some(ref s) = shape {
-                                eval_compiled_shaped(
-                                    &compiled,
-                                    item,
-                                    None,
-                                    s,
-                                    &self.options,
-                                    self.start_time,
-                                )?
-                            } else {
-                                eval_compiled(
-                                    &compiled,
-                                    item,
-                                    None,
-                                    &self.options,
-                                    self.start_time,
-                                )?
-                            };
-                            if compiled_is_truthy(&result) {
-                                filtered.push(item.clone());
-                            }
-                        }
-                        return Ok(JValue::array(filtered));
-                    }
-                    // Fallback: full AST evaluation per element
-                    let mut filtered = Vec::new();
-                    for item in _arr.iter() {
-                        let item_result = self.evaluate_internal(predicate, item)?;
-                        if self.is_truthy(&item_result) {
-                            filtered.push(item.clone());
-                        }
-                    }
-                    return Ok(JValue::array(filtered));
-                }
+                let len = _arr.len();
+                let compiled = try_compile_expr(predicate);
+                let shape = compiled
+                    .as_ref()
+                    .and_then(|_| _arr.first().and_then(build_shape_cache));
 
-                // Try to evaluate the predicate to see if it's a numeric index
-                // If evaluation succeeds and yields a number, use it as an index
-                // If evaluation fails (e.g., comparison error), treat as filter
-                match self.evaluate_internal(predicate, current) {
-                    Ok(JValue::Number(_)) => {
-                        // It's a numeric index
-                        let pred_result = self.evaluate_internal(predicate, current)?;
-                        return self.array_index(current, &pred_result);
-                    }
-                    Ok(JValue::Array(indices)) => {
-                        // Multiple array selectors [[indices]]
-                        // Check if array contains any non-numeric values
-                        let has_non_numeric =
-                            indices.iter().any(|v| !matches!(v, JValue::Number(_)));
-
-                        if has_non_numeric {
-                            // If array contains non-numeric values, return entire array
-                            return Ok(current.clone());
-                        }
-
-                        // Collect numeric indices, handling negative indices
-                        let arr_len = _arr.len() as i64;
-                        let mut resolved_indices: Vec<i64> = indices
-                            .iter()
-                            .filter_map(|v| {
-                                if let JValue::Number(n) = v {
-                                    let idx = *n as i64;
-                                    // Resolve negative indices
-                                    let actual_idx = if idx < 0 { arr_len + idx } else { idx };
-                                    // Only include valid indices
-                                    if actual_idx >= 0 && actual_idx < arr_len {
-                                        Some(actual_idx)
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        // Sort and deduplicate indices
-                        resolved_indices.sort();
-                        resolved_indices.dedup();
-
-                        // Select elements at each sorted index
-                        let result: Vec<JValue> = resolved_indices
-                            .iter()
-                            .map(|&idx| _arr[idx as usize].clone())
-                            .collect();
-
-                        return Ok(JValue::array(result));
-                    }
-                    Ok(_) => {
-                        // Evaluated successfully but not a number - might be a filter
-                        // Fall through to filter logic
-                    }
-                    Err(_) => {
-                        // Evaluation failed - it's likely a filter expression
-                        // Fall through to filter logic
-                    }
-                }
-
-                // Try CompiledExpr fast path for filter expressions
-                if let Some(compiled) = try_compile_expr(predicate) {
-                    let shape = _arr.first().and_then(build_shape_cache);
-                    let mut filtered = Vec::with_capacity(_arr.len());
-                    for item in _arr.iter() {
-                        let result = if let Some(ref s) = shape {
-                            eval_compiled_shaped(
-                                &compiled,
-                                item,
-                                None,
-                                s,
-                                &self.options,
-                                self.start_time,
-                            )?
-                        } else {
-                            eval_compiled(&compiled, item, None, &self.options, self.start_time)?
-                        };
-                        if compiled_is_truthy(&result) {
-                            filtered.push(item.clone());
-                        }
-                    }
-                    return Ok(JValue::array(filtered));
-                }
-
-                // It's a filter expression - evaluate the predicate for each array element
                 let mut filtered = Vec::new();
-                for item in _arr.iter() {
-                    let item_result = self.evaluate_internal(predicate, item)?;
-
-                    // If result is truthy, include this item
-                    if self.is_truthy(&item_result) {
+                // Whether every element's predicate result was an index selector.
+                // Index selection yields the element itself, not a one-element
+                // sequence: `[1, 2, [3, 4]][-1][-1]` needs the first `[-1]` to
+                // hand `[3, 4]` to the second, and this path unwraps singletons
+                // only once, at the end of the whole path.
+                let mut all_index_selectors = true;
+                for (index, item) in _arr.iter().enumerate() {
+                    let result = match (&compiled, &shape) {
+                        (Some(c), Some(s)) => {
+                            eval_compiled_shaped(c, item, None, s, &self.options, self.start_time)?
+                        }
+                        (Some(c), None) => {
+                            eval_compiled(c, item, None, &self.options, self.start_time)?
+                        }
+                        (None, _) => self.evaluate_internal(predicate, item)?,
+                    };
+                    let keep = match predicate_index_match(&result, index, len) {
+                        Some(matched) => matched,
+                        None => {
+                            all_index_selectors = false;
+                            self.is_truthy(&result)
+                        }
+                    };
+                    if keep {
                         filtered.push(item.clone());
                     }
                 }
 
+                if all_index_selectors && filtered.len() == 1 {
+                    return Ok(filtered.remove(0));
+                }
                 Ok(JValue::array(filtered))
             }
             JValue::Object(obj) => {

@@ -105,6 +105,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   those are index access and already return the selected element, so counting them would
   unwrap twice and turn `a[0]` over `[[5]]` into `5`.
   ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 2)
+- Numeric filter predicates now select by position instead of being treated as truthy. In
+  JSONata `arr[p]` keeps an element only when `p` equals that element's own index; negative
+  values count from the end and fractional values floor, and an array of numbers is a set of
+  such indices. The tree-walker previously evaluated the predicate against the whole array
+  and treated a numeric result as a multi-index selector, so `arr[p]` over
+  `[{"p": 1}, {"p": 2}]` returned both elements instead of nothing. Fixed for standalone
+  predicates; filters in *stage* position (`a.b[-1]`, which maps the index over each
+  extracted sub-array) keep their existing semantics, and the bytecode VM still needs the
+  same change. ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 3)
 
 ### Security
 
