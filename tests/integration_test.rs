@@ -1718,3 +1718,91 @@ fn test_merge_call_with_more_than_u8_max_args_does_not_silently_truncate() {
         other => panic!("expected object, got {other:?}"),
     }
 }
+
+// ── Fused aggregate fast path ($sum/$max/$min/$average over `array.field`) ────
+//
+// `try_fused_aggregate` short-circuits `$agg(arr.field)` into a single pass.
+// It must not diverge from the canonical aggregate semantics it replaces:
+// a present non-numeric element is a type error (T0412), and an empty
+// sequence is undefined — not a silently-skipped element or a zero.
+
+/// Evaluate `expr` against `data`, returning the raw result.
+fn fused_eval(expr: &str, data: serde_json::Value) -> Result<JValue, String> {
+    let ast = parse(expr).unwrap();
+    let data: JValue = data.into();
+    Evaluator::new()
+        .evaluate(&ast, &data)
+        .map_err(|e| e.to_string())
+}
+
+#[test]
+fn test_fused_aggregate_rejects_non_numeric_field() {
+    // jsonata-js raises T0412 for every one of these.
+    for expr in ["$sum(orders.p)", "$max(orders.p)", "$min(orders.p)", "$average(orders.p)"] {
+        let result = fused_eval(expr, json!({"orders": [{"p": "free"}]}));
+        assert!(
+            result.is_err(),
+            "{expr} must reject a non-numeric field, got {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_fused_aggregate_does_not_silently_skip_non_numeric() {
+    // The dangerous shape: a valid number alongside a string. Skipping the
+    // string yields a plausible-but-wrong total instead of an error.
+    let result = fused_eval("$sum(orders.p)", json!({"orders": [{"p": 1}, {"p": "free"}]}));
+    assert!(
+        result.is_err(),
+        "mixed numeric/non-numeric must error, got {result:?}"
+    );
+}
+
+#[test]
+fn test_fused_aggregate_empty_sequence_is_undefined() {
+    // `empty.p` is an empty sequence, which is undefined — not 0.
+    // (`$sum([])` on a literal empty array is still 0; that is a different case.)
+    assert_eq!(
+        fused_eval("$sum(empty.p)", json!({"empty": []})),
+        Ok(JValue::Undefined)
+    );
+    assert_eq!(
+        fused_eval("$max(empty.p)", json!({"empty": []})),
+        Ok(JValue::Undefined)
+    );
+    assert_eq!(
+        fused_eval("$min(empty.p)", json!({"empty": []})),
+        Ok(JValue::Undefined)
+    );
+    // $average is the one that could plausibly divide by zero instead.
+    assert_eq!(
+        fused_eval("$average(empty.p)", json!({"empty": []})),
+        Ok(JValue::Undefined)
+    );
+}
+
+#[test]
+fn test_fused_aggregate_still_aggregates_valid_input() {
+    // Guard the fast path's happy cases against an over-broad fix.
+    assert_eq!(
+        fused_eval("$sum(orders.p)", json!({"orders": [{"p": 1}, {"p": 2}]})),
+        Ok(JValue::Number(3.0))
+    );
+    // A missing field is undefined and drops out of the sequence.
+    assert_eq!(
+        fused_eval("$sum(orders.p)", json!({"orders": [{"p": 1}, {"q": 9}]})),
+        Ok(JValue::Number(1.0))
+    );
+    // A non-object element has no fields; it drops out too (matches jsonata-js).
+    assert_eq!(
+        fused_eval("$sum(orders.p)", json!({"orders": [1, {"p": 2}]})),
+        Ok(JValue::Number(2.0))
+    );
+    // Filter stages must keep working.
+    assert_eq!(
+        fused_eval("$sum(orders[p > 1].p)", json!({"orders": [{"p": 1}, {"p": 5}]})),
+        Ok(JValue::Number(5.0))
+    );
+    // A literal empty array is still 0.
+    assert_eq!(fused_eval("$sum([])", json!({})), Ok(JValue::Number(0.0)));
+}
