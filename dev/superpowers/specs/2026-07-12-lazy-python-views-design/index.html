@@ -1799,7 +1799,7 @@ instead of dicts does not help: <code>evaluate_json</code> time is dominated by 
 <li><code>py_object(&amp;self) -&gt; &amp;Py&lt;PyDict&gt;</code> — for output pass-through.</li>
 </ul>
 <p>New variant in <code>src/value.rs</code>:</p>
-<div class="language-rust highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">#[cfg(feature = </span><span class="s">&quot;python&quot;</span><span class="cp">)]</span>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="cp">#[cfg(feature = </span><span class="s">"python"</span><span class="cp">)]</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">LazyPyDict</span><span class="p">(</span><span class="n">Rc</span><span class="o">&lt;</span><span class="n">lazy</span><span class="p">::</span><span class="n">LazyPyDict</span><span class="o">&gt;</span><span class="p">),</span>
 </span></code></pre></div>
 <p>The pure-Rust crate (<code>jsonata-core</code> on crates.io, the CLI, <code>cargo test</code> without the

@@ -2031,7 +2031,7 @@
 <h3 id="predicates">Predicates<a class="headerlink" href="#predicates" title="Permanent link">&para;</a></h3>
 <p>Filter arrays using boolean conditions in square brackets:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>products[price &gt; 100]
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>users[age &gt;= 18 and status = &#39;active&#39;]
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>users[age &gt;= 18 and status = 'active']
 </span></code></pre></div>
 <h3 id="array-operations">Array Operations<a class="headerlink" href="#array-operations" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2048,9 +2048,9 @@
 <h3 id="object-construction">Object Construction<a class="headerlink" href="#object-construction" title="Permanent link">&para;</a></h3>
 <p>Create new JSON objects:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>{
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    &quot;fullName&quot;: firstName &amp; &quot; &quot; &amp; lastName,
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    &quot;age&quot;: age,
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    &quot;isAdult&quot;: age &gt;= 18
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    "fullName": firstName &amp; " " &amp; lastName,
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    "age": age,
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    "isAdult": age &gt;= 18
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>}
 </span></code></pre></div>
 <h3 id="array-constructors">Array Constructors<a class="headerlink" href="#array-constructors" title="Permanent link">&para;</a></h3>
@@ -2139,12 +2139,12 @@
 </span></code></pre></div>
 <h3 id="conditional-expressions">Conditional Expressions<a class="headerlink" href="#conditional-expressions" title="Permanent link">&para;</a></h3>
 <p>Ternary operator:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>age &gt;= 18 ? &quot;Adult&quot; : &quot;Minor&quot;
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>age &gt;= 18 ? "Adult" : "Minor"
 </span></code></pre></div>
 <p>Nested conditionals:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>score &gt;= 90 ? &quot;A&quot; :
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>score &gt;= 80 ? &quot;B&quot; :
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>score &gt;= 70 ? &quot;C&quot; : &quot;F&quot;
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>score &gt;= 90 ? "A" :
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>score &gt;= 80 ? "B" :
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>score &gt;= 70 ? "C" : "F"
 </span></code></pre></div>
 <h3 id="parent-operator">Parent Operator<a class="headerlink" href="#parent-operator" title="Permanent link">&para;</a></h3>
 <p>Use <code>%</code> to reference parent context in predicates:</p>
