@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- `$sum`, `$max`, `$min` and `$average` over a path of the form `array.field` no longer
+  silently skip non-numeric values. The fused aggregate fast path
+  (`Evaluator::try_fused_aggregate`) reimplemented aggregate semantics rather than
+  delegating to them, and treated a present non-numeric field the same as an absent one.
+  With `{"orders": [{"p": 1}, {"p": "free"}]}`, `$sum(orders.p)` returned `1` instead of
+  raising `T0412` — a plausible but wrong number rather than an error. The same path also
+  returned `0`/`null` for an empty sequence where jsonata-js returns `undefined`. The fast
+  path now declines when its assumptions do not hold, so the canonical aggregate produces
+  both the error and the empty-sequence semantics. ([#97](https://github.com/txjmb/jsonata-core/issues/97))
 
 ### Security
 

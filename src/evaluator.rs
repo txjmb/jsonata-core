@@ -7136,8 +7136,14 @@ impl Evaluator {
             let val = match item {
                 JValue::Object(obj) => match obj.get(extract_field) {
                     Some(JValue::Number(n)) => *n,
-                    Some(_) | None => continue, // Skip non-numeric / missing
+                    // A present non-numeric value is a type error (T0412), not
+                    // something to skip. Bail out so the canonical aggregate
+                    // raises it, rather than duplicating the check here.
+                    Some(_) => return Ok(None),
+                    // A missing field is undefined and drops out of the sequence.
+                    None => continue,
                 },
+                // A non-object element has no fields; it drops out too.
                 _ => continue,
             };
 
@@ -7154,12 +7160,11 @@ impl Evaluator {
             }
         }
 
+        // An empty sequence is undefined, and each aggregate spells that out
+        // differently. Defer to the canonical implementation instead of
+        // reproducing its empty-input semantics.
         if !has_any {
-            return Ok(Some(match name {
-                "sum" => JValue::from(0i64),
-                "average" | "max" | "min" => JValue::Null,
-                _ => unreachable!(),
-            }));
+            return Ok(None);
         }
 
         Ok(Some(match name {

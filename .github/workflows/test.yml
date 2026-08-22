@@ -104,6 +104,20 @@ jobs:
             --maxfail=50 \
             --junit-xml=test-results.xml
 
+      - name: Run reference test suite (forced tree-walker)
+        shell: bash
+        env:
+          JSONATAPY_FORCE_TREE_WALKER: "1"
+        run: |
+          # The bytecode VM falls back to the tree-walker for anything it
+          # cannot compile, so the tree-walker is reachable in production but
+          # was never exercised by a suite run. Without this job the toggle
+          # existed and nothing used it.
+          uv run pytest tests/python/test_reference_suite.py \
+            -v \
+            --tb=short \
+            --maxfail=50
+
       - name: Upload test results
         uses: actions/upload-artifact@v7
         if: always()
