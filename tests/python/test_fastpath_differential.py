@@ -33,9 +33,8 @@ this harness exists to catch under message-format noise.
 import json
 import pathlib
 
-import pytest
-
 import jsonatapy
+import pytest
 
 _FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 _corpus = json.loads((_FIXTURES / "fastpath_differential.json").read_text())
@@ -99,7 +98,7 @@ def evaluate(case, entry):
             raw = expr.evaluate_json_or_none(json.dumps(data))
             return None if raw is None else json.loads(raw)
         return expr.evaluate(data)
-    except Exception:  # noqa: BLE001 - any evaluation error counts as ERROR
+    except Exception:
         return ERROR
 
 
@@ -139,8 +138,6 @@ def entry(request):
 def test_fastpath_matches_reference(case, engine, entry, request):
     key = case_key(case, engine, entry)
     if key in KNOWN_DIVERGENCES:
-        request.node.add_marker(
-            pytest.mark.xfail(strict=True, reason=KNOWN_DIVERGENCES[key])
-        )
+        request.node.add_marker(pytest.mark.xfail(strict=True, reason=KNOWN_DIVERGENCES[key]))
     detail = diverges(case, entry)
     assert detail is None, f"{case['expr']} on {case['dataset']} ({entry}): {detail}"

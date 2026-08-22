@@ -1738,7 +1738,12 @@ fn fused_eval(expr: &str, data: serde_json::Value) -> Result<JValue, String> {
 #[test]
 fn test_fused_aggregate_rejects_non_numeric_field() {
     // jsonata-js raises T0412 for every one of these.
-    for expr in ["$sum(orders.p)", "$max(orders.p)", "$min(orders.p)", "$average(orders.p)"] {
+    for expr in [
+        "$sum(orders.p)",
+        "$max(orders.p)",
+        "$min(orders.p)",
+        "$average(orders.p)",
+    ] {
         let result = fused_eval(expr, json!({"orders": [{"p": "free"}]}));
         assert!(
             result.is_err(),
@@ -1751,7 +1756,10 @@ fn test_fused_aggregate_rejects_non_numeric_field() {
 fn test_fused_aggregate_does_not_silently_skip_non_numeric() {
     // The dangerous shape: a valid number alongside a string. Skipping the
     // string yields a plausible-but-wrong total instead of an error.
-    let result = fused_eval("$sum(orders.p)", json!({"orders": [{"p": 1}, {"p": "free"}]}));
+    let result = fused_eval(
+        "$sum(orders.p)",
+        json!({"orders": [{"p": 1}, {"p": "free"}]}),
+    );
     assert!(
         result.is_err(),
         "mixed numeric/non-numeric must error, got {result:?}"
@@ -1800,7 +1808,10 @@ fn test_fused_aggregate_still_aggregates_valid_input() {
     );
     // Filter stages must keep working.
     assert_eq!(
-        fused_eval("$sum(orders[p > 1].p)", json!({"orders": [{"p": 1}, {"p": 5}]})),
+        fused_eval(
+            "$sum(orders[p > 1].p)",
+            json!({"orders": [{"p": 1}, {"p": 5}]})
+        ),
         Ok(JValue::Number(5.0))
     );
     // A literal empty array is still 0.

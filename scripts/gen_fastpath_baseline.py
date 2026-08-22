@@ -13,11 +13,12 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "tests" / "python"))
 
-import test_fastpath_differential as harness  # noqa: E402
+import jsonatapy
+import test_fastpath_differential as harness
 
-import jsonatapy  # noqa: E402
-
-DEST = pathlib.Path(__file__).parent.parent / "tests" / "fixtures" / "fastpath_known_divergences.json"
+DEST = (
+    pathlib.Path(__file__).parent.parent / "tests" / "fixtures" / "fastpath_known_divergences.json"
+)
 
 
 def main():
@@ -53,7 +54,9 @@ def main():
         + "\n"
     )
     combos = 2 * len(harness.ENTRIES)
-    print(f"wrote {len(divergences)} known divergences over {len(harness.CASES)} cases x {combos} routes")
+    print(
+        f"wrote {len(divergences)} known divergences over {len(harness.CASES)} cases x {combos} routes"
+    )
     print(f"  {engine_specific} diverge on some routes but not others")
     print("  (an optimisation disagreeing with the path it replaces, not a shared gap)")
     print(f"  -> {DEST}")
