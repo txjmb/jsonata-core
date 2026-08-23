@@ -122,8 +122,15 @@ def diverges(case, entry="dict"):
 
     if expected["kind"] == "nonfinite":
         # Infinity/NaN cannot round-trip through JSON, so the corpus records the
-        # kind. jsonata-core raises on these rather than producing a non-finite
-        # number, which is a real difference and not a harness artefact.
+        # kind rather than a value.
+        #
+        # On the JSON route the result is serialised before we see it, and JSON
+        # has no way to spell Infinity -- our serialiser emits null, exactly as
+        # JavaScript's JSON.stringify does for the same value. So null is the
+        # correct observation there, not a divergence; the dict route is what
+        # actually checks the number.
+        if entry == "json" and got is None:
+            return None
         want = {"inf": float("inf"), "-inf": float("-inf"), "nan": float("nan")}[expected["value"]]
         if got is ERROR:
             return f"jsonata-js returned {want}, jsonatapy raised"

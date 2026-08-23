@@ -194,6 +194,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `&` now stringifies an explicit `null` as `"null"`, matching `$string(null)`, and treats
   only an *undefined* operand as the empty string. `null & "x"` was `"x"` and is now
   `"nullx"`; `missing.x & "x"` is still `"x"`.
+- `in` is membership again, not array filtering. An array on the left made `evaluate_binary_op`
+  treat the expression as `array[predicate]`, so `arr in 1` evaluated as `arr[1]` and returned
+  an element. It now follows jsonata-js: an undefined operand on either side gives `false`, a
+  non-array right side is wrapped, and membership is decided with `===` -- primitives by value,
+  composites by identity. `obj in [obj]` is true, `obj in [{"k": 1}]` is false, and an object
+  on the right is no longer treated as key-containment (`"k" in obj` is `false`).
+- Division and modulo by zero no longer raise. jsonata-js checks operands, never results:
+  `1/0` is `Infinity` and `0/0` is `NaN`, and the `D1001` appears when such a value is used as
+  an operand (`1/(10e300 * 10e100)`) or serialised inside a composite
+  (`$string({"inf": 1/0})`). The multiply overflow check moved from the result to the operands
+  to match. JSON cannot spell Infinity, so the JSON-returning APIs give `null` for it, exactly
+  as JavaScript's `JSON.stringify` does.
+- Unary negation of an explicit `null` now raises `D1002` instead of returning null; only
+  *undefined* propagates.
 
 ### Security
 

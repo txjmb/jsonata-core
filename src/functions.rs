@@ -231,10 +231,27 @@ pub mod string {
     /// - Converts non-integer numbers to 15 significant figures
     /// - Keeps integers without decimal point
     /// - Converts functions to empty string
+    /// jsonata-js serializes through `isNumeric`, which throws D1001 for a
+    /// non-finite number anywhere in the value. Without this the number becomes
+    /// JSON `null` and `$string({"inf": 1/0})` quietly returns `{"inf":null}`.
+    /// The scalar case raises D3001 earlier, matching the reference.
+    fn reject_non_finite(value: &JValue) -> Result<(), FunctionError> {
+        match value {
+            JValue::Number(n) if !n.is_finite() => Err(FunctionError::RuntimeError(format!(
+                "D1001: Number out of range: {}",
+                n
+            ))),
+            JValue::Array(arr) => arr.iter().try_for_each(reject_non_finite),
+            JValue::Object(obj) => obj.values().try_for_each(reject_non_finite),
+            _ => Ok(()),
+        }
+    }
+
     fn stringify_value_custom(
         value: &JValue,
         indent: Option<usize>,
     ) -> Result<String, FunctionError> {
+        reject_non_finite(value)?;
         // Transform the value recursively before stringifying
         let transformed = transform_for_stringify(value);
 

@@ -1125,8 +1125,8 @@ fn eval_compiled_inner(
             let val = eval_compiled_inner(inner, data, vars, ctx, shape, options, start_time)?;
             match val {
                 JValue::Number(n) => Ok(JValue::Number(-n)),
-                JValue::Null => Ok(JValue::Null),
-                // Undefined operand propagates through unary minus, matching the tree-walker.
+                // Only *undefined* propagates; null is D1002 like any other
+                // non-number, matching the tree-walker and jsonata-js.
                 v if v.is_undefined() => Ok(JValue::Undefined),
                 _ => Err(EvaluatorError::TypeError(
                     "D1002: Cannot negate non-number value".to_string(),
@@ -1565,36 +1565,30 @@ pub(crate) fn compiled_arithmetic(
         CompiledArithOp::Div => "/",
         CompiledArithOp::Mod => "%",
     };
+    // jsonata-js's `isNumeric` throws D1001 when an *operand* is Infinity. It
+    // must run before the numeric arm below, or `1/(10e300 * 10e100)` quietly
+    // computes 1/inf = 0 instead of raising. NaN operands are reported as
+    // non-numeric instead and fall through to T2001/T2002.
+    if matches!(left, JValue::Number(n) if n.is_infinite())
+        || matches!(right, JValue::Number(n) if n.is_infinite())
+    {
+        return Err(EvaluatorError::EvaluationError(
+            "D1001: Number out of range".to_string(),
+        ));
+    }
+
     match (left, right) {
         (JValue::Number(a), JValue::Number(b)) => {
             let result = match op {
                 CompiledArithOp::Add => *a + *b,
                 CompiledArithOp::Sub => *a - *b,
-                CompiledArithOp::Mul => {
-                    let r = *a * *b;
-                    if r.is_infinite() {
-                        return Err(EvaluatorError::EvaluationError(
-                            "D1001: Number out of range".to_string(),
-                        ));
-                    }
-                    r
-                }
-                CompiledArithOp::Div => {
-                    if *b == 0.0 {
-                        return Err(EvaluatorError::EvaluationError(
-                            "Division by zero".to_string(),
-                        ));
-                    }
-                    *a / *b
-                }
-                CompiledArithOp::Mod => {
-                    if *b == 0.0 {
-                        return Err(EvaluatorError::EvaluationError(
-                            "Division by zero".to_string(),
-                        ));
-                    }
-                    *a % *b
-                }
+                // No check on the *result*: jsonata-js returns Infinity for
+                // `1/0` and `10e300 * 10e100`, and NaN for `0/0` and `1%0`. The
+                // error surfaces when such a value is later used as an operand
+                // (see the D1001 guard above), matching `isNumeric`.
+                CompiledArithOp::Mul => *a * *b,
+                CompiledArithOp::Div => *a / *b,
+                CompiledArithOp::Mod => *a % *b,
             };
             Ok(JValue::Number(result))
         }
@@ -1608,13 +1602,17 @@ pub(crate) fn compiled_arithmetic(
         // `*_is_explicit_null` flags are vestigial: they told a literal `null`
         // from a missing value back when both were `JValue::Null`, and since
         // the null/undefined split (#32) the variant carries that itself.
-        _ if !matches!(left, JValue::Number(_) | JValue::Undefined) => {
+        _ if !matches!(left, JValue::Number(n) if !n.is_nan())
+            && !matches!(left, JValue::Undefined) =>
+        {
             Err(EvaluatorError::TypeError(format!(
                 "T2001: The left side of the {} operator must evaluate to a number",
                 op_sym
             )))
         }
-        _ if !matches!(right, JValue::Number(_) | JValue::Undefined) => {
+        _ if !matches!(right, JValue::Number(n) if !n.is_nan())
+            && !matches!(right, JValue::Undefined) =>
+        {
             Err(EvaluatorError::TypeError(format!(
                 "T2002: The right side of the {} operator must evaluate to a number",
                 op_sym
@@ -7119,27 +7117,6 @@ impl Evaluator {
             return Ok(value);
         }
 
-        // Special handling for 'In' operator - check for array filtering
-        // Must evaluate lhs first to determine if this is array filtering
-        if op == BinaryOp::In {
-            let left = self.evaluate_internal(lhs, data)?;
-
-            // Check if this is array filtering: array[predicate]
-            if matches!(left, JValue::Array(_)) {
-                // Try evaluating rhs in current context to see if it's a simple index
-                let right_result = self.evaluate_internal(rhs, data);
-
-                if let Ok(JValue::Number(_)) = right_result {
-                    // Simple numeric index: array[n]
-                    return self.array_index(&left, &right_result.unwrap());
-                } else {
-                    // This is array filtering: array[predicate]
-                    // Evaluate the predicate for each array item
-                    return self.array_filter(lhs, rhs, &left, data);
-                }
-            }
-        }
-
         // Special handling for logical operators (short-circuit evaluation)
         if op == BinaryOp::And {
             let left = self.evaluate_internal(lhs, data)?;
@@ -7247,8 +7224,9 @@ impl Evaluator {
 
         match op {
             UnaryOp::Negate => match value {
-                // undefined returns undefined
-                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                // Only *undefined* propagates; null is not a number, so it is
+                // D1002 like any other non-number (jsonata-js `evaluateUnary`).
+                JValue::Undefined => Ok(JValue::Undefined),
                 JValue::Number(n) => Ok(JValue::Number(-n)),
                 _ => Err(EvaluatorError::TypeError(
                     "D1002: Cannot negate non-number value".to_string(),
@@ -12465,55 +12443,46 @@ impl Evaluator {
         }
     }
 
+    /// The `in` membership operator.
+    ///
+    /// Mirrors jsonata-js's `evaluateIncludesExpression`: an *undefined* operand
+    /// on either side makes the result false; a non-array right side is wrapped
+    /// in a one-element array; and membership is decided with `===`, so
+    /// primitives match by value while composites match only by identity.
+    /// `obj in [obj]` is true and `obj in [{"k": 1}]` is false.
+    ///
+    /// An explicit null is a value here and matches itself. An object on the
+    /// right is NOT key-containment -- `"k" in obj` is false, because the object
+    /// is wrapped and compared against the string.
     fn in_operator(&self, left: &JValue, right: &JValue) -> Result<JValue, EvaluatorError> {
-        // If either side is undefined/null, return false (not an error)
-        // This matches JavaScript behavior
-        if left.is_null() || right.is_null() {
+        if left.is_undefined() || right.is_undefined() {
             return Ok(JValue::Bool(false));
         }
 
-        // Normalize a lazy left operand once; every equality below needs a real
-        // value, not a per-comparison materialization attempt. Guarded by `is_lazy`
-        // so the common (non-lazy) path pays no clone.
-        let normalized_left;
-        let left = if left.is_lazy() {
-            normalized_left = normalize_lazy(left)?;
-            &normalized_left
-        } else {
-            left
-        };
+        // Deliberately NOT normalizing a lazy operand here. Membership is decided
+        // by identity, and materializing one side turns a lazy dict into a fresh
+        // `Object` that can no longer be identical to the lazy dict on the other
+        // side -- which made `obj in obj` false on the Python-dict route only.
+        // `LazyPyDict::same_object` compares the underlying Python object.
+
+        /// `===` in Rust terms: primitives by value, composites by identity.
+        fn identical(a: &JValue, b: &JValue) -> bool {
+            match (a, b) {
+                (JValue::Null, JValue::Null) => true,
+                (JValue::Bool(x), JValue::Bool(y)) => x == y,
+                (JValue::Number(x), JValue::Number(y)) => x == y,
+                (JValue::String(x), JValue::String(y)) => x == y,
+                (JValue::Array(x), JValue::Array(y)) => Rc::ptr_eq(x, y),
+                (JValue::Object(x), JValue::Object(y)) => Rc::ptr_eq(x, y),
+                #[cfg(feature = "python")]
+                (JValue::LazyPyDict(x), JValue::LazyPyDict(y)) => x.same_object(y),
+                _ => false,
+            }
+        }
 
         match right {
-            JValue::Array(arr) => {
-                for v in arr.iter() {
-                    // compiled_equal normalizes a lazy element (guarded) so a
-                    // conversion failure raises instead of silently not matching.
-                    if matches!(compiled_equal(left, v)?, JValue::Bool(true)) {
-                        return Ok(JValue::Bool(true));
-                    }
-                }
-                Ok(JValue::Bool(false))
-            }
-            JValue::Object(obj) => {
-                if let JValue::String(key) = left {
-                    Ok(JValue::Bool(obj.contains_key(&**key)))
-                } else {
-                    Ok(JValue::Bool(false))
-                }
-            }
-            // Right-side lazy-object key-presence check doesn't convert any values
-            // (`contains_field` checks the Python dict directly), so it's left as-is.
-            #[cfg(feature = "python")]
-            JValue::LazyPyDict(lazy) => {
-                if let JValue::String(key) = left {
-                    Ok(JValue::Bool(lazy.contains_field(key)))
-                } else {
-                    Ok(JValue::Bool(false))
-                }
-            }
-            // If right side is not an array or object (e.g., string, number),
-            // wrap it in an array for comparison
-            other => Ok(JValue::Bool(self.equals(left, other))),
+            JValue::Array(arr) => Ok(JValue::Bool(arr.iter().any(|v| identical(left, v)))),
+            other => Ok(JValue::Bool(identical(left, other))),
         }
     }
 
@@ -12905,13 +12874,18 @@ mod tests {
         let mut evaluator = Evaluator::new();
         let data = JValue::Null;
 
+        // jsonata-js has no division-by-zero error: `10/0` is Infinity, and the
+        // D1001 appears only when that value is used as an operand. This
+        // asserted an error that the reference does not raise (#102).
         let expr = AstNode::Binary {
             op: BinaryOp::Divide,
             lhs: Box::new(AstNode::number(10.0)),
             rhs: Box::new(AstNode::number(0.0)),
         };
-        let result = evaluator.evaluate(&expr, &data);
-        assert!(result.is_err());
+        match evaluator.evaluate(&expr, &data) {
+            Ok(JValue::Number(n)) => assert!(n.is_infinite() && n > 0.0),
+            other => panic!("expected +inf, got {other:?}"),
+        }
     }
 
     #[test]

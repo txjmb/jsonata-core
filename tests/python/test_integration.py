@@ -435,9 +435,18 @@ class TestErrorHandling:
             jsonatapy.evaluate('"hello" + 42', {})
 
     def test_division_by_zero(self):
-        """Test division by zero handling"""
-        with pytest.raises((ValueError, ZeroDivisionError)):
-            jsonatapy.evaluate("10 / 0", {})
+        """Division by zero yields Infinity, as in jsonata-js.
+
+        jsonata-js has no division-by-zero error: `10/0` is Infinity and the
+        D1001 appears only when that value is used as an operand or serialised.
+        This asserted an error the reference does not raise (#102). JSON cannot
+        spell Infinity, so the JSON-returning API gives None here, exactly as
+        JavaScript's JSON.stringify gives null.
+        """
+        assert jsonatapy.evaluate("10 / 0", {}) == float("inf")
+        # Consuming it does raise.
+        with pytest.raises(ValueError):
+            jsonatapy.evaluate("1 / (10 / 0)", {})
 
 
 class TestExpressionReuse:

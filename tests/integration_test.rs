@@ -506,11 +506,18 @@ fn test_error_division_by_zero() {
     })
     .into();
 
+    // jsonata-js returns Infinity for division by zero rather than raising; the
+    // D1001 surfaces only when that value is consumed as an operand (#102).
     let ast = parse("value / 0").unwrap();
     let mut evaluator = Evaluator::new();
-    let result = evaluator.evaluate(&ast, &data);
+    match evaluator.evaluate(&ast, &data) {
+        Ok(JValue::Number(n)) => assert!(n.is_infinite() && n > 0.0),
+        other => panic!("expected +inf, got {other:?}"),
+    }
 
-    assert!(result.is_err());
+    // Consuming it does raise.
+    let ast = parse("1 / (value / 0)").unwrap();
+    assert!(Evaluator::new().evaluate(&ast, &data).is_err());
 }
 
 #[test]
@@ -2738,5 +2745,149 @@ fn test_concat_ordinary_values_unaffected() {
             .evaluate(&parse("s & x").unwrap(), &data)
             .unwrap(),
         JValue::from("a1")
+    );
+}
+
+// ── The `in` operator (issue #102 follow-up, operator matrix) ────────────────
+//
+// `in` is membership, and jsonata-js compares with `===`: primitives match by
+// value, composites only by identity. A non-array right side is wrapped, and
+// an *undefined* operand on either side makes the result false.
+//
+// Two things were wrong. `evaluate_binary_op` special-cased an array left
+// operand as "array filtering", so `arr in 1` evaluated as `arr[1]` and
+// returned an element. And `in_operator` treated an object right side as
+// key-containment and compared with deep equality.
+
+fn in_eval(expr: &str) -> JValue {
+    let data: JValue = json!({"arr": [1, 2], "nul": null, "obj": {"k": 1}}).into();
+    Evaluator::new()
+        .evaluate(&parse(expr).unwrap(), &data)
+        .unwrap()
+}
+
+#[test]
+fn test_in_with_array_left_operand_is_never_a_member() {
+    for expr in ["arr in 1", "arr in 0", "arr in arr", "arr in [[1, 2]]"] {
+        assert_eq!(in_eval(expr), JValue::Bool(false), "{expr}");
+    }
+}
+
+#[test]
+fn test_in_basic_membership() {
+    assert_eq!(in_eval("1 in arr"), JValue::Bool(true));
+    assert_eq!(in_eval("3 in arr"), JValue::Bool(false));
+    assert_eq!(in_eval("\"a\" in [\"a\", \"b\"]"), JValue::Bool(true));
+    // A non-array right side is wrapped in one.
+    assert_eq!(in_eval("1 in 1"), JValue::Bool(true));
+    assert_eq!(in_eval("1 in \"1\""), JValue::Bool(false));
+    assert_eq!(in_eval("\"a\" in \"a\""), JValue::Bool(true));
+}
+
+#[test]
+fn test_in_null_and_undefined() {
+    // null is a value and matches itself; only undefined short-circuits.
+    assert_eq!(in_eval("null in [null]"), JValue::Bool(true));
+    assert_eq!(in_eval("nul in [null]"), JValue::Bool(true));
+    assert_eq!(in_eval("nul in arr"), JValue::Bool(false));
+    assert_eq!(in_eval("missing.x in arr"), JValue::Bool(false));
+    assert_eq!(in_eval("arr in missing.x"), JValue::Bool(false));
+    assert_eq!(in_eval("missing.x in missing.y"), JValue::Bool(false));
+}
+
+#[test]
+fn test_in_composites_match_by_identity_not_structure() {
+    // A structurally equal but distinct object is not a member.
+    assert_eq!(in_eval("obj in [{\"k\": 1}]"), JValue::Bool(false));
+    // The same object is.
+    assert_eq!(in_eval("obj in [obj]"), JValue::Bool(true));
+    assert_eq!(in_eval("obj in [obj, 1]"), JValue::Bool(true));
+}
+
+#[test]
+fn test_in_object_right_side_is_not_key_containment() {
+    // jsonata-js wraps the object and compares identity, so a key name is not
+    // a member of the object it belongs to.
+    assert_eq!(in_eval("\"k\" in obj"), JValue::Bool(false));
+    assert_eq!(in_eval("\"z\" in obj"), JValue::Bool(false));
+}
+
+// ── Non-finite arithmetic (issue #102 follow-up, operator matrix) ────────────
+//
+// jsonata-js checks the *operands*, never the result: `isNumeric` throws D1001
+// for an Infinity operand and reports NaN as non-numeric (T2001/T2002). So the
+// operators themselves happily produce Infinity and NaN, and the error appears
+// when such a value is consumed. We raised "Division by zero" at the operator
+// instead, which has no counterpart in the reference.
+
+fn num_eval(expr: &str) -> Result<JValue, String> {
+    let data: JValue = json!({}).into();
+    Evaluator::new()
+        .evaluate(&parse(expr).unwrap(), &data)
+        .map_err(|e| e.to_string())
+}
+
+#[test]
+fn test_division_by_zero_yields_non_finite() {
+    match num_eval("1/0") {
+        Ok(JValue::Number(n)) => assert!(n.is_infinite() && n > 0.0, "got {n}"),
+        other => panic!("expected +inf, got {other:?}"),
+    }
+    for expr in ["0/0", "1%0", "0%0"] {
+        match num_eval(expr) {
+            Ok(JValue::Number(n)) => assert!(n.is_nan(), "{expr} gave {n}"),
+            other => panic!("{expr}: expected NaN, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_overflow_yields_infinity_but_consuming_it_raises() {
+    // The multiply itself overflows to Infinity without raising...
+    match num_eval("10e300 * 10e100") {
+        Ok(JValue::Number(n)) => assert!(n.is_infinite(), "got {n}"),
+        other => panic!("expected inf, got {other:?}"),
+    }
+    // ...and the error appears when that Infinity becomes an operand (D1001).
+    assert!(num_eval("1/(10e300 * 10e100)").is_err());
+}
+
+#[test]
+fn test_non_finite_serializes_like_javascript() {
+    // JSON has no Infinity; JSON.stringify gives null and so do we.
+    assert_eq!(num_eval("1/0").unwrap().to_json_string().unwrap(), "null");
+}
+
+#[test]
+fn test_ordinary_division_unaffected() {
+    assert_eq!(num_eval("6/3").unwrap(), JValue::Number(2.0));
+    assert_eq!(num_eval("7%3").unwrap(), JValue::Number(1.0));
+}
+
+#[test]
+fn test_unary_negate_null_raises_undefined_propagates() {
+    // jsonata-js: undefined propagates, a number negates, anything else -- null
+    // included -- is D1002. Both negate implementations treated null as
+    // "missing" and returned null.
+    let data: JValue = json!({"nul": null, "x": 5}).into();
+    for expr in ["-(null)", "-(nul)", "-(\"s\")", "-(true)"] {
+        assert!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .is_err(),
+            "{expr} must raise D1002"
+        );
+    }
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("-(missing.x)").unwrap(), &data)
+            .unwrap(),
+        JValue::Undefined
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("-x").unwrap(), &data)
+            .unwrap(),
+        JValue::Number(-5.0)
     );
 }
