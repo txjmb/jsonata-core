@@ -126,7 +126,10 @@ fn type_symbol(value: &JValue) -> char {
         JValue::Undefined => 'm',
         JValue::Lambda { .. } => 'f',
         JValue::Builtin { .. } => 'f',
-        JValue::Regex { .. } => 'o',
+        // A regex is a *function* in jsonata-js (a regex literal evaluates to
+        // one), so it matches the `f` half of unions like `(sf)` in
+        // `$match`/`$replace`/`$split`/`$contains`.
+        JValue::Regex { .. } => 'f',
         #[cfg(feature = "python")]
         JValue::LazyPyDict(_) => 'o',
     }

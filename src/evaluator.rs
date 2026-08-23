@@ -2072,6 +2072,43 @@ pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
     Ok(value.clone())
 }
 
+/// Validate and coerce a builtin's arguments against its jsonata-js signature.
+///
+/// One copy shared by all three dispatch paths -- the compiled/VM
+/// `call_pure_builtin`, the tree-walker's `evaluate_function_call`, and
+/// `call_builtin_with_values` for builtins passed by reference. They used to
+/// hand-roll their own argument checks, which is why they disagreed with each
+/// other about `$round` and the `$substring*` family.
+///
+/// Returns `None` when validation declines because an argument was missing: the
+/// answer differs per function ($count is 0, $exists is false, $abs is
+/// undefined), so the caller's arm decides. A genuine type error is returned as
+/// an error.
+fn validate_builtin_args(
+    name: &str,
+    args: &[JValue],
+    context: &JValue,
+) -> Result<Option<Vec<JValue>>, EvaluatorError> {
+    let Some(sig) = crate::signature::builtin_signature(name) else {
+        return Ok(None);
+    };
+    match sig.validate_and_coerce(args, context) {
+        Ok(mut coerced) => {
+            // Validation returns one entry per *parameter*, padding absent
+            // optional ones with Undefined. The arms decide whether an optional
+            // was supplied from `args.len()`, so a padded tail makes
+            // `$split("a,b", ",")` read a third argument and reject it as a
+            // non-numeric limit. Trim the padding back off.
+            while coerced.len() > args.len() && matches!(coerced.last(), Some(JValue::Undefined)) {
+                coerced.pop();
+            }
+            Ok(Some(coerced))
+        }
+        Err(crate::signature::SignatureError::UndefinedArgument) => Ok(None),
+        Err(e) => Err(EvaluatorError::TypeError(e.to_string())),
+    }
+}
+
 /// Dispatch a pure builtin function call.
 ///
 /// Replicates the tree-walker's evaluation for the subset of builtins in
@@ -2145,6 +2182,20 @@ fn call_pure_builtin(
     if effective_args.first().is_some_and(JValue::is_undefined) && propagates_undefined(name) {
         return Ok(JValue::Undefined);
     }
+
+    // Validate and coerce against the builtin's jsonata-js signature. This is
+    // where a lot of behaviour we used to hand-roll per function is actually
+    // specified: the `a` type "normally treats any value as a singleton array"
+    // (so `$reverse(1)` is `[1]` and `$count(null)` is 1), and `l` is distinct
+    // from `m`, so `$abs(null)` is a type error while a missing argument is not.
+    let sig_storage: Vec<JValue>;
+    let effective_args: &[JValue] = match validate_builtin_args(name, effective_args, data)? {
+        Some(coerced) => {
+            sig_storage = coerced;
+            &sig_storage
+        }
+        None => effective_args,
+    };
 
     match name {
         // ── String functions ────────────────────────────────────────────
@@ -5255,7 +5306,7 @@ impl Evaluator {
                     if steps[0].is_tuple {
                         self.keep_tuple_stream = true;
                     }
-                    let v = self.evaluate_path_step(&steps[0].node, data, data);
+                    let v = self.evaluate_path_step(&steps[0].node, data, data, true);
                     self.keep_tuple_stream = saved_keep;
                     v?
                 }
@@ -6045,7 +6096,7 @@ impl Evaluator {
                     if step.is_tuple {
                         self.keep_tuple_stream = true;
                     }
-                    let v = self.evaluate_path_step(&step.node, &current, data);
+                    let v = self.evaluate_path_step(&step.node, &current, data, false);
                     self.keep_tuple_stream = saved_keep;
                     v?
                 }
@@ -6478,11 +6529,18 @@ impl Evaluator {
     }
 
     /// Helper to evaluate a complex path step
+    /// `is_first_step` distinguishes the head of a path from a later step. The
+    /// head is evaluated against the input itself, so an expression that does
+    /// not reference the input -- an object constructor, say -- still evaluates
+    /// when the input is undefined: `{"a": 1}.a` is 1 with no input at all. A
+    /// *later* step over an undefined value has nothing to map and stays
+    /// undefined.
     fn evaluate_path_step(
         &mut self,
         step: &AstNode,
         current: &JValue,
         original_data: &JValue,
+        is_first_step: bool,
     ) -> Result<JValue, EvaluatorError> {
         // Special case: array mapping with object construction
         // e.g., items.{"name": name, "price": price}
@@ -6586,7 +6644,7 @@ impl Evaluator {
             // from that object. The array case is handled above; this is the
             // singleton form. An undefined step value stays undefined.
             if matches!(step, AstNode::Object(_)) {
-                if matches!(current, JValue::Undefined) {
+                if matches!(current, JValue::Undefined) && !is_first_step {
                     return Ok(JValue::Undefined);
                 }
                 return self.evaluate_internal(step, current);
@@ -7658,6 +7716,13 @@ impl Evaluator {
                 *arg = normalize_lazy(arg)?;
             }
         }
+
+        // NOT signature-validated yet, unlike the compiled path. Several arms
+        // here read their arguments positionally in ways coercion disturbs:
+        // `$sift(fn)` takes its object from context, so validation returns a
+        // differently-shaped list than the arm indexes into, and it panics.
+        // Wiring this path needs those arms migrated to the coerced shape
+        // first, function group by function group.
 
         match name {
             "string" => {
@@ -11221,6 +11286,13 @@ impl Evaluator {
         } else {
             values
         };
+        // NOT signature-validated yet, unlike the other two dispatch paths. A
+        // builtin reaching here was passed by reference to a higher-order
+        // function, and that changes the arity contract in two ways this helper
+        // does not yet model: a context-capable parameter (`<s-:s>`) is counted
+        // as taking no arguments, and a HOF hands its callback more arguments
+        // than the builtin declares ($sift calls its callback with value and
+        // key). Wiring it in without handling both rejects `$map(arr, $uppercase)`.
         let arg = &values[0];
 
         match name {
@@ -11439,8 +11511,10 @@ impl Evaluator {
         let mut descendants = Vec::new();
 
         match value {
-            JValue::Null => {
-                // Null has no descendants, return empty
+            // Neither a null nor a missing value has descendants. Undefined used
+            // to fall through to the catch-all and collect *itself*, so `**`
+            // with no input produced `[null]` instead of undefined.
+            JValue::Null | JValue::Undefined => {
                 return Ok(descendants);
             }
             JValue::Object(obj) => {
