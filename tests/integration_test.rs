@@ -2221,3 +2221,86 @@ fn test_stage_filter_indexes_within_each_group() {
         JValue::from(json!([2, 3]))
     );
 }
+
+// ── Arithmetic on a runtime null (issue #98 follow-up) ───────────────────────
+//
+// An explicit null operand is a type error; only *undefined* propagates. The
+// operators carried compile-time `explicit_null` flags to tell those apart
+// back when both were `JValue::Null`, so a null arriving at runtime -- from
+// data, or as a lambda parameter -- was treated as "missing" and silently
+// produced null instead of raising.
+
+#[test]
+fn test_arithmetic_on_runtime_null_is_an_error() {
+    let data: JValue = json!({"n": null, "x": 5}).into();
+    for expr in ["n * 2", "n + 1", "n - 1", "n / 2", "x * n", "x + n"] {
+        let ast = parse(expr).unwrap();
+        assert!(
+            Evaluator::new().evaluate(&ast, &data).is_err(),
+            "{expr} must raise on a null operand"
+        );
+    }
+}
+
+#[test]
+fn test_arithmetic_on_null_lambda_parameter_is_an_error() {
+    // The shape that surfaced this: the null reaches the operator as a lambda
+    // parameter, so no compile-time flag could have marked it.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+    for expr in [
+        "$map([1, null], function($v) { $v * 2 })",
+        "$map([1, null], function($v) { $v + 1 })",
+        "$map(arr.p, function($v) { $v * 2 })",
+    ] {
+        let ast = parse(expr).unwrap();
+        assert!(
+            Evaluator::new().evaluate(&ast, &data).is_err(),
+            "{expr} must raise on a null element"
+        );
+    }
+}
+
+#[test]
+fn test_arithmetic_still_propagates_undefined() {
+    // The other half: a genuinely missing operand yields undefined, not an error.
+    let data: JValue = json!({"x": 5, "e": []}).into();
+    for expr in [
+        "missing.x * 2",
+        "e.p * 2",
+        "x * missing.y",
+        "missing.a * missing.b",
+    ] {
+        let ast = parse(expr).unwrap();
+        assert_eq!(
+            Evaluator::new().evaluate(&ast, &data).unwrap(),
+            JValue::Undefined,
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_arithmetic_valid_cases_unaffected() {
+    let data: JValue = json!({"x": 5, "y": 2}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x * y").unwrap(), &data)
+            .unwrap(),
+        JValue::Number(10.0)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x - y").unwrap(), &data)
+            .unwrap(),
+        JValue::Number(3.0)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(
+                &parse("$map([1, 2], function($v) { $v * 2 })").unwrap(),
+                &data
+            )
+            .unwrap(),
+        JValue::from(json!([2, 4]))
+    );
+}

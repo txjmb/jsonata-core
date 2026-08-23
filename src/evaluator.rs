@@ -1575,8 +1575,8 @@ pub(crate) fn compiled_arithmetic(
     op: CompiledArithOp,
     left: &JValue,
     right: &JValue,
-    left_is_explicit_null: bool,
-    right_is_explicit_null: bool,
+    _left_is_explicit_null: bool,
+    _right_is_explicit_null: bool,
 ) -> Result<JValue, EvaluatorError> {
     let op_sym = match op {
         CompiledArithOp::Add => "+",
@@ -1618,27 +1618,30 @@ pub(crate) fn compiled_arithmetic(
             };
             Ok(JValue::Number(result))
         }
-        // Explicit null literal → T2002 error (matching tree-walker behavior)
-        (JValue::Null | JValue::Undefined, _) if left_is_explicit_null => {
+        // Order matters, and matches jsonata-js: type-check each *defined*
+        // operand first, then propagate undefined. `false + $x` raises T2001 on
+        // the boolean even though the right side is undefined.
+        //
+        // Only undefined propagates. An explicit null -- like any other
+        // non-number -- is a type error, whether written as a literal or
+        // arriving at runtime from data or a lambda parameter. The
+        // `*_is_explicit_null` flags are vestigial: they told a literal `null`
+        // from a missing value back when both were `JValue::Null`, and since
+        // the null/undefined split (#32) the variant carries that itself.
+        _ if !matches!(left, JValue::Number(_) | JValue::Undefined) => {
             Err(EvaluatorError::TypeError(format!(
-                "T2002: The left side of the {} operator must evaluate to a number",
+                "T2001: The left side of the {} operator must evaluate to a number",
                 op_sym
             )))
         }
-        (_, JValue::Null | JValue::Undefined) if right_is_explicit_null => {
+        _ if !matches!(right, JValue::Number(_) | JValue::Undefined) => {
             Err(EvaluatorError::TypeError(format!(
                 "T2002: The right side of the {} operator must evaluate to a number",
                 op_sym
             )))
         }
-        // Implicit undefined propagation (from missing field) → undefined result
-        (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-            Ok(JValue::Null)
-        }
-        _ => Err(EvaluatorError::TypeError(format!(
-            "Cannot apply {} to {:?} and {:?}",
-            op_sym, left, right
-        ))),
+        // At least one operand is undefined and neither is a bad type.
+        _ => Ok(JValue::Undefined),
     }
 }
 
@@ -11945,6 +11948,10 @@ impl Evaluator {
     }
 
     /// Addition
+    /// Add — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn add(
         &self,
         left: &JValue,
@@ -11952,48 +11959,20 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Number(*a + *b)),
-            // Explicit null literal with number -> T2002 error
-            (JValue::Null, JValue::Number(_)) if left_is_explicit_null => {
-                Err(EvaluatorError::TypeError(
-                    "T2002: The left side of the + operator must evaluate to a number".to_string(),
-                ))
-            }
-            (JValue::Number(_), JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::TypeError(
-                    "T2002: The right side of the + operator must evaluate to a number".to_string(),
-                ))
-            }
-            (JValue::Null, JValue::Null) if left_is_explicit_null || right_is_explicit_null => {
-                Err(EvaluatorError::TypeError(
-                    "T2002: The left side of the + operator must evaluate to a number".to_string(),
-                ))
-            }
-            // Undefined variable (null/undefined) with number -> undefined result
-            (JValue::Null | JValue::Undefined, JValue::Number(_))
-            | (JValue::Number(_), JValue::Null | JValue::Undefined) => Ok(JValue::Null),
-            // Boolean with anything (including undefined) -> T2001 error
-            (JValue::Bool(_), _) => Err(EvaluatorError::TypeError(
-                "T2001: The left side of the '+' operator must evaluate to a number or a string"
-                    .to_string(),
-            )),
-            (_, JValue::Bool(_)) => Err(EvaluatorError::TypeError(
-                "T2001: The right side of the '+' operator must evaluate to a number or a string"
-                    .to_string(),
-            )),
-            // Undefined with undefined -> undefined
-            (JValue::Null | JValue::Undefined, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot add {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Add,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Subtraction
+    /// Subtract — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn subtract(
         &self,
         left: &JValue,
@@ -12001,27 +11980,20 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Number(*a - *b)),
-            // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The left side of the - operator must evaluate to a number".to_string(),
-            )),
-            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The right side of the - operator must evaluate to a number".to_string(),
-            )),
-            // Undefined variables -> undefined result
-            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot subtract {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Sub,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Multiplication
+    /// Multiply — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn multiply(
         &self,
         left: &JValue,
@@ -12029,36 +12001,20 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                let result = *a * *b;
-                // Check for overflow to Infinity
-                if result.is_infinite() {
-                    return Err(EvaluatorError::EvaluationError(
-                        "D1001: Number out of range".to_string(),
-                    ));
-                }
-                Ok(JValue::Number(result))
-            }
-            // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The left side of the * operator must evaluate to a number".to_string(),
-            )),
-            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The right side of the * operator must evaluate to a number".to_string(),
-            )),
-            // Undefined variables -> undefined result
-            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot multiply {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Mul,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Division
+    /// Divide — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn divide(
         &self,
         left: &JValue,
@@ -12066,35 +12022,20 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                let denominator = *b;
-                if denominator == 0.0 {
-                    return Err(EvaluatorError::EvaluationError(
-                        "Division by zero".to_string(),
-                    ));
-                }
-                Ok(JValue::Number(*a / denominator))
-            }
-            // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The left side of the / operator must evaluate to a number".to_string(),
-            )),
-            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The right side of the / operator must evaluate to a number".to_string(),
-            )),
-            // Undefined variables -> undefined result
-            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot divide {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Div,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Modulo
+    /// Modulo — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn modulo(
         &self,
         left: &JValue,
@@ -12102,32 +12043,13 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                let denominator = *b;
-                if denominator == 0.0 {
-                    return Err(EvaluatorError::EvaluationError(
-                        "Division by zero".to_string(),
-                    ));
-                }
-                Ok(JValue::Number(*a % denominator))
-            }
-            // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The left side of the % operator must evaluate to a number".to_string(),
-            )),
-            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The right side of the % operator must evaluate to a number".to_string(),
-            )),
-            // Undefined variables -> undefined result
-            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot compute modulo of {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Mod,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Get human-readable type name for error messages
