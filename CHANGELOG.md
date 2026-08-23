@@ -174,6 +174,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   order"; it now declines those inputs so the general comparator raises `T2010`/`T2009`.
   Absent keys are still undefined and still sort last on the fast path.
   ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster A)
+- `$map` and `$filter` now return sequences rather than arrays: a single result unwraps to
+  that result and an empty result is undefined, so `$map(arr, function($v){$v.p})` over
+  `[{"p": "free"}]` is `"free"` rather than `["free"]`, and over `[]` is undefined rather
+  than `[]`. `$map` also accepts a non-array argument as the singleton sequence containing
+  it, which `$filter` already did.
+- Field access on a lambda parameter (`$v.p`, `$l.rating`) now yields undefined for a missing
+  field instead of null. The `$var.field` fast path used by sort and higher-order-function
+  bodies predates the null/undefined split, which is why `$map` produced `[1, null]` where
+  jsonata-js drops the undefined, and why `$filter` raised `T2010` comparing what was really
+  a missing field. ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster B)
 
 ### Security
 

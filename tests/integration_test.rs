@@ -2443,3 +2443,102 @@ fn test_specialized_sort_still_sorts_valid_keys() {
         JValue::from(json!([3, 1]))
     );
 }
+
+// ── Field access on a lambda parameter (issue #102, clusters B/D) ────────────
+//
+// The `$var.field` fast path -- used for `$l.rating`, `$v.price` in sort and
+// HOF bodies -- predates the null/undefined split and mapped a missing field
+// to `JValue::Null`. That is why `$map` produced `[1, null]` where jsonata-js
+// drops the undefined and yields `1`, and why `$filter` raised T2010 comparing
+// a "null" that was really a missing field.
+
+#[test]
+fn test_lambda_param_missing_field_is_undefined() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+
+    // The undefined drops out of the sequence rather than becoming null.
+    let ast = parse("$map(arr, function($v) { $v.p })").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!(1))
+    );
+
+    // And a comparison against it is undefined, not a T2010 on a null.
+    let ast = parse("$filter(arr, function($v) { $v.p > 0 })").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!({"p": 1}))
+    );
+}
+
+#[test]
+fn test_lambda_param_explicit_null_field_is_kept() {
+    // The other half: a present null is a value and must not vanish.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+    let ast = parse("$map(arr, function($v) { $v.p })").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([1, null]))
+    );
+}
+
+// ── $map/$filter return sequences, not arrays (issue #102, cluster B) ────────
+
+#[test]
+fn test_hof_results_are_sequences() {
+    // One result unwraps to that result.
+    let data: JValue = json!({"arr": [{"p": "free"}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("$map(arr, function($v) { $v.p })").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!("free"))
+    );
+
+    // An empty result is undefined, not [].
+    let data: JValue = json!({"arr": []}).into();
+    for expr in [
+        "$map(arr, function($v) { $v.p })",
+        "$filter(arr, function($v) { $v.p > 0 })",
+    ] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::Undefined,
+            "{expr}"
+        );
+    }
+
+    // All results undefined is also an empty sequence.
+    let data: JValue = json!({"arr": [{"q": 1}, {"q": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("$map(arr, function($v) { $v.p })").unwrap(), &data)
+            .unwrap(),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_hof_accepts_a_non_array_as_a_singleton() {
+    let data: JValue = json!({"arr": {"p": 1}}).into();
+    for expr in [
+        "$map(arr, function($v) { $v.p })",
+        "$filter(arr, function($v) { $v.p > 0 })",
+    ] {
+        let result = Evaluator::new().evaluate(&parse(expr).unwrap(), &data);
+        assert!(result.is_ok(), "{expr} must accept a non-array: {result:?}");
+    }
+}
+
+#[test]
+fn test_hof_multi_element_results_still_arrays() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("$map(arr, function($v) { $v.p })").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!([1, 2]))
+    );
+}

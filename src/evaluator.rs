@@ -1314,12 +1314,9 @@ fn eval_compiled_inner(
                     }
                 }
             }
-            check_sequence_length(result.len(), options)?;
-            Ok(if result.is_empty() {
-                JValue::Undefined
-            } else {
-                JValue::array(result)
-            })
+            // Sequence semantics, same as the tree-walker's `$map`: an empty
+            // result is undefined and a single result unwraps.
+            hof_result_sequence(result, options)
         }
 
         CompiledExpr::FilterCall {
@@ -1383,22 +1380,10 @@ fn eval_compiled_inner(
                     }
                 }
             }
-            if was_single {
-                Ok(match result.len() {
-                    0 => JValue::Undefined,
-                    1 => {
-                        check_sequence_length(1, options)?;
-                        result.remove(0)
-                    }
-                    _ => {
-                        check_sequence_length(result.len(), options)?;
-                        JValue::array(result)
-                    }
-                })
-            } else {
-                check_sequence_length(result.len(), options)?;
-                Ok(JValue::array(result))
-            }
+            // `was_single` used to gate the unwrap; the sequence rule is the
+            // same whether the input was an array or a lone value.
+            let _ = was_single;
+            hof_result_sequence(result, options)
         }
 
         CompiledExpr::ReduceCall {
@@ -3103,6 +3088,27 @@ pub struct EvaluatorOptions {
 /// unlike upstream jsonata-js, which caps flat/non-nested literals too via
 /// `fn.append`'s `createSequence()` hook. See `EvaluatorOptions::max_sequence_length`
 /// doc comment above for why this is a deliberate, temporary gap.
+/// Wrap a higher-order function's results as a JSONata *sequence*.
+///
+/// `$map`/`$filter` do not return arrays, they return sequences: an empty
+/// result is undefined rather than `[]`, and a single result unwraps to that
+/// result. Returning a bare `Vec` from each of the six exit points is what let
+/// these drift from `$map(arr, ...)` producing `["free"]` where jsonata-js
+/// produces `"free"`.
+pub(crate) fn hof_result_sequence(
+    mut result: Vec<JValue>,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
+    match result.len() {
+        0 => Ok(JValue::Undefined),
+        1 => Ok(result.pop().expect("len checked")),
+        n => {
+            check_sequence_length(n, options)?;
+            Ok(JValue::array(result))
+        }
+    }
+}
+
 pub(crate) fn check_sequence_length(
     len: usize,
     options: &EvaluatorOptions,
@@ -4985,13 +4991,18 @@ impl Evaluator {
                 if !var_name.is_empty() {
                     if let Some(value) = self.context.lookup(var_name) {
                         match value {
+                            // An absent field is undefined, not null: `$v.p`
+                            // over `{"q": 9}` must drop out of a sequence
+                            // rather than become an explicit null.
                             JValue::Object(obj) => {
-                                return Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null));
+                                return Ok(obj
+                                    .get(field_name)
+                                    .cloned()
+                                    .unwrap_or(JValue::Undefined));
                             }
                             #[cfg(feature = "python")]
                             JValue::LazyPyDict(lazy) => {
-                                let v = lazy.get_field(field_name)?;
-                                return Ok(if v.is_undefined() { JValue::Null } else { v });
+                                return lazy.get_field(field_name).map_err(Into::into);
                             }
                             JValue::Array(arr) => {
                                 // Map field extraction over array (same as single-step Name on Array)
@@ -4999,7 +5010,7 @@ impl Evaluator {
                                 for item in arr.iter() {
                                     if let JValue::Object(obj) = item {
                                         if let Some(val) = obj.get(field_name) {
-                                            if !val.is_null() {
+                                            if !val.is_undefined() {
                                                 match val {
                                                     JValue::Array(inner) => {
                                                         result.extend(inner.iter().cloned());
@@ -5012,7 +5023,7 @@ impl Evaluator {
                                         #[cfg(feature = "python")]
                                         if let JValue::LazyPyDict(lazy) = item {
                                             let val = lazy.get_field(field_name)?;
-                                            if !val.is_null() && !val.is_undefined() {
+                                            if !val.is_undefined() {
                                                 match val {
                                                     JValue::Array(inner) => {
                                                         result.extend(inner.iter().cloned());
@@ -5024,7 +5035,7 @@ impl Evaluator {
                                     }
                                 }
                                 return match result.len() {
-                                    0 => Ok(JValue::Null),
+                                    0 => Ok(JValue::Undefined),
                                     1 => Ok(result.pop().unwrap()),
                                     _ => {
                                         check_sequence_length(result.len(), &self.options)?;
@@ -9036,6 +9047,14 @@ impl Evaluator {
                 // Evaluate the array argument
                 let array = self.evaluate_internal(&args[0], data)?;
 
+                // A non-array argument is the singleton sequence containing it,
+                // so `$map({"p": 1}, fn)` maps over the one object rather than
+                // raising. `$filter` already did this; undefined stays undefined.
+                let array = match array {
+                    JValue::Array(_) | JValue::Undefined => array,
+                    other => JValue::array(vec![other]),
+                };
+
                 match array {
                     JValue::Array(arr) => {
                         // Detect how many parameters the callback expects
@@ -9071,8 +9090,7 @@ impl Evaluator {
                                             result.push(mapped);
                                         }
                                     }
-                                    check_sequence_length(result.len(), &self.options)?;
-                                    return Ok(JValue::array(result));
+                                    return hof_result_sequence(result, &self.options);
                                 }
                             }
                             // Stored lambda variable fast path: $var with pre-compiled body
@@ -9109,8 +9127,7 @@ impl Evaluator {
                                                     result.push(mapped);
                                                 }
                                             }
-                                            check_sequence_length(result.len(), &self.options)?;
-                                            return Ok(JValue::array(result));
+                                            return hof_result_sequence(result, &self.options);
                                         }
                                     }
                                 }
@@ -9144,8 +9161,7 @@ impl Evaluator {
                                 result.push(mapped);
                             }
                         }
-                        check_sequence_length(result.len(), &self.options)?;
-                        Ok(JValue::array(result))
+                        hof_result_sequence(result, &self.options)
                     }
                     JValue::Null => Ok(JValue::Null),
                     JValue::Undefined => Ok(JValue::Undefined),
@@ -9225,8 +9241,7 @@ impl Evaluator {
                                     return Ok(JValue::Undefined);
                                 }
                             }
-                            check_sequence_length(result.len(), &self.options)?;
-                            return Ok(JValue::array(result));
+                            return hof_result_sequence(result, &self.options);
                         }
                     }
                     // Stored lambda variable fast path: $var with pre-compiled body
@@ -9266,8 +9281,7 @@ impl Evaluator {
                                             return Ok(JValue::Undefined);
                                         }
                                     }
-                                    check_sequence_length(result.len(), &self.options)?;
-                                    return Ok(JValue::array(result));
+                                    return hof_result_sequence(result, &self.options);
                                 }
                             }
                         }
@@ -9311,8 +9325,7 @@ impl Evaluator {
                     }
                 }
 
-                check_sequence_length(result.len(), &self.options)?;
-                Ok(JValue::array(result))
+                hof_result_sequence(result, &self.options)
             }
 
             "reduce" => {
