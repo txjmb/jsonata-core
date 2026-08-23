@@ -460,12 +460,28 @@ fn test_empty_object() {
 fn test_error_undefined_variable() {
     let data = JValue::Null;
 
-    // Undefined variables return null in JSONata (not an error)
+    // An unbound variable is undefined -- not an error, and not null.
+    // Verified against jsonata-js: `$undefined` is undefined, `{"a": $x}` is
+    // `{}` (the key drops out), and `3 > $x` is undefined. This asserted null
+    // before the null/undefined split was carried through to variables (#98);
+    // with null the comparison would raise T2010 instead.
     let ast = parse("$undefined").unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
-    assert_eq!(result, JValue::Null);
+    assert_eq!(result, JValue::Undefined);
+
+    // The consequences that make undefined the right value here.
+    let ast = parse("3 > $x").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Undefined
+    );
+    let ast = parse("{\"a\": $x}").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!({}))
+    );
 }
 
 #[test]
@@ -2111,5 +2127,58 @@ fn test_string_predicate_on_object_is_truthiness_not_key_access() {
     assert_eq!(
         filter_eval("o[\"\"]", json!({"o": {"a": 1}})),
         JValue::Undefined
+    );
+}
+
+// ── Comparison against undefined (issue #98, root cause 5) ───────────────────
+//
+// An undefined operand makes an ordered comparison undefined, it does not
+// raise. `ordered_compare` was written before the null/undefined split and
+// matches only on `JValue::Null`, so a real `Undefined` reached the catch-all
+// and produced "T2010: Cannot compare unknown and number".
+
+#[test]
+fn test_ordered_comparison_with_undefined_is_undefined() {
+    let data: JValue = json!({"arr": []}).into();
+    for expr in ["arr.p < 2", "arr.p > 2", "arr.p <= 2", "arr.p >= 2"] {
+        let ast = parse(expr).unwrap();
+        assert_eq!(
+            Evaluator::new().evaluate(&ast, &data).unwrap(),
+            JValue::Undefined,
+            "{expr}"
+        );
+    }
+    // Not specific to empty arrays -- any missing path behaves the same.
+    let ast = parse("nothing.x < 2").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_ordered_comparison_still_errors_on_real_mismatches() {
+    // Guard: an explicit null and a boolean are still type errors, and valid
+    // comparisons still compare.
+    let data: JValue = json!({"n": null, "b": true, "x": 5}).into();
+
+    assert!(Evaluator::new()
+        .evaluate(&parse("n < 2").unwrap(), &data)
+        .is_err());
+    assert!(Evaluator::new()
+        .evaluate(&parse("b < 2").unwrap(), &data)
+        .is_err());
+    assert!(Evaluator::new()
+        .evaluate(&parse("x < \"s\"").unwrap(), &data)
+        .is_err());
+    // null is uncomparable even opposite an undefined operand.
+    assert!(Evaluator::new()
+        .evaluate(&parse("missing.x < n").unwrap(), &data)
+        .is_err());
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x < 10").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(true)
     );
 }

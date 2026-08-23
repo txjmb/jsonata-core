@@ -132,6 +132,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   -- `o ? a : b`, `and`/`or`, `$boolean`, `$not`, filter predicates -- and only when data was
   passed as a dict, so the same expression over an equivalent JSON string was correct. The
   tree-walker was unaffected. ([#98](https://github.com/txjmb/jsonata-core/issues/98))
+- Ordered comparisons (`<`, `<=`, `>`, `>=`) against an undefined operand now return undefined
+  instead of raising `T2010`, and an explicit `null` operand now raises `T2010` instead of
+  returning null. `ordered_compare` predated the null/undefined split and matched only on
+  `JValue::Null`, so a real `Undefined` reached its catch-all. Rewritten to jsonata-js's rule:
+  only numbers, strings and undefined are comparable; an undefined operand yields undefined;
+  otherwise a type mismatch is `T2009`.
+- An unbound variable (`$x`) now evaluates to undefined rather than null, so `3 > $x` is
+  undefined, `{"a": $x}` drops the key, and `$not($x)` is undefined -- all matching jsonata-js.
+  The surrounding comment already described these as the intended results; only the value was
+  wrong. ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 5)
 
 ### Security
 

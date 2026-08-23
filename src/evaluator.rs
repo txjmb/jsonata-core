@@ -3853,10 +3853,12 @@ impl Evaluator {
                     return Ok(builtin_repr);
                 }
 
-                // Undefined variable - return null (undefined in JSONata semantics)
-                // This allows expressions like `$not(undefined_var)` to return undefined
-                // and comparisons like `3 > $undefined` to return undefined
-                Ok(JValue::Null)
+                // An unbound variable is undefined. This is what makes
+                // `$not($x)` undefined, `{"a": $x}` drop the key, and `3 > $x`
+                // undefined rather than a T2010 on an uncomparable null.
+                // An unbound variable is undefined, not null: `3 > $x` is undefined
+                // and `{"a": $x}` drops the key. (#98)
+                Ok(JValue::Undefined)
             }
 
             AstNode::ParentVariable(name) => {
@@ -12132,7 +12134,20 @@ impl Evaluator {
         }
     }
 
-    /// Ordered comparison with null/type checking shared across <, <=, >, >=
+    /// Ordered comparison shared across <, <=, >, >=.
+    ///
+    /// Follows jsonata-js's `evaluateComparisonExpression`:
+    /// 1. Only numbers, strings and *undefined* are comparable. Anything else
+    ///    -- null, boolean, object, array -- raises T2010.
+    /// 2. If either side is undefined the result is undefined.
+    /// 3. Otherwise both are comparable and present, so differing types raise
+    ///    T2009.
+    ///
+    /// The `*_is_explicit_null` flags are vestigial. They existed to tell a
+    /// literal `null` in the source apart from a "missing" value back when both
+    /// were `JValue::Null`. Since the null/undefined split (#32) a missing value
+    /// is `JValue::Undefined`, so every `JValue::Null` reaching here is an
+    /// explicit null and is uncomparable either way.
     ///
     /// `compare_nums` receives (left_f64, right_f64) for numeric operands.
     /// `compare_strs` receives (left_str, right_str) for string operands.
@@ -12141,53 +12156,35 @@ impl Evaluator {
         &self,
         left: &JValue,
         right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
+        _left_is_explicit_null: bool,
+        _right_is_explicit_null: bool,
         op_symbol: &str,
         compare_nums: fn(f64, f64) -> bool,
         compare_strs: fn(&str, &str) -> bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                Ok(JValue::Bool(compare_nums(*a, *b)))
-            }
-            (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(compare_strs(a, b))),
-            // Both null/undefined -> return undefined
-            (JValue::Null, JValue::Null) => Ok(JValue::Null),
-            // Explicit null literal with any type (except null) -> T2010 error
-            (JValue::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            (_, JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Boolean with undefined -> T2010 error
-            (JValue::Bool(_), JValue::Null) | (JValue::Null, JValue::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Number or String with undefined (not explicit null) -> undefined result
-            (JValue::Number(_), JValue::Null) | (JValue::Null, JValue::Number(_)) |
-            (JValue::String(_), JValue::Null) | (JValue::Null, JValue::String(_)) => {
-                Ok(JValue::Null)
-            }
-            // String vs Number -> T2009
-            (JValue::String(_), JValue::Number(_)) | (JValue::Number(_), JValue::String(_)) => {
-                Err(EvaluatorError::EvaluationError(format!(
-                    "T2009: The expressions on either side of operator \"{}\" must be of the same data type",
-                    op_symbol
-                )))
-            }
-            // Boolean comparisons -> T2010
-            (JValue::Bool(_), _) | (_, JValue::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError(format!(
-                    "T2010: Cannot compare {} and {}",
-                    Self::type_name(left), Self::type_name(right)
-                )))
-            }
-            // Other type mismatches
-            _ => Err(EvaluatorError::EvaluationError(format!(
+        fn comparable(v: &JValue) -> bool {
+            matches!(v, JValue::Number(_) | JValue::String(_) | JValue::Undefined)
+        }
+
+        if !comparable(left) || !comparable(right) {
+            return Err(EvaluatorError::EvaluationError(format!(
                 "T2010: Cannot compare {} and {}",
-                Self::type_name(left), Self::type_name(right)
+                Self::type_name(left),
+                Self::type_name(right)
+            )));
+        }
+
+        // An undefined operand makes the comparison undefined, not an error.
+        if matches!(left, JValue::Undefined) || matches!(right, JValue::Undefined) {
+            return Ok(JValue::Undefined);
+        }
+
+        match (left, right) {
+            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Bool(compare_nums(*a, *b))),
+            (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(compare_strs(a, b))),
+            _ => Err(EvaluatorError::EvaluationError(format!(
+                "T2009: The expressions on either side of operator \"{}\" must be of the same data type",
+                op_symbol
             ))),
         }
     }
@@ -12771,11 +12768,11 @@ mod tests {
         let result = evaluator.evaluate(&AstNode::variable("x"), &data).unwrap();
         assert_eq!(result, JValue::from(100i64));
 
-        // Undefined variable returns null (undefined in JSONata semantics)
+        // An unbound variable is undefined, not null (see #98).
         let result = evaluator
             .evaluate(&AstNode::variable("undefined"), &data)
             .unwrap();
-        assert_eq!(result, JValue::Null);
+        assert_eq!(result, JValue::Undefined);
     }
 
     #[test]
