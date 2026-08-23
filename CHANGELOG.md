@@ -25,6 +25,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returned `0`/`null` for an empty sequence where jsonata-js returns `undefined`. The fast
   path now declines when its assumptions do not hold, so the canonical aggregate produces
   both the error and the empty-sequence semantics. ([#97](https://github.com/txjmb/jsonata-core/issues/97))
+- Builtin argument handling now matches jsonata-js for a missing argument in a *required*
+  slot. The reference validates a call and then hands the arguments to the function body
+  unchanged, so an undefined that the signature admitted reaches a JavaScript expression
+  and JavaScript's coercion supplies the answer: `$substring("abcdef", missing.x)` is
+  `"abcdef"` (and `$substring("abcdef", missing.x, 2)` is `""`, because the undefined start
+  makes the end `NaN`), `$pad("a", missing.x)` is `"a"`, and `$substringBefore` and
+  `$lookup` stringify the missing argument to the literal `"undefined"` rather than
+  treating it as absent. `$trim(missing.x)` propagates undefined instead of raising.
+- `$substring`, `$substringBefore` and `$substringAfter` given a single missing argument
+  now raise `T0411` on both engines. The compiled path applied its undefined-propagation
+  shortcut before signature validation; jsonata-js validates first, and for these three
+  the lone undefined argument binds to parameter 2 while parameter 1 comes from the
+  context. The tree-walker never had the shortcut, so the two engines disagreed.
+- `$spread` and `$each` now follow jsonata-js's sequence rules: `$spread({"k": 1})` is the
+  object rather than `[{"k": 1}]`, and `$spread([])`, `$spread({})` and `$each({}, fn)` are
+  `undefined` rather than empty containers. `$spread`'s *array* branch is deliberately
+  exempt — the reference folds it with `concat`, which drops the sequence flag — so
+  `$spread([{"k": 1}])` stays wrapped. `$each` also no longer drops explicit nulls from its
+  results.
+- `$sift(obj)` now raises instead of returning `undefined`. The one-argument form is
+  `$sift(function)`, with the object taken from the context.
+  ([#104](https://github.com/txjmb/jsonata-core/issues/104))
 
 ### Security
 
