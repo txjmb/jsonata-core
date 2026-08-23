@@ -2182,3 +2182,42 @@ fn test_ordered_comparison_still_errors_on_real_mismatches() {
         JValue::Bool(true)
     );
 }
+
+// ── Explicit null through a stage filter (issue #98) ─────────────────────────
+//
+// The tuple/stage branch of `evaluate_path` mapped a missing field to
+// `JValue::Null` and then skipped every null, so an explicit null was dropped
+// alongside genuinely absent fields -- the same pre-migration pattern already
+// fixed in the no-stages fast path.
+
+#[test]
+fn test_stage_filter_keeps_explicit_null() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+    let ast = parse("arr.p[-1]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([1, null]))
+    );
+}
+
+#[test]
+fn test_stage_filter_still_drops_missing_fields() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    let ast = parse("arr.p[-1]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!(1))
+    );
+}
+
+#[test]
+fn test_stage_filter_indexes_within_each_group() {
+    // Stage semantics: the index applies to each extracted value, not to the
+    // flattened sequence.
+    let data: JValue = json!({"arr": [{"p": [1, 2]}, {"p": 3}]}).into();
+    let ast = parse("arr.p[-1]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([2, 3]))
+    );
+}

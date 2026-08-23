@@ -4879,7 +4879,7 @@ impl Evaluator {
                                                 // Flatten nested arrays from recursive mapping
                                                 result.extend(nested.iter().cloned());
                                             }
-                                            JValue::Null => {} // Skip nulls from nested arrays
+                                            JValue::Null => {}
                                             other => result.push(other),
                                         }
                                     }
@@ -5063,7 +5063,7 @@ impl Evaluator {
                                                     JValue::Array(arr) => {
                                                         result.extend(arr.iter().cloned())
                                                     }
-                                                    JValue::Null => {} // Skip nulls from stage application
+                                                    JValue::Null => {}
                                                     other => result.push(other), // Shouldn't happen, but handle it
                                                 }
                                             } else {
@@ -5087,7 +5087,7 @@ impl Evaluator {
                                             JValue::Array(nested) => {
                                                 result.extend(nested.iter().cloned())
                                             }
-                                            JValue::Null => {} // Skip nulls from nested arrays
+                                            JValue::Null => {}
                                             other => result.push(other),
                                         }
                                     }
@@ -5575,37 +5575,33 @@ impl Evaluator {
                                                     .map(|(k, v)| (k.clone(), v.clone()))
                                                     .collect();
                                                 match obj.get("@") {
+                                                    // Absent field -> Undefined, matching the
+                                                    // non-tuple arm below, so the guard drops it
+                                                    // while keeping a present null.
                                                     Some(JValue::Object(inner)) => (
                                                         inner
                                                             .get(field_name)
                                                             .cloned()
-                                                            .unwrap_or(JValue::Null),
+                                                            .unwrap_or(JValue::Undefined),
                                                         Some(bindings),
                                                     ),
                                                     #[cfg(feature = "python")]
-                                                    Some(JValue::LazyPyDict(lazy)) => {
-                                                        let v = lazy.get_field(field_name)?;
-                                                        (
-                                                            if v.is_undefined() {
-                                                                JValue::Null
-                                                            } else {
-                                                                v
-                                                            },
-                                                            Some(bindings),
-                                                        )
-                                                    }
+                                                    Some(JValue::LazyPyDict(lazy)) => (
+                                                        lazy.get_field(field_name)?,
+                                                        Some(bindings),
+                                                    ),
                                                     _ => continue, // Invalid tuple
                                                 }
                                             } else {
                                                 (
                                                     obj.get(field_name)
                                                         .cloned()
-                                                        .unwrap_or(JValue::Null),
+                                                        .unwrap_or(JValue::Undefined),
                                                     None,
                                                 )
                                             };
 
-                                            if !val.is_null() {
+                                            if !val.is_undefined() {
                                                 // Helper to wrap value in tuple if we have bindings
                                                 let wrap_in_tuple = |v: JValue, bindings: &Option<Vec<(String, JValue)>>| -> JValue {
                                                     if let Some(b) = bindings {
@@ -5681,7 +5677,9 @@ impl Evaluator {
                                                                 ));
                                                             }
                                                         }
-                                                        JValue::Null => {} // Skip nulls from stage application
+                                                        // A stage yielding nothing is Undefined; a genuine null result is a
+                                                        // value and stays in the sequence.
+                                                        JValue::Undefined => {}
                                                         other => result.push(wrap_in_tuple(
                                                             other,
                                                             &tuple_bindings,
@@ -5726,7 +5724,9 @@ impl Evaluator {
                                             // None throughout, so wrap_in_tuple would be a no-op).
                                             let val = lazy.get_field(field_name)?;
 
-                                            if !val.is_null() && !val.is_undefined() {
+                                            // Only an absent field (Undefined) drops out; a
+                                            // present null is a value.
+                                            if !val.is_undefined() {
                                                 if !stages.is_empty() {
                                                     let processed_val =
                                                         self.apply_stages(val, stages)?;
@@ -5734,7 +5734,7 @@ impl Evaluator {
                                                         JValue::Array(arr) => {
                                                             result.extend(arr.iter().cloned())
                                                         }
-                                                        JValue::Null => {} // Skip nulls from stage application
+                                                        JValue::Undefined => {}
                                                         other => result.push(other),
                                                     }
                                                 } else {

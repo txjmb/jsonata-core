@@ -142,6 +142,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   undefined, `{"a": $x}` drops the key, and `$not($x)` is undefined -- all matching jsonata-js.
   The surrounding comment already described these as the intended results; only the value was
   wrong. ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 5)
+- Explicit nulls now survive a stage filter (`arr.p[-1]`, `arr.p[0]`, `arr.p[]`). The
+  tuple/stage branch of `evaluate_path` mapped an absent field to `JValue::Null` and then
+  skipped every null, dropping present nulls alongside genuinely missing fields -- the same
+  pre-migration pattern already fixed in the no-stages fast path, in three more places
+  (the object arm, the tuple arm and the lazy-dict arm).
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98))
 
 ### Security
 
