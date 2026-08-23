@@ -119,6 +119,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distinction the compiler previously discarded on the stated assumption that "both
   encodings have identical runtime semantics" -- true for boolean predicates, false for
   numeric ones. ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 3)
+- A predicate applied to a non-array value now treats it as the singleton sequence it is:
+  index 0, length 1. `arr[p]` over `{"p": 1}` is undefined (1 does not match index 0) and
+  `arr[-1]` wraps to the value itself. A string predicate on an object is no longer computed
+  property access -- `o["a"]` keeps the object because a non-empty string is truthy, matching
+  jsonata-js, rather than looking up the key.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 4)
 
 ### Security
 

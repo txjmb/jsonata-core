@@ -2051,3 +2051,65 @@ fn test_comparison_predicates_unaffected() {
         JValue::from(json!({"p": 5}))
     );
 }
+
+// ── Predicates on a non-array value (issue #98, root cause 4) ────────────────
+//
+// A non-array is a singleton sequence: index 0, length 1. The same index rule
+// applies, so `arr[p]` keeps the object only when `p` is 0 (or a non-numeric
+// truthy value). We previously treated a string predicate as computed property
+// access, which is not a JSONata rule -- `o["a"]` returns the object because a
+// non-empty string is truthy, not because "a" is looked up.
+
+#[test]
+fn test_predicate_on_object_uses_index_zero() {
+    // p == 1 does not match index 0.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": {"p": 1}})),
+        JValue::Undefined
+    );
+    // p == 0 does match index 0.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": {"p": 0}})),
+        JValue::from(json!({"p": 0}))
+    );
+    // Non-numeric falls back to truthiness.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": {"p": true}})),
+        JValue::from(json!({"p": true}))
+    );
+}
+
+#[test]
+fn test_index_into_object_singleton() {
+    assert_eq!(
+        filter_eval("arr[0]", json!({"arr": {"p": 1}})),
+        JValue::from(json!({"p": 1}))
+    );
+    assert_eq!(
+        filter_eval("arr[0].p", json!({"arr": {"p": 1}})),
+        JValue::from(json!(1))
+    );
+    assert_eq!(
+        filter_eval("arr[1]", json!({"arr": {"p": 1}})),
+        JValue::Undefined
+    );
+    // -1 wraps to index 0 of a one-element sequence.
+    assert_eq!(
+        filter_eval("arr[-1]", json!({"arr": {"p": 1}})),
+        JValue::from(json!({"p": 1}))
+    );
+}
+
+#[test]
+fn test_string_predicate_on_object_is_truthiness_not_key_access() {
+    // Truthy string keeps the object; it is not a key lookup.
+    assert_eq!(
+        filter_eval("o[\"a\"]", json!({"o": {"a": 1}})),
+        JValue::from(json!({"a": 1}))
+    );
+    // An empty string is falsy.
+    assert_eq!(
+        filter_eval("o[\"\"]", json!({"o": {"a": 1}})),
+        JValue::Undefined
+    );
+}

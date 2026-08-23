@@ -2026,8 +2026,13 @@ fn compiled_apply_filter(
         }
         JValue::Undefined => Ok(JValue::Undefined),
         _ => {
+            // A non-array is a singleton sequence: index 0, length 1.
             let pred = eval_compiled_inner(filter, value, vars, ctx, shape, options, start_time)?;
-            if compiled_is_truthy(&pred) {
+            let keep = match predicate_index_match(&pred, 0, 1) {
+                Some(matched) if selects_by_index => matched,
+                _ => compiled_is_truthy(&pred),
+            };
+            if keep {
                 Ok(value.clone())
             } else {
                 Ok(JValue::Undefined)
@@ -11451,19 +11456,23 @@ impl Evaluator {
                 Ok(JValue::array(filtered))
             }
             JValue::Object(obj) => {
-                // For objects, predicate can be either:
-                // 1. A string - property access (computed property name)
-                // 2. A boolean expression - filter (return object if truthy)
+                // A non-array is a singleton sequence: index 0, length 1. The
+                // same rule as for arrays applies, so `o[p]` keeps the object
+                // only when `p` is 0 (or a non-numeric truthy value), and
+                // `o[-1]` wraps to index 0.
+                //
+                // A string predicate is NOT computed property access -- `o["a"]`
+                // keeps the object because a non-empty string is truthy, which
+                // is what jsonata-js does. `_ = obj` keeps the binding readable
+                // for the debugger without implying a lookup happens here.
+                let _ = obj;
                 let pred_result = self.evaluate_internal(predicate, current)?;
 
-                // If it's a string, use it as a key for property access
-                if let JValue::String(key) = &pred_result {
-                    return Ok(obj.get(&**key).cloned().unwrap_or(JValue::Null));
-                }
-
-                // Otherwise, treat as a filter expression
-                // If the predicate is truthy, return the object; otherwise return undefined
-                if self.is_truthy(&pred_result) {
+                let keep = match predicate_index_match(&pred_result, 0, 1) {
+                    Some(matched) => matched,
+                    None => self.is_truthy(&pred_result),
+                };
+                if keep {
                     Ok(current.clone())
                 } else {
                     Ok(JValue::Undefined)

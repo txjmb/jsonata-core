@@ -611,10 +611,14 @@ fn run_inner(
                     }
                     JValue::Undefined => JValue::Undefined,
                     other => {
-                        // Single value: apply predicate directly
+                        // A non-array is a singleton sequence: index 0, length 1.
                         let test =
                             run_inner(sub_prog, &other, vars, &mut sub_stack, options, start_time)?;
-                        if compiled_is_truthy(&test) {
+                        let keep = match predicate_index_match(&test, 0, 1) {
+                            Some(matched) if *selects_by_index => matched,
+                            _ => compiled_is_truthy(&test),
+                        };
+                        if keep {
                             other
                         } else {
                             JValue::Undefined
