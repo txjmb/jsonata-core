@@ -12,6 +12,14 @@ An engine toggle alone would not have caught it either. The default engine
 failing. What was missing is inputs: expressions shaped to trigger each fast
 path, run against payloads that break the assumptions those fast paths make.
 
+The corpus has two halves. The first targets the optimisation fast paths as
+described above. The second is an *operator matrix*: every binary operator
+crossed with every value kind on both sides, added because the first half puts
+only *sequences* around an operator -- that is what path expressions produce --
+and every bug found in the resulting gap belonged to one family, an explicit
+null being treated as undefined. ``null & "x"`` returned ``"x"`` instead of
+``"nullx"`` and survived a corpus reporting zero divergences.
+
 Expectations come from the pinned jsonata-js in ``tests/jsonata-js`` via
 ``scripts/gen_fastpath_corpus.js``. Every case runs twice -- once through the
 default engine (bytecode VM where available) and once with the tree-walker
@@ -111,6 +119,17 @@ def diverges(case, entry="dict"):
         if got is ERROR:
             return None
         return f"jsonata-js raised {expected['code'] or 'an error'}, jsonatapy returned {got!r}"
+
+    if expected["kind"] == "nonfinite":
+        # Infinity/NaN cannot round-trip through JSON, so the corpus records the
+        # kind. jsonata-core raises on these rather than producing a non-finite
+        # number, which is a real difference and not a harness artefact.
+        want = {"inf": float("inf"), "-inf": float("-inf"), "nan": float("nan")}[expected["value"]]
+        if got is ERROR:
+            return f"jsonata-js returned {want}, jsonatapy raised"
+        if isinstance(got, float) and (got == want or (got != got and want != want)):
+            return None
+        return f"jsonata-js returned {want}, jsonatapy {got!r}"
 
     want = None if expected["kind"] == "undefined" else expected["value"]
     if got is ERROR:

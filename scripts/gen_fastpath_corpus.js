@@ -36,6 +36,10 @@ const DATASETS = {
   empty_arr:   { arr: [], obj: { a: 1 }, empty: [] },
   obj_first:   { arr: { p: 1 }, obj: { a: 1 }, empty: [] },
   deep:        { arr: [{ p: { q: 1 } }, { p: { q: 2 } }], obj: { a: 1 }, empty: [] },
+  // Operand fixtures for the operator matrix below. Each field supplies one
+  // *scalar* operand shape; the matrix crosses them so every binary operator is
+  // exercised against every value kind on both sides.
+  operands:    { nul: null, arr: [1, 2], obj: { k: 1 }, emptyarr: [], num: 5, str: 'a' },
 };
 
 const EXPRESSIONS = [];
@@ -86,17 +90,73 @@ for (const e of ['arr.p + 1', 'arr.p = 1', 'arr.p < 2', 'arr.p & "x"']) {
   add('compiled_arith', e);
 }
 
+// -- Operator matrix -------------------------------------------------------
+//
+// The fast-path corpus above puts *sequences* on either side of an operator,
+// because that is what path expressions produce. That left scalar operands
+// untested, and every bug found in that gap belonged to the same family:
+// arithmetic, comparison, equality and concatenation each treated an explicit
+// null as though it were undefined. `null & "x"` returned "x" instead of
+// "nullx" and survived a corpus that reported zero divergences.
+//
+// So cross every binary operator with every value kind on both sides. 12
+// operands x 12 x 15 operators, plus the unary forms.
+const OPERANDS = [
+  '1',          // number
+  '0',          // number, falsy
+  '"s"',        // string
+  '""',         // string, falsy
+  'true',
+  'false',
+  'null',       // literal null
+  'nul',        // null arriving from data, not a literal
+  'missing.x',  // undefined
+  'arr',        // array
+  'obj',        // object
+  'emptyarr',   // empty array
+];
+
+const BINARY_OPS = [
+  '+', '-', '*', '/', '%', '&',
+  '=', '!=', '<', '<=', '>', '>=',
+  'and', 'or', 'in',
+];
+
+for (const op of BINARY_OPS) {
+  for (const lhs of OPERANDS) {
+    for (const rhs of OPERANDS) {
+      add('operator_matrix', `${lhs} ${op} ${rhs}`);
+    }
+  }
+}
+for (const x of OPERANDS) {
+  add('operator_unary', `-(${x})`);
+  add('operator_unary', `$not(${x})`);
+}
+
 async function main() {
   const cases = [];
   let errors = 0;
   for (const { fastpath, expr } of EXPRESSIONS) {
-    for (const [dsName, data] of Object.entries(DATASETS)) {
+    // The operator matrix supplies its own operands; running it against every
+    // payload would multiply the corpus without adding information.
+    const datasets = fastpath.startsWith('operator_')
+      ? [['operands', DATASETS.operands]]
+      : Object.entries(DATASETS).filter(([n]) => n !== 'operands');
+    for (const [dsName, data] of datasets) {
       let expected;
       try {
         const r = await jsonata(expr).evaluate(structuredClone(data));
-        expected = r === undefined
-          ? { kind: 'undefined' }
-          : { kind: 'value', value: r };
+        if (r === undefined) {
+          expected = { kind: 'undefined' };
+        } else if (typeof r === 'number' && !Number.isFinite(r)) {
+          // Infinity and NaN both serialise to the JSON text "null", so
+          // recording them as a value would assert the wrong expectation --
+          // `1/0` is Infinity in jsonata-js, not null. Record the kind instead.
+          expected = { kind: 'nonfinite', value: Number.isNaN(r) ? 'nan' : (r > 0 ? 'inf' : '-inf') };
+        } else {
+          expected = { kind: 'value', value: r };
+        }
       } catch (e) {
         // Record only that it errored, plus the code for diagnostics. Error
         // *codes* are deliberately not asserted: jsonata-core's messages do
@@ -116,7 +176,9 @@ async function main() {
     cases,
   };
   const dest = path.join(__dirname, '..', 'tests', 'fixtures', 'fastpath_differential.json');
-  fs.writeFileSync(dest, JSON.stringify(out, null, 2) + '\n');
+  // Compact: this file is generated and regenerated, and pretty-printing it
+  // pushes the repo past its 500KB per-file CI limit as the corpus grows.
+  fs.writeFileSync(dest, JSON.stringify(out) + '\n');
   console.log(`wrote ${cases.length} cases (${errors} expect an error) to ${dest}`);
   console.log(`reference: jsonata-js ${refVersion}`);
 }
