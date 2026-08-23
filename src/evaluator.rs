@@ -303,8 +303,16 @@ pub(crate) enum CompiledExpr {
 pub(crate) struct CompiledStep {
     /// Field name to look up at this step.
     pub field: String,
-    /// Optional predicate filter compiled from a `Stage::Filter` stage.
+    /// Optional predicate filter, from either a `Stage::Filter` stage or a
+    /// folded-in standalone `Predicate` step.
     pub filter: Option<CompiledExpr>,
+    /// True when `filter` came from a standalone `Predicate` step (`arr[p]`)
+    /// rather than a `Stage::Filter` (`a.b[-1]`). The two are NOT
+    /// interchangeable for numeric predicates: a standalone predicate matches
+    /// each element against its own index, while a stage filter maps the index
+    /// over each extracted sub-array, so `foo.blah.baz.fud[-1]` takes the last
+    /// of every group. Boolean predicates behave identically either way.
+    pub filter_selects_by_index: bool,
 }
 
 /// Try to compile an AstNode subtree into a CompiledExpr.
@@ -1742,7 +1750,10 @@ fn try_compile_path(
     // Handles:
     //   - Name nodes with at most one Stage::Filter attached (from `a.b[pred]` dot-path parsing)
     //   - Predicate nodes (from `products[pred]` standalone predicate parsing) — folded into the
-    //     previous step's filter slot, since both encodings have identical runtime semantics.
+    //     previous step's filter slot, flagged with `filter_selects_by_index`. The two encodings
+    //     are NOT interchangeable: for a numeric predicate a standalone step matches each element
+    //     against its own index, while a stage filter maps the index over each extracted
+    //     sub-array. They coincide only for boolean predicates.
     let mut compiled_steps = Vec::with_capacity(field_steps.len());
     for step in field_steps {
         // Tuple-stream steps (@ focus / # index / % parent binding) require the
@@ -1766,6 +1777,7 @@ fn try_compile_path(
                 compiled_steps.push(CompiledStep {
                     field: name.clone(),
                     filter,
+                    filter_selects_by_index: false,
                 });
             }
             AstNode::Predicate(filter_node) => {
@@ -1778,6 +1790,7 @@ fn try_compile_path(
                     return None;
                 }
                 last.filter = Some(compile_filter(filter_node)?);
+                last.filter_selects_by_index = true;
             }
             _ => return None,
         }
@@ -1843,8 +1856,16 @@ fn compiled_eval_field_path(
         }
         // Apply filter if present (filter is an array operation — keep the flag set)
         if let Some(filter) = &step.filter {
-            current =
-                compiled_apply_filter(filter, &current, vars, ctx, shape, options, start_time)?;
+            current = compiled_apply_filter(
+                filter,
+                step.filter_selects_by_index,
+                &current,
+                vars,
+                ctx,
+                shape,
+                options,
+                start_time,
+            )?;
             // Filter always implies we operated on an array
             did_array_mapping = true;
         }
@@ -1947,8 +1968,10 @@ fn compiled_field_step(
 /// - Array: return elements for which the predicate is truthy
 /// - Single value: return it if predicate is truthy, else Undefined
 /// - Numeric predicates (index access) are NOT supported here — fall back via None compilation
+#[allow(clippy::too_many_arguments)]
 fn compiled_apply_filter(
     filter: &CompiledExpr,
+    selects_by_index: bool,
     value: &JValue,
     vars: Option<&HashMap<&str, &JValue>>,
     ctx: Option<&Context>,
@@ -1967,12 +1990,12 @@ fn compiled_apply_filter(
                 None
             };
             let effective_shape = shape.or(local_shape.as_ref());
-            // NOTE: no index-selector rule here. This helper serves filters in
-            // *stage* position (`a.b[pred]`), where a numeric predicate maps the
-            // index over each extracted sub-array rather than matching element
-            // positions -- `foo.blah.baz.fud[-1]` takes the last of every group.
-            // Standalone predicates get the index rule in `evaluate_predicate`.
-            for item in arr.iter() {
+            // A standalone predicate matches each element against its own index;
+            // a stage filter maps a numeric predicate over each extracted
+            // sub-array instead, so `foo.blah.baz.fud[-1]` takes the last of
+            // every group rather than one element of the flattened sequence.
+            let len = arr.len();
+            for (index, item) in arr.iter().enumerate() {
                 check_loop_timeout(options, start_time)?;
                 let pred = eval_compiled_inner(
                     filter,
@@ -1983,7 +2006,11 @@ fn compiled_apply_filter(
                     options,
                     start_time,
                 )?;
-                if compiled_is_truthy(&pred) {
+                let keep = match predicate_index_match(&pred, index, len) {
+                    Some(matched) if selects_by_index => matched,
+                    _ => compiled_is_truthy(&pred),
+                };
+                if keep {
                     result.push(item.clone());
                 }
             }

@@ -112,8 +112,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and treated a numeric result as a multi-index selector, so `arr[p]` over
   `[{"p": 1}, {"p": 2}]` returned both elements instead of nothing. Fixed for standalone
   predicates; filters in *stage* position (`a.b[-1]`, which maps the index over each
-  extracted sub-array) keep their existing semantics, and the bytecode VM still needs the
-  same change. ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 3)
+  extracted sub-array) keep their existing semantics.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 3)
+- The compiled path and bytecode VM now apply the same index rule. `CompiledStep` records
+  whether its filter came from a standalone `Predicate` step or a `Stage::Filter`, a
+  distinction the compiler previously discarded on the stated assumption that "both
+  encodings have identical runtime semantics" -- true for boolean predicates, false for
+  numeric ones. ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 3)
 
 ### Security
 

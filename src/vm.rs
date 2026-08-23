@@ -15,8 +15,8 @@ use std::cell::Cell;
 use std::collections::HashMap;
 
 use crate::evaluator::{
-    check_loop_timeout, check_sequence_length, eval_compiled, CompiledExpr, EvaluatorError,
-    EvaluatorOptions,
+    check_loop_timeout, check_sequence_length, eval_compiled, predicate_index_match, CompiledExpr,
+    EvaluatorError, EvaluatorOptions,
 };
 use crate::value::JValue;
 
@@ -116,7 +116,12 @@ pub(crate) enum Instr {
     /// with the element as `data`, keep elements where result is truthy.
     /// Pushes the filtered array (or Undefined if empty).
     /// The sub-program runs with a reusable stack (no per-element allocation).
-    FilterByBytecode(u16),
+    /// Filter the array on the stack by a sub-program. The bool is
+    /// `filter_selects_by_index`: true for a standalone predicate (`arr[p]`),
+    /// where a numeric result matches the element's own index; false for a
+    /// stage filter (`a.b[-1]`), where truthiness applies here and numeric
+    /// index mapping is handled by the tree-walker's stage path.
+    FilterByBytecode(u16, bool),
 
     // ── Fallback ─────────────────────────────────────────────────────────
     /// Evaluate `fallback_exprs[idx]` via `eval_compiled` (tree-IR fallback).
@@ -565,7 +570,7 @@ fn run_inner(
             }
 
             // ── Array filtering ─────────────────────────────────────
-            Instr::FilterByBytecode(idx) => {
+            Instr::FilterByBytecode(idx, selects_by_index) => {
                 let sub_prog = &sub_programs[*idx as usize];
                 let src = stack.pop().unwrap_or(JValue::Undefined);
                 // Allocate one reusable sub-stack for all element evaluations.
@@ -573,7 +578,8 @@ fn run_inner(
                 let result = match src {
                     JValue::Array(arr) => {
                         let mut kept: Vec<JValue> = Vec::with_capacity(arr.len());
-                        for item in arr.iter() {
+                        let len = arr.len();
+                        for (index, item) in arr.iter().enumerate() {
                             check_loop_timeout(options, start_time)?;
                             let test = run_inner(
                                 sub_prog,
@@ -583,7 +589,11 @@ fn run_inner(
                                 options,
                                 start_time,
                             )?;
-                            if compiled_is_truthy(&test) {
+                            let keep = match predicate_index_match(&test, index, len) {
+                                Some(matched) if *selects_by_index => matched,
+                                _ => compiled_is_truthy(&test),
+                            };
+                            if keep {
                                 kept.push(item.clone());
                             }
                         }
@@ -726,7 +736,7 @@ mod tests {
         assert!(
             prog.instrs
                 .iter()
-                .any(|i| matches!(i, Instr::FilterByBytecode(_))),
+                .any(|i| matches!(i, Instr::FilterByBytecode(..))),
             "expected `{expr_src}` to compile to Instr::FilterByBytecode, got: {:?}",
             prog.instrs
         );
