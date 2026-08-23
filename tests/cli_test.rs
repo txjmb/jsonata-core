@@ -269,7 +269,11 @@ fn evaluation_error_preserves_jsonata_error_code() {
         .write_stdin("{}")
         .assert()
         .code(1)
-        .stderr(predicates::str::starts_with("T2002:"));
+        // T2001, not T2002: jsonata-js reports a bad *left* operand as T2001
+        // and a bad right one as T2002, and `null + 1` is the left. We emitted
+        // T2002 for both until the operators started matching the reference
+        // (#102).
+        .stderr(predicates::str::starts_with("T2001:"));
 }
 
 #[test]
