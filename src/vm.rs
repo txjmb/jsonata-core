@@ -228,7 +228,7 @@ fn run_inner(
 ) -> Result<JValue, EvaluatorError> {
     use crate::evaluator::{
         call_pure_builtin_by_name, compiled_arithmetic, compiled_concat, compiled_equal,
-        compiled_is_truthy, compiled_ordered_cmp, CompiledArithOp,
+        compiled_is_truthy, compiled_not_equal, compiled_ordered_cmp, CompiledArithOp,
     };
 
     let instrs = &prog.instrs;
@@ -366,12 +366,7 @@ fn run_inner(
             Instr::CmpNe => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                let eq = compiled_equal(&lhs, &rhs)?;
-                let ne = match eq {
-                    JValue::Bool(b) => JValue::Bool(!b),
-                    other => other,
-                };
-                stack.push(ne);
+                stack.push(compiled_not_equal(&lhs, &rhs)?);
                 ip += 1;
             }
             Instr::CmpLt(lhs_en, rhs_en) => {

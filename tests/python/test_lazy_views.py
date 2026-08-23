@@ -230,15 +230,24 @@ class TestLazyErrors:
         with pytest.raises(TypeError):
             jsonatapy.compile("x != {'s': 1}").evaluate(self.BAD_NESTED)
 
-    def test_in_operator_swallowed_conversion_error_raises_typeerror(self, engine):
-        # Left-side lazy operand of `in` must normalize (and raise) too.
-        with pytest.raises(TypeError):
-            jsonatapy.compile("x in [{'s': 1}]").evaluate(self.BAD_NESTED)
-        # Right-side ARRAY case: a lazy, unconvertible element being compared
-        # via `in` must also raise rather than silently not-matching.
+    def test_in_operator_needs_no_conversion(self, engine):
+        # This used to assert that `in` surfaces a lazy conversion error, which
+        # was right while `in` compared with deep equality: reaching the answer
+        # meant reading the values, so a failure to read had to be raised rather
+        # than silently reported as "not a member".
+        #
+        # `in` now matches jsonata-js, which compares with `===` -- primitives
+        # by value, composites by identity. Distinct objects are never members
+        # however similar their contents, so the answer is reachable without
+        # converting anything and False is correct rather than swallowed.
+        # Verified against jsonata-js: both of these are false there. (#102)
+        assert jsonatapy.compile("x in [{'s': 1}]").evaluate(self.BAD_NESTED) is False
         data = {"items": [{"s": {1, 2, 3}}], "one": {"s": 1}}
+        assert jsonatapy.compile("one in items").evaluate(data) is False
+
+        # The invariant still holds for operators that must read the values.
         with pytest.raises(TypeError):
-            jsonatapy.compile("one in items").evaluate(data)
+            jsonatapy.compile("x = {'s': 1}").evaluate(self.BAD_NESTED)
 
     def test_builtin_by_reference_swallowed_conversion_error_raises_typeerror(self, engine):
         # Regression: a builtin passed BY REFERENCE to a HOF (`$map(items, $string)`)

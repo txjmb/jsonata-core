@@ -168,7 +168,20 @@ def test_reference_suite(test_id: str, group_name: str, spec: dict[str, Any]):
         compiled = jsonatapy.compile(expr)
 
         # Evaluate with optional bindings
-        result = compiled.evaluate(data, bindings) if bindings else compiled.evaluate(data)
+        if data is None:
+            # `"dataset": null` means *no input data*, which is undefined -- not
+            # JSON null. The distinction matters for context-substituted
+            # builtins: jsonata-js gives `$trim()` undefined with no input but
+            # T0411 with a null input, and `evaluate(None)` means the latter.
+            # `evaluate_json_or_none(None)` is the no-input path.
+            raw = (
+                compiled.evaluate_json_or_none(None, bindings)
+                if bindings
+                else compiled.evaluate_json_or_none(None)
+            )
+            result = None if raw is None else json.loads(raw)
+        else:
+            result = compiled.evaluate(data, bindings) if bindings else compiled.evaluate(data)
 
         # Check for expected result
         if has_result:

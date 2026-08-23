@@ -44,7 +44,7 @@ def test_evaluation_error_raises_value_error_with_coded_message() -> None:
     try:
         expr.evaluate_json_or_none("{}")
     except ValueError as e:
-        assert str(e).startswith("T2002:")
+        assert str(e).startswith("T2001:")
     else:
         raise AssertionError("expected ValueError for null + 1")
 

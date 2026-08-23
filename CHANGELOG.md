@@ -153,6 +153,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tree-walker, but the guard tested only for `AstNode::Number` -- `[-1]` parses as a
   *negation* of a literal, slipped through, and compiled to a plain truthy constant that kept
   every element. ([#98](https://github.com/txjmb/jsonata-core/issues/98))
+- Arithmetic on an explicit `null` now raises instead of silently producing null, including
+  when the null arrives at runtime rather than as a literal -- `$map([1, null], function($v)
+  { $v * 2 })` raises `T2001` where it previously returned `[2, null]`. Only *undefined*
+  propagates. Error codes now match jsonata-js: a bad left operand is `T2001` and a bad right
+  operand is `T2002` (previously `T2002` for both), and each defined operand is type-checked
+  before undefined propagation, so `false + $x` raises rather than returning undefined. The
+  five tree-walker operators now delegate to the same shared implementation as the compiled
+  path and VM instead of each carrying its own copy of the null handling.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98))
+- Ordered comparisons inside filters and sort comparators now reject uncomparable operands.
+  `compiled_ordered_cmp` was the un-migrated twin of `Evaluator::ordered_compare`: it still
+  conflated `JValue::Null` with `JValue::Undefined`, so `arr[p > 1]` over
+  `[{"p": 1}, {"p": null}]` silently returned undefined where jsonata-js raises `T2010`.
+  Rewritten to the same rule -- only numbers, strings and undefined are comparable; an
+  undefined operand yields undefined; a type mismatch is `T2009`.
+- `$sort` comparators of the form `function($l, $r) { $l.f > $r.f }` no longer sort inputs
+  that jsonata-js rejects. The specialized Schwartzian-transform fast path collapsed every
+  non-numeric, non-string key into "missing" and treated mixed types as "keep original
+  order"; it now declines those inputs so the general comparator raises `T2010`/`T2009`.
+  Absent keys are still undefined and still sort last on the fast path.
+  ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster A)
+- `$map` and `$filter` now return sequences rather than arrays: a single result unwraps to
+  that result and an empty result is undefined, so `$map(arr, function($v){$v.p})` over
+  `[{"p": "free"}]` is `"free"` rather than `["free"]`, and over `[]` is undefined rather
+  than `[]`. `$map` also accepts a non-array argument as the singleton sequence containing
+  it, which `$filter` already did.
+- Field access on a lambda parameter (`$v.p`, `$l.rating`) now yields undefined for a missing
+  field instead of null. The `$var.field` fast path used by sort and higher-order-function
+  bodies predates the null/undefined split, which is why `$map` produced `[1, null]` where
+  jsonata-js drops the undefined, and why `$filter` raised `T2010` comparing what was really
+  a missing field. ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster B)
+- `!=` against an undefined operand is now `false`, matching `=`. jsonata-js returns false
+  for both when either side is undefined -- `!=` is not the negation of `=` there -- so
+  `arr[p != null]` no longer keeps elements whose `p` is missing.
+- Object construction as a path step now follows sequence semantics: `arr.{"k": p}` over a
+  single element is the object rather than a one-element array, and over a non-array value it
+  builds from that value instead of from the root document (previously `{}`).
+  ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster C)
+- `&` now stringifies an explicit `null` as `"null"`, matching `$string(null)`, and treats
+  only an *undefined* operand as the empty string. `null & "x"` was `"x"` and is now
+  `"nullx"`; `missing.x & "x"` is still `"x"`.
+- `in` is membership again, not array filtering. An array on the left made `evaluate_binary_op`
+  treat the expression as `array[predicate]`, so `arr in 1` evaluated as `arr[1]` and returned
+  an element. It now follows jsonata-js: an undefined operand on either side gives `false`, a
+  non-array right side is wrapped, and membership is decided with `===` -- primitives by value,
+  composites by identity. `obj in [obj]` is true, `obj in [{"k": 1}]` is false, and an object
+  on the right is no longer treated as key-containment (`"k" in obj` is `false`).
+- Division and modulo by zero no longer raise. jsonata-js checks operands, never results:
+  `1/0` is `Infinity` and `0/0` is `NaN`, and the `D1001` appears when such a value is used as
+  an operand (`1/(10e300 * 10e100)`) or serialised inside a composite
+  (`$string({"inf": 1/0})`). The multiply overflow check moved from the result to the operands
+  to match. JSON cannot spell Infinity, so the JSON-returning APIs give `null` for it, exactly
+  as JavaScript's `JSON.stringify` does.
+- Unary negation of an explicit `null` now raises `D1002` instead of returning null; only
+  *undefined* propagates.
 
 ### Security
 

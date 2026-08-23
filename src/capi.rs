@@ -575,10 +575,15 @@ mod tests {
         assert!(!msg.is_empty());
         unsafe { jsonata_free_expr(h) };
 
-        // $number on an array raises a spec-coded error (D3030) — this
-        // engine stores the code at the start of the message
+        // $number on a non-numeric string raises a spec-coded error (D3030) —
+        // this engine stores the code at the start of the message.
+        //
+        // This used to pass an *array*, which raises T0410 in jsonata-js
+        // (`<(nsb)-:n>` does not accept one) and did so here too once builtins
+        // started validating against their signatures. Verified against the
+        // reference: `$number([1])` is T0410 and `$number("x")` is D3030 (#102).
         let ce2 = CString::new("$number(b)").unwrap();
-        let cd2 = CString::new(r#"{"b":[1]}"#).unwrap();
+        let cd2 = CString::new(r#"{"b":"x"}"#).unwrap();
         let h2 = unsafe { jsonata_compile(ce2.as_ptr()) };
         let r2 = unsafe { jsonata_evaluate(h2, cd2.as_ptr()) };
         assert!(r2.is_null());

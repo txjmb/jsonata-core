@@ -12,6 +12,14 @@ An engine toggle alone would not have caught it either. The default engine
 failing. What was missing is inputs: expressions shaped to trigger each fast
 path, run against payloads that break the assumptions those fast paths make.
 
+The corpus has two halves. The first targets the optimisation fast paths as
+described above. The second is an *operator matrix*: every binary operator
+crossed with every value kind on both sides, added because the first half puts
+only *sequences* around an operator -- that is what path expressions produce --
+and every bug found in the resulting gap belonged to one family, an explicit
+null being treated as undefined. ``null & "x"`` returned ``"x"`` instead of
+``"nullx"`` and survived a corpus reporting zero divergences.
+
 Expectations come from the pinned jsonata-js in ``tests/jsonata-js`` via
 ``scripts/gen_fastpath_corpus.js``. Every case runs twice -- once through the
 default engine (bytecode VM where available) and once with the tree-walker
@@ -31,6 +39,7 @@ this harness exists to catch under message-format noise.
 """
 
 import json
+import math
 import pathlib
 
 import jsonatapy
@@ -38,10 +47,13 @@ import pytest
 
 _FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 _corpus = json.loads((_FIXTURES / "fastpath_differential.json").read_text())
+# The builtin matrix lives in its own fixture: one combined file crosses the
+# repo's 500KB per-file CI limit.
+_builtins = json.loads((_FIXTURES / "builtin_differential.json").read_text())
 _known = json.loads((_FIXTURES / "fastpath_known_divergences.json").read_text())
 
-DATASETS = _corpus["datasets"]
-CASES = _corpus["cases"]
+DATASETS = {**_corpus["datasets"], **_builtins["datasets"]}
+CASES = _corpus["cases"] + _builtins["cases"]
 KNOWN_DIVERGENCES = {tuple(k.split("|", 3)): v for k, v in _known["divergences"].items()}
 
 ENGINES = {False: "vm_preferred", True: "forced_tree_walker"}
@@ -111,6 +123,24 @@ def diverges(case, entry="dict"):
         if got is ERROR:
             return None
         return f"jsonata-js raised {expected['code'] or 'an error'}, jsonatapy returned {got!r}"
+
+    if expected["kind"] == "nonfinite":
+        # Infinity/NaN cannot round-trip through JSON, so the corpus records the
+        # kind rather than a value.
+        #
+        # On the JSON route the result is serialised before we see it, and JSON
+        # has no way to spell Infinity -- our serialiser emits null, exactly as
+        # JavaScript's JSON.stringify does for the same value. So null is the
+        # correct observation there, not a divergence; the dict route is what
+        # actually checks the number.
+        if entry == "json" and got is None:
+            return None
+        want = {"inf": float("inf"), "-inf": float("-inf"), "nan": float("nan")}[expected["value"]]
+        if got is ERROR:
+            return f"jsonata-js returned {want}, jsonatapy raised"
+        if isinstance(got, float) and (got == want or (math.isnan(got) and math.isnan(want))):
+            return None
+        return f"jsonata-js returned {want}, jsonatapy {got!r}"
 
     want = None if expected["kind"] == "undefined" else expected["value"]
     if got is ERROR:

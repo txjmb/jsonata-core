@@ -97,8 +97,11 @@ int main(void) {
 
     /* coded evaluation error: message + spec code */
     {
+        /* $number("x") is D3030. This passed an array until builtins started
+           validating against their signatures: `<(nsb)-:n>` does not accept
+           one, so `$number([1])` is T0410 here and in jsonata-js (#102). */
         JsonataExpr *e = jsonata_compile("$number(b)");
-        char *r = jsonata_evaluate(e, "{\"b\":[1]}");
+        char *r = jsonata_evaluate(e, "{\"b\":\"x\"}");
         char *err = take_error();
         char *code = jsonata_last_error_code();
         CHECK(r == NULL && err != NULL, "eval error -> NULL + message");

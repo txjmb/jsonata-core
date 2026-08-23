@@ -78,22 +78,29 @@ def test_top_level_undefined_result_is_none(fn):
 
 
 @pytest.mark.parametrize("fn", MATH_FUNCTIONS)
-def test_explicit_null_argument_still_passes_through_as_null(fn):
-    """Explicit null (not a missing field) must still be kept as an explicit null key,
-    on both the default (VM) and forced-tree-walker paths -- this fix must not
-    change that pre-existing behavior."""
+def test_explicit_null_argument_is_a_type_error(fn):
+    """An explicit null is a type error, not a value these functions accept.
+
+    This asserted that a null argument passed through as an explicit null key,
+    preserving the behaviour that existed when the test was written rather than
+    checking it against the reference. jsonata-js raises T0410 for all five:
+    `{"x": $abs(v)}` with `v: null` is an error, while the missing-field case
+    above is `{}`. Routing builtins through their signatures made us agree
+    (#102) -- `n` does not match the null symbol `l`.
+    """
     expr = jsonatapy.compile(f'{{"x": ${fn}(v)}}')
     data = {"v": None}
 
-    default_result = expr.evaluate(data)
-    assert default_result == {"x": None}
+    with pytest.raises(ValueError):
+        expr.evaluate(data)
 
+    # Both engines now validate against the signature, so both raise.
     jsonatapy._set_force_tree_walker(True)
     try:
-        tw_result = expr.evaluate(data)
+        with pytest.raises(ValueError):
+            expr.evaluate(data)
     finally:
         jsonatapy._set_force_tree_walker(False)
-    assert tw_result == {"x": None}
 
 
 @pytest.mark.parametrize("fn", MATH_FUNCTIONS)

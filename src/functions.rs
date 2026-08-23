@@ -225,6 +225,24 @@ pub mod string {
         }
     }
 
+    /// Reject a non-finite number anywhere in the value.
+    ///
+    /// jsonata-js serializes through `isNumeric`, which throws D1001 for
+    /// Infinity or NaN. Without this the number becomes JSON `null` and
+    /// `$string({"inf": 1/0})` quietly returns `{"inf":null}`. The scalar case
+    /// raises D3001 earlier, matching the reference.
+    fn reject_non_finite(value: &JValue) -> Result<(), FunctionError> {
+        match value {
+            JValue::Number(n) if !n.is_finite() => Err(FunctionError::RuntimeError(format!(
+                "D1001: Number out of range: {}",
+                n
+            ))),
+            JValue::Array(arr) => arr.iter().try_for_each(reject_non_finite),
+            JValue::Object(obj) => obj.values().try_for_each(reject_non_finite),
+            _ => Ok(()),
+        }
+    }
+
     /// Helper to stringify a value as JSON with custom replacer logic
     ///
     /// Mimics JavaScript's JSON.stringify with a replacer function that:
@@ -235,6 +253,7 @@ pub mod string {
         value: &JValue,
         indent: Option<usize>,
     ) -> Result<String, FunctionError> {
+        reject_non_finite(value)?;
         // Transform the value recursively before stringifying
         let transformed = transform_for_stringify(value);
 
@@ -1726,6 +1745,10 @@ pub mod array {
                 let b_str = b.as_str().unwrap();
                 a_str.cmp(b_str)
             });
+        } else if result.len() < 2 {
+            // Nothing to compare, so the element type does not matter:
+            // `$sort(true)` is `[true]`. The signature's `a` type wraps a
+            // scalar into a singleton before we get here.
         } else {
             return Err(FunctionError::TypeError(
                 "sort() requires all elements to be of the same comparable type".to_string(),
@@ -1777,7 +1800,8 @@ pub mod array {
 
     /// $exists(value) - Check if value exists (not null/undefined)
     pub fn exists(value: &JValue) -> Result<JValue, FunctionError> {
-        let is_missing = value.is_null() || value.is_undefined();
+        // Only a *missing* value is absent. An explicit null exists.
+        let is_missing = value.is_undefined();
         Ok(JValue::Bool(!is_missing))
     }
 
@@ -2469,7 +2493,14 @@ mod tests {
             array::exists(&JValue::string("hello")).unwrap(),
             JValue::Bool(true)
         );
-        assert_eq!(array::exists(&JValue::Null).unwrap(), JValue::Bool(false));
+        // An explicit null exists; only a *missing* value does not. Verified
+        // against jsonata-js: `$exists(null)` is true, `$exists(nothing)` is
+        // false. This asserted the opposite (#102).
+        assert_eq!(array::exists(&JValue::Null).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            array::exists(&JValue::Undefined).unwrap(),
+            JValue::Bool(false)
+        );
     }
 
     // ===== Object Functions Tests =====

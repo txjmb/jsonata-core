@@ -1046,10 +1046,7 @@ fn eval_compiled_inner(
                 // neither side is lazy) so conversion failures raise instead of
                 // silently comparing unequal.
                 CompiledCmp::Eq => compiled_equal(&left, &right),
-                CompiledCmp::Ne => match compiled_equal(&left, &right)? {
-                    JValue::Bool(b) => Ok(JValue::Bool(!b)),
-                    other => Ok(other),
-                },
+                CompiledCmp::Ne => compiled_not_equal(&left, &right),
                 CompiledCmp::Lt => compiled_ordered_cmp(
                     &left,
                     &right,
@@ -1128,8 +1125,8 @@ fn eval_compiled_inner(
             let val = eval_compiled_inner(inner, data, vars, ctx, shape, options, start_time)?;
             match val {
                 JValue::Number(n) => Ok(JValue::Number(-n)),
-                JValue::Null => Ok(JValue::Null),
-                // Undefined operand propagates through unary minus, matching the tree-walker.
+                // Only *undefined* propagates; null is D1002 like any other
+                // non-number, matching the tree-walker and jsonata-js.
                 v if v.is_undefined() => Ok(JValue::Undefined),
                 _ => Err(EvaluatorError::TypeError(
                     "D1002: Cannot negate non-number value".to_string(),
@@ -1314,12 +1311,9 @@ fn eval_compiled_inner(
                     }
                 }
             }
-            check_sequence_length(result.len(), options)?;
-            Ok(if result.is_empty() {
-                JValue::Undefined
-            } else {
-                JValue::array(result)
-            })
+            // Sequence semantics, same as the tree-walker's `$map`: an empty
+            // result is undefined and a single result unwraps.
+            hof_result_sequence(result, options)
         }
 
         CompiledExpr::FilterCall {
@@ -1383,22 +1377,10 @@ fn eval_compiled_inner(
                     }
                 }
             }
-            if was_single {
-                Ok(match result.len() {
-                    0 => JValue::Undefined,
-                    1 => {
-                        check_sequence_length(1, options)?;
-                        result.remove(0)
-                    }
-                    _ => {
-                        check_sequence_length(result.len(), options)?;
-                        JValue::array(result)
-                    }
-                })
-            } else {
-                check_sequence_length(result.len(), options)?;
-                Ok(JValue::array(result))
-            }
+            // `was_single` used to gate the unwrap; the sequence rule is the
+            // same whether the input was an array or a lone value.
+            let _ = was_single;
+            hof_result_sequence(result, options)
         }
 
         CompiledExpr::ReduceCall {
@@ -1527,43 +1509,41 @@ fn is_compiled_explicit_null(expr: &CompiledExpr) -> bool {
 pub(crate) fn compiled_ordered_cmp(
     left: &JValue,
     right: &JValue,
-    left_is_explicit_null: bool,
-    right_is_explicit_null: bool,
+    _left_is_explicit_null: bool,
+    _right_is_explicit_null: bool,
     cmp_num: fn(f64, f64) -> bool,
     cmp_str: fn(&str, &str) -> bool,
 ) -> Result<JValue, EvaluatorError> {
+    // Compiled twin of `Evaluator::ordered_compare`; keep the two in step.
+    // jsonata-js's rule: only numbers, strings and *undefined* are comparable,
+    // so anything else -- null, boolean, object, array -- raises T2010; an
+    // undefined operand then makes the result undefined; and only after that
+    // does a differing type raise T2009.
+    //
+    // The `*_is_explicit_null` flags are vestigial. They told a literal `null`
+    // from a missing value back when both were `JValue::Null`; since the
+    // null/undefined split (#32) the variant carries that itself, and every
+    // `JValue::Null` reaching here is an explicit null and uncomparable.
+    fn comparable(v: &JValue) -> bool {
+        matches!(v, JValue::Number(_) | JValue::String(_) | JValue::Undefined)
+    }
+
+    if !comparable(left) || !comparable(right) {
+        return Err(EvaluatorError::EvaluationError(
+            "T2010: Type mismatch in comparison".to_string(),
+        ));
+    }
+
+    if matches!(left, JValue::Undefined) || matches!(right, JValue::Undefined) {
+        return Ok(JValue::Undefined);
+    }
+
     match (left, right) {
         (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Bool(cmp_num(*a, *b))),
         (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(cmp_str(a, b))),
-        // Both null/undefined → undefined
-        (JValue::Null, JValue::Null) | (JValue::Undefined, JValue::Undefined) => Ok(JValue::Null),
-        (JValue::Undefined, JValue::Null) | (JValue::Null, JValue::Undefined) => Ok(JValue::Null),
-        // Explicit null literal with any non-null type → T2010 error
-        (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::EvaluationError(
-            "T2010: Type mismatch in comparison".to_string(),
-        )),
-        (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::EvaluationError(
-            "T2010: Type mismatch in comparison".to_string(),
-        )),
-        // Boolean with undefined → T2010 error
-        (JValue::Bool(_), JValue::Null | JValue::Undefined)
-        | (JValue::Null | JValue::Undefined, JValue::Bool(_)) => Err(
-            EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()),
-        ),
-        // Number or String with implicit undefined (missing field) → undefined result
-        (JValue::Number(_) | JValue::String(_), JValue::Null | JValue::Undefined)
-        | (JValue::Null | JValue::Undefined, JValue::Number(_) | JValue::String(_)) => {
-            Ok(JValue::Null)
-        }
-        // Type mismatch (string vs number)
-        (JValue::String(_), JValue::Number(_)) | (JValue::Number(_), JValue::String(_)) => {
-            Err(EvaluatorError::EvaluationError(
-                "T2009: The expressions on either side of operator must be of the same data type"
-                    .to_string(),
-            ))
-        }
         _ => Err(EvaluatorError::EvaluationError(
-            "T2010: Type mismatch in comparison".to_string(),
+            "T2009: The expressions on either side of operator must be of the same data type"
+                .to_string(),
         )),
     }
 }
@@ -1575,8 +1555,8 @@ pub(crate) fn compiled_arithmetic(
     op: CompiledArithOp,
     left: &JValue,
     right: &JValue,
-    left_is_explicit_null: bool,
-    right_is_explicit_null: bool,
+    _left_is_explicit_null: bool,
+    _right_is_explicit_null: bool,
 ) -> Result<JValue, EvaluatorError> {
     let op_sym = match op {
         CompiledArithOp::Add => "+",
@@ -1585,60 +1565,61 @@ pub(crate) fn compiled_arithmetic(
         CompiledArithOp::Div => "/",
         CompiledArithOp::Mod => "%",
     };
+    // jsonata-js's `isNumeric` throws D1001 when an *operand* is Infinity. It
+    // must run before the numeric arm below, or `1/(10e300 * 10e100)` quietly
+    // computes 1/inf = 0 instead of raising. NaN operands are reported as
+    // non-numeric instead and fall through to T2001/T2002.
+    if matches!(left, JValue::Number(n) if n.is_infinite())
+        || matches!(right, JValue::Number(n) if n.is_infinite())
+    {
+        return Err(EvaluatorError::EvaluationError(
+            "D1001: Number out of range".to_string(),
+        ));
+    }
+
     match (left, right) {
         (JValue::Number(a), JValue::Number(b)) => {
             let result = match op {
                 CompiledArithOp::Add => *a + *b,
                 CompiledArithOp::Sub => *a - *b,
-                CompiledArithOp::Mul => {
-                    let r = *a * *b;
-                    if r.is_infinite() {
-                        return Err(EvaluatorError::EvaluationError(
-                            "D1001: Number out of range".to_string(),
-                        ));
-                    }
-                    r
-                }
-                CompiledArithOp::Div => {
-                    if *b == 0.0 {
-                        return Err(EvaluatorError::EvaluationError(
-                            "Division by zero".to_string(),
-                        ));
-                    }
-                    *a / *b
-                }
-                CompiledArithOp::Mod => {
-                    if *b == 0.0 {
-                        return Err(EvaluatorError::EvaluationError(
-                            "Division by zero".to_string(),
-                        ));
-                    }
-                    *a % *b
-                }
+                // No check on the *result*: jsonata-js returns Infinity for
+                // `1/0` and `10e300 * 10e100`, and NaN for `0/0` and `1%0`. The
+                // error surfaces when such a value is later used as an operand
+                // (see the D1001 guard above), matching `isNumeric`.
+                CompiledArithOp::Mul => *a * *b,
+                CompiledArithOp::Div => *a / *b,
+                CompiledArithOp::Mod => *a % *b,
             };
             Ok(JValue::Number(result))
         }
-        // Explicit null literal → T2002 error (matching tree-walker behavior)
-        (JValue::Null | JValue::Undefined, _) if left_is_explicit_null => {
+        // Order matters, and matches jsonata-js: type-check each *defined*
+        // operand first, then propagate undefined. `false + $x` raises T2001 on
+        // the boolean even though the right side is undefined.
+        //
+        // Only undefined propagates. An explicit null -- like any other
+        // non-number -- is a type error, whether written as a literal or
+        // arriving at runtime from data or a lambda parameter. The
+        // `*_is_explicit_null` flags are vestigial: they told a literal `null`
+        // from a missing value back when both were `JValue::Null`, and since
+        // the null/undefined split (#32) the variant carries that itself.
+        _ if !matches!(left, JValue::Number(n) if !n.is_nan())
+            && !matches!(left, JValue::Undefined) =>
+        {
             Err(EvaluatorError::TypeError(format!(
-                "T2002: The left side of the {} operator must evaluate to a number",
+                "T2001: The left side of the {} operator must evaluate to a number",
                 op_sym
             )))
         }
-        (_, JValue::Null | JValue::Undefined) if right_is_explicit_null => {
+        _ if !matches!(right, JValue::Number(n) if !n.is_nan())
+            && !matches!(right, JValue::Undefined) =>
+        {
             Err(EvaluatorError::TypeError(format!(
                 "T2002: The right side of the {} operator must evaluate to a number",
                 op_sym
             )))
         }
-        // Implicit undefined propagation (from missing field) → undefined result
-        (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-            Ok(JValue::Null)
-        }
-        _ => Err(EvaluatorError::TypeError(format!(
-            "Cannot apply {} to {:?} and {:?}",
-            op_sym, left, right
-        ))),
+        // At least one operand is undefined and neither is a bad type.
+        _ => Ok(JValue::Undefined),
     }
 }
 
@@ -1658,16 +1639,20 @@ pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, Evalua
     };
     match value {
         JValue::String(s) => Ok(s.to_string()),
-        JValue::Null | JValue::Undefined => Ok(String::new()),
-        JValue::Number(_) | JValue::Bool(_) | JValue::Array(_) | JValue::Object(_) => {
-            match crate::functions::string::string(value, None) {
-                Ok(JValue::String(s)) => Ok(s.to_string()),
-                Ok(JValue::Null) => Ok(String::new()),
-                _ => Err(EvaluatorError::TypeError(
-                    "Cannot concatenate complex types".to_string(),
-                )),
-            }
-        }
+        // An explicit null stringifies as "null" (same as `$string(null)`);
+        // only an *undefined* operand contributes nothing.
+        JValue::Undefined => Ok(String::new()),
+        JValue::Null
+        | JValue::Number(_)
+        | JValue::Bool(_)
+        | JValue::Array(_)
+        | JValue::Object(_) => match crate::functions::string::string(value, None) {
+            Ok(JValue::String(s)) => Ok(s.to_string()),
+            Ok(JValue::Null) => Ok(String::new()),
+            _ => Err(EvaluatorError::TypeError(
+                "Cannot concatenate complex types".to_string(),
+            )),
+        },
         _ => Ok(String::new()),
     }
 }
@@ -1688,6 +1673,20 @@ pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, Evalu
     Ok(JValue::Bool(crate::functions::array::values_equal(
         lhs, rhs,
     )))
+}
+
+/// Inequality. NOT simply the negation of `compiled_equal`: jsonata-js returns
+/// false for both `=` and `!=` when either operand is undefined, so an element
+/// whose field is missing does not survive `arr[p != null]`.
+#[inline]
+pub(crate) fn compiled_not_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, EvaluatorError> {
+    if lhs.is_undefined() || rhs.is_undefined() {
+        return Ok(JValue::Bool(false));
+    }
+    match compiled_equal(lhs, rhs)? {
+        JValue::Bool(b) => Ok(JValue::Bool(!b)),
+        other => Ok(other),
+    }
 }
 
 /// String concatenation for the bytecode VM.
@@ -2073,6 +2072,63 @@ pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
     Ok(value.clone())
 }
 
+/// Validate and coerce a builtin's arguments against its jsonata-js signature.
+///
+/// One copy shared by all three dispatch paths -- the compiled/VM
+/// `call_pure_builtin`, the tree-walker's `evaluate_function_call`, and
+/// `call_builtin_with_values` for builtins passed by reference. They used to
+/// hand-roll their own argument checks, which is why they disagreed with each
+/// other about `$round` and the `$substring*` family.
+///
+/// Returns `None` when validation declines because an argument was missing: the
+/// answer differs per function ($count is 0, $exists is false, $abs is
+/// undefined), so the caller's arm decides. A genuine type error is returned as
+/// an error.
+fn validate_builtin_args(
+    name: &str,
+    args: &[JValue],
+    context: &JValue,
+) -> Result<Option<Vec<JValue>>, EvaluatorError> {
+    let Some(sig) = crate::signature::builtin_signature(name) else {
+        return Ok(None);
+    };
+    // A trailing argument that evaluated to undefined and binds to an
+    // *optional* parameter was not really supplied: `$round(2.5, missing.x)` is
+    // 2 in jsonata-js, not an error. Trim those before validating.
+    //
+    // Only optional ones. An undefined argument bound to a required or
+    // repeatable parameter is meaningful and must reach the function:
+    // `$zip([1,2,3], [4,5,6], nothing)` is `[]` and `$append(1, notexist)` is
+    // `1`, and both break if the argument is dropped.
+    // Never trim to zero: the `-` marker makes the first parameter optional
+    // too, and dropping the only argument turns an explicit call into a
+    // context-substituted one.
+    let mut end = args.len();
+    while end > 1 {
+        let binds_to_optional = sig.params.get(end - 1).is_some_and(|p| p.optional);
+        if binds_to_optional && matches!(args.get(end - 1), Some(JValue::Undefined)) {
+            end -= 1;
+        } else {
+            break;
+        }
+    }
+    let args = &args[..end];
+    match sig.validate_and_coerce(args, context) {
+        Ok(mut coerced) => {
+            // Validation returns one entry per *parameter*, padding absent
+            // optional ones with Undefined. The arms decide whether an optional
+            // was supplied from `args.len()`, so a padded tail makes
+            // `$split("a,b", ",")` read a third argument and reject it as a
+            // non-numeric limit. Trim the padding back off.
+            while coerced.len() > args.len() && matches!(coerced.last(), Some(JValue::Undefined)) {
+                coerced.pop();
+            }
+            Ok(Some(coerced))
+        }
+        Err(e) => Err(EvaluatorError::TypeError(e.to_string())),
+    }
+}
+
 /// Dispatch a pure builtin function call.
 ///
 /// Replicates the tree-walker's evaluation for the subset of builtins in
@@ -2146,6 +2202,20 @@ fn call_pure_builtin(
     if effective_args.first().is_some_and(JValue::is_undefined) && propagates_undefined(name) {
         return Ok(JValue::Undefined);
     }
+
+    // Validate and coerce against the builtin's jsonata-js signature. This is
+    // where a lot of behaviour we used to hand-roll per function is actually
+    // specified: the `a` type "normally treats any value as a singleton array"
+    // (so `$reverse(1)` is `[1]` and `$count(null)` is 1), and `l` is distinct
+    // from `m`, so `$abs(null)` is a type error while a missing argument is not.
+    let sig_storage: Vec<JValue>;
+    let effective_args: &[JValue] = match validate_builtin_args(name, effective_args, data)? {
+        Some(coerced) => {
+            sig_storage = coerced;
+            &sig_storage
+        }
+        None => effective_args,
+    };
 
     match name {
         // ── String functions ────────────────────────────────────────────
@@ -2485,10 +2555,12 @@ fn call_pure_builtin(
             }
             let first = &effective_args[0];
             let second = &effective_args[1];
-            if matches!(second, JValue::Null | JValue::Undefined) {
+            // Only a *missing* operand is skipped; an explicit null is a value
+            // and gets appended. Mirrors the tree-walker arm.
+            if matches!(second, JValue::Undefined) {
                 return Ok(first.clone());
             }
-            if matches!(first, JValue::Null | JValue::Undefined) {
+            if matches!(first, JValue::Undefined) {
                 return Ok(second.clone());
             }
             let arr = match first {
@@ -3102,6 +3174,27 @@ pub struct EvaluatorOptions {
 /// unlike upstream jsonata-js, which caps flat/non-nested literals too via
 /// `fn.append`'s `createSequence()` hook. See `EvaluatorOptions::max_sequence_length`
 /// doc comment above for why this is a deliberate, temporary gap.
+/// Wrap a higher-order function's results as a JSONata *sequence*.
+///
+/// `$map`/`$filter` do not return arrays, they return sequences: an empty
+/// result is undefined rather than `[]`, and a single result unwraps to that
+/// result. Returning a bare `Vec` from each of the six exit points is what let
+/// these drift from `$map(arr, ...)` producing `["free"]` where jsonata-js
+/// produces `"free"`.
+pub(crate) fn hof_result_sequence(
+    mut result: Vec<JValue>,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
+    match result.len() {
+        0 => Ok(JValue::Undefined),
+        1 => Ok(result.pop().expect("len checked")),
+        n => {
+            check_sequence_length(n, options)?;
+            Ok(JValue::array(result))
+        }
+    }
+}
+
 pub(crate) fn check_sequence_length(
     len: usize,
     options: &EvaluatorOptions,
@@ -3433,9 +3526,64 @@ impl Evaluator {
     /// Specialized sort using pre-extracted keys (Schwartzian transform).
     /// Extracts sort keys once (N lookups), then sorts by comparing keys directly,
     /// avoiding O(N log N) hash lookups during comparisons.
-    fn merge_sort_specialized(arr: &mut [JValue], spec: &SpecializedSortComparator) {
+    ///
+    /// Returns `false` when the keys are not uniformly comparable, leaving the
+    /// array untouched so the caller falls back to the general comparator. A
+    /// sort comparator is an ordered comparison, so jsonata-js rejects a null,
+    /// boolean, object or array key with T2010 and mixed number/string keys
+    /// with T2009. This path cannot raise (it sorts in place), and duplicating
+    /// the type rule here is what let it silently sort inputs the general path
+    /// rejects -- so it declines instead and lets `compiled_ordered_cmp`, which
+    /// owns the rule, produce the error.
+    fn merge_sort_specialized(arr: &mut [JValue], spec: &SpecializedSortComparator) -> bool {
         if arr.len() <= 1 {
-            return;
+            return true;
+        }
+
+        // Phase 0: A present key that is neither number nor string is
+        // uncomparable. An *absent* key is undefined, which sorts last without
+        // raising, so it stays on the fast path.
+        let mut uncomparable = false;
+        let mut saw_num = false;
+        let mut saw_str = false;
+        // Classify without cloning: the Object case is the hot one and only the
+        // variant matters.
+        enum KeyKind {
+            Num,
+            Str,
+            Absent,
+            Uncomparable,
+        }
+        fn kind(v: Option<&JValue>) -> KeyKind {
+            match v {
+                Some(JValue::Number(_)) => KeyKind::Num,
+                Some(JValue::String(_)) => KeyKind::Str,
+                None | Some(JValue::Undefined) => KeyKind::Absent,
+                Some(_) => KeyKind::Uncomparable,
+            }
+        }
+        for item in arr.iter() {
+            let k = match item {
+                JValue::Object(obj) => kind(obj.get(&spec.field)),
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(lazy) => match lazy.get_field(&spec.field) {
+                    Ok(v) => kind(Some(&v)),
+                    Err(_) => KeyKind::Absent,
+                },
+                _ => KeyKind::Absent,
+            };
+            match k {
+                KeyKind::Num => saw_num = true,
+                KeyKind::Str => saw_str = true,
+                KeyKind::Absent => {}
+                KeyKind::Uncomparable => {
+                    uncomparable = true;
+                    break;
+                }
+            }
+        }
+        if uncomparable || (saw_num && saw_str) {
+            return false;
         }
 
         // Phase 1: Extract sort keys -- one IndexMap lookup per element
@@ -3485,6 +3633,7 @@ impl Evaluator {
                 j = target;
             }
         }
+        true
     }
 
     /// Merge sort implementation using a comparator function.
@@ -3505,8 +3654,11 @@ impl Evaluator {
         if let AstNode::Lambda { params, body, .. } = comparator {
             if params.len() >= 2 {
                 if let Some(spec) = try_specialize_sort_comparator(body, &params[0], &params[1]) {
-                    Self::merge_sort_specialized(arr, &spec);
-                    return Ok(());
+                    // Falls through to the general comparator when the keys are
+                    // not uniformly comparable, so the type error is raised.
+                    if Self::merge_sort_specialized(arr, &spec) {
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -4925,13 +5077,18 @@ impl Evaluator {
                 if !var_name.is_empty() {
                     if let Some(value) = self.context.lookup(var_name) {
                         match value {
+                            // An absent field is undefined, not null: `$v.p`
+                            // over `{"q": 9}` must drop out of a sequence
+                            // rather than become an explicit null.
                             JValue::Object(obj) => {
-                                return Ok(obj.get(field_name).cloned().unwrap_or(JValue::Null));
+                                return Ok(obj
+                                    .get(field_name)
+                                    .cloned()
+                                    .unwrap_or(JValue::Undefined));
                             }
                             #[cfg(feature = "python")]
                             JValue::LazyPyDict(lazy) => {
-                                let v = lazy.get_field(field_name)?;
-                                return Ok(if v.is_undefined() { JValue::Null } else { v });
+                                return lazy.get_field(field_name).map_err(Into::into);
                             }
                             JValue::Array(arr) => {
                                 // Map field extraction over array (same as single-step Name on Array)
@@ -4939,7 +5096,7 @@ impl Evaluator {
                                 for item in arr.iter() {
                                     if let JValue::Object(obj) = item {
                                         if let Some(val) = obj.get(field_name) {
-                                            if !val.is_null() {
+                                            if !val.is_undefined() {
                                                 match val {
                                                     JValue::Array(inner) => {
                                                         result.extend(inner.iter().cloned());
@@ -4952,7 +5109,7 @@ impl Evaluator {
                                         #[cfg(feature = "python")]
                                         if let JValue::LazyPyDict(lazy) = item {
                                             let val = lazy.get_field(field_name)?;
-                                            if !val.is_null() && !val.is_undefined() {
+                                            if !val.is_undefined() {
                                                 match val {
                                                     JValue::Array(inner) => {
                                                         result.extend(inner.iter().cloned());
@@ -4964,7 +5121,7 @@ impl Evaluator {
                                     }
                                 }
                                 return match result.len() {
-                                    0 => Ok(JValue::Null),
+                                    0 => Ok(JValue::Undefined),
                                     1 => Ok(result.pop().unwrap()),
                                     _ => {
                                         check_sequence_length(result.len(), &self.options)?;
@@ -5171,7 +5328,7 @@ impl Evaluator {
                     if steps[0].is_tuple {
                         self.keep_tuple_stream = true;
                     }
-                    let v = self.evaluate_path_step(&steps[0].node, data, data);
+                    let v = self.evaluate_path_step(&steps[0].node, data, data, true);
                     self.keep_tuple_stream = saved_keep;
                     v?
                 }
@@ -5951,11 +6108,17 @@ impl Evaluator {
                 }
                 // Handle complex path steps (e.g., computed properties, object construction)
                 _ => {
+                    // These steps map over an array just as a Name step does, so
+                    // the result is a sequence and a singleton unwraps:
+                    // `arr.{"k": p}` over one element is the object, not `[object]`.
+                    if matches!(current, JValue::Array(_)) {
+                        did_array_mapping = true;
+                    }
                     let saved_keep = self.keep_tuple_stream;
                     if step.is_tuple {
                         self.keep_tuple_stream = true;
                     }
-                    let v = self.evaluate_path_step(&step.node, &current, data);
+                    let v = self.evaluate_path_step(&step.node, &current, data, false);
                     self.keep_tuple_stream = saved_keep;
                     v?
                 }
@@ -6388,11 +6551,18 @@ impl Evaluator {
     }
 
     /// Helper to evaluate a complex path step
+    /// `is_first_step` distinguishes the head of a path from a later step. The
+    /// head is evaluated against the input itself, so an expression that does
+    /// not reference the input -- an object constructor, say -- still evaluates
+    /// when the input is undefined: `{"a": 1}.a` is 1 with no input at all. A
+    /// *later* step over an undefined value has nothing to map and stays
+    /// undefined.
     fn evaluate_path_step(
         &mut self,
         step: &AstNode,
         current: &JValue,
         original_data: &JValue,
+        is_first_step: bool,
     ) -> Result<JValue, EvaluatorError> {
         // Special case: array mapping with object construction
         // e.g., items.{"name": name, "price": price}
@@ -6491,6 +6661,17 @@ impl Evaluator {
             // or [0..9] where it's an array constructor
             // or $^(field) where it's a sort operator
             // or (expr).field where (expr) is a block that evaluates to a value
+            // An object constructor as a path step builds from the value at that
+            // step, not from the root: `arr.{"k": p}` over `{"p": 1}` reads `p`
+            // from that object. The array case is handled above; this is the
+            // singleton form. An undefined step value stays undefined.
+            if matches!(step, AstNode::Object(_)) {
+                if matches!(current, JValue::Undefined) && !is_first_step {
+                    return Ok(JValue::Undefined);
+                }
+                return self.evaluate_internal(step, current);
+            }
+
             if matches!(
                 step,
                 AstNode::Binary { .. }
@@ -6499,7 +6680,6 @@ impl Evaluator {
                     | AstNode::ParentVariable(_)
                     | AstNode::Parent(_)
                     | AstNode::Array(_)
-                    | AstNode::Object(_)
                     | AstNode::Sort { .. }
                     | AstNode::Block(_)
             ) {
@@ -7017,27 +7197,6 @@ impl Evaluator {
             return Ok(value);
         }
 
-        // Special handling for 'In' operator - check for array filtering
-        // Must evaluate lhs first to determine if this is array filtering
-        if op == BinaryOp::In {
-            let left = self.evaluate_internal(lhs, data)?;
-
-            // Check if this is array filtering: array[predicate]
-            if matches!(left, JValue::Array(_)) {
-                // Try evaluating rhs in current context to see if it's a simple index
-                let right_result = self.evaluate_internal(rhs, data);
-
-                if let Ok(JValue::Number(_)) = right_result {
-                    // Simple numeric index: array[n]
-                    return self.array_index(&left, &right_result.unwrap());
-                } else {
-                    // This is array filtering: array[predicate]
-                    // Evaluate the predicate for each array item
-                    return self.array_filter(lhs, rhs, &left, data);
-                }
-            }
-        }
-
         // Special handling for logical operators (short-circuit evaluation)
         if op == BinaryOp::And {
             let left = self.evaluate_internal(lhs, data)?;
@@ -7086,10 +7245,7 @@ impl Evaluator {
             // side is lazy) so conversion failures raise instead of silently comparing
             // unequal.
             BinaryOp::Equal => compiled_equal(&left, &right),
-            BinaryOp::NotEqual => match compiled_equal(&left, &right)? {
-                JValue::Bool(b) => Ok(JValue::Bool(!b)),
-                other => Ok(other),
-            },
+            BinaryOp::NotEqual => compiled_not_equal(&left, &right),
             BinaryOp::LessThan => {
                 self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
             }
@@ -7148,8 +7304,9 @@ impl Evaluator {
 
         match op {
             UnaryOp::Negate => match value {
-                // undefined returns undefined
-                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                // Only *undefined* propagates; null is not a number, so it is
+                // D1002 like any other non-number (jsonata-js `evaluateUnary`).
+                JValue::Undefined => Ok(JValue::Undefined),
                 JValue::Number(n) => Ok(JValue::Number(-n)),
                 _ => Err(EvaluatorError::TypeError(
                     "D1002: Cannot negate non-number value".to_string(),
@@ -7398,9 +7555,12 @@ impl Evaluator {
                 }
             }
 
-            // For other expressions, evaluate and check if non-null/non-undefined
+            // For other expressions, evaluate and check whether anything is
+            // there. An explicit null exists -- only a missing value does not,
+            // which is what the AstNode::Null branch above already assumed for
+            // the literal form.
             let value = self.evaluate_internal(arg, data)?;
-            return Ok(JValue::Bool(!value.is_null() && !value.is_undefined()));
+            return Ok(JValue::Bool(!value.is_undefined()));
         }
 
         // Check if any arguments are undefined variables or undefined paths
@@ -7580,6 +7740,12 @@ impl Evaluator {
             if matches!(arg, JValue::LazyPyDict(_)) {
                 *arg = normalize_lazy(arg)?;
             }
+        }
+
+        // Same signature validation the compiled path performs, so the two
+        // engines cannot disagree about argument handling.
+        if let Some(coerced) = validate_builtin_args(name, &evaluated_args, data)? {
+            evaluated_args = coerced;
         }
 
         match name {
@@ -7951,32 +8117,6 @@ impl Evaluator {
 
                 let coerced_args = match signature.validate_and_coerce(&evaluated_args, data) {
                     Ok(args) => args,
-                    Err(crate::signature::SignatureError::UndefinedArgument) => {
-                        // This can happen if the separator is undefined
-                        // In that case, just validate the first arg and use default separator
-                        let sig_first_arg = Signature::parse("<a<s>:a<s>>").map_err(|e| {
-                            EvaluatorError::EvaluationError(format!("Invalid signature: {}", e))
-                        })?;
-
-                        match sig_first_arg.validate_and_coerce(&evaluated_args[0..1], data) {
-                            Ok(args) => args,
-                            Err(crate::signature::SignatureError::ArrayTypeMismatch {
-                                index,
-                                expected,
-                            }) => {
-                                return Err(EvaluatorError::TypeError(format!(
-                                    "T0412: Argument {} of function $join must be an array of {}",
-                                    index, expected
-                                )));
-                            }
-                            Err(e) => {
-                                return Err(EvaluatorError::TypeError(format!(
-                                    "Signature validation failed: {}",
-                                    e
-                                )));
-                            }
-                        }
-                    }
                     Err(crate::signature::SignatureError::ArgumentTypeMismatch {
                         index,
                         expected,
@@ -8506,13 +8646,13 @@ impl Evaluator {
                 let first = &evaluated_args[0];
                 let second = &evaluated_args[1];
 
-                // If second arg is null/undefined, return first as-is (no change)
-                if second.is_null() || second.is_undefined() {
+                // Only a *missing* operand is skipped; an explicit null is a
+                // value and gets appended, so `$append([1,2], null)` is
+                // `[1,2,null]`.
+                if second.is_undefined() {
                     return Ok(first.clone());
                 }
-
-                // If first arg is null/undefined, return second as-is (appending to nothing gives second)
-                if first.is_null() || first.is_undefined() {
+                if first.is_undefined() {
                     return Ok(second.clone());
                 }
 
@@ -8569,18 +8709,18 @@ impl Evaluator {
 
             "sift" => {
                 // $sift(object, function) or $sift(function) - filter object by predicate
-                if evaluated_args.is_empty() || evaluated_args.len() > 2 {
+                if args.is_empty() || args.len() > 2 {
                     return Err(EvaluatorError::EvaluationError(
                         "sift() requires 1 or 2 arguments".to_string(),
                     ));
                 }
 
-                // Determine which argument is the function
-                let func_arg = if evaluated_args.len() == 1 {
-                    &args[0]
-                } else {
-                    &args[1]
-                };
+                // Decide from `args` (the source arguments), not from the
+                // evaluated values: signature coercion can substitute the
+                // context for a `-` parameter, which grows the value list
+                // without adding a source argument. Indexing `args` by the
+                // value count then runs off the end.
+                let func_arg = if args.len() == 1 { &args[0] } else { &args[1] };
 
                 // Detect how many parameters the callback expects
                 let param_count = self.get_callback_param_count(func_arg);
@@ -8627,7 +8767,7 @@ impl Evaluator {
                 };
 
                 // Handle partial application - if only 1 arg, use current context as object
-                if evaluated_args.len() == 1 {
+                if args.len() == 1 {
                     // $sift(function) - use current context data as object
                     let data = &normalize_lazy(data)?;
                     match data {
@@ -8976,6 +9116,14 @@ impl Evaluator {
                 // Evaluate the array argument
                 let array = self.evaluate_internal(&args[0], data)?;
 
+                // A non-array argument is the singleton sequence containing it,
+                // so `$map({"p": 1}, fn)` maps over the one object rather than
+                // raising. `$filter` already did this; undefined stays undefined.
+                let array = match array {
+                    JValue::Array(_) | JValue::Undefined => array,
+                    other => JValue::array(vec![other]),
+                };
+
                 match array {
                     JValue::Array(arr) => {
                         // Detect how many parameters the callback expects
@@ -9011,8 +9159,7 @@ impl Evaluator {
                                             result.push(mapped);
                                         }
                                     }
-                                    check_sequence_length(result.len(), &self.options)?;
-                                    return Ok(JValue::array(result));
+                                    return hof_result_sequence(result, &self.options);
                                 }
                             }
                             // Stored lambda variable fast path: $var with pre-compiled body
@@ -9049,8 +9196,7 @@ impl Evaluator {
                                                     result.push(mapped);
                                                 }
                                             }
-                                            check_sequence_length(result.len(), &self.options)?;
-                                            return Ok(JValue::array(result));
+                                            return hof_result_sequence(result, &self.options);
                                         }
                                     }
                                 }
@@ -9084,8 +9230,7 @@ impl Evaluator {
                                 result.push(mapped);
                             }
                         }
-                        check_sequence_length(result.len(), &self.options)?;
-                        Ok(JValue::array(result))
+                        hof_result_sequence(result, &self.options)
                     }
                     JValue::Null => Ok(JValue::Null),
                     JValue::Undefined => Ok(JValue::Undefined),
@@ -9165,8 +9310,7 @@ impl Evaluator {
                                     return Ok(JValue::Undefined);
                                 }
                             }
-                            check_sequence_length(result.len(), &self.options)?;
-                            return Ok(JValue::array(result));
+                            return hof_result_sequence(result, &self.options);
                         }
                     }
                     // Stored lambda variable fast path: $var with pre-compiled body
@@ -9206,8 +9350,7 @@ impl Evaluator {
                                             return Ok(JValue::Undefined);
                                         }
                                     }
-                                    check_sequence_length(result.len(), &self.options)?;
-                                    return Ok(JValue::array(result));
+                                    return hof_result_sequence(result, &self.options);
                                 }
                             }
                         }
@@ -9251,8 +9394,7 @@ impl Evaluator {
                     }
                 }
 
-                check_sequence_length(result.len(), &self.options)?;
-                Ok(JValue::array(result))
+                hof_result_sequence(result, &self.options)
             }
 
             "reduce" => {
@@ -10210,9 +10352,6 @@ impl Evaluator {
                     Err(e) => {
                         self.context.pop_scope();
                         match e {
-                            crate::signature::SignatureError::UndefinedArgument => {
-                                return Ok(JValue::Null);
-                            }
                             crate::signature::SignatureError::ArgumentTypeMismatch {
                                 index,
                                 expected,
@@ -10452,9 +10591,6 @@ impl Evaluator {
                 Ok(sig) => match sig.validate_and_coerce(values, data) {
                     Ok(coerced) => coerced,
                     Err(e) => match e {
-                        crate::signature::SignatureError::UndefinedArgument => {
-                            return Ok(LambdaResult::JValue(JValue::Null));
-                        }
                         crate::signature::SignatureError::ArgumentTypeMismatch {
                             index,
                             expected,
@@ -11142,6 +11278,13 @@ impl Evaluator {
         } else {
             values
         };
+        // NOT signature-validated yet, unlike the other two dispatch paths. A
+        // builtin reaching here was passed by reference to a higher-order
+        // function, and that changes the arity contract in two ways this helper
+        // does not yet model: a context-capable parameter (`<s-:s>`) is counted
+        // as taking no arguments, and a HOF hands its callback more arguments
+        // than the builtin declares ($sift calls its callback with value and
+        // key). Wiring it in without handling both rejects `$map(arr, $uppercase)`.
         let arg = &values[0];
 
         match name {
@@ -11157,7 +11300,7 @@ impl Evaluator {
                     )),
                 }
             }
-            "exists" => Ok(JValue::Bool(!arg.is_null())),
+            "exists" => Ok(JValue::Bool(!arg.is_undefined())),
             "abs" => match arg {
                 JValue::Number(n) => Ok(functions::numeric::abs(*n)?),
                 _ => Err(EvaluatorError::TypeError(
@@ -11360,8 +11503,10 @@ impl Evaluator {
         let mut descendants = Vec::new();
 
         match value {
-            JValue::Null => {
-                // Null has no descendants, return empty
+            // Neither a null nor a missing value has descendants. Undefined used
+            // to fall through to the catch-all and collect *itself*, so `**`
+            // with no input produced `[null]` instead of undefined.
+            JValue::Null | JValue::Undefined => {
                 return Ok(descendants);
             }
             JValue::Object(obj) => {
@@ -11939,12 +12084,11 @@ impl Evaluator {
         }
     }
 
-    /// Equality comparison (JSONata semantics)
-    fn equals(&self, left: &JValue, right: &JValue) -> bool {
-        crate::functions::array::values_equal(left, right)
-    }
-
     /// Addition
+    /// Add — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn add(
         &self,
         left: &JValue,
@@ -11952,48 +12096,20 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Number(*a + *b)),
-            // Explicit null literal with number -> T2002 error
-            (JValue::Null, JValue::Number(_)) if left_is_explicit_null => {
-                Err(EvaluatorError::TypeError(
-                    "T2002: The left side of the + operator must evaluate to a number".to_string(),
-                ))
-            }
-            (JValue::Number(_), JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::TypeError(
-                    "T2002: The right side of the + operator must evaluate to a number".to_string(),
-                ))
-            }
-            (JValue::Null, JValue::Null) if left_is_explicit_null || right_is_explicit_null => {
-                Err(EvaluatorError::TypeError(
-                    "T2002: The left side of the + operator must evaluate to a number".to_string(),
-                ))
-            }
-            // Undefined variable (null/undefined) with number -> undefined result
-            (JValue::Null | JValue::Undefined, JValue::Number(_))
-            | (JValue::Number(_), JValue::Null | JValue::Undefined) => Ok(JValue::Null),
-            // Boolean with anything (including undefined) -> T2001 error
-            (JValue::Bool(_), _) => Err(EvaluatorError::TypeError(
-                "T2001: The left side of the '+' operator must evaluate to a number or a string"
-                    .to_string(),
-            )),
-            (_, JValue::Bool(_)) => Err(EvaluatorError::TypeError(
-                "T2001: The right side of the '+' operator must evaluate to a number or a string"
-                    .to_string(),
-            )),
-            // Undefined with undefined -> undefined
-            (JValue::Null | JValue::Undefined, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot add {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Add,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Subtraction
+    /// Subtract — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn subtract(
         &self,
         left: &JValue,
@@ -12001,27 +12117,20 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Number(*a - *b)),
-            // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The left side of the - operator must evaluate to a number".to_string(),
-            )),
-            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The right side of the - operator must evaluate to a number".to_string(),
-            )),
-            // Undefined variables -> undefined result
-            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot subtract {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Sub,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Multiplication
+    /// Multiply — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn multiply(
         &self,
         left: &JValue,
@@ -12029,36 +12138,20 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                let result = *a * *b;
-                // Check for overflow to Infinity
-                if result.is_infinite() {
-                    return Err(EvaluatorError::EvaluationError(
-                        "D1001: Number out of range".to_string(),
-                    ));
-                }
-                Ok(JValue::Number(result))
-            }
-            // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The left side of the * operator must evaluate to a number".to_string(),
-            )),
-            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The right side of the * operator must evaluate to a number".to_string(),
-            )),
-            // Undefined variables -> undefined result
-            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot multiply {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Mul,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Division
+    /// Divide — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn divide(
         &self,
         left: &JValue,
@@ -12066,35 +12159,20 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                let denominator = *b;
-                if denominator == 0.0 {
-                    return Err(EvaluatorError::EvaluationError(
-                        "Division by zero".to_string(),
-                    ));
-                }
-                Ok(JValue::Number(*a / denominator))
-            }
-            // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The left side of the / operator must evaluate to a number".to_string(),
-            )),
-            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The right side of the / operator must evaluate to a number".to_string(),
-            )),
-            // Undefined variables -> undefined result
-            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot divide {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Div,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Modulo
+    /// Modulo — delegates to the shared `compiled_arithmetic` so the
+    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
+    /// used to carry its own copy of the null/undefined handling, which is how
+    /// a runtime null came to be treated as "missing" here (#98).
     fn modulo(
         &self,
         left: &JValue,
@@ -12102,32 +12180,13 @@ impl Evaluator {
         left_is_explicit_null: bool,
         right_is_explicit_null: bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                let denominator = *b;
-                if denominator == 0.0 {
-                    return Err(EvaluatorError::EvaluationError(
-                        "Division by zero".to_string(),
-                    ));
-                }
-                Ok(JValue::Number(*a % denominator))
-            }
-            // Explicit null literal -> error
-            (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The left side of the % operator must evaluate to a number".to_string(),
-            )),
-            (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::TypeError(
-                "T2002: The right side of the % operator must evaluate to a number".to_string(),
-            )),
-            // Undefined variables -> undefined result
-            (JValue::Null | JValue::Undefined, _) | (_, JValue::Null | JValue::Undefined) => {
-                Ok(JValue::Null)
-            }
-            _ => Err(EvaluatorError::TypeError(format!(
-                "Cannot compute modulo of {:?} and {:?}",
-                left, right
-            ))),
-        }
+        compiled_arithmetic(
+            CompiledArithOp::Mod,
+            left,
+            right,
+            left_is_explicit_null,
+            right_is_explicit_null,
+        )
     }
 
     /// Get human-readable type name for error messages
@@ -12291,16 +12350,20 @@ impl Evaluator {
         };
         match value {
             JValue::String(s) => Ok(s.to_string()),
-            JValue::Null => Ok(String::new()),
-            JValue::Number(_) | JValue::Bool(_) | JValue::Array(_) | JValue::Object(_) => {
-                match crate::functions::string::string(value, None) {
-                    Ok(JValue::String(s)) => Ok(s.to_string()),
-                    Ok(JValue::Null) => Ok(String::new()),
-                    _ => Err(EvaluatorError::TypeError(
-                        "Cannot concatenate complex types".to_string(),
-                    )),
-                }
-            }
+            // An explicit null stringifies as "null" (same as `$string(null)`);
+            // only an *undefined* operand contributes nothing.
+            JValue::Undefined => Ok(String::new()),
+            JValue::Null
+            | JValue::Number(_)
+            | JValue::Bool(_)
+            | JValue::Array(_)
+            | JValue::Object(_) => match crate::functions::string::string(value, None) {
+                Ok(JValue::String(s)) => Ok(s.to_string()),
+                Ok(JValue::Null) => Ok(String::new()),
+                _ => Err(EvaluatorError::TypeError(
+                    "Cannot concatenate complex types".to_string(),
+                )),
+            },
             _ => Ok(String::new()),
         }
     }
@@ -12408,88 +12471,46 @@ impl Evaluator {
         }
     }
 
-    /// Array filtering: array[predicate]
-    /// Evaluates the predicate for each item in the array and returns items where predicate is true
-    fn array_filter(
-        &mut self,
-        _lhs_node: &AstNode,
-        rhs_node: &AstNode,
-        array: &JValue,
-        _original_data: &JValue,
-    ) -> Result<JValue, EvaluatorError> {
-        match array {
-            JValue::Array(arr) => {
-                // Pre-allocate with estimated capacity (assume ~50% will match)
-                let mut filtered = Vec::with_capacity(arr.len() / 2);
-
-                for item in arr.iter() {
-                    // Evaluate the predicate in the context of this array item
-                    // The item becomes the new "current context" ($)
-                    let predicate_result = self.evaluate_internal(rhs_node, item)?;
-
-                    // Check if the predicate is truthy
-                    if self.is_truthy(&predicate_result) {
-                        filtered.push(item.clone());
-                    }
-                }
-
-                Ok(JValue::array(filtered))
-            }
-            _ => Err(EvaluatorError::TypeError(
-                "Array filtering requires an array".to_string(),
-            )),
-        }
-    }
-
+    /// The `in` membership operator.
+    ///
+    /// Mirrors jsonata-js's `evaluateIncludesExpression`: an *undefined* operand
+    /// on either side makes the result false; a non-array right side is wrapped
+    /// in a one-element array; and membership is decided with `===`, so
+    /// primitives match by value while composites match only by identity.
+    /// `obj in [obj]` is true and `obj in [{"k": 1}]` is false.
+    ///
+    /// An explicit null is a value here and matches itself. An object on the
+    /// right is NOT key-containment -- `"k" in obj` is false, because the object
+    /// is wrapped and compared against the string.
     fn in_operator(&self, left: &JValue, right: &JValue) -> Result<JValue, EvaluatorError> {
-        // If either side is undefined/null, return false (not an error)
-        // This matches JavaScript behavior
-        if left.is_null() || right.is_null() {
+        if left.is_undefined() || right.is_undefined() {
             return Ok(JValue::Bool(false));
         }
 
-        // Normalize a lazy left operand once; every equality below needs a real
-        // value, not a per-comparison materialization attempt. Guarded by `is_lazy`
-        // so the common (non-lazy) path pays no clone.
-        let normalized_left;
-        let left = if left.is_lazy() {
-            normalized_left = normalize_lazy(left)?;
-            &normalized_left
-        } else {
-            left
-        };
+        // Deliberately NOT normalizing a lazy operand here. Membership is decided
+        // by identity, and materializing one side turns a lazy dict into a fresh
+        // `Object` that can no longer be identical to the lazy dict on the other
+        // side -- which made `obj in obj` false on the Python-dict route only.
+        // `LazyPyDict::same_object` compares the underlying Python object.
+
+        /// `===` in Rust terms: primitives by value, composites by identity.
+        fn identical(a: &JValue, b: &JValue) -> bool {
+            match (a, b) {
+                (JValue::Null, JValue::Null) => true,
+                (JValue::Bool(x), JValue::Bool(y)) => x == y,
+                (JValue::Number(x), JValue::Number(y)) => x == y,
+                (JValue::String(x), JValue::String(y)) => x == y,
+                (JValue::Array(x), JValue::Array(y)) => Rc::ptr_eq(x, y),
+                (JValue::Object(x), JValue::Object(y)) => Rc::ptr_eq(x, y),
+                #[cfg(feature = "python")]
+                (JValue::LazyPyDict(x), JValue::LazyPyDict(y)) => x.same_object(y),
+                _ => false,
+            }
+        }
 
         match right {
-            JValue::Array(arr) => {
-                for v in arr.iter() {
-                    // compiled_equal normalizes a lazy element (guarded) so a
-                    // conversion failure raises instead of silently not matching.
-                    if matches!(compiled_equal(left, v)?, JValue::Bool(true)) {
-                        return Ok(JValue::Bool(true));
-                    }
-                }
-                Ok(JValue::Bool(false))
-            }
-            JValue::Object(obj) => {
-                if let JValue::String(key) = left {
-                    Ok(JValue::Bool(obj.contains_key(&**key)))
-                } else {
-                    Ok(JValue::Bool(false))
-                }
-            }
-            // Right-side lazy-object key-presence check doesn't convert any values
-            // (`contains_field` checks the Python dict directly), so it's left as-is.
-            #[cfg(feature = "python")]
-            JValue::LazyPyDict(lazy) => {
-                if let JValue::String(key) = left {
-                    Ok(JValue::Bool(lazy.contains_field(key)))
-                } else {
-                    Ok(JValue::Bool(false))
-                }
-            }
-            // If right side is not an array or object (e.g., string, number),
-            // wrap it in an array for comparison
-            other => Ok(JValue::Bool(self.equals(left, other))),
+            JValue::Array(arr) => Ok(JValue::Bool(arr.iter().any(|v| identical(left, v)))),
+            other => Ok(JValue::Bool(identical(left, other))),
         }
     }
 
@@ -12881,13 +12902,18 @@ mod tests {
         let mut evaluator = Evaluator::new();
         let data = JValue::Null;
 
+        // jsonata-js has no division-by-zero error: `10/0` is Infinity, and the
+        // D1001 appears only when that value is used as an operand. This
+        // asserted an error that the reference does not raise (#102).
         let expr = AstNode::Binary {
             op: BinaryOp::Divide,
             lhs: Box::new(AstNode::number(10.0)),
             rhs: Box::new(AstNode::number(0.0)),
         };
-        let result = evaluator.evaluate(&expr, &data);
-        assert!(result.is_err());
+        match evaluator.evaluate(&expr, &data) {
+            Ok(JValue::Number(n)) => assert!(n.is_infinite() && n > 0.0),
+            other => panic!("expected +inf, got {other:?}"),
+        }
     }
 
     #[test]

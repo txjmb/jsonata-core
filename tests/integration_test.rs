@@ -506,11 +506,18 @@ fn test_error_division_by_zero() {
     })
     .into();
 
+    // jsonata-js returns Infinity for division by zero rather than raising; the
+    // D1001 surfaces only when that value is consumed as an operand (#102).
     let ast = parse("value / 0").unwrap();
     let mut evaluator = Evaluator::new();
-    let result = evaluator.evaluate(&ast, &data);
+    match evaluator.evaluate(&ast, &data) {
+        Ok(JValue::Number(n)) => assert!(n.is_infinite() && n > 0.0),
+        other => panic!("expected +inf, got {other:?}"),
+    }
 
-    assert!(result.is_err());
+    // Consuming it does raise.
+    let ast = parse("1 / (value / 0)").unwrap();
+    assert!(Evaluator::new().evaluate(&ast, &data).is_err());
 }
 
 #[test]
@@ -1689,18 +1696,24 @@ fn test_sibling_blocks_do_not_cumulatively_overflow_shared_const_pool() {
 /// calling `BytecodeCompiler::compile`, so `_bench::compile` must return
 /// `None` for this expression - asserted explicitly below - and the whole
 /// expression falls back to the tree-walking `Evaluator`, which has no such
-/// arg-count ceiling and merges all 300 objects correctly.
+/// arg-count ceiling and sees all 300 arguments.
 ///
 /// NOTE ON API CHOICE: same reasoning as the tests above - bare
 /// `Evaluator::evaluate` never invokes `try_compile_expr`/the VM at all, so a
 /// test built on it alone would not exercise the guard being fixed here.
 #[cfg(feature = "bench")]
 #[test]
-fn test_merge_call_with_more_than_u8_max_args_does_not_silently_truncate() {
+fn test_call_with_more_than_u8_max_args_does_not_silently_truncate() {
     use jsonata_core::_bench;
+    // `$zip` is genuinely variadic (`<a+>`), so a 300-argument call is valid
+    // and exercises the >u8::MAX guard end to end. This used to use a
+    // 300-argument `$merge`, which jsonata-js rejects with T0410 -- its
+    // signature is `<a<o>:o>`, one array of objects, not varargs -- and which
+    // we now reject too (#102). The guard being tested is about argument
+    // *count*, so the choice of function is incidental.
     let n = 300;
-    let objects: Vec<String> = (0..n).map(|i| format!("{{\"k{i}\": {i}}}")).collect();
-    let expr_str = format!("$merge({})", objects.join(", "));
+    let arrays: Vec<String> = (0..n).map(|i| format!("[{i}]")).collect();
+    let expr_str = format!("$zip({})", arrays.join(", "));
     let ast = parse(&expr_str).unwrap();
     let data = JValue::Null;
 
@@ -1709,29 +1722,37 @@ fn test_merge_call_with_more_than_u8_max_args_does_not_silently_truncate() {
     // the bytecode.
     assert!(
         _bench::compile(&ast).is_none(),
-        "expected the >u8::MAX-arg $merge call to decline bytecode compilation \
+        "expected the >u8::MAX-arg call to decline bytecode compilation \
          (fall back to the tree-walker), but it compiled successfully - the \
          u8::MAX arg-count guard appears to be missing or broken"
     );
 
+    // The tree-walker has no such ceiling and must see every argument.
     let result = Evaluator::new().evaluate(&ast, &data).unwrap();
     match result {
-        JValue::Object(obj) => {
-            assert_eq!(
-                obj.len(),
-                n,
-                "merge() with 300 single-key object args silently dropped keys - \
-                 likely the u8 arg-count truncation this guard exists to prevent"
-            );
-            for i in 0..n {
-                assert_eq!(
-                    obj.get(&format!("k{i}")),
-                    Some(&JValue::from(i as i64)),
-                    "missing or wrong value for k{i} in merged result"
-                );
+        JValue::Array(outer) => {
+            assert_eq!(outer.len(), 1, "expected one zipped tuple, got {outer:?}");
+            match &outer[0] {
+                JValue::Array(inner) => {
+                    assert_eq!(
+                        inner.len(),
+                        n,
+                        "zip() with 300 single-element array args silently dropped \
+                         arguments - likely the u8 arg-count truncation this guard \
+                         exists to prevent"
+                    );
+                    for i in 0..n {
+                        assert_eq!(
+                            inner[i],
+                            JValue::from(i as i64),
+                            "missing or wrong value at position {i}"
+                        );
+                    }
+                }
+                other => panic!("expected inner array, got {other:?}"),
             }
         }
-        other => panic!("expected object, got {other:?}"),
+        other => panic!("expected array, got {other:?}"),
     }
 }
 
@@ -2220,4 +2241,699 @@ fn test_stage_filter_indexes_within_each_group() {
         Evaluator::new().evaluate(&ast, &data).unwrap(),
         JValue::from(json!([2, 3]))
     );
+}
+
+// ── Arithmetic on a runtime null (issue #98 follow-up) ───────────────────────
+//
+// An explicit null operand is a type error; only *undefined* propagates. The
+// operators carried compile-time `explicit_null` flags to tell those apart
+// back when both were `JValue::Null`, so a null arriving at runtime -- from
+// data, or as a lambda parameter -- was treated as "missing" and silently
+// produced null instead of raising.
+
+#[test]
+fn test_arithmetic_on_runtime_null_is_an_error() {
+    let data: JValue = json!({"n": null, "x": 5}).into();
+    for expr in ["n * 2", "n + 1", "n - 1", "n / 2", "x * n", "x + n"] {
+        let ast = parse(expr).unwrap();
+        assert!(
+            Evaluator::new().evaluate(&ast, &data).is_err(),
+            "{expr} must raise on a null operand"
+        );
+    }
+}
+
+#[test]
+fn test_arithmetic_on_null_lambda_parameter_is_an_error() {
+    // The shape that surfaced this: the null reaches the operator as a lambda
+    // parameter, so no compile-time flag could have marked it.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+    for expr in [
+        "$map([1, null], function($v) { $v * 2 })",
+        "$map([1, null], function($v) { $v + 1 })",
+        "$map(arr.p, function($v) { $v * 2 })",
+    ] {
+        let ast = parse(expr).unwrap();
+        assert!(
+            Evaluator::new().evaluate(&ast, &data).is_err(),
+            "{expr} must raise on a null element"
+        );
+    }
+}
+
+#[test]
+fn test_arithmetic_still_propagates_undefined() {
+    // The other half: a genuinely missing operand yields undefined, not an error.
+    let data: JValue = json!({"x": 5, "e": []}).into();
+    for expr in [
+        "missing.x * 2",
+        "e.p * 2",
+        "x * missing.y",
+        "missing.a * missing.b",
+    ] {
+        let ast = parse(expr).unwrap();
+        assert_eq!(
+            Evaluator::new().evaluate(&ast, &data).unwrap(),
+            JValue::Undefined,
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_arithmetic_valid_cases_unaffected() {
+    let data: JValue = json!({"x": 5, "y": 2}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x * y").unwrap(), &data)
+            .unwrap(),
+        JValue::Number(10.0)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x - y").unwrap(), &data)
+            .unwrap(),
+        JValue::Number(3.0)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(
+                &parse("$map([1, 2], function($v) { $v * 2 })").unwrap(),
+                &data
+            )
+            .unwrap(),
+        JValue::from(json!([2, 4]))
+    );
+}
+
+// ── Comparison inside compiled filters (issue #102, cluster A) ───────────────
+//
+// `compiled_ordered_cmp` is the compiled twin of `Evaluator::ordered_compare`
+// and predates the null/undefined split the same way: it conflates
+// `JValue::Null` with `JValue::Undefined` and leans on the vestigial
+// compile-time explicit-null flags. Filters run through the compiled path, so
+// `arr[p > 1]` silently dropped uncomparable elements instead of raising.
+
+#[test]
+fn test_compiled_comparison_rejects_uncomparable_operands() {
+    for (payload, label) in [
+        (json!({"arr": [{"p": 1}, {"p": null}]}), "null"),
+        (json!({"arr": [{"p": 1}, {"p": true}]}), "boolean"),
+        (json!({"arr": [{"p": 1}, {"p": {"q": 1}}]}), "object"),
+    ] {
+        let data: JValue = payload.into();
+        for expr in ["arr[p > 1]", "arr[p > 1].p", "$sum(arr[p > 1].p)"] {
+            let ast = parse(expr).unwrap();
+            assert!(
+                Evaluator::new().evaluate(&ast, &data).is_err(),
+                "{expr} must raise on a {label} operand"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_compiled_comparison_type_mismatch_still_raises() {
+    // A string against a number is comparable-but-mismatched: T2009, not T2010.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": "free"}]}).into();
+    let ast = parse("arr[p > 1]").unwrap();
+    assert!(Evaluator::new().evaluate(&ast, &data).is_err());
+}
+
+#[test]
+fn test_compiled_comparison_propagates_undefined() {
+    // A missing field is undefined: the comparison is undefined, so the element
+    // drops out rather than raising.
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    for expr in ["arr[p > 1]", "$sum(arr[p > 1].p)"] {
+        let ast = parse(expr).unwrap();
+        assert_eq!(
+            Evaluator::new().evaluate(&ast, &data).unwrap(),
+            JValue::Undefined,
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_compiled_comparison_valid_cases_unaffected() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 5}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr[p > 1]").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"p": 5}))
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("$sum(arr[p > 1].p)").unwrap(), &data)
+            .unwrap(),
+        JValue::Number(5.0)
+    );
+}
+
+// ── Sort comparator type checking (issue #102, cluster A) ────────────────────
+//
+// `merge_sort_specialized` is a Schwartzian-transform fast path for
+// `function($l, $r) { $l.f > $r.f }`. It collapsed every non-numeric,
+// non-string key into `SortKey::None` and treated mixed types as "maintain
+// original order", so a comparator that jsonata-js rejects sorted silently.
+// It now declines those inputs and lets the general comparator -- which runs
+// the lambda body through `compiled_ordered_cmp` -- raise.
+
+const SORT_BY_P: &str = "$sort(arr, function($l, $r) { $l.p > $r.p }).p";
+
+#[test]
+fn test_specialized_sort_rejects_uncomparable_keys() {
+    for (payload, label) in [
+        (json!({"arr": [{"p": 1}, {"p": null}]}), "null"),
+        (json!({"arr": [{"p": 1}, {"p": true}]}), "boolean"),
+        (json!({"arr": [{"p": {"q": 1}}, {"p": {"q": 2}}]}), "object"),
+        (json!({"arr": [{"p": [1, 2]}, {"p": 3}]}), "array"),
+    ] {
+        let data: JValue = payload.into();
+        let ast = parse(SORT_BY_P).unwrap();
+        assert!(
+            Evaluator::new().evaluate(&ast, &data).is_err(),
+            "sort must raise on a {label} key"
+        );
+    }
+}
+
+#[test]
+fn test_specialized_sort_rejects_mixed_key_types() {
+    // Comparable individually, but not against each other: T2009.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": "free"}]}).into();
+    let ast = parse(SORT_BY_P).unwrap();
+    assert!(Evaluator::new().evaluate(&ast, &data).is_err());
+}
+
+#[test]
+fn test_specialized_sort_still_sorts_valid_keys() {
+    // The fast path must keep working for what it was written for.
+    let data: JValue = json!({"arr": [{"p": 3}, {"p": 1}, {"p": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse(SORT_BY_P).unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!([1, 2, 3]))
+    );
+
+    let data: JValue = json!({"arr": [{"p": "b"}, {"p": "a"}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse(SORT_BY_P).unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!(["a", "b"]))
+    );
+
+    // A missing key is undefined, which sorts without raising.
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse(SORT_BY_P).unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!(1))
+    );
+
+    // Descending comparators keep working too.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 3}]}).into();
+    let ast = parse("$sort(arr, function($l, $r) { $l.p < $r.p }).p").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([3, 1]))
+    );
+}
+
+// ── Field access on a lambda parameter (issue #102, clusters B/D) ────────────
+//
+// The `$var.field` fast path -- used for `$l.rating`, `$v.price` in sort and
+// HOF bodies -- predates the null/undefined split and mapped a missing field
+// to `JValue::Null`. That is why `$map` produced `[1, null]` where jsonata-js
+// drops the undefined and yields `1`, and why `$filter` raised T2010 comparing
+// a "null" that was really a missing field.
+
+#[test]
+fn test_lambda_param_missing_field_is_undefined() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+
+    // The undefined drops out of the sequence rather than becoming null.
+    let ast = parse("$map(arr, function($v) { $v.p })").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!(1))
+    );
+
+    // And a comparison against it is undefined, not a T2010 on a null.
+    let ast = parse("$filter(arr, function($v) { $v.p > 0 })").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!({"p": 1}))
+    );
+}
+
+#[test]
+fn test_lambda_param_explicit_null_field_is_kept() {
+    // The other half: a present null is a value and must not vanish.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+    let ast = parse("$map(arr, function($v) { $v.p })").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([1, null]))
+    );
+}
+
+// ── $map/$filter return sequences, not arrays (issue #102, cluster B) ────────
+
+#[test]
+fn test_hof_results_are_sequences() {
+    // One result unwraps to that result.
+    let data: JValue = json!({"arr": [{"p": "free"}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("$map(arr, function($v) { $v.p })").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!("free"))
+    );
+
+    // An empty result is undefined, not [].
+    let data: JValue = json!({"arr": []}).into();
+    for expr in [
+        "$map(arr, function($v) { $v.p })",
+        "$filter(arr, function($v) { $v.p > 0 })",
+    ] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::Undefined,
+            "{expr}"
+        );
+    }
+
+    // All results undefined is also an empty sequence.
+    let data: JValue = json!({"arr": [{"q": 1}, {"q": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("$map(arr, function($v) { $v.p })").unwrap(), &data)
+            .unwrap(),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_hof_accepts_a_non_array_as_a_singleton() {
+    let data: JValue = json!({"arr": {"p": 1}}).into();
+    for expr in [
+        "$map(arr, function($v) { $v.p })",
+        "$filter(arr, function($v) { $v.p > 0 })",
+    ] {
+        let result = Evaluator::new().evaluate(&parse(expr).unwrap(), &data);
+        assert!(result.is_ok(), "{expr} must accept a non-array: {result:?}");
+    }
+}
+
+#[test]
+fn test_hof_multi_element_results_still_arrays() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("$map(arr, function($v) { $v.p })").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!([1, 2]))
+    );
+}
+
+// ── Equality against undefined (issue #102, cluster C) ───────────────────────
+//
+// jsonata-js returns false for BOTH `=` and `!=` when either operand is
+// undefined -- `!=` is not the negation of `=` there. We negated, so
+// `arr[p != null]` kept elements whose `p` was missing.
+
+#[test]
+fn test_inequality_with_undefined_is_false() {
+    let data: JValue = json!({"n": null}).into();
+    for expr in [
+        "missing.x != null",
+        "missing.x != 1",
+        "missing.x != missing.y",
+    ] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::Bool(false),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_equality_with_undefined_is_still_false() {
+    let data: JValue = json!({"n": null}).into();
+    for expr in ["missing.x = null", "missing.x = 1", "missing.x = missing.y"] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::Bool(false),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_equality_against_present_null_unaffected() {
+    // A present null still compares normally; only undefined short-circuits.
+    let data: JValue = json!({"n": null, "x": 1}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("n = null").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(true)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("n != null").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(false)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x = 1").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(true)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x != 1").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(false)
+    );
+}
+
+#[test]
+fn test_filter_on_not_null_drops_missing_fields() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr[p != null]").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"p": 1}))
+    );
+
+    // A non-object element has no fields, so it drops out too.
+    let data: JValue = json!({"arr": [1, {"p": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr[p != null]").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"p": 2}))
+    );
+}
+
+// ── Object construction over a path (issue #102, cluster C) ──────────────────
+//
+// `arr.{"k": p}` maps the constructor over a sequence, so a single result
+// unwraps to that object, and a non-array input is the singleton sequence
+// containing it.
+
+#[test]
+fn test_object_construction_over_path_unwraps_singleton() {
+    let data: JValue = json!({"arr": [{"p": "free"}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"k": "free"}))
+    );
+
+    // An undefined-valued key drops out, leaving an empty object -- still a
+    // singleton, so it unwraps too.
+    let data: JValue = json!({"arr": [{"q": 9}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({}))
+    );
+}
+
+#[test]
+fn test_object_construction_over_non_array_input() {
+    let data: JValue = json!({"arr": {"p": 1}}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"k": 1}))
+    );
+}
+
+#[test]
+fn test_object_construction_over_path_multi_and_empty() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!([{"k": 1}, {"k": 2}]))
+    );
+
+    let data: JValue = json!({"arr": []}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::Undefined
+    );
+}
+
+// ── Concatenation of null vs undefined (issue #102 follow-up) ────────────────
+//
+// `&` stringifies an explicit null as "null" -- consistent with `$string(null)`
+// -- and only an *undefined* operand as the empty string. Both concat helpers
+// collapsed the two, so `null & "x"` produced "x" instead of "nullx".
+
+#[test]
+fn test_concat_stringifies_explicit_null() {
+    let data: JValue = json!({"n": null}).into();
+    for (expr, want) in [
+        ("null & \"x\"", "nullx"),
+        ("n & \"x\"", "nullx"),
+        ("1 & null", "1null"),
+    ] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::from(want),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_concat_treats_undefined_as_empty() {
+    let data: JValue = json!({"x": 1}).into();
+    for (expr, want) in [
+        ("missing.y & \"x\"", "x"),
+        ("\"a\" & missing.y", "a"),
+        ("missing.a & missing.b", ""),
+    ] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::from(want),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_concat_ordinary_values_unaffected() {
+    let data: JValue = json!({"x": 1, "s": "a"}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("s & x").unwrap(), &data)
+            .unwrap(),
+        JValue::from("a1")
+    );
+}
+
+// ── The `in` operator (issue #102 follow-up, operator matrix) ────────────────
+//
+// `in` is membership, and jsonata-js compares with `===`: primitives match by
+// value, composites only by identity. A non-array right side is wrapped, and
+// an *undefined* operand on either side makes the result false.
+//
+// Two things were wrong. `evaluate_binary_op` special-cased an array left
+// operand as "array filtering", so `arr in 1` evaluated as `arr[1]` and
+// returned an element. And `in_operator` treated an object right side as
+// key-containment and compared with deep equality.
+
+fn in_eval(expr: &str) -> JValue {
+    let data: JValue = json!({"arr": [1, 2], "nul": null, "obj": {"k": 1}}).into();
+    Evaluator::new()
+        .evaluate(&parse(expr).unwrap(), &data)
+        .unwrap()
+}
+
+#[test]
+fn test_in_with_array_left_operand_is_never_a_member() {
+    for expr in ["arr in 1", "arr in 0", "arr in arr", "arr in [[1, 2]]"] {
+        assert_eq!(in_eval(expr), JValue::Bool(false), "{expr}");
+    }
+}
+
+#[test]
+fn test_in_basic_membership() {
+    assert_eq!(in_eval("1 in arr"), JValue::Bool(true));
+    assert_eq!(in_eval("3 in arr"), JValue::Bool(false));
+    assert_eq!(in_eval("\"a\" in [\"a\", \"b\"]"), JValue::Bool(true));
+    // A non-array right side is wrapped in one.
+    assert_eq!(in_eval("1 in 1"), JValue::Bool(true));
+    assert_eq!(in_eval("1 in \"1\""), JValue::Bool(false));
+    assert_eq!(in_eval("\"a\" in \"a\""), JValue::Bool(true));
+}
+
+#[test]
+fn test_in_null_and_undefined() {
+    // null is a value and matches itself; only undefined short-circuits.
+    assert_eq!(in_eval("null in [null]"), JValue::Bool(true));
+    assert_eq!(in_eval("nul in [null]"), JValue::Bool(true));
+    assert_eq!(in_eval("nul in arr"), JValue::Bool(false));
+    assert_eq!(in_eval("missing.x in arr"), JValue::Bool(false));
+    assert_eq!(in_eval("arr in missing.x"), JValue::Bool(false));
+    assert_eq!(in_eval("missing.x in missing.y"), JValue::Bool(false));
+}
+
+#[test]
+fn test_in_composites_match_by_identity_not_structure() {
+    // A structurally equal but distinct object is not a member.
+    assert_eq!(in_eval("obj in [{\"k\": 1}]"), JValue::Bool(false));
+    // The same object is.
+    assert_eq!(in_eval("obj in [obj]"), JValue::Bool(true));
+    assert_eq!(in_eval("obj in [obj, 1]"), JValue::Bool(true));
+}
+
+#[test]
+fn test_in_object_right_side_is_not_key_containment() {
+    // jsonata-js wraps the object and compares identity, so a key name is not
+    // a member of the object it belongs to.
+    assert_eq!(in_eval("\"k\" in obj"), JValue::Bool(false));
+    assert_eq!(in_eval("\"z\" in obj"), JValue::Bool(false));
+}
+
+// ── Non-finite arithmetic (issue #102 follow-up, operator matrix) ────────────
+//
+// jsonata-js checks the *operands*, never the result: `isNumeric` throws D1001
+// for an Infinity operand and reports NaN as non-numeric (T2001/T2002). So the
+// operators themselves happily produce Infinity and NaN, and the error appears
+// when such a value is consumed. We raised "Division by zero" at the operator
+// instead, which has no counterpart in the reference.
+
+fn num_eval(expr: &str) -> Result<JValue, String> {
+    let data: JValue = json!({}).into();
+    Evaluator::new()
+        .evaluate(&parse(expr).unwrap(), &data)
+        .map_err(|e| e.to_string())
+}
+
+#[test]
+fn test_division_by_zero_yields_non_finite() {
+    match num_eval("1/0") {
+        Ok(JValue::Number(n)) => assert!(n.is_infinite() && n > 0.0, "got {n}"),
+        other => panic!("expected +inf, got {other:?}"),
+    }
+    for expr in ["0/0", "1%0", "0%0"] {
+        match num_eval(expr) {
+            Ok(JValue::Number(n)) => assert!(n.is_nan(), "{expr} gave {n}"),
+            other => panic!("{expr}: expected NaN, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_overflow_yields_infinity_but_consuming_it_raises() {
+    // The multiply itself overflows to Infinity without raising...
+    match num_eval("10e300 * 10e100") {
+        Ok(JValue::Number(n)) => assert!(n.is_infinite(), "got {n}"),
+        other => panic!("expected inf, got {other:?}"),
+    }
+    // ...and the error appears when that Infinity becomes an operand (D1001).
+    assert!(num_eval("1/(10e300 * 10e100)").is_err());
+}
+
+#[test]
+fn test_non_finite_serializes_like_javascript() {
+    // JSON has no Infinity; JSON.stringify gives null and so do we.
+    assert_eq!(num_eval("1/0").unwrap().to_json_string().unwrap(), "null");
+}
+
+#[test]
+fn test_ordinary_division_unaffected() {
+    assert_eq!(num_eval("6/3").unwrap(), JValue::Number(2.0));
+    assert_eq!(num_eval("7%3").unwrap(), JValue::Number(1.0));
+}
+
+#[test]
+fn test_unary_negate_null_raises_undefined_propagates() {
+    // jsonata-js: undefined propagates, a number negates, anything else -- null
+    // included -- is D1002. Both negate implementations treated null as
+    // "missing" and returned null.
+    let data: JValue = json!({"nul": null, "x": 5}).into();
+    for expr in ["-(null)", "-(nul)", "-(\"s\")", "-(true)"] {
+        assert!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .is_err(),
+            "{expr} must raise D1002"
+        );
+    }
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("-(missing.x)").unwrap(), &data)
+            .unwrap(),
+        JValue::Undefined
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("-x").unwrap(), &data)
+            .unwrap(),
+        JValue::Number(-5.0)
+    );
+}
+
+// ── Builtins: null is a value, not a missing argument (issue #102) ───────────
+
+#[test]
+fn test_builtin_null_handling_matches_reference() {
+    let data: JValue = json!({"arr": [1, 2], "nul": null, "obj": {"k": 1}}).into();
+    let ev = |expr: &str| {
+        Evaluator::new()
+            .evaluate(&parse(expr).unwrap(), &data)
+            .unwrap()
+    };
+
+    // $exists: only a *missing* value is false; an explicit null exists.
+    assert_eq!(ev("$exists(nul)"), JValue::Bool(true));
+    assert_eq!(ev("$exists(missing.x)"), JValue::Bool(false));
+
+    // $append: a null is a value and gets appended; only undefined is skipped.
+    assert_eq!(ev("$append(arr, null)"), JValue::from(json!([1, 2, null])));
+    assert_eq!(ev("$append(arr, missing.x)"), JValue::from(json!([1, 2])));
+
+    // $sort over a single element has nothing to compare, so the element type
+    // does not matter -- the signature wraps a scalar into a singleton first.
+    assert_eq!(ev("$sort(true)"), JValue::from(json!([true])));
+    assert_eq!(ev("$sort(nul)"), JValue::from(json!([null])));
+    assert_eq!(ev("$sort(obj)"), JValue::from(json!([{"k": 1}])));
+
+    // Mixed comparable types across several elements is still an error.
+    assert!(Evaluator::new()
+        .evaluate(&parse("$sort([1, \"a\"])").unwrap(), &data)
+        .is_err());
+    assert_eq!(ev("$sort([3, 1, 2])"), JValue::from(json!([1, 2, 3])));
 }
