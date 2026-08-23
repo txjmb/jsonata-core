@@ -2891,3 +2891,35 @@ fn test_unary_negate_null_raises_undefined_propagates() {
         JValue::Number(-5.0)
     );
 }
+
+// ── Builtins: null is a value, not a missing argument (issue #102) ───────────
+
+#[test]
+fn test_builtin_null_handling_matches_reference() {
+    let data: JValue = json!({"arr": [1, 2], "nul": null, "obj": {"k": 1}}).into();
+    let ev = |expr: &str| {
+        Evaluator::new()
+            .evaluate(&parse(expr).unwrap(), &data)
+            .unwrap()
+    };
+
+    // $exists: only a *missing* value is false; an explicit null exists.
+    assert_eq!(ev("$exists(nul)"), JValue::Bool(true));
+    assert_eq!(ev("$exists(missing.x)"), JValue::Bool(false));
+
+    // $append: a null is a value and gets appended; only undefined is skipped.
+    assert_eq!(ev("$append(arr, null)"), JValue::from(json!([1, 2, null])));
+    assert_eq!(ev("$append(arr, missing.x)"), JValue::from(json!([1, 2])));
+
+    // $sort over a single element has nothing to compare, so the element type
+    // does not matter -- the signature wraps a scalar into a singleton first.
+    assert_eq!(ev("$sort(true)"), JValue::from(json!([true])));
+    assert_eq!(ev("$sort(nul)"), JValue::from(json!([null])));
+    assert_eq!(ev("$sort(obj)"), JValue::from(json!([{"k": 1}])));
+
+    // Mixed comparable types across several elements is still an error.
+    assert!(Evaluator::new()
+        .evaluate(&parse("$sort([1, \"a\"])").unwrap(), &data)
+        .is_err());
+    assert_eq!(ev("$sort([3, 1, 2])"), JValue::from(json!([1, 2, 3])));
+}

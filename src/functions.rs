@@ -1743,6 +1743,10 @@ pub mod array {
                 let b_str = b.as_str().unwrap();
                 a_str.cmp(b_str)
             });
+        } else if result.len() < 2 {
+            // Nothing to compare, so the element type does not matter:
+            // `$sort(true)` is `[true]`. The signature's `a` type wraps a
+            // scalar into a singleton before we get here.
         } else {
             return Err(FunctionError::TypeError(
                 "sort() requires all elements to be of the same comparable type".to_string(),
@@ -1794,7 +1798,8 @@ pub mod array {
 
     /// $exists(value) - Check if value exists (not null/undefined)
     pub fn exists(value: &JValue) -> Result<JValue, FunctionError> {
-        let is_missing = value.is_null() || value.is_undefined();
+        // Only a *missing* value is absent. An explicit null exists.
+        let is_missing = value.is_undefined();
         Ok(JValue::Bool(!is_missing))
     }
 
@@ -2486,7 +2491,14 @@ mod tests {
             array::exists(&JValue::string("hello")).unwrap(),
             JValue::Bool(true)
         );
-        assert_eq!(array::exists(&JValue::Null).unwrap(), JValue::Bool(false));
+        // An explicit null exists; only a *missing* value does not. Verified
+        // against jsonata-js: `$exists(null)` is true, `$exists(nothing)` is
+        // false. This asserted the opposite (#102).
+        assert_eq!(array::exists(&JValue::Null).unwrap(), JValue::Bool(true));
+        assert_eq!(
+            array::exists(&JValue::Undefined).unwrap(),
+            JValue::Bool(false)
+        );
     }
 
     // ===== Object Functions Tests =====

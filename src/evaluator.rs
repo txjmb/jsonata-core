@@ -2092,6 +2092,27 @@ fn validate_builtin_args(
     let Some(sig) = crate::signature::builtin_signature(name) else {
         return Ok(None);
     };
+    // A trailing argument that evaluated to undefined and binds to an
+    // *optional* parameter was not really supplied: `$round(2.5, missing.x)` is
+    // 2 in jsonata-js, not an error. Trim those before validating.
+    //
+    // Only optional ones. An undefined argument bound to a required or
+    // repeatable parameter is meaningful and must reach the function:
+    // `$zip([1,2,3], [4,5,6], nothing)` is `[]` and `$append(1, notexist)` is
+    // `1`, and both break if the argument is dropped.
+    // Never trim to zero: the `-` marker makes the first parameter optional
+    // too, and dropping the only argument turns an explicit call into a
+    // context-substituted one.
+    let mut end = args.len();
+    while end > 1 {
+        let binds_to_optional = sig.params.get(end - 1).is_some_and(|p| p.optional);
+        if binds_to_optional && matches!(args.get(end - 1), Some(JValue::Undefined)) {
+            end -= 1;
+        } else {
+            break;
+        }
+    }
+    let args = &args[..end];
     match sig.validate_and_coerce(args, context) {
         Ok(mut coerced) => {
             // Validation returns one entry per *parameter*, padding absent
@@ -2535,10 +2556,12 @@ fn call_pure_builtin(
             }
             let first = &effective_args[0];
             let second = &effective_args[1];
-            if matches!(second, JValue::Null | JValue::Undefined) {
+            // Only a *missing* operand is skipped; an explicit null is a value
+            // and gets appended. Mirrors the tree-walker arm.
+            if matches!(second, JValue::Undefined) {
                 return Ok(first.clone());
             }
-            if matches!(first, JValue::Null | JValue::Undefined) {
+            if matches!(first, JValue::Undefined) {
                 return Ok(second.clone());
             }
             let arr = match first {
@@ -7533,9 +7556,12 @@ impl Evaluator {
                 }
             }
 
-            // For other expressions, evaluate and check if non-null/non-undefined
+            // For other expressions, evaluate and check whether anything is
+            // there. An explicit null exists -- only a missing value does not,
+            // which is what the AstNode::Null branch above already assumed for
+            // the literal form.
             let value = self.evaluate_internal(arg, data)?;
-            return Ok(JValue::Bool(!value.is_null() && !value.is_undefined()));
+            return Ok(JValue::Bool(!value.is_undefined()));
         }
 
         // Check if any arguments are undefined variables or undefined paths
@@ -8647,13 +8673,13 @@ impl Evaluator {
                 let first = &evaluated_args[0];
                 let second = &evaluated_args[1];
 
-                // If second arg is null/undefined, return first as-is (no change)
-                if second.is_null() || second.is_undefined() {
+                // Only a *missing* operand is skipped; an explicit null is a
+                // value and gets appended, so `$append([1,2], null)` is
+                // `[1,2,null]`.
+                if second.is_undefined() {
                     return Ok(first.clone());
                 }
-
-                // If first arg is null/undefined, return second as-is (appending to nothing gives second)
-                if first.is_null() || first.is_undefined() {
+                if first.is_undefined() {
                     return Ok(second.clone());
                 }
 
@@ -11307,7 +11333,7 @@ impl Evaluator {
                     )),
                 }
             }
-            "exists" => Ok(JValue::Bool(!arg.is_null())),
+            "exists" => Ok(JValue::Bool(!arg.is_undefined())),
             "abs" => match arg {
                 JValue::Number(n) => Ok(functions::numeric::abs(*n)?),
                 _ => Err(EvaluatorError::TypeError(
