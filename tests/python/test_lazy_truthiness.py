@@ -11,9 +11,8 @@ the equivalent JSON string is the same question asked twice.
 
 import json
 
-import pytest
-
 import jsonatapy
+import pytest
 
 # Expressions whose result depends on the truthiness of an object value.
 TRUTHINESS_EXPRS = [
