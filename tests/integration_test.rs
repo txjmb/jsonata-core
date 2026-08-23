@@ -2687,3 +2687,56 @@ fn test_object_construction_over_path_multi_and_empty() {
         JValue::Undefined
     );
 }
+
+// ── Concatenation of null vs undefined (issue #102 follow-up) ────────────────
+//
+// `&` stringifies an explicit null as "null" -- consistent with `$string(null)`
+// -- and only an *undefined* operand as the empty string. Both concat helpers
+// collapsed the two, so `null & "x"` produced "x" instead of "nullx".
+
+#[test]
+fn test_concat_stringifies_explicit_null() {
+    let data: JValue = json!({"n": null}).into();
+    for (expr, want) in [
+        ("null & \"x\"", "nullx"),
+        ("n & \"x\"", "nullx"),
+        ("1 & null", "1null"),
+    ] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::from(want),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_concat_treats_undefined_as_empty() {
+    let data: JValue = json!({"x": 1}).into();
+    for (expr, want) in [
+        ("missing.y & \"x\"", "x"),
+        ("\"a\" & missing.y", "a"),
+        ("missing.a & missing.b", ""),
+    ] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::from(want),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_concat_ordinary_values_unaffected() {
+    let data: JValue = json!({"x": 1, "s": "a"}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("s & x").unwrap(), &data)
+            .unwrap(),
+        JValue::from("a1")
+    );
+}

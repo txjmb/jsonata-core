@@ -191,6 +191,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single element is the object rather than a one-element array, and over a non-array value it
   builds from that value instead of from the root document (previously `{}`).
   ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster C)
+- `&` now stringifies an explicit `null` as `"null"`, matching `$string(null)`, and treats
+  only an *undefined* operand as the empty string. `null & "x"` was `"x"` and is now
+  `"nullx"`; `missing.x & "x"` is still `"x"`.
 
 ### Security
 

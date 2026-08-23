@@ -1641,16 +1641,20 @@ pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, Evalua
     };
     match value {
         JValue::String(s) => Ok(s.to_string()),
-        JValue::Null | JValue::Undefined => Ok(String::new()),
-        JValue::Number(_) | JValue::Bool(_) | JValue::Array(_) | JValue::Object(_) => {
-            match crate::functions::string::string(value, None) {
-                Ok(JValue::String(s)) => Ok(s.to_string()),
-                Ok(JValue::Null) => Ok(String::new()),
-                _ => Err(EvaluatorError::TypeError(
-                    "Cannot concatenate complex types".to_string(),
-                )),
-            }
-        }
+        // An explicit null stringifies as "null" (same as `$string(null)`);
+        // only an *undefined* operand contributes nothing.
+        JValue::Undefined => Ok(String::new()),
+        JValue::Null
+        | JValue::Number(_)
+        | JValue::Bool(_)
+        | JValue::Array(_)
+        | JValue::Object(_) => match crate::functions::string::string(value, None) {
+            Ok(JValue::String(s)) => Ok(s.to_string()),
+            Ok(JValue::Null) => Ok(String::new()),
+            _ => Err(EvaluatorError::TypeError(
+                "Cannot concatenate complex types".to_string(),
+            )),
+        },
         _ => Ok(String::new()),
     }
 }
@@ -12307,16 +12311,20 @@ impl Evaluator {
         };
         match value {
             JValue::String(s) => Ok(s.to_string()),
-            JValue::Null => Ok(String::new()),
-            JValue::Number(_) | JValue::Bool(_) | JValue::Array(_) | JValue::Object(_) => {
-                match crate::functions::string::string(value, None) {
-                    Ok(JValue::String(s)) => Ok(s.to_string()),
-                    Ok(JValue::Null) => Ok(String::new()),
-                    _ => Err(EvaluatorError::TypeError(
-                        "Cannot concatenate complex types".to_string(),
-                    )),
-                }
-            }
+            // An explicit null stringifies as "null" (same as `$string(null)`);
+            // only an *undefined* operand contributes nothing.
+            JValue::Undefined => Ok(String::new()),
+            JValue::Null
+            | JValue::Number(_)
+            | JValue::Bool(_)
+            | JValue::Array(_)
+            | JValue::Object(_) => match crate::functions::string::string(value, None) {
+                Ok(JValue::String(s)) => Ok(s.to_string()),
+                Ok(JValue::Null) => Ok(String::new()),
+                _ => Err(EvaluatorError::TypeError(
+                    "Cannot concatenate complex types".to_string(),
+                )),
+            },
             _ => Ok(String::new()),
         }
     }
