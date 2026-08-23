@@ -184,6 +184,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bodies predates the null/undefined split, which is why `$map` produced `[1, null]` where
   jsonata-js drops the undefined, and why `$filter` raised `T2010` comparing what was really
   a missing field. ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster B)
+- `!=` against an undefined operand is now `false`, matching `=`. jsonata-js returns false
+  for both when either side is undefined -- `!=` is not the negation of `=` there -- so
+  `arr[p != null]` no longer keeps elements whose `p` is missing.
+- Object construction as a path step now follows sequence semantics: `arr.{"k": p}` over a
+  single element is the object rather than a one-element array, and over a non-array value it
+  builds from that value instead of from the root document (previously `{}`).
+  ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster C)
 
 ### Security
 

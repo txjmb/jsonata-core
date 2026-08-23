@@ -1046,10 +1046,7 @@ fn eval_compiled_inner(
                 // neither side is lazy) so conversion failures raise instead of
                 // silently comparing unequal.
                 CompiledCmp::Eq => compiled_equal(&left, &right),
-                CompiledCmp::Ne => match compiled_equal(&left, &right)? {
-                    JValue::Bool(b) => Ok(JValue::Bool(!b)),
-                    other => Ok(other),
-                },
+                CompiledCmp::Ne => compiled_not_equal(&left, &right),
                 CompiledCmp::Lt => compiled_ordered_cmp(
                     &left,
                     &right,
@@ -1674,6 +1671,20 @@ pub(crate) fn compiled_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, Evalu
     Ok(JValue::Bool(crate::functions::array::values_equal(
         lhs, rhs,
     )))
+}
+
+/// Inequality. NOT simply the negation of `compiled_equal`: jsonata-js returns
+/// false for both `=` and `!=` when either operand is undefined, so an element
+/// whose field is missing does not survive `arr[p != null]`.
+#[inline]
+pub(crate) fn compiled_not_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, EvaluatorError> {
+    if lhs.is_undefined() || rhs.is_undefined() {
+        return Ok(JValue::Bool(false));
+    }
+    match compiled_equal(lhs, rhs)? {
+        JValue::Bool(b) => Ok(JValue::Bool(!b)),
+        other => Ok(other),
+    }
 }
 
 /// String concatenation for the bytecode VM.
@@ -6022,6 +6033,12 @@ impl Evaluator {
                 }
                 // Handle complex path steps (e.g., computed properties, object construction)
                 _ => {
+                    // These steps map over an array just as a Name step does, so
+                    // the result is a sequence and a singleton unwraps:
+                    // `arr.{"k": p}` over one element is the object, not `[object]`.
+                    if matches!(current, JValue::Array(_)) {
+                        did_array_mapping = true;
+                    }
                     let saved_keep = self.keep_tuple_stream;
                     if step.is_tuple {
                         self.keep_tuple_stream = true;
@@ -6562,6 +6579,17 @@ impl Evaluator {
             // or [0..9] where it's an array constructor
             // or $^(field) where it's a sort operator
             // or (expr).field where (expr) is a block that evaluates to a value
+            // An object constructor as a path step builds from the value at that
+            // step, not from the root: `arr.{"k": p}` over `{"p": 1}` reads `p`
+            // from that object. The array case is handled above; this is the
+            // singleton form. An undefined step value stays undefined.
+            if matches!(step, AstNode::Object(_)) {
+                if matches!(current, JValue::Undefined) {
+                    return Ok(JValue::Undefined);
+                }
+                return self.evaluate_internal(step, current);
+            }
+
             if matches!(
                 step,
                 AstNode::Binary { .. }
@@ -6570,7 +6598,6 @@ impl Evaluator {
                     | AstNode::ParentVariable(_)
                     | AstNode::Parent(_)
                     | AstNode::Array(_)
-                    | AstNode::Object(_)
                     | AstNode::Sort { .. }
                     | AstNode::Block(_)
             ) {
@@ -7157,10 +7184,7 @@ impl Evaluator {
             // side is lazy) so conversion failures raise instead of silently comparing
             // unequal.
             BinaryOp::Equal => compiled_equal(&left, &right),
-            BinaryOp::NotEqual => match compiled_equal(&left, &right)? {
-                JValue::Bool(b) => Ok(JValue::Bool(!b)),
-                other => Ok(other),
-            },
+            BinaryOp::NotEqual => compiled_not_equal(&left, &right),
             BinaryOp::LessThan => {
                 self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
             }

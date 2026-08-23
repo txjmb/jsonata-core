@@ -2542,3 +2542,148 @@ fn test_hof_multi_element_results_still_arrays() {
         JValue::from(json!([1, 2]))
     );
 }
+
+// ── Equality against undefined (issue #102, cluster C) ───────────────────────
+//
+// jsonata-js returns false for BOTH `=` and `!=` when either operand is
+// undefined -- `!=` is not the negation of `=` there. We negated, so
+// `arr[p != null]` kept elements whose `p` was missing.
+
+#[test]
+fn test_inequality_with_undefined_is_false() {
+    let data: JValue = json!({"n": null}).into();
+    for expr in [
+        "missing.x != null",
+        "missing.x != 1",
+        "missing.x != missing.y",
+    ] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::Bool(false),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_equality_with_undefined_is_still_false() {
+    let data: JValue = json!({"n": null}).into();
+    for expr in ["missing.x = null", "missing.x = 1", "missing.x = missing.y"] {
+        assert_eq!(
+            Evaluator::new()
+                .evaluate(&parse(expr).unwrap(), &data)
+                .unwrap(),
+            JValue::Bool(false),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_equality_against_present_null_unaffected() {
+    // A present null still compares normally; only undefined short-circuits.
+    let data: JValue = json!({"n": null, "x": 1}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("n = null").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(true)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("n != null").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(false)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x = 1").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(true)
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x != 1").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(false)
+    );
+}
+
+#[test]
+fn test_filter_on_not_null_drops_missing_fields() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr[p != null]").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"p": 1}))
+    );
+
+    // A non-object element has no fields, so it drops out too.
+    let data: JValue = json!({"arr": [1, {"p": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr[p != null]").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"p": 2}))
+    );
+}
+
+// ── Object construction over a path (issue #102, cluster C) ──────────────────
+//
+// `arr.{"k": p}` maps the constructor over a sequence, so a single result
+// unwraps to that object, and a non-array input is the singleton sequence
+// containing it.
+
+#[test]
+fn test_object_construction_over_path_unwraps_singleton() {
+    let data: JValue = json!({"arr": [{"p": "free"}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"k": "free"}))
+    );
+
+    // An undefined-valued key drops out, leaving an empty object -- still a
+    // singleton, so it unwraps too.
+    let data: JValue = json!({"arr": [{"q": 9}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({}))
+    );
+}
+
+#[test]
+fn test_object_construction_over_non_array_input() {
+    let data: JValue = json!({"arr": {"p": 1}}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"k": 1}))
+    );
+}
+
+#[test]
+fn test_object_construction_over_path_multi_and_empty() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!([{"k": 1}, {"k": 2}]))
+    );
+
+    let data: JValue = json!({"arr": []}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr.{\"k\": p}").unwrap(), &data)
+            .unwrap(),
+        JValue::Undefined
+    );
+}
