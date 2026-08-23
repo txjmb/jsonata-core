@@ -125,6 +125,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   property access -- `o["a"]` keeps the object because a non-empty string is truthy, matching
   jsonata-js, rather than looking up the key.
   ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 4)
+- A non-empty Python `dict` is no longer falsy on the bytecode VM and compiled paths.
+  Dicts cross the boundary as a lazy view rather than a materialised object, and
+  `compiled_is_truthy` had no arm for that variant, so it fell through to its catch-all and
+  returned `false` for every one. This affected any truthiness context on the compiled path
+  -- `o ? a : b`, `and`/`or`, `$boolean`, `$not`, filter predicates -- and only when data was
+  passed as a dict, so the same expression over an equivalent JSON string was correct. The
+  tree-walker was unaffected. ([#98](https://github.com/txjmb/jsonata-core/issues/98))
 
 ### Security
 

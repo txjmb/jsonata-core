@@ -1467,6 +1467,11 @@ pub(crate) fn compiled_is_truthy(value: &JValue) -> bool {
         JValue::String(s) => !s.is_empty(),
         JValue::Array(a) => !a.is_empty(),
         JValue::Object(o) => !o.is_empty(),
+        // A Python dict arrives as a lazy view, not a materialised Object.
+        // Without this arm it fell through to `_ => false` and every non-empty
+        // dict was falsy on the compiled path -- mirrors `Evaluator::is_truthy`.
+        #[cfg(feature = "python")]
+        JValue::LazyPyDict(lazy) => !lazy.is_empty(),
         _ => false,
     }
 }
