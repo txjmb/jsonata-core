@@ -225,16 +225,12 @@ pub mod string {
         }
     }
 
-    /// Helper to stringify a value as JSON with custom replacer logic
+    /// Reject a non-finite number anywhere in the value.
     ///
-    /// Mimics JavaScript's JSON.stringify with a replacer function that:
-    /// - Converts non-integer numbers to 15 significant figures
-    /// - Keeps integers without decimal point
-    /// - Converts functions to empty string
-    /// jsonata-js serializes through `isNumeric`, which throws D1001 for a
-    /// non-finite number anywhere in the value. Without this the number becomes
-    /// JSON `null` and `$string({"inf": 1/0})` quietly returns `{"inf":null}`.
-    /// The scalar case raises D3001 earlier, matching the reference.
+    /// jsonata-js serializes through `isNumeric`, which throws D1001 for
+    /// Infinity or NaN. Without this the number becomes JSON `null` and
+    /// `$string({"inf": 1/0})` quietly returns `{"inf":null}`. The scalar case
+    /// raises D3001 earlier, matching the reference.
     fn reject_non_finite(value: &JValue) -> Result<(), FunctionError> {
         match value {
             JValue::Number(n) if !n.is_finite() => Err(FunctionError::RuntimeError(format!(
@@ -247,6 +243,12 @@ pub mod string {
         }
     }
 
+    /// Helper to stringify a value as JSON with custom replacer logic
+    ///
+    /// Mimics JavaScript's JSON.stringify with a replacer function that:
+    /// - Converts non-integer numbers to 15 significant figures
+    /// - Keeps integers without decimal point
+    /// - Converts functions to empty string
     fn stringify_value_custom(
         value: &JValue,
         indent: Option<usize>,

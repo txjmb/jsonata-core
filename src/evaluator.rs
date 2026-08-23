@@ -2125,7 +2125,6 @@ fn validate_builtin_args(
             }
             Ok(Some(coerced))
         }
-        Err(crate::signature::SignatureError::UndefinedArgument) => Ok(None),
         Err(e) => Err(EvaluatorError::TypeError(e.to_string())),
     }
 }
@@ -8118,32 +8117,6 @@ impl Evaluator {
 
                 let coerced_args = match signature.validate_and_coerce(&evaluated_args, data) {
                     Ok(args) => args,
-                    Err(crate::signature::SignatureError::UndefinedArgument) => {
-                        // This can happen if the separator is undefined
-                        // In that case, just validate the first arg and use default separator
-                        let sig_first_arg = Signature::parse("<a<s>:a<s>>").map_err(|e| {
-                            EvaluatorError::EvaluationError(format!("Invalid signature: {}", e))
-                        })?;
-
-                        match sig_first_arg.validate_and_coerce(&evaluated_args[0..1], data) {
-                            Ok(args) => args,
-                            Err(crate::signature::SignatureError::ArrayTypeMismatch {
-                                index,
-                                expected,
-                            }) => {
-                                return Err(EvaluatorError::TypeError(format!(
-                                    "T0412: Argument {} of function $join must be an array of {}",
-                                    index, expected
-                                )));
-                            }
-                            Err(e) => {
-                                return Err(EvaluatorError::TypeError(format!(
-                                    "Signature validation failed: {}",
-                                    e
-                                )));
-                            }
-                        }
-                    }
                     Err(crate::signature::SignatureError::ArgumentTypeMismatch {
                         index,
                         expected,
@@ -10379,9 +10352,6 @@ impl Evaluator {
                     Err(e) => {
                         self.context.pop_scope();
                         match e {
-                            crate::signature::SignatureError::UndefinedArgument => {
-                                return Ok(JValue::Null);
-                            }
                             crate::signature::SignatureError::ArgumentTypeMismatch {
                                 index,
                                 expected,
@@ -10621,9 +10591,6 @@ impl Evaluator {
                 Ok(sig) => match sig.validate_and_coerce(values, data) {
                     Ok(coerced) => coerced,
                     Err(e) => match e {
-                        crate::signature::SignatureError::UndefinedArgument => {
-                            return Ok(LambdaResult::JValue(JValue::Null));
-                        }
                         crate::signature::SignatureError::ArgumentTypeMismatch {
                             index,
                             expected,
@@ -12117,11 +12084,6 @@ impl Evaluator {
         }
     }
 
-    /// Equality comparison (JSONata semantics)
-    fn equals(&self, left: &JValue, right: &JValue) -> bool {
-        crate::functions::array::values_equal(left, right)
-    }
-
     /// Addition
     /// Add — delegates to the shared `compiled_arithmetic` so the
     /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
@@ -12505,39 +12467,6 @@ impl Evaluator {
             }
             _ => Err(EvaluatorError::TypeError(
                 "Array indexing requires array and number".to_string(),
-            )),
-        }
-    }
-
-    /// Array filtering: array[predicate]
-    /// Evaluates the predicate for each item in the array and returns items where predicate is true
-    fn array_filter(
-        &mut self,
-        _lhs_node: &AstNode,
-        rhs_node: &AstNode,
-        array: &JValue,
-        _original_data: &JValue,
-    ) -> Result<JValue, EvaluatorError> {
-        match array {
-            JValue::Array(arr) => {
-                // Pre-allocate with estimated capacity (assume ~50% will match)
-                let mut filtered = Vec::with_capacity(arr.len() / 2);
-
-                for item in arr.iter() {
-                    // Evaluate the predicate in the context of this array item
-                    // The item becomes the new "current context" ($)
-                    let predicate_result = self.evaluate_internal(rhs_node, item)?;
-
-                    // Check if the predicate is truthy
-                    if self.is_truthy(&predicate_result) {
-                        filtered.push(item.clone());
-                    }
-                }
-
-                Ok(JValue::array(filtered))
-            }
-            _ => Err(EvaluatorError::TypeError(
-                "Array filtering requires an array".to_string(),
             )),
         }
     }

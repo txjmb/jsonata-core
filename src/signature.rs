@@ -22,9 +22,6 @@ pub enum SignatureError {
 
     #[error("T0411: Context value does not match function signature (expected {expected})")]
     ContextTypeMismatch { index: usize, expected: String },
-
-    #[error("Undefined argument")]
-    UndefinedArgument,
 }
 
 /// Parameter type
@@ -909,7 +906,7 @@ mod builtin_signature_table_tests {
             JValue::string("s"),
         ] {
             assert!(
-                sig.validate_and_coerce(&[arg.clone()], &JValue::Undefined)
+                sig.validate_and_coerce(std::slice::from_ref(&arg), &JValue::Undefined)
                     .is_ok(),
                 "count should accept {arg:?} as a singleton"
             );
