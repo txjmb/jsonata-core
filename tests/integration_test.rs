@@ -1696,18 +1696,24 @@ fn test_sibling_blocks_do_not_cumulatively_overflow_shared_const_pool() {
 /// calling `BytecodeCompiler::compile`, so `_bench::compile` must return
 /// `None` for this expression - asserted explicitly below - and the whole
 /// expression falls back to the tree-walking `Evaluator`, which has no such
-/// arg-count ceiling and merges all 300 objects correctly.
+/// arg-count ceiling and sees all 300 arguments.
 ///
 /// NOTE ON API CHOICE: same reasoning as the tests above - bare
 /// `Evaluator::evaluate` never invokes `try_compile_expr`/the VM at all, so a
 /// test built on it alone would not exercise the guard being fixed here.
 #[cfg(feature = "bench")]
 #[test]
-fn test_merge_call_with_more_than_u8_max_args_does_not_silently_truncate() {
+fn test_call_with_more_than_u8_max_args_does_not_silently_truncate() {
     use jsonata_core::_bench;
+    // `$zip` is genuinely variadic (`<a+>`), so a 300-argument call is valid
+    // and exercises the >u8::MAX guard end to end. This used to use a
+    // 300-argument `$merge`, which jsonata-js rejects with T0410 -- its
+    // signature is `<a<o>:o>`, one array of objects, not varargs -- and which
+    // we now reject too (#102). The guard being tested is about argument
+    // *count*, so the choice of function is incidental.
     let n = 300;
-    let objects: Vec<String> = (0..n).map(|i| format!("{{\"k{i}\": {i}}}")).collect();
-    let expr_str = format!("$merge({})", objects.join(", "));
+    let arrays: Vec<String> = (0..n).map(|i| format!("[{i}]")).collect();
+    let expr_str = format!("$zip({})", arrays.join(", "));
     let ast = parse(&expr_str).unwrap();
     let data = JValue::Null;
 
@@ -1716,29 +1722,37 @@ fn test_merge_call_with_more_than_u8_max_args_does_not_silently_truncate() {
     // the bytecode.
     assert!(
         _bench::compile(&ast).is_none(),
-        "expected the >u8::MAX-arg $merge call to decline bytecode compilation \
+        "expected the >u8::MAX-arg call to decline bytecode compilation \
          (fall back to the tree-walker), but it compiled successfully - the \
          u8::MAX arg-count guard appears to be missing or broken"
     );
 
+    // The tree-walker has no such ceiling and must see every argument.
     let result = Evaluator::new().evaluate(&ast, &data).unwrap();
     match result {
-        JValue::Object(obj) => {
-            assert_eq!(
-                obj.len(),
-                n,
-                "merge() with 300 single-key object args silently dropped keys - \
-                 likely the u8 arg-count truncation this guard exists to prevent"
-            );
-            for i in 0..n {
-                assert_eq!(
-                    obj.get(&format!("k{i}")),
-                    Some(&JValue::from(i as i64)),
-                    "missing or wrong value for k{i} in merged result"
-                );
+        JValue::Array(outer) => {
+            assert_eq!(outer.len(), 1, "expected one zipped tuple, got {outer:?}");
+            match &outer[0] {
+                JValue::Array(inner) => {
+                    assert_eq!(
+                        inner.len(),
+                        n,
+                        "zip() with 300 single-element array args silently dropped \
+                         arguments - likely the u8 arg-count truncation this guard \
+                         exists to prevent"
+                    );
+                    for i in 0..n {
+                        assert_eq!(
+                            inner[i],
+                            JValue::from(i as i64),
+                            "missing or wrong value at position {i}"
+                        );
+                    }
+                }
+                other => panic!("expected inner array, got {other:?}"),
             }
         }
-        other => panic!("expected object, got {other:?}"),
+        other => panic!("expected array, got {other:?}"),
     }
 }
 
