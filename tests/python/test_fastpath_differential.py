@@ -46,10 +46,13 @@ import pytest
 
 _FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
 _corpus = json.loads((_FIXTURES / "fastpath_differential.json").read_text())
+# The builtin matrix lives in its own fixture: one combined file crosses the
+# repo's 500KB per-file CI limit.
+_builtins = json.loads((_FIXTURES / "builtin_differential.json").read_text())
 _known = json.loads((_FIXTURES / "fastpath_known_divergences.json").read_text())
 
-DATASETS = _corpus["datasets"]
-CASES = _corpus["cases"]
+DATASETS = {**_corpus["datasets"], **_builtins["datasets"]}
+CASES = _corpus["cases"] + _builtins["cases"]
 KNOWN_DIVERGENCES = {tuple(k.split("|", 3)): v for k, v in _known["divergences"].items()}
 
 ENGINES = {False: "vm_preferred", True: "forced_tree_walker"}
