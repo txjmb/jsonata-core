@@ -472,6 +472,25 @@ impl Signature {
         args: &[JValue],
         context: &JValue,
     ) -> Result<Vec<JValue>, SignatureError> {
+        self.validate_and_coerce_counted(args, context)
+            .map(|(coerced, _)| coerced)
+    }
+
+    /// As `validate_and_coerce`, but also reports how many parameters were
+    /// filled from the context by the '-' modifier.
+    ///
+    /// Callers need that number to tell two kinds of extra entry apart. The
+    /// returned vector has one entry per *parameter*, so it can be longer than
+    /// `args` for two unrelated reasons: an absent optional parameter padded
+    /// with Undefined, which should be trimmed back off, and a '-' parameter
+    /// filled from the context, which must be kept. `$lookup(missing.x)`
+    /// produces both shapes at once -- `[context, Undefined]` from one
+    /// argument -- and trimming on length alone throws away the supplied key.
+    pub fn validate_and_coerce_counted(
+        &self,
+        args: &[JValue],
+        context: &JValue,
+    ) -> Result<(Vec<JValue>, usize), SignatureError> {
         self.validate_arg_count(args.len())?;
 
         let supplied_sig: String = args.iter().map(type_symbol).collect();
@@ -483,6 +502,7 @@ impl Signature {
 
         let mut coerced_args = Vec::with_capacity(args.len());
         let mut arg_index = 0usize;
+        let mut context_substitutions = 0usize;
 
         for (i, param) in self.params.iter().enumerate() {
             let matched = captures.get(i + 1).map(|m| m.as_str()).unwrap_or("");
@@ -497,6 +517,7 @@ impl Signature {
                         .map_err(|e| SignatureError::InvalidSignature(e.to_string()))?;
                     if context_re.is_match(&context_symbol) {
                         coerced_args.push(context.clone());
+                        context_substitutions += 1;
                     } else {
                         return Err(SignatureError::ContextTypeMismatch {
                             index: arg_index + 1,
@@ -554,7 +575,7 @@ impl Signature {
             }
         }
 
-        Ok(coerced_args)
+        Ok((coerced_args, context_substitutions))
     }
 
     /// Build an ArgumentTypeMismatch error identifying roughly which argument

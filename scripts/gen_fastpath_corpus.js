@@ -182,6 +182,61 @@ for (const [fn, first] of BUILTINS_SECOND_ARG) {
   for (const o of OPERANDS) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_second_arg', expr: `$${fn}(${first}, ${o})` });
 }
 
+// Hand-written probes for shapes neither matrix can reach. Both cross one
+// varying operand against a fixed partner, which leaves out three-argument
+// calls, second arguments that interact with the *content* of the first, and
+// builtins passed by reference to a higher-order function -- the last of
+// which is a whole dispatch path (`call_builtin_with_values`) that an
+// explicit argument list never reaches.
+const BUILTIN_PROBES = [
+  // An undefined start is NaN in JavaScript's arithmetic, so the presence of
+  // the length argument decides the answer: absent, the whole string;
+  // present, empty. "Treat undefined as 0" gets the second one wrong.
+  '$substring("abcdef", missing.x, 2)',
+  '$substring(missing.x, 1)',
+  // JavaScript stringifies an undefined search term to "undefined" rather
+  // than treating it as absent, which is observable when the subject
+  // contains that text.
+  '$substringBefore("xundefinedy", missing.x)',
+  // No $substringAfter twin: with a separator it finds, the reference then
+  // dereferences `chars.length` on the undefined separator and dies of a raw
+  // JavaScript TypeError. The generator records that as `kind: 'error'`, the
+  // same shape a real JSONata error gets, so the expectation would read as
+  // "jsonata-core must crash here too" -- a limitation of the generator, not
+  // a conformance target.
+  '$lookup({"undefined": 7}, missing.x)',
+  '$pad("a", missing.x, "-")',
+  // $spread builds a sequence, so a one-entry result unwraps and an empty
+  // one is undefined -- including when the entry comes from inside an array.
+  '$spread([obj])',
+  '$spread([{}])',
+  '$spread({})',
+  // The one-argument form of $sift takes its object from the context, which
+  // is the case that stops `$sift(obj)` from simply being rejected on arity.
+  '$sift(function($v, $k) { $k = "num" })',
+  '$sift(obj, function($v) { true })',
+  '$sift(obj, function($v) { false })',
+  // $each builds a sequence too, and it drops only undefined results -- an
+  // explicit null is a result like any other.
+  '$each(obj, function($v) { $v })',
+  '$each({"a": null}, function($v) { $v })',
+  '$each({"a": null, "b": 1}, function($v) { $v })',
+  '$each({}, $string)',
+  // Builtins passed by reference. A higher-order function hands its callback
+  // a fixed number of arguments regardless of what the builtin declares, and
+  // a context-capable parameter makes the declared count look like zero.
+  '$map(["a","b"], $uppercase)',
+  '$map([1,2], $string)',
+  '$map(["a","b"], $trim)',
+  '$map([1,2], $sqrt)',
+  '$map([" a ", "b"], $length)',
+  '$filter([1,0,2], $boolean)',
+  '$sift(obj, $boolean)',
+  '$each(obj, $string)',
+  '$map([[1,2],[3]], $count)',
+];
+for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
+
 async function main() {
   const cases = [];
   let errors = 0;

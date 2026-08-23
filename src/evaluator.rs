@@ -2072,6 +2072,33 @@ pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
     Ok(value.clone())
 }
 
+/// What JavaScript makes of an undefined argument in a string position.
+///
+/// jsonata-js validates a call and then hands the arguments to the function
+/// body unchanged, so an undefined that the signature admitted reaches a
+/// JavaScript string operation -- `indexOf`, `hasOwnProperty` -- which
+/// stringifies it to the literal text "undefined" rather than treating it as
+/// absent. Observable whenever the subject contains that text:
+/// `$substringBefore("xundefinedy", missing.x)` is "x", not the whole string.
+const JS_UNDEFINED_AS_STRING: &str = "undefined";
+
+/// `$substring` with an undefined start, which JavaScript's arithmetic rather
+/// than any JSONata rule decides.
+///
+/// `strLength + undefined` is NaN, which is not `< 0`, so the start stays
+/// undefined and `Array.prototype.slice` reads it as 0. Supply a length and
+/// the end becomes NaN as well, and `slice(0, NaN)` is empty -- so the same
+/// undefined start yields the whole string or none of it depending only on
+/// whether a length was given. Nothing here can be derived from "treat the
+/// missing start as 0"; that gets the second case wrong.
+fn substring_with_undefined_start(s: &str, has_length: bool) -> JValue {
+    if has_length {
+        JValue::string("")
+    } else {
+        JValue::string(s)
+    }
+}
+
 /// Validate and coerce a builtin's arguments against its jsonata-js signature.
 ///
 /// One copy shared by all three dispatch paths -- the compiled/VM
@@ -2113,14 +2140,23 @@ fn validate_builtin_args(
         }
     }
     let args = &args[..end];
-    match sig.validate_and_coerce(args, context) {
-        Ok(mut coerced) => {
+    match sig.validate_and_coerce_counted(args, context) {
+        Ok((mut coerced, context_substitutions)) => {
             // Validation returns one entry per *parameter*, padding absent
             // optional ones with Undefined. The arms decide whether an optional
             // was supplied from `args.len()`, so a padded tail makes
             // `$split("a,b", ",")` read a third argument and reject it as a
             // non-numeric limit. Trim the padding back off.
-            while coerced.len() > args.len() && matches!(coerced.last(), Some(JValue::Undefined)) {
+            //
+            // A '-' parameter filled from the context also lengthens the list,
+            // and that entry is not padding -- it stands in for an argument the
+            // function must receive. `$lookup(missing.x)` grows one argument
+            // into `[context, Undefined]`, so trimming on length alone would
+            // discard the supplied (undefined) key and leave the arm reporting
+            // a one-argument call. Allow for the substitutions before deciding
+            // what is padding.
+            let supplied = args.len() + context_substitutions;
+            while coerced.len() > supplied && matches!(coerced.last(), Some(JValue::Undefined)) {
                 coerced.pop();
             }
             Ok(Some(coerced))
@@ -2196,13 +2232,6 @@ fn call_pure_builtin(
         effective_args
     };
 
-    // Apply undefined propagation: if the first effective argument is Undefined
-    // and the function propagates undefined, return Undefined immediately.
-    // This matches the tree-walker's `propagates_undefined` check.
-    if effective_args.first().is_some_and(JValue::is_undefined) && propagates_undefined(name) {
-        return Ok(JValue::Undefined);
-    }
-
     // Validate and coerce against the builtin's jsonata-js signature. This is
     // where a lot of behaviour we used to hand-roll per function is actually
     // specified: the `a` type "normally treats any value as a singleton array"
@@ -2216,6 +2245,23 @@ fn call_pure_builtin(
         }
         None => effective_args,
     };
+
+    // Apply undefined propagation: if the first effective argument is Undefined
+    // and the function propagates undefined, return Undefined immediately.
+    //
+    // Deliberately *after* validation, which is the order jsonata-js works in:
+    // it has no such shortcut, it validates and then each function body checks
+    // its own first argument. The distinction is only visible when parameter 1
+    // is context-capable and a required parameter follows it -- `substring`
+    // (`<s-nn?:s>`) and `substringBefore`/`substringAfter` (`<s-s:s>`) are the
+    // whole set. There the lone undefined argument binds to parameter *2*, and
+    // parameter 1 comes from the context, so `$substring(missing.x)` against a
+    // non-string context is a T0411 rather than undefined. Running this guard
+    // first swallowed that, which is why the two engines disagreed: the
+    // tree-walker never had the shortcut.
+    if effective_args.first().is_some_and(JValue::is_undefined) && propagates_undefined(name) {
+        return Ok(JValue::Undefined);
+    }
 
     match name {
         // ── String functions ────────────────────────────────────────────
@@ -2292,6 +2338,9 @@ fn call_pure_builtin(
                     };
                     Ok(functions::string::substring(s, *start as i64, length)?)
                 }
+                (JValue::String(s), JValue::Undefined) => {
+                    Ok(substring_with_undefined_start(s, effective_args.len() > 2))
+                }
                 _ => Err(EvaluatorError::TypeError(
                     "T0410: Argument 1 of function substring does not match function signature"
                         .to_string(),
@@ -2307,6 +2356,9 @@ fn call_pure_builtin(
             match (&effective_args[0], &effective_args[1]) {
                 (JValue::String(s), JValue::String(sep)) => {
                     Ok(functions::string::substring_before(s, sep)?)
+                }
+                (JValue::String(s), JValue::Undefined) => {
+                    Ok(functions::string::substring_before(s, JS_UNDEFINED_AS_STRING)?)
                 }
                 // Undefined propagates; null is a type error.
                 (JValue::Undefined, _) => Ok(JValue::Undefined),
@@ -2324,6 +2376,9 @@ fn call_pure_builtin(
             match (&effective_args[0], &effective_args[1]) {
                 (JValue::String(s), JValue::String(sep)) => {
                     Ok(functions::string::substring_after(s, sep)?)
+                }
+                (JValue::String(s), JValue::Undefined) => {
+                    Ok(functions::string::substring_after(s, JS_UNDEFINED_AS_STRING)?)
                 }
                 // Undefined propagates; null is a type error.
                 (JValue::Undefined, _) => Ok(JValue::Undefined),
@@ -7899,6 +7954,9 @@ impl Evaluator {
                         };
                         Ok(functions::string::substring(s, *start as i64, length)?)
                     }
+                    (JValue::String(s), JValue::Undefined) => {
+                        Ok(substring_with_undefined_start(s, evaluated_args.len() == 3))
+                    }
                     (JValue::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substring does not match function signature"
                             .to_string(),
@@ -7920,6 +7978,9 @@ impl Evaluator {
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
                     (JValue::String(s), JValue::String(sep)) => Ok(functions::string::substring_before(s, sep)?),
+                    (JValue::String(s), JValue::Undefined) => {
+                        Ok(functions::string::substring_before(s, JS_UNDEFINED_AS_STRING)?)
+                    }
                     (JValue::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substringBefore does not match function signature".to_string(),
                     )),
@@ -7939,6 +8000,9 @@ impl Evaluator {
                 }
                 match (&evaluated_args[0], &evaluated_args[1]) {
                     (JValue::String(s), JValue::String(sep)) => Ok(functions::string::substring_after(s, sep)?),
+                    (JValue::String(s), JValue::Undefined) => {
+                        Ok(functions::string::substring_after(s, JS_UNDEFINED_AS_STRING)?)
+                    }
                     (JValue::String(_), _) => Err(EvaluatorError::TypeError(
                         "T0410: Argument 2 of function substringAfter does not match function signature".to_string(),
                     )),
@@ -7966,9 +8030,17 @@ impl Evaluator {
                     }
                 };
 
-                // Second argument: width (negative = left pad, positive = right pad)
+                // Second argument: width (negative = left pad, positive = right pad).
+                //
+                // An undefined width survives validation (`<s-ns?:s>` admits a
+                // missing argument in any slot) and reaches jsonata-js's body,
+                // where `Math.trunc(undefined)` is NaN and the padding length
+                // is therefore NaN too. `NaN > 0` is false, so the reference
+                // skips padding entirely and returns the string unchanged --
+                // whatever pad character was given.
                 let width = match &evaluated_args.get(1) {
                     Some(JValue::Number(n)) => *n as i32,
+                    Some(JValue::Undefined) | None => return Ok(JValue::string(string)),
                     _ => {
                         return Err(EvaluatorError::TypeError(
                             "pad() second argument must be a number".to_string(),
@@ -8022,6 +8094,11 @@ impl Evaluator {
                 match &evaluated_args[0] {
                     JValue::Null => Ok(JValue::Null),
                     JValue::String(s) => Ok(functions::string::trim(s)?),
+                    // `<s-:s>` admits a missing argument, and jsonata-js's body
+                    // opens with the usual `typeof str === 'undefined'` guard.
+                    // The compiled path already propagated here; this arm is
+                    // what stopped the two engines agreeing.
+                    JValue::Undefined => Ok(JValue::Undefined),
                     _ => Err(EvaluatorError::TypeError(
                         "trim() requires a string argument".to_string(),
                     )),
@@ -8768,6 +8845,25 @@ impl Evaluator {
 
                 // Handle partial application - if only 1 arg, use current context as object
                 if args.len() == 1 {
+                    // The one-argument form is `$sift(function)`, with the
+                    // object coming from the context via the signature's '-'
+                    // marker. `$sift(obj)` looks identical here but is not that
+                    // form: the object binds to parameter 1 and jsonata-js
+                    // reaches the body with no callback at all, where applying
+                    // `undefined` throws. Discriminate on the value in the
+                    // callback slot, which validation leaves last -- and only
+                    // when something is actually there. An undefined argument
+                    // must still fall through: `$sift(missing.x)` iterates no
+                    // keys and is undefined, not an error.
+                    match evaluated_args.last() {
+                        Some(JValue::Lambda { .. } | JValue::Builtin { .. })
+                        | Some(JValue::Undefined)
+                        | None => {}
+                        Some(_) => return Err(EvaluatorError::TypeError(
+                            "T0410: Argument 2 of function sift does not match function signature"
+                                .to_string(),
+                        )),
+                    }
                     // $sift(function) - use current context data as object
                     let data = &normalize_lazy(data)?;
                     match data {
@@ -8980,6 +9076,11 @@ impl Evaluator {
 
                 let key = match &evaluated_args[1] {
                     JValue::String(k) => &**k,
+                    // jsonata-js looks the key up with `hasOwnProperty`, which
+                    // stringifies an undefined key to "undefined" instead of
+                    // rejecting it -- so `$lookup(obj, missing.x)` is undefined
+                    // for an ordinary object but 7 for `{"undefined": 7}`.
+                    JValue::Undefined => JS_UNDEFINED_AS_STRING,
                     _ => {
                         return Err(EvaluatorError::TypeError(
                             "lookup() requires a string key".to_string(),
@@ -9049,9 +9150,31 @@ impl Evaluator {
                         // array-fanout branch below and as the "keys" arm's single-object
                         // branch.
                         check_sequence_length(obj.len(), &self.options)?;
-                        Ok(functions::object::spread(obj)?)
+                        // That loop pushes into a *sequence*, so the usual
+                        // sequence rules close over the result: one entry
+                        // unwraps and none at all is undefined. Hence
+                        // `$spread({"k": 1})` is the object back, not a
+                        // one-element array, and `$spread({})` is undefined.
+                        match functions::object::spread(obj)? {
+                            JValue::Array(entries) => {
+                                hof_result_sequence(entries.to_vec(), &self.options)
+                            }
+                            other => Ok(other),
+                        }
                     }
                     JValue::Array(arr) => {
+                        // The array branch does NOT get those sequence rules,
+                        // even though it looks symmetrical. jsonata-js folds
+                        // each element's spread in with `append`, which ends in
+                        // `concat` -- and `concat` returns a plain Array,
+                        // dropping the `sequence` flag that `push` preserves.
+                        // So `$spread([{"k": 1}])` stays `[{"k": 1}]`. The one
+                        // exception is an empty input: the fold never runs, the
+                        // sequence created up front survives untouched, and an
+                        // empty sequence is undefined.
+                        if arr.is_empty() {
+                            return Ok(JValue::Undefined);
+                        }
                         // Spread each object in the array
                         let mut result = Vec::new();
                         for item in arr.iter() {
@@ -9655,13 +9778,19 @@ impl Evaluator {
                             };
 
                             let fn_result = self.apply_function(func_arg, &call_args, data)?;
-                            // Skip undefined results (similar to map behavior)
-                            if !fn_result.is_null() && !fn_result.is_undefined() {
+                            // Skip undefined results only. jsonata-js guards
+                            // this push with `typeof val !== 'undefined'`, so an
+                            // explicit null is a result like any other and
+                            // `$each({"a": null, "b": 1}, fn)` is `[null, 1]`.
+                            if !fn_result.is_undefined() {
                                 result.push(fn_result);
                             }
                         }
                         check_sequence_length(result.len(), &self.options)?;
-                        Ok(JValue::array(result))
+                        // jsonata-js pushes each result into a sequence, so the
+                        // sequence rules apply: a single-key object yields the
+                        // result itself and an empty one yields undefined.
+                        hof_result_sequence(result, &self.options)
                     }
                     JValue::Null => Ok(JValue::Null),
                     // jsonata-js: $each returns undefined when its first argument
