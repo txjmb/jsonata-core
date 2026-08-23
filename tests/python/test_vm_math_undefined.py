@@ -94,13 +94,11 @@ def test_explicit_null_argument_is_a_type_error(fn):
     with pytest.raises(ValueError):
         expr.evaluate(data)
 
-    # The tree-walker still returns null here: only the compiled/VM dispatch is
-    # signature-validated so far, so this assertion is deliberately one-sided
-    # until that path is migrated too. Tighten it to match the line above once
-    # it is.
+    # Both engines now validate against the signature, so both raise.
     jsonatapy._set_force_tree_walker(True)
     try:
-        assert expr.evaluate(data) == {"x": None}
+        with pytest.raises(ValueError):
+            expr.evaluate(data)
     finally:
         jsonatapy._set_force_tree_walker(False)
 

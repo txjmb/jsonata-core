@@ -7717,12 +7717,11 @@ impl Evaluator {
             }
         }
 
-        // NOT signature-validated yet, unlike the compiled path. Several arms
-        // here read their arguments positionally in ways coercion disturbs:
-        // `$sift(fn)` takes its object from context, so validation returns a
-        // differently-shaped list than the arm indexes into, and it panics.
-        // Wiring this path needs those arms migrated to the coerced shape
-        // first, function group by function group.
+        // Same signature validation the compiled path performs, so the two
+        // engines cannot disagree about argument handling.
+        if let Some(coerced) = validate_builtin_args(name, &evaluated_args, data)? {
+            evaluated_args = coerced;
+        }
 
         match name {
             "string" => {
@@ -8711,18 +8710,18 @@ impl Evaluator {
 
             "sift" => {
                 // $sift(object, function) or $sift(function) - filter object by predicate
-                if evaluated_args.is_empty() || evaluated_args.len() > 2 {
+                if args.is_empty() || args.len() > 2 {
                     return Err(EvaluatorError::EvaluationError(
                         "sift() requires 1 or 2 arguments".to_string(),
                     ));
                 }
 
-                // Determine which argument is the function
-                let func_arg = if evaluated_args.len() == 1 {
-                    &args[0]
-                } else {
-                    &args[1]
-                };
+                // Decide from `args` (the source arguments), not from the
+                // evaluated values: signature coercion can substitute the
+                // context for a `-` parameter, which grows the value list
+                // without adding a source argument. Indexing `args` by the
+                // value count then runs off the end.
+                let func_arg = if args.len() == 1 { &args[0] } else { &args[1] };
 
                 // Detect how many parameters the callback expects
                 let param_count = self.get_callback_param_count(func_arg);
@@ -8769,7 +8768,7 @@ impl Evaluator {
                 };
 
                 // Handle partial application - if only 1 arg, use current context as object
-                if evaluated_args.len() == 1 {
+                if args.len() == 1 {
                     // $sift(function) - use current context data as object
                     let data = &normalize_lazy(data)?;
                     match data {
