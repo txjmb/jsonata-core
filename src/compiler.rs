@@ -168,7 +168,7 @@ impl BytecodeCompiler {
                         let sub_bc = BytecodeCompiler::compile(filter);
                         let sidx = self.sub_programs.len() as u16;
                         self.sub_programs.push(sub_bc);
-                        self.emit(Instr::FilterByBytecode(sidx));
+                        self.emit(Instr::FilterByBytecode(sidx, step.filter_selects_by_index));
                     }
                 } else {
                     // Multi-step filtered path: delegate to eval_compiled (handles

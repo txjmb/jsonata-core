@@ -89,6 +89,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- Path expressions no longer drop explicit `null` values from query-result sequences.
+  `evaluate_path`'s array-mapping fast path predates the null/undefined migration in #32
+  and skipped both, so `arr.p` over `[{"p": 1}, {"p": null}]` returned `1` instead of
+  `[1, null]`. Only an *absent* field is undefined and drops out; a present `null` is a
+  value and stays. Fixed for both the JSON and Python-dict (lazy view) routes. This
+  corrects everything downstream of such a sequence — `$count`, array construction,
+  comparison and arithmetic operands, and the fused aggregates, which now raise `T0412`
+  on a null element rather than silently summing around it.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 1)
+- Filter predicates now unwrap a single-element result, so `arr[p = 1]` is `{"p": 1}` rather
+  than `[{"p": 1}]`. The tree-walker decided this from `step.stages` alone, but `arr[p = 1]`
+  parses its predicate as a `Predicate` step *node* with empty stages, so no filter written
+  that way was ever recognised as an array operation. Numeric-literal predicates are excluded:
+  those are index access and already return the selected element, so counting them would
+  unwrap twice and turn `a[0]` over `[[5]]` into `5`.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 2)
+- Numeric filter predicates now select by position instead of being treated as truthy. In
+  JSONata `arr[p]` keeps an element only when `p` equals that element's own index; negative
+  values count from the end and fractional values floor, and an array of numbers is a set of
+  such indices. The tree-walker previously evaluated the predicate against the whole array
+  and treated a numeric result as a multi-index selector, so `arr[p]` over
+  `[{"p": 1}, {"p": 2}]` returned both elements instead of nothing. Fixed for standalone
+  predicates; filters in *stage* position (`a.b[-1]`, which maps the index over each
+  extracted sub-array) keep their existing semantics.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 3)
+- The compiled path and bytecode VM now apply the same index rule. `CompiledStep` records
+  whether its filter came from a standalone `Predicate` step or a `Stage::Filter`, a
+  distinction the compiler previously discarded on the stated assumption that "both
+  encodings have identical runtime semantics" -- true for boolean predicates, false for
+  numeric ones. ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 3)
+- A predicate applied to a non-array value now treats it as the singleton sequence it is:
+  index 0, length 1. `arr[p]` over `{"p": 1}` is undefined (1 does not match index 0) and
+  `arr[-1]` wraps to the value itself. A string predicate on an object is no longer computed
+  property access -- `o["a"]` keeps the object because a non-empty string is truthy, matching
+  jsonata-js, rather than looking up the key.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 4)
+- A non-empty Python `dict` is no longer falsy on the bytecode VM and compiled paths.
+  Dicts cross the boundary as a lazy view rather than a materialised object, and
+  `compiled_is_truthy` had no arm for that variant, so it fell through to its catch-all and
+  returned `false` for every one. This affected any truthiness context on the compiled path
+  -- `o ? a : b`, `and`/`or`, `$boolean`, `$not`, filter predicates -- and only when data was
+  passed as a dict, so the same expression over an equivalent JSON string was correct. The
+  tree-walker was unaffected. ([#98](https://github.com/txjmb/jsonata-core/issues/98))
+- Ordered comparisons (`<`, `<=`, `>`, `>=`) against an undefined operand now return undefined
+  instead of raising `T2010`, and an explicit `null` operand now raises `T2010` instead of
+  returning null. `ordered_compare` predated the null/undefined split and matched only on
+  `JValue::Null`, so a real `Undefined` reached its catch-all. Rewritten to jsonata-js's rule:
+  only numbers, strings and undefined are comparable; an undefined operand yields undefined;
+  otherwise a type mismatch is `T2009`.
+- An unbound variable (`$x`) now evaluates to undefined rather than null, so `3 > $x` is
+  undefined, `{"a": $x}` drops the key, and `$not($x)` is undefined -- all matching jsonata-js.
+  The surrounding comment already described these as the intended results; only the value was
+  wrong. ([#98](https://github.com/txjmb/jsonata-core/issues/98), root cause 5)
+- Explicit nulls now survive a stage filter (`arr.p[-1]`, `arr.p[0]`, `arr.p[]`). The
+  tuple/stage branch of `evaluate_path` mapped an absent field to `JValue::Null` and then
+  skipped every null, dropping present nulls alongside genuinely missing fields -- the same
+  pre-migration pattern already fixed in the no-stages fast path, in three more places
+  (the object arm, the tuple arm and the lazy-dict arm).
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98))
+- `arr.p[-1]` now takes the last element of each extracted group on the bytecode VM, matching
+  the tree-walker. Numeric-literal predicates are index access and are deliberately left to
+  the tree-walker, but the guard tested only for `AstNode::Number` -- `[-1]` parses as a
+  *negation* of a literal, slipped through, and compiled to a plain truthy constant that kept
+  every element. ([#98](https://github.com/txjmb/jsonata-core/issues/98))
 
 ### Security
 

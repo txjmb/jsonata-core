@@ -28,9 +28,13 @@ print("\nTest 3: Filter + object construction (CRITICAL)")
 data3 = {"items": [{"name": "Item 1", "price": 60}, {"name": "Item 2", "price": 40}]}
 expr3 = jsonatapy.compile('items[price > 50].{"name": name, "double": price * 2}')
 result3 = expr3.evaluate(data3)
-assert len(result3) == 1, f"Filter failed: expected 1 item, got {len(result3)}"
-assert result3[0]["name"] == "Item 1", f"Object construction failed: {result3[0]}"
-assert result3[0]["double"] == 120.0, f"Computed field failed: {result3[0]['double']}"
+# A filter matching exactly one item unwraps to that item, so the object
+# constructor produces one object rather than a one-element list. Verified
+# against jsonata-js, which returns {"name": "Item 1", "double": 120}.
+# This previously asserted a one-element list, which was the bug fixed in #98.
+assert isinstance(result3, dict), f"Filter failed: expected one object, got {result3!r}"
+assert result3["name"] == "Item 1", f"Object construction failed: {result3}"
+assert result3["double"] == 120.0, f"Computed field failed: {result3['double']}"
 print("✓ PASSED")
 
 # Test 4: Complex boolean expressions with filter

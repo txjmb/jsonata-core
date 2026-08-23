@@ -303,8 +303,16 @@ pub(crate) enum CompiledExpr {
 pub(crate) struct CompiledStep {
     /// Field name to look up at this step.
     pub field: String,
-    /// Optional predicate filter compiled from a `Stage::Filter` stage.
+    /// Optional predicate filter, from either a `Stage::Filter` stage or a
+    /// folded-in standalone `Predicate` step.
     pub filter: Option<CompiledExpr>,
+    /// True when `filter` came from a standalone `Predicate` step (`arr[p]`)
+    /// rather than a `Stage::Filter` (`a.b[-1]`). The two are NOT
+    /// interchangeable for numeric predicates: a standalone predicate matches
+    /// each element against its own index, while a stage filter maps the index
+    /// over each extracted sub-array, so `foo.blah.baz.fud[-1]` takes the last
+    /// of every group. Boolean predicates behave identically either way.
+    pub filter_selects_by_index: bool,
 }
 
 /// Try to compile an AstNode subtree into a CompiledExpr.
@@ -1459,7 +1467,50 @@ pub(crate) fn compiled_is_truthy(value: &JValue) -> bool {
         JValue::String(s) => !s.is_empty(),
         JValue::Array(a) => !a.is_empty(),
         JValue::Object(o) => !o.is_empty(),
+        // A Python dict arrives as a lazy view, not a materialised Object.
+        // Without this arm it fell through to `_ => false` and every non-empty
+        // dict was falsy on the compiled path -- mirrors `Evaluator::is_truthy`.
+        #[cfg(feature = "python")]
+        JValue::LazyPyDict(lazy) => !lazy.is_empty(),
         _ => false,
+    }
+}
+
+/// Decide whether a filter predicate result selects the element at `index`.
+///
+/// In JSONata a predicate that evaluates to a number is an *index selector*,
+/// not a truthiness test: the element is kept only when the number equals its
+/// own position. Negative values count from the end and fractional values
+/// floor, matching jsonata-js's `evaluateFilter`. An array whose elements are
+/// all numbers is a set of such indices, and any match keeps the element --
+/// which makes an empty array vacuously numeric and matching nothing.
+///
+/// Returns `None` when the result is not an index selector, leaving the caller
+/// to apply its own truthiness rule.
+///
+/// This exists so the four filter implementations (the tree-walker's predicate
+/// step and stage forms, the compiled path, and the VM) share one copy of the
+/// decision while keeping their own evaluation strategies. Each previously
+/// carried its own `is_truthy` call and so was wrong in the same way.
+#[inline]
+pub(crate) fn predicate_index_match(pred: &JValue, index: usize, len: usize) -> Option<bool> {
+    fn matches_index(n: f64, index: usize, len: usize) -> bool {
+        let mut i = n.floor() as i64;
+        if i < 0 {
+            i += len as i64;
+        }
+        i >= 0 && i as usize == index
+    }
+
+    match pred {
+        JValue::Number(n) => Some(matches_index(*n, index, len)),
+        JValue::Array(arr) if arr.iter().all(|v| matches!(v, JValue::Number(_))) => {
+            Some(arr.iter().any(|v| match v {
+                JValue::Number(n) => matches_index(*n, index, len),
+                _ => false,
+            }))
+        }
+        _ => None,
     }
 }
 
@@ -1694,7 +1745,18 @@ fn try_compile_path(
     // `evaluate_predicate` special-cases it and the compiled path has no
     // equivalent, so bail out rather than silently treating it as `filter(true)`.
     let compile_filter = |node: &AstNode| -> Option<CompiledExpr> {
-        if matches!(node, AstNode::Number(_) | AstNode::Boolean(true)) {
+        let is_numeric_literal = match node {
+            AstNode::Number(_) => true,
+            // `[-1]` parses as a negation of a literal, not a negative literal.
+            // Missing this let it compile as a plain truthy constant, so
+            // `arr.p[-1]` kept every element instead of taking the last of each
+            // extracted group.
+            AstNode::Unary { op, operand } => {
+                matches!(op, crate::ast::UnaryOp::Negate) && matches!(**operand, AstNode::Number(_))
+            }
+            _ => false,
+        };
+        if is_numeric_literal || matches!(node, AstNode::Boolean(true)) {
             return None;
         }
         try_compile_expr_inner(node, allowed_vars)
@@ -1704,7 +1766,10 @@ fn try_compile_path(
     // Handles:
     //   - Name nodes with at most one Stage::Filter attached (from `a.b[pred]` dot-path parsing)
     //   - Predicate nodes (from `products[pred]` standalone predicate parsing) — folded into the
-    //     previous step's filter slot, since both encodings have identical runtime semantics.
+    //     previous step's filter slot, flagged with `filter_selects_by_index`. The two encodings
+    //     are NOT interchangeable: for a numeric predicate a standalone step matches each element
+    //     against its own index, while a stage filter maps the index over each extracted
+    //     sub-array. They coincide only for boolean predicates.
     let mut compiled_steps = Vec::with_capacity(field_steps.len());
     for step in field_steps {
         // Tuple-stream steps (@ focus / # index / % parent binding) require the
@@ -1728,6 +1793,7 @@ fn try_compile_path(
                 compiled_steps.push(CompiledStep {
                     field: name.clone(),
                     filter,
+                    filter_selects_by_index: false,
                 });
             }
             AstNode::Predicate(filter_node) => {
@@ -1740,6 +1806,7 @@ fn try_compile_path(
                     return None;
                 }
                 last.filter = Some(compile_filter(filter_node)?);
+                last.filter_selects_by_index = true;
             }
             _ => return None,
         }
@@ -1805,8 +1872,16 @@ fn compiled_eval_field_path(
         }
         // Apply filter if present (filter is an array operation — keep the flag set)
         if let Some(filter) = &step.filter {
-            current =
-                compiled_apply_filter(filter, &current, vars, ctx, shape, options, start_time)?;
+            current = compiled_apply_filter(
+                filter,
+                step.filter_selects_by_index,
+                &current,
+                vars,
+                ctx,
+                shape,
+                options,
+                start_time,
+            )?;
             // Filter always implies we operated on an array
             did_array_mapping = true;
         }
@@ -1909,8 +1984,10 @@ fn compiled_field_step(
 /// - Array: return elements for which the predicate is truthy
 /// - Single value: return it if predicate is truthy, else Undefined
 /// - Numeric predicates (index access) are NOT supported here — fall back via None compilation
+#[allow(clippy::too_many_arguments)]
 fn compiled_apply_filter(
     filter: &CompiledExpr,
+    selects_by_index: bool,
     value: &JValue,
     vars: Option<&HashMap<&str, &JValue>>,
     ctx: Option<&Context>,
@@ -1929,7 +2006,12 @@ fn compiled_apply_filter(
                 None
             };
             let effective_shape = shape.or(local_shape.as_ref());
-            for item in arr.iter() {
+            // A standalone predicate matches each element against its own index;
+            // a stage filter maps a numeric predicate over each extracted
+            // sub-array instead, so `foo.blah.baz.fud[-1]` takes the last of
+            // every group rather than one element of the flattened sequence.
+            let len = arr.len();
+            for (index, item) in arr.iter().enumerate() {
                 check_loop_timeout(options, start_time)?;
                 let pred = eval_compiled_inner(
                     filter,
@@ -1940,7 +2022,11 @@ fn compiled_apply_filter(
                     options,
                     start_time,
                 )?;
-                if compiled_is_truthy(&pred) {
+                let keep = match predicate_index_match(&pred, index, len) {
+                    Some(matched) if selects_by_index => matched,
+                    _ => compiled_is_truthy(&pred),
+                };
+                if keep {
                     result.push(item.clone());
                 }
             }
@@ -1956,8 +2042,13 @@ fn compiled_apply_filter(
         }
         JValue::Undefined => Ok(JValue::Undefined),
         _ => {
+            // A non-array is a singleton sequence: index 0, length 1.
             let pred = eval_compiled_inner(filter, value, vars, ctx, shape, options, start_time)?;
-            if compiled_is_truthy(&pred) {
+            let keep = match predicate_index_match(&pred, 0, 1) {
+                Some(matched) if selects_by_index => matched,
+                _ => compiled_is_truthy(&pred),
+            };
+            if keep {
                 Ok(value.clone())
             } else {
                 Ok(JValue::Undefined)
@@ -3773,10 +3864,12 @@ impl Evaluator {
                     return Ok(builtin_repr);
                 }
 
-                // Undefined variable - return null (undefined in JSONata semantics)
-                // This allows expressions like `$not(undefined_var)` to return undefined
-                // and comparisons like `3 > $undefined` to return undefined
-                Ok(JValue::Null)
+                // An unbound variable is undefined. This is what makes
+                // `$not($x)` undefined, `{"a": $x}` drop the key, and `3 > $x`
+                // undefined rather than a T2010 on an uncomparable null.
+                // An unbound variable is undefined, not null: `3 > $x` is undefined
+                // and `{"a": $x}` drops the key. (#98)
+                Ok(JValue::Undefined)
             }
 
             AstNode::ParentVariable(name) => {
@@ -4563,9 +4656,15 @@ impl Evaluator {
 
                 // It's a filter expression
                 let mut filtered = Vec::new();
-                for item in arr.iter() {
+                let len = arr.len();
+                for (index, item) in arr.iter().enumerate() {
                     let item_result = self.evaluate_internal(predicate, item)?;
-                    if self.is_truthy(&item_result) {
+                    // A numeric predicate selects by position, not truthiness.
+                    let keep = match predicate_index_match(&item_result, index, len) {
+                        Some(matched) => matched,
+                        None => self.is_truthy(&item_result),
+                    };
+                    if keep {
                         filtered.push(item.clone());
                     }
                 }
@@ -4791,7 +4890,7 @@ impl Evaluator {
                                                 // Flatten nested arrays from recursive mapping
                                                 result.extend(nested.iter().cloned());
                                             }
-                                            JValue::Null => {} // Skip nulls from nested arrays
+                                            JValue::Null => {}
                                             other => result.push(other),
                                         }
                                     }
@@ -4975,7 +5074,7 @@ impl Evaluator {
                                                     JValue::Array(arr) => {
                                                         result.extend(arr.iter().cloned())
                                                     }
-                                                    JValue::Null => {} // Skip nulls from stage application
+                                                    JValue::Null => {}
                                                     other => result.push(other), // Shouldn't happen, but handle it
                                                 }
                                             } else {
@@ -4999,7 +5098,7 @@ impl Evaluator {
                                             JValue::Array(nested) => {
                                                 result.extend(nested.iter().cloned())
                                             }
-                                            JValue::Null => {} // Skip nulls from nested arrays
+                                            JValue::Null => {}
                                             other => result.push(other),
                                         }
                                     }
@@ -5427,14 +5526,16 @@ impl Evaluator {
                                 for item in arr.iter() {
                                     match item {
                                         JValue::Object(obj) => {
+                                            // `None` is an absent field (undefined -> drops out);
+                                            // `Some(Null)` is a present null, which is a value and
+                                            // stays in the sequence. Mirrors compiled_field_step.
                                             if let Some(val) = obj.get(field_name) {
-                                                if !val.is_null() {
-                                                    match val {
-                                                        JValue::Array(arr_val) => {
-                                                            result.extend(arr_val.iter().cloned())
-                                                        }
-                                                        other => result.push(other.clone()),
+                                                match val {
+                                                    JValue::Undefined => {}
+                                                    JValue::Array(arr_val) => {
+                                                        result.extend(arr_val.iter().cloned())
                                                     }
+                                                    other => result.push(other.clone()),
                                                 }
                                             }
                                         }
@@ -5452,7 +5553,8 @@ impl Evaluator {
                                         #[cfg(feature = "python")]
                                         JValue::LazyPyDict(lazy) => {
                                             let val = lazy.get_field(field_name)?;
-                                            if !val.is_null() && !val.is_undefined() {
+                                            // A present null is a value; only an absent field (Undefined) drops out.
+                                            if !val.is_undefined() {
                                                 match val {
                                                     JValue::Array(arr_val) => {
                                                         result.extend(arr_val.iter().cloned())
@@ -5484,37 +5586,33 @@ impl Evaluator {
                                                     .map(|(k, v)| (k.clone(), v.clone()))
                                                     .collect();
                                                 match obj.get("@") {
+                                                    // Absent field -> Undefined, matching the
+                                                    // non-tuple arm below, so the guard drops it
+                                                    // while keeping a present null.
                                                     Some(JValue::Object(inner)) => (
                                                         inner
                                                             .get(field_name)
                                                             .cloned()
-                                                            .unwrap_or(JValue::Null),
+                                                            .unwrap_or(JValue::Undefined),
                                                         Some(bindings),
                                                     ),
                                                     #[cfg(feature = "python")]
-                                                    Some(JValue::LazyPyDict(lazy)) => {
-                                                        let v = lazy.get_field(field_name)?;
-                                                        (
-                                                            if v.is_undefined() {
-                                                                JValue::Null
-                                                            } else {
-                                                                v
-                                                            },
-                                                            Some(bindings),
-                                                        )
-                                                    }
+                                                    Some(JValue::LazyPyDict(lazy)) => (
+                                                        lazy.get_field(field_name)?,
+                                                        Some(bindings),
+                                                    ),
                                                     _ => continue, // Invalid tuple
                                                 }
                                             } else {
                                                 (
                                                     obj.get(field_name)
                                                         .cloned()
-                                                        .unwrap_or(JValue::Null),
+                                                        .unwrap_or(JValue::Undefined),
                                                     None,
                                                 )
                                             };
 
-                                            if !val.is_null() {
+                                            if !val.is_undefined() {
                                                 // Helper to wrap value in tuple if we have bindings
                                                 let wrap_in_tuple = |v: JValue, bindings: &Option<Vec<(String, JValue)>>| -> JValue {
                                                     if let Some(b) = bindings {
@@ -5590,7 +5688,9 @@ impl Evaluator {
                                                                 ));
                                                             }
                                                         }
-                                                        JValue::Null => {} // Skip nulls from stage application
+                                                        // A stage yielding nothing is Undefined; a genuine null result is a
+                                                        // value and stays in the sequence.
+                                                        JValue::Undefined => {}
                                                         other => result.push(wrap_in_tuple(
                                                             other,
                                                             &tuple_bindings,
@@ -5635,7 +5735,9 @@ impl Evaluator {
                                             // None throughout, so wrap_in_tuple would be a no-op).
                                             let val = lazy.get_field(field_name)?;
 
-                                            if !val.is_null() && !val.is_undefined() {
+                                            // Only an absent field (Undefined) drops out; a
+                                            // present null is a value.
+                                            if !val.is_undefined() {
                                                 if !stages.is_empty() {
                                                     let processed_val =
                                                         self.apply_stages(val, stages)?;
@@ -5643,7 +5745,7 @@ impl Evaluator {
                                                         JValue::Array(arr) => {
                                                             result.extend(arr.iter().cloned())
                                                         }
-                                                        JValue::Null => {} // Skip nulls from stage application
+                                                        JValue::Undefined => {}
                                                         other => result.push(other),
                                                     }
                                                 } else {
@@ -5900,7 +6002,10 @@ impl Evaluator {
         let has_explicit_array_keep = Self::path_keeps_singleton_array(steps);
 
         // Unwrap when:
-        // 1. Any step has stages (predicates, sorts, etc.) which are array operations, OR
+        // 1. Any step is an array operation -- a stage (sort, filter) or a
+        //    `Predicate` step node. Both spellings must count: `arr[p = 1]`
+        //    parses the predicate as a step *node* with empty stages, so
+        //    checking `stages` alone missed every filter written that way.
         // 2. We did array mapping during step evaluation (tracked via did_array_mapping flag)
         //    Note: did_array_mapping is reset to false when extracting from a single object,
         //    so a[0].b where a[0] returns a single object and .b extracts a field will NOT unwrap.
@@ -5908,8 +6013,16 @@ impl Evaluator {
         //
         // Important: We DON'T unwrap just because original data was an array - what matters is
         // whether the final extraction was from an array mapping context or a single object.
-        let should_unwrap = !has_explicit_array_keep
-            && (steps.iter().any(|step| !step.stages.is_empty()) || did_array_mapping);
+        // A numeric-literal predicate is index access: `evaluate_predicate`
+        // returns the selected element itself, already final. A filter
+        // predicate returns a sequence, which is what the singleton rule
+        // unwraps. Counting index access here would unwrap it a second time
+        // and turn `a[0]` over `[[5]]` into `5` instead of `[5]`.
+        let has_array_op = steps.iter().any(|step| {
+            !step.stages.is_empty()
+                || matches!(&step.node, AstNode::Predicate(p) if !matches!(**p, AstNode::Number(_)))
+        });
+        let should_unwrap = !has_explicit_array_keep && (has_array_op || did_array_mapping);
 
         let result = match &current {
             // An empty result sequence is "no value" -> undefined (jsonata-js
@@ -11305,171 +11418,79 @@ impl Evaluator {
 
         match current {
             JValue::Array(_arr) => {
-                // Standalone predicates do simple array operations (no mapping over sub-arrays)
+                // Standalone predicates: jsonata-js evaluates the predicate once
+                // per element and decides from the result. A numeric result is an
+                // index selector compared against that element's own position; any
+                // other result is a truthiness test. This one loop subsumes the
+                // multi-index selector form too -- a constant `[0, 1]` predicate
+                // evaluates to the same array for every element and matches
+                // positions 0 and 1 -- so there is no separate whole-array path.
 
-                // First, try to evaluate predicate as a simple number (array index)
+                // Literal numeric index keeps its direct route: array_index returns
+                // the selected element itself rather than a one-element sequence,
+                // which the caller's singleton-unwrap rule depends on.
                 if let AstNode::Number(n) = predicate {
-                    // Direct array indexing
                     return self.array_index(current, &JValue::Number(*n));
                 }
 
-                // Fast path: if predicate is definitely a filter expression (comparison/logical),
-                // skip speculative numeric evaluation and go directly to filter logic
-                if Self::is_filter_predicate(predicate) {
-                    // Try CompiledExpr fast path
-                    if let Some(compiled) = try_compile_expr(predicate) {
-                        let shape = _arr.first().and_then(build_shape_cache);
-                        let mut filtered = Vec::with_capacity(_arr.len());
-                        for item in _arr.iter() {
-                            let result = if let Some(ref s) = shape {
-                                eval_compiled_shaped(
-                                    &compiled,
-                                    item,
-                                    None,
-                                    s,
-                                    &self.options,
-                                    self.start_time,
-                                )?
-                            } else {
-                                eval_compiled(
-                                    &compiled,
-                                    item,
-                                    None,
-                                    &self.options,
-                                    self.start_time,
-                                )?
-                            };
-                            if compiled_is_truthy(&result) {
-                                filtered.push(item.clone());
-                            }
-                        }
-                        return Ok(JValue::array(filtered));
-                    }
-                    // Fallback: full AST evaluation per element
-                    let mut filtered = Vec::new();
-                    for item in _arr.iter() {
-                        let item_result = self.evaluate_internal(predicate, item)?;
-                        if self.is_truthy(&item_result) {
-                            filtered.push(item.clone());
-                        }
-                    }
-                    return Ok(JValue::array(filtered));
-                }
+                let len = _arr.len();
+                let compiled = try_compile_expr(predicate);
+                let shape = compiled
+                    .as_ref()
+                    .and_then(|_| _arr.first().and_then(build_shape_cache));
 
-                // Try to evaluate the predicate to see if it's a numeric index
-                // If evaluation succeeds and yields a number, use it as an index
-                // If evaluation fails (e.g., comparison error), treat as filter
-                match self.evaluate_internal(predicate, current) {
-                    Ok(JValue::Number(_)) => {
-                        // It's a numeric index
-                        let pred_result = self.evaluate_internal(predicate, current)?;
-                        return self.array_index(current, &pred_result);
-                    }
-                    Ok(JValue::Array(indices)) => {
-                        // Multiple array selectors [[indices]]
-                        // Check if array contains any non-numeric values
-                        let has_non_numeric =
-                            indices.iter().any(|v| !matches!(v, JValue::Number(_)));
-
-                        if has_non_numeric {
-                            // If array contains non-numeric values, return entire array
-                            return Ok(current.clone());
-                        }
-
-                        // Collect numeric indices, handling negative indices
-                        let arr_len = _arr.len() as i64;
-                        let mut resolved_indices: Vec<i64> = indices
-                            .iter()
-                            .filter_map(|v| {
-                                if let JValue::Number(n) = v {
-                                    let idx = *n as i64;
-                                    // Resolve negative indices
-                                    let actual_idx = if idx < 0 { arr_len + idx } else { idx };
-                                    // Only include valid indices
-                                    if actual_idx >= 0 && actual_idx < arr_len {
-                                        Some(actual_idx)
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        // Sort and deduplicate indices
-                        resolved_indices.sort();
-                        resolved_indices.dedup();
-
-                        // Select elements at each sorted index
-                        let result: Vec<JValue> = resolved_indices
-                            .iter()
-                            .map(|&idx| _arr[idx as usize].clone())
-                            .collect();
-
-                        return Ok(JValue::array(result));
-                    }
-                    Ok(_) => {
-                        // Evaluated successfully but not a number - might be a filter
-                        // Fall through to filter logic
-                    }
-                    Err(_) => {
-                        // Evaluation failed - it's likely a filter expression
-                        // Fall through to filter logic
-                    }
-                }
-
-                // Try CompiledExpr fast path for filter expressions
-                if let Some(compiled) = try_compile_expr(predicate) {
-                    let shape = _arr.first().and_then(build_shape_cache);
-                    let mut filtered = Vec::with_capacity(_arr.len());
-                    for item in _arr.iter() {
-                        let result = if let Some(ref s) = shape {
-                            eval_compiled_shaped(
-                                &compiled,
-                                item,
-                                None,
-                                s,
-                                &self.options,
-                                self.start_time,
-                            )?
-                        } else {
-                            eval_compiled(&compiled, item, None, &self.options, self.start_time)?
-                        };
-                        if compiled_is_truthy(&result) {
-                            filtered.push(item.clone());
-                        }
-                    }
-                    return Ok(JValue::array(filtered));
-                }
-
-                // It's a filter expression - evaluate the predicate for each array element
                 let mut filtered = Vec::new();
-                for item in _arr.iter() {
-                    let item_result = self.evaluate_internal(predicate, item)?;
-
-                    // If result is truthy, include this item
-                    if self.is_truthy(&item_result) {
+                // Whether every element's predicate result was an index selector.
+                // Index selection yields the element itself, not a one-element
+                // sequence: `[1, 2, [3, 4]][-1][-1]` needs the first `[-1]` to
+                // hand `[3, 4]` to the second, and this path unwraps singletons
+                // only once, at the end of the whole path.
+                let mut all_index_selectors = true;
+                for (index, item) in _arr.iter().enumerate() {
+                    let result = match (&compiled, &shape) {
+                        (Some(c), Some(s)) => {
+                            eval_compiled_shaped(c, item, None, s, &self.options, self.start_time)?
+                        }
+                        (Some(c), None) => {
+                            eval_compiled(c, item, None, &self.options, self.start_time)?
+                        }
+                        (None, _) => self.evaluate_internal(predicate, item)?,
+                    };
+                    let keep = match predicate_index_match(&result, index, len) {
+                        Some(matched) => matched,
+                        None => {
+                            all_index_selectors = false;
+                            self.is_truthy(&result)
+                        }
+                    };
+                    if keep {
                         filtered.push(item.clone());
                     }
                 }
 
+                if all_index_selectors && filtered.len() == 1 {
+                    return Ok(filtered.remove(0));
+                }
                 Ok(JValue::array(filtered))
             }
             JValue::Object(obj) => {
-                // For objects, predicate can be either:
-                // 1. A string - property access (computed property name)
-                // 2. A boolean expression - filter (return object if truthy)
+                // A non-array is a singleton sequence: index 0, length 1. The
+                // same rule as for arrays applies, so `o[p]` keeps the object
+                // only when `p` is 0 (or a non-numeric truthy value), and
+                // `o[-1]` wraps to index 0.
+                //
+                // A string predicate is NOT computed property access -- `o["a"]`
+                // keeps the object because a non-empty string is truthy, which
+                // is what jsonata-js does. `_ = obj` keeps the binding readable
+                // for the debugger without implying a lookup happens here.
+                let _ = obj;
                 let pred_result = self.evaluate_internal(predicate, current)?;
 
-                // If it's a string, use it as a key for property access
-                if let JValue::String(key) = &pred_result {
-                    return Ok(obj.get(&**key).cloned().unwrap_or(JValue::Null));
-                }
-
-                // Otherwise, treat as a filter expression
-                // If the predicate is truthy, return the object; otherwise return undefined
-                if self.is_truthy(&pred_result) {
+                let keep = match predicate_index_match(&pred_result, 0, 1) {
+                    Some(matched) => matched,
+                    None => self.is_truthy(&pred_result),
+                };
+                if keep {
                     Ok(current.clone())
                 } else {
                     Ok(JValue::Undefined)
@@ -12124,7 +12145,20 @@ impl Evaluator {
         }
     }
 
-    /// Ordered comparison with null/type checking shared across <, <=, >, >=
+    /// Ordered comparison shared across <, <=, >, >=.
+    ///
+    /// Follows jsonata-js's `evaluateComparisonExpression`:
+    /// 1. Only numbers, strings and *undefined* are comparable. Anything else
+    ///    -- null, boolean, object, array -- raises T2010.
+    /// 2. If either side is undefined the result is undefined.
+    /// 3. Otherwise both are comparable and present, so differing types raise
+    ///    T2009.
+    ///
+    /// The `*_is_explicit_null` flags are vestigial. They existed to tell a
+    /// literal `null` in the source apart from a "missing" value back when both
+    /// were `JValue::Null`. Since the null/undefined split (#32) a missing value
+    /// is `JValue::Undefined`, so every `JValue::Null` reaching here is an
+    /// explicit null and is uncomparable either way.
     ///
     /// `compare_nums` receives (left_f64, right_f64) for numeric operands.
     /// `compare_strs` receives (left_str, right_str) for string operands.
@@ -12133,53 +12167,35 @@ impl Evaluator {
         &self,
         left: &JValue,
         right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
+        _left_is_explicit_null: bool,
+        _right_is_explicit_null: bool,
         op_symbol: &str,
         compare_nums: fn(f64, f64) -> bool,
         compare_strs: fn(&str, &str) -> bool,
     ) -> Result<JValue, EvaluatorError> {
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => {
-                Ok(JValue::Bool(compare_nums(*a, *b)))
-            }
-            (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(compare_strs(a, b))),
-            // Both null/undefined -> return undefined
-            (JValue::Null, JValue::Null) => Ok(JValue::Null),
-            // Explicit null literal with any type (except null) -> T2010 error
-            (JValue::Null, _) if left_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            (_, JValue::Null) if right_is_explicit_null => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Boolean with undefined -> T2010 error
-            (JValue::Bool(_), JValue::Null) | (JValue::Null, JValue::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()))
-            }
-            // Number or String with undefined (not explicit null) -> undefined result
-            (JValue::Number(_), JValue::Null) | (JValue::Null, JValue::Number(_)) |
-            (JValue::String(_), JValue::Null) | (JValue::Null, JValue::String(_)) => {
-                Ok(JValue::Null)
-            }
-            // String vs Number -> T2009
-            (JValue::String(_), JValue::Number(_)) | (JValue::Number(_), JValue::String(_)) => {
-                Err(EvaluatorError::EvaluationError(format!(
-                    "T2009: The expressions on either side of operator \"{}\" must be of the same data type",
-                    op_symbol
-                )))
-            }
-            // Boolean comparisons -> T2010
-            (JValue::Bool(_), _) | (_, JValue::Bool(_)) => {
-                Err(EvaluatorError::EvaluationError(format!(
-                    "T2010: Cannot compare {} and {}",
-                    Self::type_name(left), Self::type_name(right)
-                )))
-            }
-            // Other type mismatches
-            _ => Err(EvaluatorError::EvaluationError(format!(
+        fn comparable(v: &JValue) -> bool {
+            matches!(v, JValue::Number(_) | JValue::String(_) | JValue::Undefined)
+        }
+
+        if !comparable(left) || !comparable(right) {
+            return Err(EvaluatorError::EvaluationError(format!(
                 "T2010: Cannot compare {} and {}",
-                Self::type_name(left), Self::type_name(right)
+                Self::type_name(left),
+                Self::type_name(right)
+            )));
+        }
+
+        // An undefined operand makes the comparison undefined, not an error.
+        if matches!(left, JValue::Undefined) || matches!(right, JValue::Undefined) {
+            return Ok(JValue::Undefined);
+        }
+
+        match (left, right) {
+            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Bool(compare_nums(*a, *b))),
+            (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(compare_strs(a, b))),
+            _ => Err(EvaluatorError::EvaluationError(format!(
+                "T2009: The expressions on either side of operator \"{}\" must be of the same data type",
+                op_symbol
             ))),
         }
     }
@@ -12763,11 +12779,11 @@ mod tests {
         let result = evaluator.evaluate(&AstNode::variable("x"), &data).unwrap();
         assert_eq!(result, JValue::from(100i64));
 
-        // Undefined variable returns null (undefined in JSONata semantics)
+        // An unbound variable is undefined, not null (see #98).
         let result = evaluator
             .evaluate(&AstNode::variable("undefined"), &data)
             .unwrap();
-        assert_eq!(result, JValue::Null);
+        assert_eq!(result, JValue::Undefined);
     }
 
     #[test]

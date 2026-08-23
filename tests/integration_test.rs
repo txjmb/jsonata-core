@@ -460,12 +460,28 @@ fn test_empty_object() {
 fn test_error_undefined_variable() {
     let data = JValue::Null;
 
-    // Undefined variables return null in JSONata (not an error)
+    // An unbound variable is undefined -- not an error, and not null.
+    // Verified against jsonata-js: `$undefined` is undefined, `{"a": $x}` is
+    // `{}` (the key drops out), and `3 > $x` is undefined. This asserted null
+    // before the null/undefined split was carried through to variables (#98);
+    // with null the comparison would raise T2010 instead.
     let ast = parse("$undefined").unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data).unwrap();
 
-    assert_eq!(result, JValue::Null);
+    assert_eq!(result, JValue::Undefined);
+
+    // The consequences that make undefined the right value here.
+    let ast = parse("3 > $x").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Undefined
+    );
+    let ast = parse("{\"a\": $x}").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!({}))
+    );
 }
 
 #[test]
@@ -1816,4 +1832,392 @@ fn test_fused_aggregate_still_aggregates_valid_input() {
     );
     // A literal empty array is still 0.
     assert_eq!(fused_eval("$sum([])", json!({})), Ok(JValue::Number(0.0)));
+}
+
+// ── Explicit null in path results (issue #98, root cause 1) ──────────────────
+//
+// An explicit JSON `null` is a value: it stays in a query-result sequence.
+// Only *undefined* (an absent field) drops out. `evaluate_path`'s array-mapping
+// fast path predates the null/undefined migration in #32 and skipped both,
+// which silently shortened sequences and changed the answers of everything
+// downstream of them.
+
+#[test]
+fn test_path_keeps_explicit_null_in_sequence() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+    let ast = parse("arr.p").unwrap();
+    let result = Evaluator::new().evaluate(&ast, &data).unwrap();
+
+    assert_eq!(result, JValue::from(json!([1, null])));
+}
+
+#[test]
+fn test_path_keeps_lone_explicit_null() {
+    // A single null is still a value, so the singleton unwraps to null itself
+    // rather than collapsing to undefined.
+    let data: JValue = json!({"arr": [{"p": null}]}).into();
+    let ast = parse("arr.p").unwrap();
+
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Null
+    );
+}
+
+#[test]
+fn test_path_still_drops_missing_fields() {
+    // The other half of the distinction: an absent field is undefined and must
+    // still drop out, so this fix must not turn missing into null.
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    let ast = parse("arr.p").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!(1))
+    );
+
+    // Nothing present at all is undefined, not a sequence of nulls.
+    let ast = parse("arr.nope").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_path_null_is_counted_and_constructed() {
+    // Downstream consumers see the full sequence.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+
+    let ast = parse("$count(arr.p)").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Number(2.0)
+    );
+
+    let ast = parse("[arr.p]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([1, null]))
+    );
+}
+
+// ── Singleton unwrapping after a predicate step (issue #98, root cause 2) ────
+//
+// A predicate is an array operation, so a result sequence of one unwraps to
+// that element. `arr[p = 1]` is `{"p": 1}`, not `[{"p": 1}]`. The tree-walker
+// decided this from `step.stages` alone, but `arr[p = 1]` parses the predicate
+// as a `Predicate` step *node* with empty stages, so the check never saw it.
+
+#[test]
+fn test_predicate_unwraps_singleton_result() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 2}]}).into();
+    let ast = parse("arr[p = 1]").unwrap();
+
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!({"p": 1}))
+    );
+}
+
+#[test]
+fn test_predicate_keeps_multi_element_result() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 2}]}).into();
+    let ast = parse("arr[p > 0]").unwrap();
+
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([{"p": 1}, {"p": 2}]))
+    );
+}
+
+#[test]
+fn test_predicate_singleton_that_is_itself_an_array() {
+    // Unwrapping is uniform: the sequence [[5]] has one element, [5], so the
+    // result is [5] -- not 5, and not [[5]].
+    let data: JValue = json!({"a": [[5]]}).into();
+
+    for expr in ["a[0]", "a[$[0] = 5]"] {
+        let ast = parse(expr).unwrap();
+        assert_eq!(
+            Evaluator::new().evaluate(&ast, &data).unwrap(),
+            JValue::from(json!([5])),
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_predicate_no_match_is_undefined() {
+    let data: JValue = json!({"arr": [{"p": 1}]}).into();
+    let ast = parse("arr[p = 99]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_empty_predicate_still_keeps_array() {
+    // `[]` must survive the unwrap rule -- it is an explicit keep-array.
+    let data: JValue = json!({"arr": [{"p": 1}]}).into();
+    let ast = parse("arr[].p").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([1]))
+    );
+}
+
+// ── Numeric predicates select by index (issue #98, root cause 3) ─────────────
+//
+// `arr[p]` does not mean "keep elements where p is truthy". When the predicate
+// evaluates to a number, jsonata-js compares it against the element's *index*
+// and keeps the element only on a match; negative values wrap from the end,
+// and fractional values floor. Only a non-numeric result falls back to
+// truthiness. All four filter implementations shared a copy of the truthiness
+// rule, so all four were wrong the same way.
+
+fn filter_eval(expr: &str, data: serde_json::Value) -> JValue {
+    let ast = parse(expr).unwrap();
+    let data: JValue = data.into();
+    Evaluator::new().evaluate(&ast, &data).unwrap()
+}
+
+#[test]
+fn test_numeric_predicate_matches_element_index() {
+    // 0 == index 0 and 1 == index 1, so both survive.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": 0}, {"p": 1}]})),
+        JValue::from(json!([{"p": 0}, {"p": 1}]))
+    );
+    // Neither value equals its own index.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": 1}, {"p": 0}]})),
+        JValue::Undefined
+    );
+    // Only the first matches; the singleton then unwraps.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": 0}, {"p": 9}]})),
+        JValue::from(json!({"p": 0}))
+    );
+}
+
+#[test]
+fn test_numeric_predicate_negative_wraps_and_fractional_floors() {
+    // -1 wraps to index 1, which is where the second element lives.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": -1}, {"p": 1}]})),
+        JValue::from(json!({"p": 1}))
+    );
+    // floor(0.7) == 0 and floor(1.2) == 1.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": 0.7}, {"p": 1.2}]})),
+        JValue::from(json!([{"p": 0.7}, {"p": 1.2}]))
+    );
+}
+
+#[test]
+fn test_array_of_numbers_predicate_matches_any() {
+    // An array of numbers is a set of indices; any match keeps the element.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": [0, 1]}, {"p": [5]}]})),
+        JValue::from(json!({"p": [0, 1]}))
+    );
+    // An empty array is vacuously "all numbers" and matches no index.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": []}, {"p": []}]})),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_non_numeric_predicate_still_uses_truthiness() {
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": "x"}, {"p": ""}]})),
+        JValue::from(json!({"p": "x"}))
+    );
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": true}, {"p": false}]})),
+        JValue::from(json!({"p": true}))
+    );
+    // A mixed array is not an index selector, and a non-empty array is truthy.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"p": [1, "x"]}]})),
+        JValue::from(json!({"p": [1, "x"]}))
+    );
+    // Missing and null are falsy and drop out.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": [{"q": 9}, {"p": null}]})),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_comparison_predicates_unaffected() {
+    // Guard: ordinary boolean filters must keep working.
+    assert_eq!(
+        filter_eval("a[$ = 20]", json!({"a": [10, 20, 30]})),
+        JValue::from(json!(20))
+    );
+    assert_eq!(
+        filter_eval("a[1]", json!({"a": [10, 20, 30]})),
+        JValue::from(json!(20))
+    );
+    assert_eq!(
+        filter_eval("arr[p > 1]", json!({"arr": [{"p": 1}, {"p": 5}]})),
+        JValue::from(json!({"p": 5}))
+    );
+}
+
+// ── Predicates on a non-array value (issue #98, root cause 4) ────────────────
+//
+// A non-array is a singleton sequence: index 0, length 1. The same index rule
+// applies, so `arr[p]` keeps the object only when `p` is 0 (or a non-numeric
+// truthy value). We previously treated a string predicate as computed property
+// access, which is not a JSONata rule -- `o["a"]` returns the object because a
+// non-empty string is truthy, not because "a" is looked up.
+
+#[test]
+fn test_predicate_on_object_uses_index_zero() {
+    // p == 1 does not match index 0.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": {"p": 1}})),
+        JValue::Undefined
+    );
+    // p == 0 does match index 0.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": {"p": 0}})),
+        JValue::from(json!({"p": 0}))
+    );
+    // Non-numeric falls back to truthiness.
+    assert_eq!(
+        filter_eval("arr[p]", json!({"arr": {"p": true}})),
+        JValue::from(json!({"p": true}))
+    );
+}
+
+#[test]
+fn test_index_into_object_singleton() {
+    assert_eq!(
+        filter_eval("arr[0]", json!({"arr": {"p": 1}})),
+        JValue::from(json!({"p": 1}))
+    );
+    assert_eq!(
+        filter_eval("arr[0].p", json!({"arr": {"p": 1}})),
+        JValue::from(json!(1))
+    );
+    assert_eq!(
+        filter_eval("arr[1]", json!({"arr": {"p": 1}})),
+        JValue::Undefined
+    );
+    // -1 wraps to index 0 of a one-element sequence.
+    assert_eq!(
+        filter_eval("arr[-1]", json!({"arr": {"p": 1}})),
+        JValue::from(json!({"p": 1}))
+    );
+}
+
+#[test]
+fn test_string_predicate_on_object_is_truthiness_not_key_access() {
+    // Truthy string keeps the object; it is not a key lookup.
+    assert_eq!(
+        filter_eval("o[\"a\"]", json!({"o": {"a": 1}})),
+        JValue::from(json!({"a": 1}))
+    );
+    // An empty string is falsy.
+    assert_eq!(
+        filter_eval("o[\"\"]", json!({"o": {"a": 1}})),
+        JValue::Undefined
+    );
+}
+
+// ── Comparison against undefined (issue #98, root cause 5) ───────────────────
+//
+// An undefined operand makes an ordered comparison undefined, it does not
+// raise. `ordered_compare` was written before the null/undefined split and
+// matches only on `JValue::Null`, so a real `Undefined` reached the catch-all
+// and produced "T2010: Cannot compare unknown and number".
+
+#[test]
+fn test_ordered_comparison_with_undefined_is_undefined() {
+    let data: JValue = json!({"arr": []}).into();
+    for expr in ["arr.p < 2", "arr.p > 2", "arr.p <= 2", "arr.p >= 2"] {
+        let ast = parse(expr).unwrap();
+        assert_eq!(
+            Evaluator::new().evaluate(&ast, &data).unwrap(),
+            JValue::Undefined,
+            "{expr}"
+        );
+    }
+    // Not specific to empty arrays -- any missing path behaves the same.
+    let ast = parse("nothing.x < 2").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::Undefined
+    );
+}
+
+#[test]
+fn test_ordered_comparison_still_errors_on_real_mismatches() {
+    // Guard: an explicit null and a boolean are still type errors, and valid
+    // comparisons still compare.
+    let data: JValue = json!({"n": null, "b": true, "x": 5}).into();
+
+    assert!(Evaluator::new()
+        .evaluate(&parse("n < 2").unwrap(), &data)
+        .is_err());
+    assert!(Evaluator::new()
+        .evaluate(&parse("b < 2").unwrap(), &data)
+        .is_err());
+    assert!(Evaluator::new()
+        .evaluate(&parse("x < \"s\"").unwrap(), &data)
+        .is_err());
+    // null is uncomparable even opposite an undefined operand.
+    assert!(Evaluator::new()
+        .evaluate(&parse("missing.x < n").unwrap(), &data)
+        .is_err());
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("x < 10").unwrap(), &data)
+            .unwrap(),
+        JValue::Bool(true)
+    );
+}
+
+// ── Explicit null through a stage filter (issue #98) ─────────────────────────
+//
+// The tuple/stage branch of `evaluate_path` mapped a missing field to
+// `JValue::Null` and then skipped every null, so an explicit null was dropped
+// alongside genuinely absent fields -- the same pre-migration pattern already
+// fixed in the no-stages fast path.
+
+#[test]
+fn test_stage_filter_keeps_explicit_null() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": null}]}).into();
+    let ast = parse("arr.p[-1]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([1, null]))
+    );
+}
+
+#[test]
+fn test_stage_filter_still_drops_missing_fields() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    let ast = parse("arr.p[-1]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!(1))
+    );
+}
+
+#[test]
+fn test_stage_filter_indexes_within_each_group() {
+    // Stage semantics: the index applies to each extracted value, not to the
+    // flattened sequence.
+    let data: JValue = json!({"arr": [{"p": [1, 2]}, {"p": 3}]}).into();
+    let ast = parse("arr.p[-1]").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([2, 3]))
+    );
 }
