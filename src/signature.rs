@@ -37,6 +37,9 @@ pub enum ParamType {
     Object,
     Function(Option<String>), // Function with optional signature subtype like "n:n"
     Any,
+    /// `j` — any JSON type. Like `Any` but excludes functions, matching
+    /// jsonata-js's `case 'j'` regex `[asnblom]`.
+    Json,
     Null,
     Union(Vec<ParamType>), // Union type like (ns) = number or string
 }
@@ -52,6 +55,7 @@ impl ParamType {
             'o' => Some(ParamType::Object),
             'f' => Some(ParamType::Function(None)),
             'x' => Some(ParamType::Any),
+            'j' => Some(ParamType::Json),
             'l' => Some(ParamType::Null),
             _ => None,
         }
@@ -101,6 +105,7 @@ fn type_char(t: &ParamType) -> char {
         ParamType::Array(_) => 'a',
         ParamType::Function(_) => 'f',
         ParamType::Any => 'x',
+        ParamType::Json => 'j',
         // Unreachable in practice: signature.js does not nest unions inside
         // unions, and our parser never constructs one this way either.
         ParamType::Union(_) => 'x',
@@ -173,6 +178,8 @@ impl Parameter {
             ParamType::Array(_) => "[asnblfom]".to_string(),
             ParamType::Function(_) => "f".to_string(),
             ParamType::Any => "[asnblfom]".to_string(),
+            // Any JSON type: everything except a function.
+            ParamType::Json => "[asnblom]".to_string(),
             ParamType::String => "[sm]".to_string(),
             ParamType::Number => "[nm]".to_string(),
             ParamType::Boolean => "[bm]".to_string(),
@@ -500,10 +507,12 @@ impl Signature {
                     // This position was genuinely supplied (not out-of-bounds
                     // padding) only if arg_index is within the original args.
                     let was_supplied = arg_index < args.len();
-                    if was_supplied
-                        && (arg.is_null() || arg.is_undefined())
-                        && !matches!(param.param_type, ParamType::Null | ParamType::Any)
-                    {
+                    // Only *undefined* short-circuits. An explicit null is a
+                    // value: it must reach the regex match, where `[nm]` rejects
+                    // it as T0410 and the array class `[asnblfom]` accepts and
+                    // wraps it -- which is what makes `$abs(null)` an error and
+                    // `$count(null)` equal to 1, as in jsonata-js.
+                    if was_supplied && arg.is_undefined() {
                         return Err(SignatureError::UndefinedArgument);
                     }
                     coerced_args.push(arg);
@@ -516,10 +525,8 @@ impl Signature {
                 let was_supplied = arg_index < args.len();
                 let arg = args.get(arg_index).cloned().unwrap_or(JValue::Undefined);
 
-                if was_supplied
-                    && (arg.is_null() || arg.is_undefined())
-                    && !matches!(param.param_type, ParamType::Null | ParamType::Any)
-                {
+                // See the note above: only undefined short-circuits.
+                if was_supplied && arg.is_undefined() {
                     return Err(SignatureError::UndefinedArgument);
                 }
 
@@ -600,6 +607,7 @@ impl Signature {
             ParamType::Function(None) => "Function".to_string(),
             ParamType::Function(Some(sig)) => format!("Function<{}>", sig),
             ParamType::Any => "Any".to_string(),
+            ParamType::Json => "JSON value".to_string(),
             ParamType::Null => "Null".to_string(),
             ParamType::Union(types) => {
                 let names: Vec<_> = types.iter().map(Self::type_name).collect();
@@ -768,5 +776,178 @@ mod tests {
         // vector must not be an error.
         assert_eq!(coerced[0], JValue::Number(1.0));
         assert_eq!(coerced[1], JValue::Number(2.0));
+    }
+}
+
+// ── Builtin signature table ─────────────────────────────────────────────────
+
+/// jsonata-js's signature for every built-in function, lifted verbatim from its
+/// `staticFrame.bind("name", defineFunction(fn.name, "<sig>"))` declarations.
+///
+/// These drive the same validation and coercion the reference performs, which is
+/// where a lot of our null/undefined and singleton-coercion behaviour is
+/// specified rather than in the function bodies:
+///
+/// - `a` "normally treats any value as a singleton array" (the reference's own
+///   comment), so `$reverse(1)` is `[1]` and `$count(null)` is 1.
+/// - `l` is null and `m` is missing, and they are distinct: `$abs(null)` fails
+///   the `n` check with T0410, while `$abs(missing.x)` passes as `m` and the
+///   function returns undefined.
+///
+/// `random` and `shuffle` are here for completeness even though their results
+/// cannot be compared against the reference.
+pub(crate) const BUILTIN_SIGNATURES: &[(&str, &str)] = &[
+    ("sum", "<a<n>:n>"),
+    ("count", "<a:n>"),
+    ("max", "<a<n>:n>"),
+    ("min", "<a<n>:n>"),
+    ("average", "<a<n>:n>"),
+    ("string", "<x-b?:s>"),
+    ("substring", "<s-nn?:s>"),
+    ("substringBefore", "<s-s:s>"),
+    ("substringAfter", "<s-s:s>"),
+    ("lowercase", "<s-:s>"),
+    ("uppercase", "<s-:s>"),
+    ("length", "<s-:n>"),
+    ("trim", "<s-:s>"),
+    ("pad", "<s-ns?:s>"),
+    ("match", "<s-f<s:o>n?:a<o>>"),
+    ("contains", "<s-(sf):b>"),
+    ("replace", "<s-(sf)(sf)n?:s>"),
+    ("split", "<s-(sf)n?:a<s>>"),
+    ("join", "<a<s>s?:s>"),
+    ("formatNumber", "<n-so?:s>"),
+    ("formatBase", "<n-n?:s>"),
+    ("number", "<(nsb)-:n>"),
+    ("floor", "<n-:n>"),
+    ("ceil", "<n-:n>"),
+    ("round", "<n-n?:n>"),
+    ("abs", "<n-:n>"),
+    ("sqrt", "<n-:n>"),
+    ("power", "<n-n:n>"),
+    ("random", "<:n>"),
+    ("boolean", "<x-:b>"),
+    ("not", "<x-:b>"),
+    ("map", "<af>"),
+    ("zip", "<a+>"),
+    ("filter", "<af>"),
+    ("single", "<af?>"),
+    ("reduce", "<afj?:j>"),
+    ("sift", "<o-f?:o>"),
+    ("keys", "<x-:a<s>>"),
+    ("lookup", "<x-s:x>"),
+    ("append", "<xx:a>"),
+    ("exists", "<x:b>"),
+    ("spread", "<x-:a<o>>"),
+    ("merge", "<a<o>:o>"),
+    ("reverse", "<a:a>"),
+    ("each", "<o-f:a>"),
+    ("error", "<s?:x>"),
+    ("assert", "<bs?:x>"),
+    ("type", "<x:s>"),
+    ("sort", "<af?:a>"),
+    ("shuffle", "<a:a>"),
+    ("distinct", "<x:x>"),
+    ("encodeUrlComponent", "<s-:s>"),
+    ("encodeUrl", "<s-:s>"),
+    ("decodeUrlComponent", "<s-:s>"),
+    ("decodeUrl", "<s-:s>"),
+];
+
+/// Look up a builtin's parsed signature, or `None` if it has no declared one.
+///
+/// Signatures are parsed once on first use: parsing builds a regex, which is far
+/// too expensive to repeat per call.
+pub(crate) fn builtin_signature(name: &str) -> Option<&'static Signature> {
+    static CACHE: std::sync::OnceLock<std::collections::HashMap<&'static str, Signature>> =
+        std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            BUILTIN_SIGNATURES
+                .iter()
+                .filter_map(|(name, sig)| Signature::parse(sig).ok().map(|s| (*name, s)))
+                .collect()
+        })
+        .get(name)
+}
+
+#[cfg(test)]
+mod builtin_signature_table_tests {
+    use super::*;
+
+    #[test]
+    fn every_reference_signature_parses() {
+        // A signature that fails to parse would silently drop out of the lookup
+        // cache and leave that builtin unvalidated, so assert on the table.
+        let bad: Vec<String> = BUILTIN_SIGNATURES
+            .iter()
+            .filter_map(|(name, sig)| {
+                Signature::parse(sig)
+                    .err()
+                    .map(|e| format!("{name} {sig}: {e}"))
+            })
+            .collect();
+        assert!(
+            bad.is_empty(),
+            "{} of {} failed:\n{}",
+            bad.len(),
+            BUILTIN_SIGNATURES.len(),
+            bad.join("\n")
+        );
+        assert_eq!(BUILTIN_SIGNATURES.len(), 55);
+    }
+
+    #[test]
+    fn lookup_returns_parsed_signatures() {
+        assert!(builtin_signature("count").is_some());
+        assert!(builtin_signature("reverse").is_some());
+        assert!(builtin_signature("nosuchfunction").is_none());
+    }
+
+    #[test]
+    fn array_type_accepts_any_single_value() {
+        // The property that makes `$reverse(1)` == [1] and `$count(null)` == 1.
+        let sig = builtin_signature("count").expect("count has a signature");
+        for arg in [
+            JValue::Number(1.0),
+            JValue::Null,
+            JValue::Bool(true),
+            JValue::string("s"),
+        ] {
+            assert!(
+                sig.validate_and_coerce(&[arg.clone()], &JValue::Undefined)
+                    .is_ok(),
+                "count should accept {arg:?} as a singleton"
+            );
+        }
+    }
+
+    #[test]
+    fn null_and_missing_are_distinct() {
+        // Both are rejected by `<n-:n>`, but for different reasons, and callers
+        // depend on telling them apart: a null is a genuine type error (T0410),
+        // while a missing argument is the signal to return undefined.
+        let sig = builtin_signature("abs").expect("abs has a signature");
+        assert!(matches!(
+            sig.validate_and_coerce(&[JValue::Null], &JValue::Undefined),
+            Err(SignatureError::ArgumentTypeMismatch { .. })
+        ));
+        assert!(matches!(
+            sig.validate_and_coerce(&[JValue::Undefined], &JValue::Undefined),
+            Err(SignatureError::UndefinedArgument)
+        ));
+    }
+
+    #[test]
+    fn null_reaches_the_array_class_instead_of_short_circuiting() {
+        // The counterpart: `a` accepts null and wraps it, so `$count(null)` is
+        // 1 rather than 0. Before, null short-circuited as "undefined argument"
+        // and never reached the regex at all.
+        let sig = builtin_signature("count").expect("count has a signature");
+        assert_eq!(
+            sig.validate_and_coerce(&[JValue::Null], &JValue::Undefined)
+                .unwrap(),
+            vec![JValue::array(vec![JValue::Null])]
+        );
     }
 }
