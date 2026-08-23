@@ -231,23 +231,6 @@ Add to `src/builtins.rs`'s `mod tests`:
 
 ```rust
     #[test]
-    fn context_insertion_covers_both_paths_lists() {
-        // The compiled path and the tree-walker kept separate lists of which
-        // builtins take the context as an implicit argument, and they
-        // disagreed: only the tree-walker had `fromMillis` (zero-arg) and
-        // `replace` (missing-first). Merging must take the union, so assert on
-        // the member that only one list had.
-        let opts = EvaluatorOptions::default();
-        // $fromMillis() with a numeric context formats that context.
-        let got = dispatch_pure("fromMillis", &[], &JValue::Number(0.0), &opts)
-            .expect("fromMillis should read the context");
-        assert!(
-            matches!(&got, JValue::String(s) if s.starts_with("1970-01-01")),
-            "expected an epoch timestamp, got {got:?}"
-        );
-    }
-
-    #[test]
     fn validation_runs_before_undefined_propagation() {
         // $substring(missing) binds its lone undefined argument to parameter 2
         // and takes parameter 1 from the context, so a non-string context is a
@@ -268,10 +251,10 @@ Add to `src/builtins.rs`'s `mod tests`:
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cargo test --release builtins::tests 2>&1 | tail -20`
-Expected: both new tests fail by panicking in `unreachable!("dispatch_pure called with non-pure builtin: fromMillis")` / `... substring`.
+Expected: the new test fails by panicking in `unreachable!("dispatch_pure called with non-pure builtin: substring")` — the prologue does not exist yet, so nothing raises T0411 before the fallback.
 
 - [ ] **Step 3: Write the prologue**
 
@@ -360,15 +343,15 @@ pub(crate) fn dispatch_pure(
 
 `validate_builtin_args`, `propagates_undefined` and `normalize_lazy` are private to `evaluator.rs` today. Change each from `fn` to `pub(crate) fn` (`normalize_lazy` is already `pub(crate)`).
 
-- [ ] **Step 4: Run the tests to verify they still fail, but differently**
+- [ ] **Step 4: Run the test to verify it passes**
 
-Run: `cargo test --release builtins::tests 2>&1 | tail -20`
-Expected: `validation_runs_before_undefined_propagation` now PASSES (validation raises T0411 before the `unreachable!()` is reached). `context_insertion_covers_both_paths_lists` still fails at `unreachable!()`, because `fromMillis` has no arm yet — that arm arrives in Task 4. Leave it failing; note this explicitly when handing the task off for review.
+Run: `cargo test --release builtins::tests 2>&1 | grep -E "^test result|^error"`
+Expected: `test result: ok. 2 passed`. Validation now raises T0411 before the `unreachable!()` fallback is reached.
 
 - [ ] **Step 5: Confirm the rest of the suite is untouched**
 
 Run: `cargo test --release 2>&1 | grep -E "^test result"`
-Expected: one `FAILED` line for the `builtins` unit tests (the known `fromMillis` case), every other line `ok`. Nothing calls `dispatch_pure` yet, so no behaviour has changed.
+Expected: every line `ok`, `0 failed`. Nothing calls `dispatch_pure` yet, so no behaviour has changed.
 
 - [ ] **Step 6: Commit**
 
@@ -387,8 +370,6 @@ The context-insertion lists are the one deliberate change: they take the
 union. The tree-walker had fromMillis and replace, the compiled path did
 not, and that disagreement was invisible only because neither builtin is
 compilable, so the compiled path never saw them.
-
-One unit test is left failing on purpose: fromMillis has no arm yet.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01JEvVbP5MEcZDt7mXv7SxLS
@@ -489,12 +470,33 @@ Two mechanical substitutions inside the moved code:
 - `evaluated_args` becomes `args`
 - `&self.options` becomes `options`; `self.options` becomes `*options`
 
-Do **not** yet delegate from `evaluate_function_call` — that is Step 3. After this step the tree-walker has no arms for these names and would fall through, so the build is expected to be red between Step 1 and Step 3. Do not run the suites in between.
+Do **not** yet delegate from `evaluate_function_call` — that is Step 3. `evaluate_function_call`'s match ends in a catch-all (`_ => Err(ReferenceError(...))`), so the crate still **compiles** between Step 1 and Step 3; what breaks is behaviour — the tree-walker answers "unknown function" for all 24 names until the delegation lands. Do not run the suites in between; they will report failures that Step 3 fixes.
 
-- [ ] **Step 2: Verify the failing unit test now passes**
+- [ ] **Step 2: Write the test for the merged context-insertion lists**
+
+Add to `src/builtins.rs`'s `mod tests`:
+
+```rust
+    #[test]
+    fn context_insertion_covers_both_paths_lists() {
+        // The compiled path and the tree-walker kept separate lists of which
+        // builtins take the context as an implicit argument, and they
+        // disagreed: only the tree-walker had `fromMillis` (zero-arg) and
+        // `replace` (missing-first). The merged prologue takes the union, so
+        // assert on the member only one list had.
+        let opts = EvaluatorOptions::default();
+        // $fromMillis() with a numeric context formats that context.
+        let got = dispatch_pure("fromMillis", &[], &JValue::Number(0.0), &opts)
+            .expect("fromMillis should read the context");
+        assert!(
+            matches!(&got, JValue::String(s) if s.starts_with("1970-01-01")),
+            "expected an epoch timestamp, got {got:?}"
+        );
+    }
+```
 
 Run: `cargo test --release builtins::tests 2>&1 | grep -E "^test result|^error"`
-Expected: all three tests pass. `context_insertion_covers_both_paths_lists` was failing since Task 2 for want of a `fromMillis` arm; it now has one.
+Expected: `test result: ok. 3 passed`. This test could not pass before this task — the prologue has routed `fromMillis` to the context since Task 2, but the arm that formats it only exists as of Step 1 above.
 
 - [ ] **Step 3: Delegate from the tree-walker**
 
@@ -702,10 +704,13 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01JEvVbP5MEcZDt7mXv7SxLS
 EOF
 )"
-git push -u origin fix/byref-builtin-dispatch
 ```
 
-The PR body must state, with the Step 1 measurement as evidence:
+**Do not push and do not open a pull request.** Both are outward-facing and
+belong to the human running this plan; the controller handles them after the
+whole-branch review. Stop at the commit.
+
+Report the Step 1 measurement so the PR body can state, with it as evidence:
 - what moved and what stayed, with counts
 - that behaviour is unchanged on everything the corpus reaches, and that where the old implementations disagreed in shapes the corpus does *not* reach, the extraction silently picked the compiled path's version — a known limit, stated rather than buried
 - that `$not` was the one reconciliation, and why the compiled version won
