@@ -35,18 +35,25 @@ actually reaches for:
 
 | | count | needs |
 |---|---|---|
-| pure arm-groups | **50** | values + `options` |
+| pure arm-groups | **52** | values + `options` |
 | evaluator-dependent | **11** | `apply_function`, `evaluate_internal`, `self.context`, `start_time` |
 
 The eleven are `$map`, `$filter`, `$reduce`, `$single`, `$sift`, `$each`, `$sort`, `$eval`,
-`$match`, `$replace` and `$not` (the last only via `self.is_truthy`, trivially a free
-function).
+`$match`, `$replace` and `$not`.
 
-`call_pure_builtin` covers 29 of the 50. So **29 builtins are implemented twice and 21 exist
-only in the tree-walker** — precisely the set that fails when passed by reference.
+`call_pure_builtin` has 29 arms. Twenty-eight of them overlap the pure 52; the odd one out is
+`$not`, which the VM implements purely (`functions::boolean::boolean`, negated) while the
+tree-walker routes it through `self.is_truthy`. So the partition is:
+
+- **28** implemented twice, in `call_pure_builtin` and the tree-walker
+- **24** existing only in the tree-walker — `$type`, `$zip`, `$spread`, `$lookup`, `$pad`,
+  `$power`, `$shuffle`, `$exists`, `$error`, `$assert`, the four URL codecs, both base64
+  codecs, the four `format*`/`parse*` numerics, and the four date/time functions. This is
+  precisely the set that fails when passed by reference.
+- **1** (`$not`) implemented differently in each
 
 The three paths are therefore not three copies of one thing. They are one genuinely
-evaluator-dependent set of 11, and one pure set of 50 that has been copied unevenly across
+evaluator-dependent set of 11, and one pure set of 52 that has been copied unevenly across
 three sites.
 
 ### Why now
@@ -76,7 +83,9 @@ pub(crate) fn dispatch_pure(
 ) -> Result<JValue, EvaluatorError>
 ```
 
-paired with `pub(crate) fn is_pure_builtin(name: &str) -> bool`. The predicate-plus-dispatcher
+paired with `pub(crate) fn is_pure_builtin(name: &str) -> bool`. It admits **53** names: the
+52 above plus `not`, which the tree-walker classifies as evaluator-dependent only because it
+reaches for `self.is_truthy`, while the compiled path already implements it purely. The predicate-plus-dispatcher
 pairing mirrors the existing `is_compilable_builtin` / `call_pure_builtin` convention rather
 than inventing a new one, and lets the match keep its `unreachable!()` fallback — a name can
 only arrive here if the predicate admitted it.
@@ -93,8 +102,10 @@ Then:
 
 - `call_pure_builtin` is deleted; the VM calls `dispatch_pure` (`is_compilable_builtin` stays
   as the *compilation* gate, which is a separate question from what dispatch can handle).
-- `evaluate_function_call` keeps its 11 evaluator arms and delegates everything else.
-- `call_builtin_with_values` delegates the 50 and keeps only what it must.
+- `evaluate_function_call` keeps its 10 remaining evaluator arms and delegates everything
+  else. `$not` moves to `dispatch_pure` using the VM's implementation; the corpus exercises
+  `$not` against every operand shape in two matrices, so the swap is checked, not hoped.
+- `call_builtin_with_values` delegates the 53 and keeps only what it must.
 
 **Unify the context-insertion lists deliberately.** The two paths disagree today: the
 tree-walker's zero-argument list includes `fromMillis` and its missing-first list includes
@@ -102,7 +113,7 @@ tree-walker's zero-argument list includes `fromMillis` and its missing-first lis
 compilable, so the VM never sees them. Merging must take the union knowingly, not silently
 adopt whichever list is copied first.
 
-**The 21 tree-walker-only builtins move rather than get rewritten.** They are already correct;
+**The 24 tree-walker-only builtins move rather than get rewritten.** They are already correct;
 extraction relocates them.
 
 ### Stage 2 — #107, by-reference dispatch
@@ -134,7 +145,7 @@ is fine.
 
 **Dispatch.** `call_builtin_with_values` gains a `context: &JValue` parameter (both call sites,
 `evaluator.rs:7540` and `:10269`, have one in scope; the reference validates with the call-site
-`input` as context) and delegates to `dispatch_pure` for the 50.
+`input` as context) and delegates to `dispatch_pure` for the 53.
 
 **The evaluator-dependent remainder.** Extraction does **not** make this fall out. `$sort`,
 `$sift` and `$each` are evaluator-dependent *and* reachable by reference — `$map([[3,1]],
@@ -176,7 +187,7 @@ main performance risk.
 ## Risks
 
 **Churn in the hottest file.** `src/evaluator.rs` is 13,731 lines and Stage 1 moves ~2000 of
-them. The mitigation is that the move is mechanical — the 50 pure arms reach for nothing on
+them. The mitigation is that the move is mechanical — the 52 pure arms reach for nothing on
 `self` except `options`, verified by census — and that the oracle is at maximum strength right
 now.
 
