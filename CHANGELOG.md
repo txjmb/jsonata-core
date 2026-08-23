@@ -148,6 +148,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-migration pattern already fixed in the no-stages fast path, in three more places
   (the object arm, the tuple arm and the lazy-dict arm).
   ([#98](https://github.com/txjmb/jsonata-core/issues/98))
+- `arr.p[-1]` now takes the last element of each extracted group on the bytecode VM, matching
+  the tree-walker. Numeric-literal predicates are index access and are deliberately left to
+  the tree-walker, but the guard tested only for `AstNode::Number` -- `[-1]` parses as a
+  *negation* of a literal, slipped through, and compiled to a plain truthy constant that kept
+  every element. ([#98](https://github.com/txjmb/jsonata-core/issues/98))
 
 ### Security
 

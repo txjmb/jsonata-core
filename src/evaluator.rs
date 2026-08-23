@@ -1745,7 +1745,18 @@ fn try_compile_path(
     // `evaluate_predicate` special-cases it and the compiled path has no
     // equivalent, so bail out rather than silently treating it as `filter(true)`.
     let compile_filter = |node: &AstNode| -> Option<CompiledExpr> {
-        if matches!(node, AstNode::Number(_) | AstNode::Boolean(true)) {
+        let is_numeric_literal = match node {
+            AstNode::Number(_) => true,
+            // `[-1]` parses as a negation of a literal, not a negative literal.
+            // Missing this let it compile as a plain truthy constant, so
+            // `arr.p[-1]` kept every element instead of taking the last of each
+            // extracted group.
+            AstNode::Unary { op, operand } => {
+                matches!(op, crate::ast::UnaryOp::Negate) && matches!(**operand, AstNode::Number(_))
+            }
+            _ => false,
+        };
+        if is_numeric_literal || matches!(node, AstNode::Boolean(true)) {
             return None;
         }
         try_compile_expr_inner(node, allowed_vars)
