@@ -39,6 +39,7 @@ this harness exists to catch under message-format noise.
 """
 
 import json
+import math
 import pathlib
 
 import jsonatapy
@@ -137,7 +138,7 @@ def diverges(case, entry="dict"):
         want = {"inf": float("inf"), "-inf": float("-inf"), "nan": float("nan")}[expected["value"]]
         if got is ERROR:
             return f"jsonata-js returned {want}, jsonatapy raised"
-        if isinstance(got, float) and (got == want or (got != got and want != want)):
+        if isinstance(got, float) and (got == want or (math.isnan(got) and math.isnan(want))):
             return None
         return f"jsonata-js returned {want}, jsonatapy {got!r}"
 

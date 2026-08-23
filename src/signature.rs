@@ -872,10 +872,13 @@ mod builtin_signature_table_tests {
         // cache and leave that builtin unvalidated, so assert on the table.
         let bad: Vec<String> = BUILTIN_SIGNATURES
             .iter()
+            // Explicit format arguments rather than inline `{name}` captures:
+            // CodeQL's Rust analysis does not see implicit captures and reports
+            // the binding as unused.
             .filter_map(|(name, sig)| {
                 Signature::parse(sig)
                     .err()
-                    .map(|e| format!("{name} {sig}: {e}"))
+                    .map(|e| format!("{} {}: {}", name, sig, e))
             })
             .collect();
         assert!(
