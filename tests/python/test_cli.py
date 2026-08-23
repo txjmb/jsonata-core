@@ -137,7 +137,7 @@ def test_argjson_nan_is_usage_error_exit_two() -> None:
 def test_evaluation_error_preserves_jsonata_error_code() -> None:
     result = run_cli(["null + 1"], stdin="{}")
     assert result.returncode == 1
-    assert result.stderr.startswith("T2002:")
+    assert result.stderr.startswith("T2001:")
 
 
 def test_malformed_arg_binding_takes_precedence_over_parse_error() -> None:

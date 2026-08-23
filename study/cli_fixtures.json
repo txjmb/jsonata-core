@@ -101,7 +101,7 @@
     "stdin": "{}",
     "expected_exit": 1,
     "expected_stdout": null,
-    "expected_stderr_contains": "T2002:"
+    "expected_stderr_contains": "T2001:"
   },
   {
     "name": "malformed_arg_binding_is_exit_2",

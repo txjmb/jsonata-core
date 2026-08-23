@@ -86,7 +86,7 @@ async def test_evaluate_batch_reports_per_expression_errors_without_failing_the_
             {"expressions": ["a", "null + 1"], "data": '{"a": 1}'},
         )
         assert result.data[0] == "1"
-        assert "T2002:" in result.data[1]
+        assert "T2001:" in result.data[1]
 
 
 async def test_evaluate_batch_compile_error_is_not_double_prefixed() -> None:

@@ -153,6 +153,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the tree-walker, but the guard tested only for `AstNode::Number` -- `[-1]` parses as a
   *negation* of a literal, slipped through, and compiled to a plain truthy constant that kept
   every element. ([#98](https://github.com/txjmb/jsonata-core/issues/98))
+- Arithmetic on an explicit `null` now raises instead of silently producing null, including
+  when the null arrives at runtime rather than as a literal -- `$map([1, null], function($v)
+  { $v * 2 })` raises `T2001` where it previously returned `[2, null]`. Only *undefined*
+  propagates. Error codes now match jsonata-js: a bad left operand is `T2001` and a bad right
+  operand is `T2002` (previously `T2002` for both), and each defined operand is type-checked
+  before undefined propagation, so `false + $x` raises rather than returning undefined. The
+  five tree-walker operators now delegate to the same shared implementation as the compiled
+  path and VM instead of each carrying its own copy of the null handling.
+  ([#98](https://github.com/txjmb/jsonata-core/issues/98))
 
 ### Security
 
