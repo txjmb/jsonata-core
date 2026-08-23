@@ -93,7 +93,77 @@ pub(crate) fn dispatch_pure(
     context: &JValue,
     options: &EvaluatorOptions,
 ) -> Result<JValue, EvaluatorError> {
-    let _ = (args, context, options);
+    // 1. Implicit context insertion. The union of what the two paths used to
+    //    do separately: only the tree-walker had `fromMillis` here and
+    //    `replace` below, which was invisible because neither compiles.
+    let args_storage: Vec<JValue>;
+    let args: &[JValue] = if args.is_empty() {
+        match name {
+            "string" => {
+                // $string() with a null/undefined context is undefined, not "null".
+                if context.is_undefined() || context.is_null() {
+                    return Ok(JValue::Undefined);
+                }
+                args_storage = vec![context.clone()];
+                &args_storage
+            }
+            "number" | "boolean" | "uppercase" | "lowercase" | "fromMillis" => {
+                args_storage = vec![context.clone()];
+                &args_storage
+            }
+            _ => args,
+        }
+    } else if args.len() == 1 {
+        match name {
+            "substringBefore" | "substringAfter" | "contains" | "split" | "replace" => {
+                if matches!(context, JValue::String(_)) {
+                    args_storage = std::iter::once(context.clone())
+                        .chain(args.iter().cloned())
+                        .collect();
+                    &args_storage
+                } else {
+                    args
+                }
+            }
+            _ => args,
+        }
+    } else {
+        args
+    };
+
+    // 2. Materialize top-level lazy args so every builtin sees plain Objects.
+    #[cfg(feature = "python")]
+    let lazy_storage: Vec<JValue>;
+    #[cfg(feature = "python")]
+    let args: &[JValue] = if args.iter().any(|a| matches!(a, JValue::LazyPyDict(_))) {
+        lazy_storage = args
+            .iter()
+            .map(crate::evaluator::normalize_lazy)
+            .collect::<Result<Vec<_>, _>>()?;
+        &lazy_storage
+    } else {
+        args
+    };
+
+    // 3. Validate and coerce against the jsonata-js signature.
+    let sig_storage: Vec<JValue>;
+    let args: &[JValue] = match crate::evaluator::validate_builtin_args(name, args, context)? {
+        Some(coerced) => {
+            sig_storage = coerced;
+            &sig_storage
+        }
+        None => args,
+    };
+
+    // 4. Undefined propagation -- deliberately AFTER validation, which is the
+    //    order jsonata-js works in. See the note in `validate_builtin_args`.
+    if args.first().is_some_and(JValue::is_undefined)
+        && crate::evaluator::propagates_undefined(name)
+    {
+        return Ok(JValue::Undefined);
+    }
+
+    let _ = (args, options);
     unreachable!("dispatch_pure called with non-pure builtin: {}", name)
 }
 
@@ -170,5 +240,25 @@ mod tests {
         }
 
         assert!(!is_pure_builtin("nosuchfunction"));
+    }
+
+    #[test]
+    fn validation_runs_before_undefined_propagation() {
+        // $substring(missing) binds its lone undefined argument to parameter 2
+        // and takes parameter 1 from the context, so a non-string context is a
+        // T0411 -- not undefined. Propagating first would swallow that, which
+        // is the bug #106 fixed in the compiled path.
+        let opts = EvaluatorOptions::default();
+        let err = dispatch_pure(
+            "substring",
+            &[JValue::Undefined],
+            &JValue::Number(5.0),
+            &opts,
+        )
+        .expect_err("a numeric context cannot satisfy substring's first parameter");
+        assert!(
+            err.to_string().contains("T0411"),
+            "expected T0411, got {err}"
+        );
     }
 }

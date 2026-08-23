@@ -2111,7 +2111,7 @@ fn substring_with_undefined_start(s: &str, has_length: bool) -> JValue {
 /// answer differs per function ($count is 0, $exists is false, $abs is
 /// undefined), so the caller's arm decides. A genuine type error is returned as
 /// an error.
-fn validate_builtin_args(
+pub(crate) fn validate_builtin_args(
     name: &str,
     args: &[JValue],
     context: &JValue,
@@ -2733,7 +2733,7 @@ const UNDEFINED_PROPAGATING_FUNCTIONS: &[&str] = &[
 ];
 
 /// Check whether a function propagates undefined values
-fn propagates_undefined(name: &str) -> bool {
+pub(crate) fn propagates_undefined(name: &str) -> bool {
     UNDEFINED_PROPAGATING_FUNCTIONS.contains(&name)
 }
 
