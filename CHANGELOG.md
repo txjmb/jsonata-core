@@ -162,6 +162,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   five tree-walker operators now delegate to the same shared implementation as the compiled
   path and VM instead of each carrying its own copy of the null handling.
   ([#98](https://github.com/txjmb/jsonata-core/issues/98))
+- Ordered comparisons inside filters and sort comparators now reject uncomparable operands.
+  `compiled_ordered_cmp` was the un-migrated twin of `Evaluator::ordered_compare`: it still
+  conflated `JValue::Null` with `JValue::Undefined`, so `arr[p > 1]` over
+  `[{"p": 1}, {"p": null}]` silently returned undefined where jsonata-js raises `T2010`.
+  Rewritten to the same rule -- only numbers, strings and undefined are comparable; an
+  undefined operand yields undefined; a type mismatch is `T2009`.
+- `$sort` comparators of the form `function($l, $r) { $l.f > $r.f }` no longer sort inputs
+  that jsonata-js rejects. The specialized Schwartzian-transform fast path collapsed every
+  non-numeric, non-string key into "missing" and treated mixed types as "keep original
+  order"; it now declines those inputs so the general comparator raises `T2010`/`T2009`.
+  Absent keys are still undefined and still sort last on the fast path.
+  ([#102](https://github.com/txjmb/jsonata-core/issues/102), cluster A)
 
 ### Security
 

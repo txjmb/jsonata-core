@@ -1527,43 +1527,41 @@ fn is_compiled_explicit_null(expr: &CompiledExpr) -> bool {
 pub(crate) fn compiled_ordered_cmp(
     left: &JValue,
     right: &JValue,
-    left_is_explicit_null: bool,
-    right_is_explicit_null: bool,
+    _left_is_explicit_null: bool,
+    _right_is_explicit_null: bool,
     cmp_num: fn(f64, f64) -> bool,
     cmp_str: fn(&str, &str) -> bool,
 ) -> Result<JValue, EvaluatorError> {
+    // Compiled twin of `Evaluator::ordered_compare`; keep the two in step.
+    // jsonata-js's rule: only numbers, strings and *undefined* are comparable,
+    // so anything else -- null, boolean, object, array -- raises T2010; an
+    // undefined operand then makes the result undefined; and only after that
+    // does a differing type raise T2009.
+    //
+    // The `*_is_explicit_null` flags are vestigial. They told a literal `null`
+    // from a missing value back when both were `JValue::Null`; since the
+    // null/undefined split (#32) the variant carries that itself, and every
+    // `JValue::Null` reaching here is an explicit null and uncomparable.
+    fn comparable(v: &JValue) -> bool {
+        matches!(v, JValue::Number(_) | JValue::String(_) | JValue::Undefined)
+    }
+
+    if !comparable(left) || !comparable(right) {
+        return Err(EvaluatorError::EvaluationError(
+            "T2010: Type mismatch in comparison".to_string(),
+        ));
+    }
+
+    if matches!(left, JValue::Undefined) || matches!(right, JValue::Undefined) {
+        return Ok(JValue::Undefined);
+    }
+
     match (left, right) {
         (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Bool(cmp_num(*a, *b))),
         (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(cmp_str(a, b))),
-        // Both null/undefined → undefined
-        (JValue::Null, JValue::Null) | (JValue::Undefined, JValue::Undefined) => Ok(JValue::Null),
-        (JValue::Undefined, JValue::Null) | (JValue::Null, JValue::Undefined) => Ok(JValue::Null),
-        // Explicit null literal with any non-null type → T2010 error
-        (JValue::Null, _) if left_is_explicit_null => Err(EvaluatorError::EvaluationError(
-            "T2010: Type mismatch in comparison".to_string(),
-        )),
-        (_, JValue::Null) if right_is_explicit_null => Err(EvaluatorError::EvaluationError(
-            "T2010: Type mismatch in comparison".to_string(),
-        )),
-        // Boolean with undefined → T2010 error
-        (JValue::Bool(_), JValue::Null | JValue::Undefined)
-        | (JValue::Null | JValue::Undefined, JValue::Bool(_)) => Err(
-            EvaluatorError::EvaluationError("T2010: Type mismatch in comparison".to_string()),
-        ),
-        // Number or String with implicit undefined (missing field) → undefined result
-        (JValue::Number(_) | JValue::String(_), JValue::Null | JValue::Undefined)
-        | (JValue::Null | JValue::Undefined, JValue::Number(_) | JValue::String(_)) => {
-            Ok(JValue::Null)
-        }
-        // Type mismatch (string vs number)
-        (JValue::String(_), JValue::Number(_)) | (JValue::Number(_), JValue::String(_)) => {
-            Err(EvaluatorError::EvaluationError(
-                "T2009: The expressions on either side of operator must be of the same data type"
-                    .to_string(),
-            ))
-        }
         _ => Err(EvaluatorError::EvaluationError(
-            "T2010: Type mismatch in comparison".to_string(),
+            "T2009: The expressions on either side of operator must be of the same data type"
+                .to_string(),
         )),
     }
 }
@@ -3436,9 +3434,64 @@ impl Evaluator {
     /// Specialized sort using pre-extracted keys (Schwartzian transform).
     /// Extracts sort keys once (N lookups), then sorts by comparing keys directly,
     /// avoiding O(N log N) hash lookups during comparisons.
-    fn merge_sort_specialized(arr: &mut [JValue], spec: &SpecializedSortComparator) {
+    ///
+    /// Returns `false` when the keys are not uniformly comparable, leaving the
+    /// array untouched so the caller falls back to the general comparator. A
+    /// sort comparator is an ordered comparison, so jsonata-js rejects a null,
+    /// boolean, object or array key with T2010 and mixed number/string keys
+    /// with T2009. This path cannot raise (it sorts in place), and duplicating
+    /// the type rule here is what let it silently sort inputs the general path
+    /// rejects -- so it declines instead and lets `compiled_ordered_cmp`, which
+    /// owns the rule, produce the error.
+    fn merge_sort_specialized(arr: &mut [JValue], spec: &SpecializedSortComparator) -> bool {
         if arr.len() <= 1 {
-            return;
+            return true;
+        }
+
+        // Phase 0: A present key that is neither number nor string is
+        // uncomparable. An *absent* key is undefined, which sorts last without
+        // raising, so it stays on the fast path.
+        let mut uncomparable = false;
+        let mut saw_num = false;
+        let mut saw_str = false;
+        // Classify without cloning: the Object case is the hot one and only the
+        // variant matters.
+        enum KeyKind {
+            Num,
+            Str,
+            Absent,
+            Uncomparable,
+        }
+        fn kind(v: Option<&JValue>) -> KeyKind {
+            match v {
+                Some(JValue::Number(_)) => KeyKind::Num,
+                Some(JValue::String(_)) => KeyKind::Str,
+                None | Some(JValue::Undefined) => KeyKind::Absent,
+                Some(_) => KeyKind::Uncomparable,
+            }
+        }
+        for item in arr.iter() {
+            let k = match item {
+                JValue::Object(obj) => kind(obj.get(&spec.field)),
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(lazy) => match lazy.get_field(&spec.field) {
+                    Ok(v) => kind(Some(&v)),
+                    Err(_) => KeyKind::Absent,
+                },
+                _ => KeyKind::Absent,
+            };
+            match k {
+                KeyKind::Num => saw_num = true,
+                KeyKind::Str => saw_str = true,
+                KeyKind::Absent => {}
+                KeyKind::Uncomparable => {
+                    uncomparable = true;
+                    break;
+                }
+            }
+        }
+        if uncomparable || (saw_num && saw_str) {
+            return false;
         }
 
         // Phase 1: Extract sort keys -- one IndexMap lookup per element
@@ -3488,6 +3541,7 @@ impl Evaluator {
                 j = target;
             }
         }
+        true
     }
 
     /// Merge sort implementation using a comparator function.
@@ -3508,8 +3562,11 @@ impl Evaluator {
         if let AstNode::Lambda { params, body, .. } = comparator {
             if params.len() >= 2 {
                 if let Some(spec) = try_specialize_sort_comparator(body, &params[0], &params[1]) {
-                    Self::merge_sort_specialized(arr, &spec);
-                    return Ok(());
+                    // Falls through to the general comparator when the keys are
+                    // not uniformly comparable, so the type error is raised.
+                    if Self::merge_sort_specialized(arr, &spec) {
+                        return Ok(());
+                    }
                 }
             }
         }

@@ -2304,3 +2304,142 @@ fn test_arithmetic_valid_cases_unaffected() {
         JValue::from(json!([2, 4]))
     );
 }
+
+// ── Comparison inside compiled filters (issue #102, cluster A) ───────────────
+//
+// `compiled_ordered_cmp` is the compiled twin of `Evaluator::ordered_compare`
+// and predates the null/undefined split the same way: it conflates
+// `JValue::Null` with `JValue::Undefined` and leans on the vestigial
+// compile-time explicit-null flags. Filters run through the compiled path, so
+// `arr[p > 1]` silently dropped uncomparable elements instead of raising.
+
+#[test]
+fn test_compiled_comparison_rejects_uncomparable_operands() {
+    for (payload, label) in [
+        (json!({"arr": [{"p": 1}, {"p": null}]}), "null"),
+        (json!({"arr": [{"p": 1}, {"p": true}]}), "boolean"),
+        (json!({"arr": [{"p": 1}, {"p": {"q": 1}}]}), "object"),
+    ] {
+        let data: JValue = payload.into();
+        for expr in ["arr[p > 1]", "arr[p > 1].p", "$sum(arr[p > 1].p)"] {
+            let ast = parse(expr).unwrap();
+            assert!(
+                Evaluator::new().evaluate(&ast, &data).is_err(),
+                "{expr} must raise on a {label} operand"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_compiled_comparison_type_mismatch_still_raises() {
+    // A string against a number is comparable-but-mismatched: T2009, not T2010.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": "free"}]}).into();
+    let ast = parse("arr[p > 1]").unwrap();
+    assert!(Evaluator::new().evaluate(&ast, &data).is_err());
+}
+
+#[test]
+fn test_compiled_comparison_propagates_undefined() {
+    // A missing field is undefined: the comparison is undefined, so the element
+    // drops out rather than raising.
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    for expr in ["arr[p > 1]", "$sum(arr[p > 1].p)"] {
+        let ast = parse(expr).unwrap();
+        assert_eq!(
+            Evaluator::new().evaluate(&ast, &data).unwrap(),
+            JValue::Undefined,
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn test_compiled_comparison_valid_cases_unaffected() {
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 5}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("arr[p > 1]").unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!({"p": 5}))
+    );
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse("$sum(arr[p > 1].p)").unwrap(), &data)
+            .unwrap(),
+        JValue::Number(5.0)
+    );
+}
+
+// ── Sort comparator type checking (issue #102, cluster A) ────────────────────
+//
+// `merge_sort_specialized` is a Schwartzian-transform fast path for
+// `function($l, $r) { $l.f > $r.f }`. It collapsed every non-numeric,
+// non-string key into `SortKey::None` and treated mixed types as "maintain
+// original order", so a comparator that jsonata-js rejects sorted silently.
+// It now declines those inputs and lets the general comparator -- which runs
+// the lambda body through `compiled_ordered_cmp` -- raise.
+
+const SORT_BY_P: &str = "$sort(arr, function($l, $r) { $l.p > $r.p }).p";
+
+#[test]
+fn test_specialized_sort_rejects_uncomparable_keys() {
+    for (payload, label) in [
+        (json!({"arr": [{"p": 1}, {"p": null}]}), "null"),
+        (json!({"arr": [{"p": 1}, {"p": true}]}), "boolean"),
+        (json!({"arr": [{"p": {"q": 1}}, {"p": {"q": 2}}]}), "object"),
+        (json!({"arr": [{"p": [1, 2]}, {"p": 3}]}), "array"),
+    ] {
+        let data: JValue = payload.into();
+        let ast = parse(SORT_BY_P).unwrap();
+        assert!(
+            Evaluator::new().evaluate(&ast, &data).is_err(),
+            "sort must raise on a {label} key"
+        );
+    }
+}
+
+#[test]
+fn test_specialized_sort_rejects_mixed_key_types() {
+    // Comparable individually, but not against each other: T2009.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": "free"}]}).into();
+    let ast = parse(SORT_BY_P).unwrap();
+    assert!(Evaluator::new().evaluate(&ast, &data).is_err());
+}
+
+#[test]
+fn test_specialized_sort_still_sorts_valid_keys() {
+    // The fast path must keep working for what it was written for.
+    let data: JValue = json!({"arr": [{"p": 3}, {"p": 1}, {"p": 2}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse(SORT_BY_P).unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!([1, 2, 3]))
+    );
+
+    let data: JValue = json!({"arr": [{"p": "b"}, {"p": "a"}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse(SORT_BY_P).unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!(["a", "b"]))
+    );
+
+    // A missing key is undefined, which sorts without raising.
+    let data: JValue = json!({"arr": [{"p": 1}, {"q": 9}]}).into();
+    assert_eq!(
+        Evaluator::new()
+            .evaluate(&parse(SORT_BY_P).unwrap(), &data)
+            .unwrap(),
+        JValue::from(json!(1))
+    );
+
+    // Descending comparators keep working too.
+    let data: JValue = json!({"arr": [{"p": 1}, {"p": 3}]}).into();
+    let ast = parse("$sort(arr, function($l, $r) { $l.p < $r.p }).p").unwrap();
+    assert_eq!(
+        Evaluator::new().evaluate(&ast, &data).unwrap(),
+        JValue::from(json!([3, 1]))
+    );
+}
