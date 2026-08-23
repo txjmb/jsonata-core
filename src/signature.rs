@@ -509,15 +509,12 @@ impl Signature {
                 } else {
                     // This position was genuinely supplied (not out-of-bounds
                     // padding) only if arg_index is within the original args.
-                    let was_supplied = arg_index < args.len();
-                    // Only *undefined* short-circuits. An explicit null is a
-                    // value: it must reach the regex match, where `[nm]` rejects
-                    // it as T0410 and the array class `[asnblfom]` accepts and
-                    // wraps it -- which is what makes `$abs(null)` an error and
-                    // `$count(null)` equal to 1, as in jsonata-js.
-                    if was_supplied && arg.is_undefined() {
-                        return Err(SignatureError::UndefinedArgument);
-                    }
+                    // Nothing short-circuits here. Every parameter class
+                    // includes `m`, so an undefined argument matches and is
+                    // passed through for the function to interpret -- which is
+                    // how jsonata-js gets `$count(missing)` = 0 and
+                    // `$exists(missing)` = false from the same validator that
+                    // rejects `$abs(null)`.
                     coerced_args.push(arg);
                     arg_index += 1;
                 }
@@ -525,13 +522,7 @@ impl Signature {
             }
 
             for single in matched.chars() {
-                let was_supplied = arg_index < args.len();
                 let arg = args.get(arg_index).cloned().unwrap_or(JValue::Undefined);
-
-                // See the note above: only undefined short-circuits.
-                if was_supplied && arg.is_undefined() {
-                    return Err(SignatureError::UndefinedArgument);
-                }
 
                 let resolved = if let ParamType::Array(elem_type) = &param.param_type {
                     if single == 'm' {
@@ -935,10 +926,15 @@ mod builtin_signature_table_tests {
             sig.validate_and_coerce(&[JValue::Null], &JValue::Undefined),
             Err(SignatureError::ArgumentTypeMismatch { .. })
         ));
-        assert!(matches!(
-            sig.validate_and_coerce(&[JValue::Undefined], &JValue::Undefined),
-            Err(SignatureError::UndefinedArgument)
-        ));
+        // A missing argument matches `m` and passes straight through, leaving
+        // the answer to the function: `$abs(missing)` is undefined,
+        // `$count(missing)` is 0, `$exists(missing)` is false. The validator
+        // does not and cannot decide that.
+        assert_eq!(
+            sig.validate_and_coerce(&[JValue::Undefined], &JValue::Undefined)
+                .unwrap(),
+            vec![JValue::Undefined]
+        );
     }
 
     #[test]
