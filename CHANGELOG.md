@@ -14,9 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and shared by the compiled path and the tree-walker instead of being written out in each.
   Fifty-three builtins were spread across two dispatch sites: twenty-nine were implemented
   twice, and twenty-four existed in exactly one, which is why `$type(x)` worked while
-  `$map(arr, $type)` raised. The extraction itself is behaviour-preserving for every builtin
-  other than the six listed under Fixed below, confirmed by the differential corpus and the
-  1686-case reference suite. `evaluate_function_call` drops from 2688 lines to 1266.
+  `$map(arr, $type)` raised. The differential corpus and the 1686-case reference suite
+  confirm the extraction preserves *value* and *error* behaviour for every builtin other
+  than the six listed under Fixed below. Both harnesses collapse `null` and `undefined` to
+  Python `None`, so that axis is confirmed only where the corpus's new object-construction
+  probes cover it directly (an undefined-valued key is dropped, a null-valued one is kept).
+  `$string()` against an explicit-null context is a further route disagreement at the
+  pre-branch baseline: the compiled path answered `undefined`, the tree-walker answered
+  `null`. The shared dispatcher answers `null` on both. `evaluate_function_call` drops from
+  2688 lines to 1266.
   ([#107](https://github.com/txjmb/jsonata-core/issues/107))
 
 ### Deprecated
