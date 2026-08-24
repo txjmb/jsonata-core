@@ -531,6 +531,20 @@ for (const o of PATH_OPERANDS) {
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '*' });
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '**' });
 
+// Positional binding. `#$i` turns its step into a tuple stream, and the same
+// singleton rule applies to the result: a one-value stream unwraps, so
+// `num#$i` is `5` rather than `[5]`. The bare and `.$i` forms cover the value
+// and the index; the filtered form is the control, since a filter predicate
+// already forces the unwrap and so was never wrong.
+for (const o of PATH_OPERANDS) {
+  for (const form of ['#$i', '#$i.$i', '#$i[$i=0]']) {
+    BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: `${o}${form}` });
+  }
+}
+BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: 'arrobj#$i.{"i":$i,"x":x}' });
+BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: 'arr#$i^($i)' });
+BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: 'arr#$i[0]' });
+
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 
 async function main() {
