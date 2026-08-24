@@ -19,7 +19,42 @@
 const fs = require('fs');
 const path = require('path');
 const jsonata = require(path.join(__dirname, '..', 'tests', 'jsonata-js', 'src', 'jsonata.js'));
+const jsFunctions = require(path.join(__dirname, '..', 'tests', 'jsonata-js', 'src', 'functions.js'));
+const jsDatetime = require(path.join(__dirname, '..', 'tests', 'jsonata-js', 'src', 'datetime.js'));
 const refVersion = require(path.join(__dirname, '..', 'tests', 'jsonata-js', 'package.json')).version;
+
+// Arity of every builtin that a higher-order function can pass a callback
+// by reference (`$map(arr, $uppercase)`). jsonata-js truncates the arguments
+// it hands the callback to the *JavaScript function's parameter count*
+// (`hofFuncArgs` -> `getFunctionArity` -> `implementation.length`), not to
+// the JSONata signature -- `$string` has two signature parameters but arity
+// 1, and `$substring` has arity 3, which is why `$map([1,2], $substring)` is
+// a T0410 in the reference (arity 3 > the 1 argument $map supplies).
+//
+// `now` and `millis` are inline closures bound in jsonata.js's `evaluate`
+// (tests/jsonata-js/src/jsonata.js:2140 and :2143), not entries in
+// functions.js, so their arity is hard-coded here rather than read off a
+// `.length`.
+const FUNCTIONS_JS_ARITY_NAMES = [
+  'abs', 'append', 'assert', 'average', 'base64decode', 'base64encode',
+  'boolean', 'ceil', 'contains', 'count', 'decodeUrl', 'decodeUrlComponent',
+  'distinct', 'encodeUrl', 'encodeUrlComponent', 'error', 'exists', 'floor',
+  'formatBase', 'formatNumber', 'join', 'keys', 'length', 'lookup',
+  'lowercase', 'max', 'merge', 'min', 'not', 'number', 'pad', 'power',
+  'reverse', 'round', 'shuffle', 'split', 'spread', 'sqrt', 'string',
+  'substring', 'substringAfter', 'substringBefore', 'sum', 'trim', 'type',
+  'uppercase', 'zip',
+];
+const DATETIME_JS_ARITY_NAMES = ['toMillis', 'fromMillis', 'formatInteger', 'parseInteger'];
+
+function buildBuiltinArity() {
+  const arity = {};
+  for (const name of FUNCTIONS_JS_ARITY_NAMES) arity[name] = jsFunctions[name].length;
+  for (const name of DATETIME_JS_ARITY_NAMES) arity[name] = jsDatetime[name].length;
+  arity.now = 2; // jsonata.js:2140 -- function(picture, timezone)
+  arity.millis = 0; // jsonata.js:2143 -- function()
+  return arity;
+}
 
 // Payloads. Each keeps the same field names so one expression can be run
 // against all of them; the shapes differ in the ways fast paths care about.
@@ -407,6 +442,13 @@ async function main() {
     }) + '\n'
   );
   console.log(`wrote ${builtinCases.length} builtin cases`);
+
+  const arityDest = path.join(__dirname, '..', 'tests', 'fixtures', 'builtin_arity.json');
+  const arity = buildBuiltinArity();
+  const sortedArity = {};
+  for (const k of Object.keys(arity).sort()) sortedArity[k] = arity[k];
+  fs.writeFileSync(arityDest, JSON.stringify(sortedArity) + '\n');
+  console.log(`wrote ${Object.keys(sortedArity).length} builtin arities to ${arityDest}`);
 
   const dest = path.join(__dirname, '..', 'tests', 'fixtures', 'fastpath_differential.json');
   // Compact: this file is generated and regenerated, and pretty-printing it
