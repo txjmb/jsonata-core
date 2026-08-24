@@ -127,6 +127,7 @@
 
 pub mod ast;
 pub mod ast_transform;
+mod builtins;
 #[cfg(feature = "capi")]
 pub mod capi;
 mod compiler;

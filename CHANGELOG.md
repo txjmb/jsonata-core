@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- Every builtin that needs only its arguments is now implemented once, in `src/builtins.rs`,
+  and shared by the compiled path and the tree-walker instead of being written out in each.
+  Fifty-three builtins were spread across two dispatch sites: twenty-nine were implemented
+  twice, and twenty-four existed in exactly one, which is why `$type(x)` worked while
+  `$map(arr, $type)` raised. The differential corpus and the 1686-case reference suite
+  confirm the extraction preserves *value* and *error* behaviour for every builtin other
+  than the six listed under Fixed below. Both harnesses collapse `null` and `undefined` to
+  Python `None`, so that axis is confirmed only where the corpus's new object-construction
+  probes cover it directly (an undefined-valued key is dropped, a null-valued one is kept).
+  `$string()` against an explicit-null context is a further route disagreement at the
+  pre-branch baseline: the compiled path answered `undefined`, the tree-walker answered
+  `null`. The shared dispatcher answers `null` on both. `evaluate_function_call` drops from
+  2688 lines to 1266.
+  ([#107](https://github.com/txjmb/jsonata-core/issues/107))
 
 ### Deprecated
 
@@ -47,6 +61,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `$sift(obj)` now raises instead of returning `undefined`. The one-argument form is
   `$sift(function)`, with the object taken from the context.
   ([#104](https://github.com/txjmb/jsonata-core/issues/104))
+- `$trim`, `$merge`, `$reverse`, `$distinct`, `$join` and `$keys` given a missing argument
+  now yield `undefined` rather than `null`, matching jsonata-js. This was visible through
+  object construction, which drops an undefined-valued key but keeps a null-valued one:
+  `{"k": $trim(missing)}` was `{"k": null}` and is now `{}`. For the first five, the two
+  evaluation routes previously disagreed — the compiled/VM path returned `null` while the
+  tree-walker returned `undefined` — and the shared dispatcher makes them agree. `$keys`
+  was wrong on both routes; the tree-walker arm had no `Undefined` case at all, and the new
+  shared dispatcher's corpus is what exposed it.
+  ([#107](https://github.com/txjmb/jsonata-core/issues/107))
 
 ### Security
 

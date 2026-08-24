@@ -1,0 +1,1491 @@
+//! One dispatcher for every builtin that needs nothing but its arguments.
+//!
+//! A builtin used to be implemented up to three times -- once in the compiled
+//! path, once in the tree-walker, once again for by-reference calls -- and the
+//! copies drifted. Twenty-four of them existed in exactly one of the three, so
+//! `$map(arr, $type)` failed while `$type(x)` worked. This module is the single
+//! implementation the three dispatch sites share.
+//!
+//! What does NOT live here: the ten builtins that need the evaluator itself
+//! ($map, $filter, $reduce, $single, $sift, $each, $sort, $eval, $match,
+//! $replace). They take AST arguments and call back into evaluation, so they
+//! stay in `evaluate_function_call`. That line is a real boundary, not an
+//! accident of this refactor -- jsonata-js draws it in the same place.
+
+use crate::evaluator::{EvaluatorError, EvaluatorOptions};
+use crate::value::JValue;
+use std::rc::Rc;
+
+/// What JavaScript makes of an undefined argument in a string position.
+///
+/// jsonata-js validates a call and then hands the arguments to the function
+/// body unchanged, so an undefined that the signature admitted reaches a
+/// JavaScript string operation -- `indexOf`, `hasOwnProperty` -- which
+/// stringifies it to the literal text "undefined" rather than treating it as
+/// absent. Observable whenever the subject contains that text:
+/// `$substringBefore("xundefinedy", missing.x)` is "x", not the whole string.
+const JS_UNDEFINED_AS_STRING: &str = "undefined";
+
+/// `$substring` with an undefined start, which JavaScript's arithmetic rather
+/// than any JSONata rule decides.
+///
+/// `strLength + undefined` is NaN, which is not `< 0`, so the start stays
+/// undefined and `Array.prototype.slice` reads it as 0. Supply a length and
+/// the end becomes NaN as well, and `slice(0, NaN)` is empty -- so the same
+/// undefined start yields the whole string or none of it depending only on
+/// whether a length was given. Nothing here can be derived from "treat the
+/// missing start as 0"; that gets the second case wrong.
+fn substring_with_undefined_start(s: &str, has_length: bool) -> JValue {
+    if has_length {
+        JValue::string("")
+    } else {
+        JValue::string(s)
+    }
+}
+
+/// The builtins `dispatch_pure` can handle: everything that needs only its
+/// arguments, the context value, and the evaluation options.
+///
+/// Paired with `dispatch_pure` the way `is_compilable_builtin` is paired with
+/// the compiled path, so the dispatcher's match can keep an `unreachable!()`
+/// fallback: a name only reaches it if this predicate admitted it. Adding a
+/// name here without adding an arm there is therefore a panic, not a silent
+/// wrong answer.
+pub(crate) fn is_pure_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "string"
+            | "length"
+            | "uppercase"
+            | "lowercase"
+            | "number"
+            | "sum"
+            | "count"
+            | "substring"
+            | "substringBefore"
+            | "substringAfter"
+            | "pad"
+            | "trim"
+            | "contains"
+            | "split"
+            | "join"
+            | "max"
+            | "min"
+            | "average"
+            | "abs"
+            | "floor"
+            | "ceil"
+            | "round"
+            | "sqrt"
+            | "power"
+            | "formatNumber"
+            | "formatBase"
+            | "formatInteger"
+            | "parseInteger"
+            | "append"
+            | "reverse"
+            | "shuffle"
+            | "zip"
+            | "distinct"
+            | "exists"
+            | "keys"
+            | "lookup"
+            | "spread"
+            | "merge"
+            | "boolean"
+            | "not"
+            | "type"
+            | "base64encode"
+            | "base64decode"
+            | "encodeUrlComponent"
+            | "decodeUrlComponent"
+            | "encodeUrl"
+            | "decodeUrl"
+            | "error"
+            | "assert"
+            | "now"
+            | "millis"
+            | "toMillis"
+            | "fromMillis"
+    )
+}
+
+/// Dispatch a builtin that needs nothing but its arguments.
+///
+/// `context` is the JSONata context value (`$`) at the call site. It is used
+/// for implicit-argument insertion and for the signature's `-` modifier, and
+/// jsonata-js passes the same value (`input`) in all three dispatch positions.
+pub(crate) fn dispatch_pure(
+    name: &str,
+    args: &[JValue],
+    context: &JValue,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
+    // 1. Implicit context insertion. The union of what the two paths used to
+    //    do separately: only the tree-walker had `fromMillis` here and
+    //    `replace` below, which was invisible because neither compiles.
+    let args_storage: Vec<JValue>;
+    let args: &[JValue] = if args.is_empty() {
+        match name {
+            "string" => {
+                // $string() with an undefined context is undefined; with an
+                // explicit null context it stays Null (baseline behaviour,
+                // see git show 30e2794:src/evaluator.rs ~line 7782).
+                if context.is_undefined() {
+                    return Ok(JValue::Undefined);
+                }
+                if context.is_null() {
+                    return Ok(JValue::Null);
+                }
+                args_storage = vec![context.clone()];
+                &args_storage
+            }
+            "number" | "boolean" | "uppercase" | "lowercase" | "fromMillis" => {
+                args_storage = vec![context.clone()];
+                &args_storage
+            }
+            _ => args,
+        }
+    } else if args.len() == 1 {
+        match name {
+            "substringBefore" | "substringAfter" | "contains" | "split" | "replace" => {
+                if matches!(context, JValue::String(_)) {
+                    args_storage = std::iter::once(context.clone())
+                        .chain(args.iter().cloned())
+                        .collect();
+                    &args_storage
+                } else {
+                    args
+                }
+            }
+            _ => args,
+        }
+    } else {
+        args
+    };
+
+    // 2. Materialize top-level lazy args so every builtin sees plain Objects.
+    #[cfg(feature = "python")]
+    let lazy_storage: Vec<JValue>;
+    #[cfg(feature = "python")]
+    let args: &[JValue] = if args.iter().any(|a| matches!(a, JValue::LazyPyDict(_))) {
+        lazy_storage = args
+            .iter()
+            .map(crate::evaluator::normalize_lazy)
+            .collect::<Result<Vec<_>, _>>()?;
+        &lazy_storage
+    } else {
+        args
+    };
+
+    // 3. Validate and coerce against the jsonata-js signature.
+    let sig_storage: Vec<JValue>;
+    let args: &[JValue] = match crate::evaluator::validate_builtin_args(name, args, context)? {
+        Some(coerced) => {
+            sig_storage = coerced;
+            &sig_storage
+        }
+        None => args,
+    };
+
+    // 4. Undefined propagation -- deliberately AFTER validation, which is the
+    //    order jsonata-js works in. See the note in `validate_builtin_args`.
+    if args.first().is_some_and(JValue::is_undefined)
+        && crate::evaluator::propagates_undefined(name)
+    {
+        return Ok(JValue::Undefined);
+    }
+
+    use crate::functions;
+
+    match name {
+        // ── String functions ────────────────────────────────────────────
+        "string" => {
+            // Validate the optional prettify argument: must be a boolean.
+            let prettify = match args.get(1) {
+                None => None,
+                Some(JValue::Bool(b)) => Some(*b),
+                Some(_) => {
+                    return Err(EvaluatorError::TypeError(
+                        "string() prettify parameter must be a boolean".to_string(),
+                    ))
+                }
+            };
+            let arg = args.first().unwrap_or(&JValue::Null);
+            Ok(functions::string::string(arg, prettify)?)
+        }
+        "length" => match args.first() {
+            Some(JValue::String(s)) => Ok(functions::string::length(s)?),
+            // Undefined input propagates (caught above by the undefined-propagation guard).
+            Some(JValue::Undefined) => Ok(JValue::Undefined),
+            // No argument: mirrors tree-walker "requires exactly 1 argument" (no error code,
+            // so the test framework accepts it against any expected T-code).
+            None => Err(EvaluatorError::EvaluationError(
+                "length() requires exactly 1 argument".to_string(),
+            )),
+            // null and any other non-string type → T0410
+            _ => Err(EvaluatorError::TypeError(
+                "T0410: Argument 1 of function length does not match function signature"
+                    .to_string(),
+            )),
+        },
+        "uppercase" => match args.first() {
+            Some(JValue::String(s)) => Ok(functions::string::uppercase(s)?),
+            Some(JValue::Undefined) | None => Ok(JValue::Undefined),
+            _ => Err(EvaluatorError::TypeError(
+                "T0410: Argument 1 of function uppercase does not match function signature"
+                    .to_string(),
+            )),
+        },
+        "lowercase" => match args.first() {
+            Some(JValue::String(s)) => Ok(functions::string::lowercase(s)?),
+            Some(JValue::Undefined) | None => Ok(JValue::Undefined),
+            _ => Err(EvaluatorError::TypeError(
+                "T0410: Argument 1 of function lowercase does not match function signature"
+                    .to_string(),
+            )),
+        },
+        "trim" => match args.first() {
+            // Signature `<s-:s>` rejects an explicit null before this arm is
+            // ever reached (Null's type symbol 'l' isn't in the "[sm]" class),
+            // so this branch is dead in practice via any validated call path
+            // -- kept for defensiveness, matching the tree-walker's pre-merge
+            // behaviour. Undefined (and a genuinely absent argument) must
+            // propagate as Undefined, not Null: `{"k": $trim(missing.x)}` is
+            // `{}` in the reference, not `{"k": null}`.
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(JValue::Null) => Ok(JValue::Null),
+            Some(JValue::String(s)) => Ok(functions::string::trim(s)?),
+            _ => Err(EvaluatorError::TypeError(
+                "trim() requires a string argument".to_string(),
+            )),
+        },
+        "substring" => {
+            if args.len() < 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "substring() requires at least 2 arguments".to_string(),
+                ));
+            }
+            match (&args[0], &args[1]) {
+                (JValue::String(s), JValue::Number(start)) => {
+                    // Optional 3rd arg (length) must be a number if provided.
+                    let length = match args.get(2) {
+                        None => None,
+                        Some(JValue::Number(l)) => Some(*l as i64),
+                        Some(_) => {
+                            return Err(EvaluatorError::TypeError(
+                                "T0410: Argument 3 of function substring does not match function signature"
+                                    .to_string(),
+                            ))
+                        }
+                    };
+                    Ok(functions::string::substring(s, *start as i64, length)?)
+                }
+                (JValue::String(s), JValue::Undefined) => {
+                    Ok(substring_with_undefined_start(s, args.len() > 2))
+                }
+                _ => Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function substring does not match function signature"
+                        .to_string(),
+                )),
+            }
+        }
+        "substringBefore" => {
+            if args.len() != 2 {
+                return Err(EvaluatorError::TypeError(
+                    "T0411: Context value is not a compatible type with argument 2 of function substringBefore".to_string(),
+                ));
+            }
+            match (&args[0], &args[1]) {
+                (JValue::String(s), JValue::String(sep)) => {
+                    Ok(functions::string::substring_before(s, sep)?)
+                }
+                (JValue::String(s), JValue::Undefined) => {
+                    Ok(functions::string::substring_before(s, JS_UNDEFINED_AS_STRING)?)
+                }
+                // Undefined propagates; null is a type error.
+                (JValue::Undefined, _) => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function substringBefore does not match function signature".to_string(),
+                )),
+            }
+        }
+        "substringAfter" => {
+            if args.len() != 2 {
+                return Err(EvaluatorError::TypeError(
+                    "T0411: Context value is not a compatible type with argument 2 of function substringAfter".to_string(),
+                ));
+            }
+            match (&args[0], &args[1]) {
+                (JValue::String(s), JValue::String(sep)) => {
+                    Ok(functions::string::substring_after(s, sep)?)
+                }
+                (JValue::String(s), JValue::Undefined) => {
+                    Ok(functions::string::substring_after(s, JS_UNDEFINED_AS_STRING)?)
+                }
+                // Undefined propagates; null is a type error.
+                (JValue::Undefined, _) => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function substringAfter does not match function signature".to_string(),
+                )),
+            }
+        }
+        "contains" => {
+            if args.len() != 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "contains() requires exactly 2 arguments".to_string(),
+                ));
+            }
+            // jsonata-js #809: $contains returns undefined when either argument
+            // (the string OR the pattern) is undefined.
+            if args[0].is_undefined() || args[1].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match &args[0] {
+                JValue::Null => Ok(JValue::Null),
+                JValue::String(s) => Ok(functions::string::contains(s, &args[1])?),
+                _ => Err(EvaluatorError::TypeError(
+                    "contains() requires a string as the first argument".to_string(),
+                )),
+            }
+        }
+        "split" => {
+            if args.len() < 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "split() requires at least 2 arguments".to_string(),
+                ));
+            }
+            match &args[0] {
+                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                JValue::String(s) => {
+                    // Validate the optional limit argument — must be a positive number.
+                    let limit = match args.get(2) {
+                        None => None,
+                        Some(JValue::Number(n)) => {
+                            if *n < 0.0 {
+                                return Err(EvaluatorError::EvaluationError(
+                                    "D3020: Third argument of split function must be a positive number"
+                                        .to_string(),
+                                ));
+                            }
+                            Some(n.floor() as usize)
+                        }
+                        Some(_) => {
+                            return Err(EvaluatorError::TypeError(
+                                "split() limit must be a number".to_string(),
+                            ))
+                        }
+                    };
+                    Ok(functions::string::split(s, &args[1], limit)?)
+                }
+                _ => Err(EvaluatorError::TypeError(
+                    "split() requires a string as the first argument".to_string(),
+                )),
+            }
+        }
+        "join" => {
+            if args.is_empty() {
+                return Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function $join does not match function signature"
+                        .to_string(),
+                ));
+            }
+            match &args[0] {
+                // Signature `<a<s>s?:s>` rejects an explicit null before this
+                // arm is reached (a scalar Null fails the array's element-type
+                // check, T0412), so this branch is dead in practice via any
+                // validated call path -- kept for defensiveness. Undefined
+                // must propagate as Undefined, not Null.
+                JValue::Undefined => Ok(JValue::Undefined),
+                JValue::Null => Ok(JValue::Null),
+                // Signature: <a<s>s?:s> — first arg must be an array of strings.
+                JValue::Bool(_) | JValue::Number(_) | JValue::Object(_) => {
+                    Err(EvaluatorError::TypeError(
+                        "T0412: Argument 1 of function $join must be an array of String"
+                            .to_string(),
+                    ))
+                }
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(_) => Err(EvaluatorError::TypeError(
+                    "T0412: Argument 1 of function $join must be an array of String".to_string(),
+                )),
+                JValue::Array(arr) => {
+                    // All elements must be strings.
+                    for item in arr.iter() {
+                        if !matches!(item, JValue::String(_)) {
+                            return Err(EvaluatorError::TypeError(
+                                "T0412: Argument 1 of function $join must be an array of String"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                    // Validate separator: must be a string if provided.
+                    let separator = match args.get(1) {
+                        None | Some(JValue::Undefined) => None,
+                        Some(JValue::String(s)) => Some(&**s),
+                        Some(_) => {
+                            return Err(EvaluatorError::TypeError(
+                                "T0410: Argument 2 of function $join does not match function signature (expected String)"
+                                    .to_string(),
+                            ))
+                        }
+                    };
+                    Ok(functions::string::join(arr, separator)?)
+                }
+                JValue::String(s) => Ok(JValue::String(s.clone())),
+                _ => Err(EvaluatorError::TypeError(
+                    "T0412: Argument 1 of function $join must be an array of String".to_string(),
+                )),
+            }
+        }
+
+        "pad" => {
+            if args.is_empty() || args.len() > 3 {
+                return Err(EvaluatorError::EvaluationError(
+                    "pad() requires 2 or 3 arguments".to_string(),
+                ));
+            }
+
+            // First argument: string to pad
+            let string = match &args[0] {
+                JValue::String(s) => s.clone(),
+                JValue::Null => return Ok(JValue::Null),
+                JValue::Undefined => return Ok(JValue::Undefined),
+                _ => {
+                    return Err(EvaluatorError::TypeError(
+                        "pad() first argument must be a string".to_string(),
+                    ))
+                }
+            };
+
+            // Second argument: width (negative = left pad, positive = right pad).
+            //
+            // An undefined width survives validation (`<s-ns?:s>` admits a
+            // missing argument in any slot) and reaches jsonata-js's body,
+            // where `Math.trunc(undefined)` is NaN and the padding length
+            // is therefore NaN too. `NaN > 0` is false, so the reference
+            // skips padding entirely and returns the string unchanged --
+            // whatever pad character was given.
+            let width = match &args.get(1) {
+                Some(JValue::Number(n)) => *n as i32,
+                Some(JValue::Undefined) | None => return Ok(JValue::string(string)),
+                _ => {
+                    return Err(EvaluatorError::TypeError(
+                        "pad() second argument must be a number".to_string(),
+                    ))
+                }
+            };
+
+            // Third argument: padding string (optional, defaults to space)
+            let pad_string = match args.get(2) {
+                Some(JValue::String(s)) if !s.is_empty() => s.clone(),
+                _ => Rc::from(" "),
+            };
+
+            let abs_width = width.unsigned_abs() as usize;
+            // Count Unicode characters (code points), not bytes
+            let char_count = string.chars().count();
+
+            if char_count >= abs_width {
+                // String is already long enough
+                return Ok(JValue::string(string));
+            }
+
+            let padding_needed = abs_width - char_count;
+
+            let pad_chars: Vec<char> = pad_string.chars().collect();
+            let mut padding = String::with_capacity(padding_needed);
+            for i in 0..padding_needed {
+                padding.push(pad_chars[i % pad_chars.len()]);
+            }
+
+            let result = if width < 0 {
+                // Left pad (negative width)
+                format!("{}{}", padding, string)
+            } else {
+                // Right pad (positive width)
+                format!("{}{}", string, padding)
+            };
+
+            Ok(JValue::string(result))
+        }
+
+        // ── Numeric functions ───────────────────────────────────────────
+        "number" => match args.first() {
+            Some(v) => Ok(functions::numeric::number(v)?),
+            None => Err(EvaluatorError::EvaluationError(
+                "number() requires at least 1 argument".to_string(),
+            )),
+        },
+        "floor" => match args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => Ok(functions::numeric::floor(*n)?),
+            _ => Err(EvaluatorError::TypeError(
+                "floor() requires a number argument".to_string(),
+            )),
+        },
+        "ceil" => match args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => Ok(functions::numeric::ceil(*n)?),
+            _ => Err(EvaluatorError::TypeError(
+                "ceil() requires a number argument".to_string(),
+            )),
+        },
+        "round" => match args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => {
+                let precision = args.get(1).and_then(|v| {
+                    if let JValue::Number(p) = v {
+                        Some(*p as i32)
+                    } else {
+                        None
+                    }
+                });
+                Ok(functions::numeric::round(*n, precision)?)
+            }
+            _ => Err(EvaluatorError::TypeError(
+                "round() requires a number argument".to_string(),
+            )),
+        },
+        "abs" => match args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => Ok(functions::numeric::abs(*n)?),
+            _ => Err(EvaluatorError::TypeError(
+                "abs() requires a number argument".to_string(),
+            )),
+        },
+        "sqrt" => match args.first() {
+            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            Some(JValue::Number(n)) => Ok(functions::numeric::sqrt(*n)?),
+            _ => Err(EvaluatorError::TypeError(
+                "sqrt() requires a number argument".to_string(),
+            )),
+        },
+
+        "power" => {
+            if args.len() != 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "power() requires exactly 2 arguments".to_string(),
+                ));
+            }
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match (&args[0], &args[1]) {
+                (JValue::Number(base), JValue::Number(exp)) => {
+                    Ok(functions::numeric::power(*base, *exp)?)
+                }
+                _ => Err(EvaluatorError::TypeError(
+                    "power() requires number arguments".to_string(),
+                )),
+            }
+        }
+        "formatNumber" => {
+            if args.len() < 2 || args.len() > 3 {
+                return Err(EvaluatorError::EvaluationError(
+                    "formatNumber() requires 2 or 3 arguments".to_string(),
+                ));
+            }
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match (&args[0], &args[1]) {
+                (JValue::Number(num), JValue::String(picture)) => {
+                    let fmt_options = if args.len() == 3 {
+                        Some(&args[2])
+                    } else {
+                        None
+                    };
+                    Ok(functions::numeric::format_number(
+                        *num,
+                        picture,
+                        fmt_options,
+                    )?)
+                }
+                _ => Err(EvaluatorError::TypeError(
+                    "formatNumber() requires a number and a string".to_string(),
+                )),
+            }
+        }
+        "formatBase" => {
+            if args.is_empty() || args.len() > 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "formatBase() requires 1 or 2 arguments".to_string(),
+                ));
+            }
+            // Handle undefined input
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match &args[0] {
+                JValue::Number(num) => {
+                    let radix = if args.len() == 2 {
+                        match &args[1] {
+                            JValue::Number(r) => Some(r.trunc() as i64),
+                            _ => {
+                                return Err(EvaluatorError::TypeError(
+                                    "formatBase() radix must be a number".to_string(),
+                                ))
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    Ok(functions::numeric::format_base(*num, radix)?)
+                }
+                _ => Err(EvaluatorError::TypeError(
+                    "formatBase() requires a number".to_string(),
+                )),
+            }
+        }
+        "formatInteger" => {
+            if args.len() != 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "formatInteger() requires exactly 2 arguments".to_string(),
+                ));
+            }
+            match (&args[0], &args[1]) {
+                (JValue::Number(n), JValue::String(picture)) => {
+                    Ok(crate::datetime::format_integer(*n, picture)?)
+                }
+                (JValue::Null, _) => Ok(JValue::Null),
+                (JValue::Undefined, _) => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "formatInteger() requires a number and a string".to_string(),
+                )),
+            }
+        }
+        "parseInteger" => {
+            if args.len() != 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "parseInteger() requires exactly 2 arguments".to_string(),
+                ));
+            }
+            match (&args[0], &args[1]) {
+                (JValue::String(value), JValue::String(picture)) => {
+                    Ok(crate::datetime::parse_integer(value, picture)?)
+                }
+                (JValue::Null, _) => Ok(JValue::Null),
+                (JValue::Undefined, _) => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "parseInteger() requires a string and a string".to_string(),
+                )),
+            }
+        }
+
+        // ── Aggregation functions ───────────────────────────────────────
+        "sum" => match args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::Undefined),
+            None => Err(EvaluatorError::EvaluationError(
+                "sum() requires exactly 1 argument".to_string(),
+            )),
+            Some(JValue::Null) => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(crate::evaluator::aggregation::sum(arr)?),
+            Some(JValue::Number(n)) => Ok(JValue::Number(*n)),
+            Some(other) => Ok(functions::numeric::sum(std::slice::from_ref(other))?),
+        },
+        "max" => match args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::Undefined),
+            Some(JValue::Null) | None => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(crate::evaluator::aggregation::max(arr)?),
+            Some(v @ JValue::Number(_)) => Ok(v.clone()),
+            _ => Err(EvaluatorError::TypeError(
+                "max() requires an array or number argument".to_string(),
+            )),
+        },
+        "min" => match args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::Undefined),
+            Some(JValue::Null) | None => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(crate::evaluator::aggregation::min(arr)?),
+            Some(v @ JValue::Number(_)) => Ok(v.clone()),
+            _ => Err(EvaluatorError::TypeError(
+                "min() requires an array or number argument".to_string(),
+            )),
+        },
+        "average" => match args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::Undefined),
+            Some(JValue::Null) | None => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(crate::evaluator::aggregation::average(arr)?),
+            Some(v @ JValue::Number(_)) => Ok(v.clone()),
+            _ => Err(EvaluatorError::TypeError(
+                "average() requires an array or number argument".to_string(),
+            )),
+        },
+        "count" => match args.first() {
+            Some(v) if v.is_undefined() => Ok(JValue::from(0i64)),
+            Some(JValue::Null) | None => Ok(JValue::from(0i64)),
+            Some(JValue::Array(arr)) => Ok(functions::array::count(arr)?),
+            _ => Ok(JValue::from(1i64)),
+        },
+
+        // ── Boolean / logic ─────────────────────────────────────────────
+        "boolean" => match args.first() {
+            Some(v) => Ok(functions::boolean::boolean(v)?),
+            None => Err(EvaluatorError::EvaluationError(
+                "boolean() requires 1 argument".to_string(),
+            )),
+        },
+        "not" => match args.first() {
+            Some(v) => Ok(JValue::Bool(!crate::evaluator::compiled_is_truthy(v))),
+            None => Err(EvaluatorError::EvaluationError(
+                "not() requires 1 argument".to_string(),
+            )),
+        },
+
+        // ── Array functions ─────────────────────────────────────────────
+        "append" => {
+            if args.len() != 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "append() requires exactly 2 arguments".to_string(),
+                ));
+            }
+            let first = &args[0];
+            let second = &args[1];
+            // Only a *missing* operand is skipped; an explicit null is a value
+            // and gets appended. Mirrors the tree-walker arm.
+            if matches!(second, JValue::Undefined) {
+                return Ok(first.clone());
+            }
+            if matches!(first, JValue::Undefined) {
+                return Ok(second.clone());
+            }
+            let arr = match first {
+                JValue::Array(a) => a.to_vec(),
+                other => vec![other.clone()],
+            };
+            let second_len = match second {
+                JValue::Array(a) => a.len(),
+                _ => 1,
+            };
+            crate::evaluator::check_sequence_length(arr.len() + second_len, options)?;
+            Ok(functions::array::append(&arr, second)?)
+        }
+        "reverse" => match args.first() {
+            // Signature `<a:a>` has no element-type constraint, so a scalar
+            // explicit null is wrapped into `[null]` by signature coercion
+            // before this arm is reached -- `Some(JValue::Null)` here is dead
+            // in practice via any validated call path, kept for defensiveness.
+            // Undefined (and a genuinely absent argument) must propagate as
+            // Undefined, not Null.
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(JValue::Null) => Ok(JValue::Null),
+            Some(JValue::Array(arr)) => Ok(functions::array::reverse(arr)?),
+            _ => Err(EvaluatorError::TypeError(
+                "reverse() requires an array argument".to_string(),
+            )),
+        },
+        "distinct" => match args.first() {
+            // Signature `<x:x>` (Any) lets an explicit null reach here
+            // unwrapped, and it must stay Null; only Undefined (and a
+            // genuinely absent argument) moves to Undefined.
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(JValue::Array(arr)) if arr.len() > 1 => Ok(functions::array::distinct(arr)?),
+            // Non-array input (including Null), and arrays of length <= 1,
+            // pass through unchanged (jsonata-js functions.js:
+            // `if(!Array.isArray(arr) || arr.length <= 1) return arr;`)
+            Some(other) => Ok(other.clone()),
+        },
+
+        "shuffle" => {
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "shuffle() requires exactly 1 argument".to_string(),
+                ));
+            }
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match &args[0] {
+                JValue::Array(arr) => Ok(functions::array::shuffle(arr)?),
+                _ => Err(EvaluatorError::TypeError(
+                    "shuffle() requires an array argument".to_string(),
+                )),
+            }
+        }
+        "zip" => {
+            if args.is_empty() {
+                return Err(EvaluatorError::EvaluationError(
+                    "zip() requires at least 1 argument".to_string(),
+                ));
+            }
+
+            // Convert arguments to arrays (wrapping non-arrays in single-element arrays)
+            // If any argument is null/undefined, return empty array
+            let mut arrays: Vec<Vec<JValue>> = Vec::with_capacity(args.len());
+            for arg in args {
+                match arg {
+                    JValue::Array(arr) => {
+                        if arr.is_empty() {
+                            // Empty array means result is empty
+                            return Ok(JValue::array(vec![]));
+                        }
+                        arrays.push(arr.to_vec());
+                    }
+                    JValue::Null | JValue::Undefined => {
+                        // Null/undefined means result is empty
+                        return Ok(JValue::array(vec![]));
+                    }
+                    other => {
+                        // Wrap non-array values in single-element array
+                        arrays.push(vec![other.clone()]);
+                    }
+                }
+            }
+
+            if arrays.is_empty() {
+                return Ok(JValue::array(vec![]));
+            }
+
+            // Find the length of the shortest array
+            let min_len = arrays.iter().map(|a| a.len()).min().unwrap_or(0);
+
+            // Zip the arrays together
+            let mut result = Vec::with_capacity(min_len);
+            for i in 0..min_len {
+                let mut tuple = Vec::with_capacity(arrays.len());
+                for array in &arrays {
+                    tuple.push(array[i].clone());
+                }
+                result.push(JValue::array(tuple));
+            }
+
+            Ok(JValue::array(result))
+        }
+        "exists" => {
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "exists() requires exactly 1 argument".to_string(),
+                ));
+            }
+            Ok(functions::array::exists(&args[0])?)
+        }
+
+        // ── Object functions ────────────────────────────────────────────
+        "keys" => match args.first() {
+            // Signature `<x-:a<s>>` (Any) admits an explicit null unwrapped, so this
+            // branch is reached: `$keys(null)` stays `Null`, preserving pre-existing
+            // baseline behaviour on both routes. That diverges from jsonata-js, which
+            // gives `undefined` for `$keys(null)`; the divergence predates this branch
+            // and is deliberately not fixed here (tracked separately). Undefined (and
+            // a genuinely absent argument) must still propagate as Undefined, not Null:
+            // `{"k": $keys(missing.x)}` is `{}` in the reference, not `{"k": null}`.
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(JValue::Null) => Ok(JValue::Null),
+            Some(JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(JValue::Null),
+            Some(JValue::Object(obj)) => {
+                if obj.is_empty() {
+                    Ok(JValue::Null)
+                } else {
+                    let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
+                    crate::evaluator::check_sequence_length(keys.len(), options)?;
+                    if keys.len() == 1 {
+                        Ok(keys.into_iter().next().unwrap())
+                    } else {
+                        Ok(JValue::array(keys))
+                    }
+                }
+            }
+            Some(JValue::Array(arr)) => {
+                let mut all_keys: Vec<JValue> = Vec::new();
+                for item in arr.iter() {
+                    let normalized_item = crate::evaluator::normalize_lazy(item)?;
+                    if let JValue::Object(obj) = &normalized_item {
+                        for key in obj.keys() {
+                            let k = JValue::string(key.clone());
+                            if !all_keys.contains(&k) {
+                                all_keys.push(k);
+                            }
+                        }
+                    }
+                }
+                if all_keys.is_empty() {
+                    Ok(JValue::Null)
+                } else if all_keys.len() == 1 {
+                    Ok(all_keys.into_iter().next().unwrap())
+                } else {
+                    crate::evaluator::check_sequence_length(all_keys.len(), options)?;
+                    Ok(JValue::array(all_keys))
+                }
+            }
+            _ => Ok(JValue::Null),
+        },
+        "lookup" => {
+            if args.len() != 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "lookup() requires exactly 2 arguments".to_string(),
+                ));
+            }
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+
+            let key = match &args[1] {
+                JValue::String(k) => &**k,
+                // jsonata-js looks the key up with `hasOwnProperty`, which
+                // stringifies an undefined key to "undefined" instead of
+                // rejecting it -- so `$lookup(obj, missing.x)` is undefined
+                // for an ordinary object but 7 for `{"undefined": 7}`.
+                JValue::Undefined => JS_UNDEFINED_AS_STRING,
+                _ => {
+                    return Err(EvaluatorError::TypeError(
+                        "lookup() requires a string key".to_string(),
+                    ))
+                }
+            };
+
+            // Helper function to recursively lookup in values
+            fn lookup_recursive(val: &JValue, key: &str) -> Result<Vec<JValue>, EvaluatorError> {
+                match val {
+                    JValue::Array(arr) => {
+                        let mut results = Vec::new();
+                        for item in arr.iter() {
+                            let nested = lookup_recursive(item, key)?;
+                            results.extend(nested.iter().cloned());
+                        }
+                        Ok(results)
+                    }
+                    JValue::Object(obj) => {
+                        if let Some(v) = obj.get(key) {
+                            Ok(vec![v.clone()])
+                        } else {
+                            Ok(vec![])
+                        }
+                    }
+                    #[cfg(feature = "python")]
+                    JValue::LazyPyDict(lazy) => {
+                        let v = lazy.get_field(key)?;
+                        if v.is_undefined() {
+                            Ok(vec![])
+                        } else {
+                            Ok(vec![v])
+                        }
+                    }
+                    _ => Ok(vec![]),
+                }
+            }
+
+            let results = lookup_recursive(&args[0], key)?;
+            if results.is_empty() {
+                Ok(JValue::Null)
+            } else if results.len() == 1 {
+                Ok(results[0].clone())
+            } else {
+                crate::evaluator::check_sequence_length(results.len(), options)?;
+                Ok(JValue::array(results))
+            }
+        }
+        "spread" => {
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "spread() requires exactly 1 argument".to_string(),
+                ));
+            }
+            match &args[0] {
+                JValue::Null => Ok(JValue::Null),
+                // Not a container - pass through unchanged (e.g. so $string() still
+                // sees the function value and applies its own function->"" rule).
+                lambda @ (JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(lambda.clone()),
+                JValue::Object(obj) => {
+                    // functions::object::spread() always returns an array with one
+                    // element per key (mirrors jsonata-js's push-per-key loop through
+                    // this.createSequence()), so it needs the same cap as the
+                    // array-fanout branch below and as the "keys" arm's single-object
+                    // branch.
+                    crate::evaluator::check_sequence_length(obj.len(), options)?;
+                    // That loop pushes into a *sequence*, so the usual
+                    // sequence rules close over the result: one entry
+                    // unwraps and none at all is undefined. Hence
+                    // `$spread({"k": 1})` is the object back, not a
+                    // one-element array, and `$spread({})` is undefined.
+                    match functions::object::spread(obj)? {
+                        JValue::Array(entries) => {
+                            crate::evaluator::hof_result_sequence(entries.to_vec(), options)
+                        }
+                        other => Ok(other),
+                    }
+                }
+                JValue::Array(arr) => {
+                    // The array branch does NOT get those sequence rules,
+                    // even though it looks symmetrical. jsonata-js folds
+                    // each element's spread in with `append`, which ends in
+                    // `concat` -- and `concat` returns a plain Array,
+                    // dropping the `sequence` flag that `push` preserves.
+                    // So `$spread([{"k": 1}])` stays `[{"k": 1}]`. The one
+                    // exception is an empty input: the fold never runs, the
+                    // sequence created up front survives untouched, and an
+                    // empty sequence is undefined.
+                    if arr.is_empty() {
+                        return Ok(JValue::Undefined);
+                    }
+                    // Spread each object in the array
+                    let mut result = Vec::new();
+                    for item in arr.iter() {
+                        let normalized_item = crate::evaluator::normalize_lazy(item)?;
+                        match &normalized_item {
+                            JValue::Lambda { .. } | JValue::Builtin { .. } => {
+                                // Skip lambdas in array
+                                continue;
+                            }
+                            JValue::Object(obj) => {
+                                let spread_result = functions::object::spread(obj)?;
+                                if let JValue::Array(spread_items) = spread_result {
+                                    result.extend(spread_items.iter().cloned());
+                                } else {
+                                    result.push(spread_result);
+                                }
+                            }
+                            // Non-objects in array are returned unchanged
+                            other => result.push(other.clone()),
+                        }
+                    }
+                    crate::evaluator::check_sequence_length(result.len(), options)?;
+                    Ok(JValue::array(result))
+                }
+                // Non-objects are returned unchanged
+                other => Ok(other.clone()),
+            }
+        }
+        "merge" => match args.len() {
+            0 => Err(EvaluatorError::EvaluationError(
+                "merge() requires at least 1 argument".to_string(),
+            )),
+            1 => match &args[0] {
+                JValue::Array(arr) => Ok(functions::object::merge(arr)?),
+                // Signature `<a<o>:o>` rejects an explicit null before this
+                // arm is reached (a scalar Null fails the array's
+                // element-type check, T0412), so this branch is dead in
+                // practice via any validated call path -- kept for
+                // defensiveness. Undefined must propagate as Undefined.
+                JValue::Undefined => Ok(JValue::Undefined),
+                JValue::Null => Ok(JValue::Null),
+                JValue::Object(_) => Ok(args[0].clone()),
+                _ => Err(EvaluatorError::TypeError(
+                    "merge() requires objects or an array of objects".to_string(),
+                )),
+            },
+            _ => Ok(functions::object::merge(args)?),
+        },
+
+        // ── Type / function introspection ───────────────────────────────
+        "type" => {
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "type() requires exactly 1 argument".to_string(),
+                ));
+            }
+            // Return type string
+            // In JavaScript: $type(undefined) returns undefined, $type(null) returns "null"
+            // We use a special marker object to distinguish undefined from null
+            match &args[0] {
+                JValue::Null => Ok(JValue::string("null")),
+                JValue::Bool(_) => Ok(JValue::string("boolean")),
+                JValue::Number(_) => Ok(JValue::string("number")),
+                JValue::String(_) => Ok(JValue::string("string")),
+                JValue::Array(_) => Ok(JValue::string("array")),
+                JValue::Object(_) => Ok(JValue::string("object")),
+                JValue::Undefined => Ok(JValue::Undefined),
+                JValue::Lambda { .. } | JValue::Builtin { .. } => Ok(JValue::string("function")),
+                JValue::Regex { .. } => Ok(JValue::string("regex")),
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(_) => Ok(JValue::string("object")),
+            }
+        }
+
+        // ── Encoding functions ──────────────────────────────────────────
+        "base64encode" => {
+            if args.is_empty() || args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "base64encode() requires exactly 1 argument".to_string(),
+                ));
+            }
+            match &args[0] {
+                JValue::String(s) => Ok(functions::encoding::base64encode(s)?),
+                _ => Err(EvaluatorError::TypeError(
+                    "base64encode() requires a string argument".to_string(),
+                )),
+            }
+        }
+        "base64decode" => {
+            if args.is_empty() || args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "base64decode() requires exactly 1 argument".to_string(),
+                ));
+            }
+            match &args[0] {
+                JValue::String(s) => Ok(functions::encoding::base64decode(s)?),
+                _ => Err(EvaluatorError::TypeError(
+                    "base64decode() requires a string argument".to_string(),
+                )),
+            }
+        }
+        "encodeUrlComponent" => {
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "encodeUrlComponent() requires exactly 1 argument".to_string(),
+                ));
+            }
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match &args[0] {
+                JValue::String(s) => Ok(functions::encoding::encode_url_component(s)?),
+                _ => Err(EvaluatorError::TypeError(
+                    "encodeUrlComponent() requires a string argument".to_string(),
+                )),
+            }
+        }
+        "decodeUrlComponent" => {
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "decodeUrlComponent() requires exactly 1 argument".to_string(),
+                ));
+            }
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match &args[0] {
+                JValue::String(s) => Ok(functions::encoding::decode_url_component(s)?),
+                _ => Err(EvaluatorError::TypeError(
+                    "decodeUrlComponent() requires a string argument".to_string(),
+                )),
+            }
+        }
+        "encodeUrl" => {
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "encodeUrl() requires exactly 1 argument".to_string(),
+                ));
+            }
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match &args[0] {
+                JValue::String(s) => Ok(functions::encoding::encode_url(s)?),
+                _ => Err(EvaluatorError::TypeError(
+                    "encodeUrl() requires a string argument".to_string(),
+                )),
+            }
+        }
+        "decodeUrl" => {
+            if args.len() != 1 {
+                return Err(EvaluatorError::EvaluationError(
+                    "decodeUrl() requires exactly 1 argument".to_string(),
+                ));
+            }
+            if args[0].is_null() {
+                return Ok(JValue::Null);
+            }
+            if args[0].is_undefined() {
+                return Ok(JValue::Undefined);
+            }
+            match &args[0] {
+                JValue::String(s) => Ok(functions::encoding::decode_url(s)?),
+                _ => Err(EvaluatorError::TypeError(
+                    "decodeUrl() requires a string argument".to_string(),
+                )),
+            }
+        }
+
+        // ── Error / assertion functions ─────────────────────────────────
+        "error" => {
+            // $error(message) - throw error with custom message
+            if args.is_empty() {
+                // No message provided
+                return Err(EvaluatorError::EvaluationError(
+                    "D3137: $error() function evaluated".to_string(),
+                ));
+            }
+
+            match &args[0] {
+                JValue::String(s) => Err(EvaluatorError::EvaluationError(format!("D3137: {}", s))),
+                _ => Err(EvaluatorError::TypeError(
+                    "T0410: Argument 1 of function error does not match function signature"
+                        .to_string(),
+                )),
+            }
+        }
+        "assert" => {
+            // $assert(condition, message) - throw error if condition is false
+            if args.is_empty() || args.len() > 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "assert() requires 1 or 2 arguments".to_string(),
+                ));
+            }
+
+            // First argument must be a boolean
+            let condition = match &args[0] {
+                JValue::Bool(b) => *b,
+                _ => {
+                    return Err(EvaluatorError::TypeError(
+                        "T0410: Argument 1 of function $assert does not match function signature"
+                            .to_string(),
+                    ));
+                }
+            };
+
+            if !condition {
+                let message = if args.len() == 2 {
+                    match &args[1] {
+                        JValue::String(s) => s.clone(),
+                        _ => Rc::from("$assert() statement failed"),
+                    }
+                } else {
+                    Rc::from("$assert() statement failed")
+                };
+                return Err(EvaluatorError::EvaluationError(format!(
+                    "D3141: {}",
+                    message
+                )));
+            }
+
+            Ok(JValue::Null)
+        }
+
+        // ── Date/time functions ─────────────────────────────────────────
+        "now" => {
+            if !args.is_empty() {
+                return Err(EvaluatorError::EvaluationError(
+                    "now() takes no arguments".to_string(),
+                ));
+            }
+            Ok(crate::datetime::now())
+        }
+        "millis" => {
+            if !args.is_empty() {
+                return Err(EvaluatorError::EvaluationError(
+                    "millis() takes no arguments".to_string(),
+                ));
+            }
+            Ok(crate::datetime::millis())
+        }
+        "toMillis" => {
+            if args.is_empty() || args.len() > 2 {
+                return Err(EvaluatorError::EvaluationError(
+                    "toMillis() requires 1 or 2 arguments".to_string(),
+                ));
+            }
+
+            match &args[0] {
+                JValue::String(s) => {
+                    // Optional second argument is a picture string for custom parsing
+                    if args.len() == 2 {
+                        match &args[1] {
+                            JValue::String(picture) => {
+                                // Use custom picture format parsing
+                                Ok(crate::datetime::to_millis_with_picture(s, picture)?)
+                            }
+                            JValue::Null => Ok(JValue::Null),
+                            JValue::Undefined => Ok(JValue::Undefined),
+                            _ => Err(EvaluatorError::TypeError(
+                                "toMillis() second argument must be a string".to_string(),
+                            )),
+                        }
+                    } else {
+                        // Use ISO 8601 partial date parsing
+                        Ok(crate::datetime::to_millis(s)?)
+                    }
+                }
+                JValue::Null => Ok(JValue::Null),
+                JValue::Undefined => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "toMillis() requires a string argument".to_string(),
+                )),
+            }
+        }
+        "fromMillis" => {
+            if args.is_empty() || args.len() > 3 {
+                return Err(EvaluatorError::EvaluationError(
+                    "fromMillis() requires 1 to 3 arguments".to_string(),
+                ));
+            }
+
+            match &args[0] {
+                JValue::Number(n) => {
+                    let millis = (if n.fract() == 0.0 {
+                        Ok(*n as i64)
+                    } else {
+                        Err(())
+                    })
+                    .map_err(|_| {
+                        EvaluatorError::TypeError("fromMillis() requires an integer".to_string())
+                    })?;
+
+                    let picture = match args.get(1) {
+                        None | Some(JValue::Undefined) | Some(JValue::Null) => None,
+                        Some(JValue::String(s)) => Some(s.to_string()),
+                        Some(_) => {
+                            return Err(EvaluatorError::TypeError(
+                                "fromMillis() second argument must be a string".to_string(),
+                            ))
+                        }
+                    };
+                    let timezone = match args.get(2) {
+                        None | Some(JValue::Undefined) | Some(JValue::Null) => None,
+                        Some(JValue::String(s)) => Some(s.to_string()),
+                        Some(_) => {
+                            return Err(EvaluatorError::TypeError(
+                                "fromMillis() third argument must be a string".to_string(),
+                            ))
+                        }
+                    };
+
+                    Ok(crate::datetime::from_millis_with_picture(
+                        millis,
+                        picture.as_deref(),
+                        timezone.as_deref(),
+                    )?)
+                }
+                JValue::Null => Ok(JValue::Null),
+                JValue::Undefined => Ok(JValue::Undefined),
+                _ => Err(EvaluatorError::TypeError(
+                    "fromMillis() requires a number argument".to_string(),
+                )),
+            }
+        }
+
+        _ => unreachable!("dispatch_pure called with non-pure builtin: {}", name),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn predicate_admits_the_pure_set_and_rejects_the_evaluator_set() {
+        for name in [
+            "string",
+            "length",
+            "uppercase",
+            "lowercase",
+            "number",
+            "sum",
+            "count",
+            "substring",
+            "substringBefore",
+            "substringAfter",
+            "pad",
+            "trim",
+            "contains",
+            "split",
+            "join",
+            "max",
+            "min",
+            "average",
+            "abs",
+            "floor",
+            "ceil",
+            "round",
+            "sqrt",
+            "power",
+            "formatNumber",
+            "formatBase",
+            "formatInteger",
+            "parseInteger",
+            "append",
+            "reverse",
+            "shuffle",
+            "zip",
+            "distinct",
+            "exists",
+            "keys",
+            "lookup",
+            "spread",
+            "merge",
+            "boolean",
+            "not",
+            "type",
+            "base64encode",
+            "base64decode",
+            "encodeUrlComponent",
+            "decodeUrlComponent",
+            "encodeUrl",
+            "decodeUrl",
+            "error",
+            "assert",
+            "now",
+            "millis",
+            "toMillis",
+            "fromMillis",
+        ] {
+            assert!(is_pure_builtin(name), "{name} should be a pure builtin");
+        }
+
+        // These need the evaluator: they take AST arguments and call back into
+        // evaluation. Admitting one here would route it into `unreachable!()`.
+        for name in [
+            "map", "filter", "reduce", "single", "sift", "each", "sort", "eval", "match", "replace",
+        ] {
+            assert!(!is_pure_builtin(name), "{name} needs the evaluator");
+        }
+
+        assert!(!is_pure_builtin("nosuchfunction"));
+    }
+
+    #[test]
+    fn validation_runs_before_undefined_propagation() {
+        // $substring(missing) binds its lone undefined argument to parameter 2
+        // and takes parameter 1 from the context, so a non-string context is a
+        // T0411 -- not undefined. Propagating first would swallow that, which
+        // is the bug #106 fixed in the compiled path.
+        let opts = EvaluatorOptions::default();
+        let err = dispatch_pure(
+            "substring",
+            &[JValue::Undefined],
+            &JValue::Number(5.0),
+            &opts,
+        )
+        .expect_err("a numeric context cannot satisfy substring's first parameter");
+        assert!(
+            err.to_string().contains("T0411"),
+            "expected T0411, got {err}"
+        );
+    }
+
+    #[test]
+    fn context_insertion_covers_both_paths_lists() {
+        // The compiled path and the tree-walker kept separate lists of which
+        // builtins take the context as an implicit argument, and they
+        // disagreed: only the tree-walker had `fromMillis` (zero-arg) and
+        // `replace` (missing-first). The merged prologue takes the union, so
+        // assert on the member only one list had.
+        let opts = EvaluatorOptions::default();
+        // $fromMillis() with a numeric context formats that context.
+        let got = dispatch_pure("fromMillis", &[], &JValue::Number(0.0), &opts)
+            .expect("fromMillis should read the context");
+        assert!(
+            matches!(&got, JValue::String(s) if s.starts_with("1970-01-01")),
+            "expected an epoch timestamp, got {got:?}"
+        );
+    }
+}

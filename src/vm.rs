@@ -226,9 +226,10 @@ fn run_inner(
     options: &EvaluatorOptions,
     start_time: Option<std::time::Instant>,
 ) -> Result<JValue, EvaluatorError> {
+    use crate::builtins::dispatch_pure;
     use crate::evaluator::{
-        call_pure_builtin_by_name, compiled_arithmetic, compiled_concat, compiled_equal,
-        compiled_is_truthy, compiled_not_equal, compiled_ordered_cmp, CompiledArithOp,
+        compiled_arithmetic, compiled_concat, compiled_equal, compiled_is_truthy,
+        compiled_not_equal, compiled_ordered_cmp, CompiledArithOp,
     };
 
     let instrs = &prog.instrs;
@@ -560,7 +561,7 @@ fn run_inner(
                 let n = *arg_count as usize;
                 let start = stack.len().saturating_sub(n);
                 let args: Vec<JValue> = stack.drain(start..).collect();
-                stack.push(call_pure_builtin_by_name(name, &args, data, options)?);
+                stack.push(dispatch_pure(name, &args, data, options)?);
                 ip += 1;
             }
 
