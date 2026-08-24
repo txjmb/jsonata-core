@@ -6316,10 +6316,16 @@ impl Evaluator {
                 };
             }
 
-            // Early check: if LHS evaluates to undefined, return undefined
-            // This matches JSONata behavior where undefined ~> anyFunc returns undefined
+            // Early check: if LHS evaluates to undefined, return undefined.
+            // This matches JSONata behavior where undefined ~> anyFunc returns
+            // undefined. An explicit null LHS is NOT short-circuited here
+            // (issue #116): null is an ordinary value in jsonata-js, and each
+            // RHS kind below evaluates `lhs` again on its own terms -- as a
+            // function argument (`nul ~> $string()` == `$string(nul)` ==
+            // "null"), as a transform's `$` binding, etc. -- so it gets the
+            // same null-vs-undefined handling a direct call would.
             let lhs_value_for_check = self.evaluate_internal(lhs, data)?;
-            if lhs_value_for_check.is_undefined() || lhs_value_for_check.is_null() {
+            if lhs_value_for_check.is_undefined() {
                 return Ok(JValue::Undefined);
             }
 
@@ -6399,6 +6405,23 @@ impl Evaluator {
                     // RHS is a transform - invoke it with LHS as input
                     // Evaluate LHS first
                     let lhs_value = self.evaluate_internal(lhs, data)?;
+
+                    // jsonata-js compiles the transform operator into a
+                    // function with signature `<(oa):o>` (first argument:
+                    // object or array), so piping any other type into it --
+                    // including an explicit null (issue #116) -- is a type
+                    // error, not a silent passthrough.
+                    if !matches!(lhs_value, JValue::Object(_) | JValue::Array(_)) {
+                        #[cfg(feature = "python")]
+                        let is_lazy = matches!(lhs_value, JValue::LazyPyDict(_));
+                        #[cfg(not(feature = "python"))]
+                        let is_lazy = false;
+                        if !is_lazy {
+                            return Err(EvaluatorError::TypeError(
+                                "T0410: Argument 1 of function undefined does not match function signature".to_string(),
+                            ));
+                        }
+                    }
 
                     // Bind $ to the LHS value, then evaluate the transform
                     let saved_binding = self.context.lookup("$").cloned();
