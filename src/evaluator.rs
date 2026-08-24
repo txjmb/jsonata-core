@@ -2211,7 +2211,8 @@ pub(crate) mod aggregation {
 
     pub fn max(arr: &[JValue]) -> Result<JValue, EvaluatorError> {
         if arr.is_empty() {
-            return Ok(JValue::Null);
+            // jsonata-js: $max([]) is undefined, not null (issue #109).
+            return Ok(JValue::Undefined);
         }
         let mut max_val = f64::NEG_INFINITY;
         for_each_numeric(arr, "max", |n| {
@@ -2224,7 +2225,8 @@ pub(crate) mod aggregation {
 
     pub fn min(arr: &[JValue]) -> Result<JValue, EvaluatorError> {
         if arr.is_empty() {
-            return Ok(JValue::Null);
+            // jsonata-js: $min([]) is undefined, not null (issue #109).
+            return Ok(JValue::Undefined);
         }
         let mut min_val = f64::INFINITY;
         for_each_numeric(arr, "min", |n| {
@@ -2237,7 +2239,8 @@ pub(crate) mod aggregation {
 
     pub fn average(arr: &[JValue]) -> Result<JValue, EvaluatorError> {
         if arr.is_empty() {
-            return Ok(JValue::Null);
+            // jsonata-js: $average([]) is undefined, not null (issue #109).
+            return Ok(JValue::Undefined);
         }
         let mut total = 0.0f64;
         let count = count_numeric(arr, "average")?;
