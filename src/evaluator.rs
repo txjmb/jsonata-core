@@ -4651,9 +4651,9 @@ impl Evaluator {
                         // jsonata-js's wildcard guards with `typeof input ===
                         // 'object'`, which JS's `typeof null === 'object'`
                         // quirk would satisfy -- except the guard also checks
-                        // `input !== null` explicitly, so null (like every
-                        // other non-object/array value) maps over nothing:
-                        // `nul.*` is undefined (issue #114), not null.
+                        // `input !== null` explicitly, so null maps over
+                        // nothing: `nul.*` is undefined (issue #114), not
+                        // null.
                         JValue::Null => JValue::Undefined,
                         _ => JValue::Null,
                     }
@@ -5118,8 +5118,7 @@ impl Evaluator {
                             JValue::array(all_values)
                         }
                         // See the matching first-step Wildcard arm above: null
-                        // maps over nothing, same as any other non-object/array
-                        // value (issue #114).
+                        // maps over nothing (issue #114).
                         JValue::Null => JValue::Undefined,
                         _ => JValue::Null,
                     };

@@ -324,6 +324,16 @@ const BUILTIN_PROBES = [
   // one step and hits an unrelated len==1 fast path, so it doesn't pin this).
   'nul.(foo.bar)',
   '{"k": nul.(foo.bar)}',
+  // Two non-null fixes rode in on this branch alongside the null-context
+  // work, and no probe above -- or in the reference suite -- pins either:
+  // `**` singleton unwrapping (`a.**` over `{"a":5}` is `5`, not `[5]`) and
+  // the `~> |...|` transform operator's argument type check (a non-object,
+  // non-array LHS is T0410, not a silent passthrough).
+  'num.**',
+  'obj.**',
+  'num ~> |$|{}|',
+  'obj.k ~> |$|{}|',
+  'obj ~> |$|{"z":9}|',
 ];
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 
