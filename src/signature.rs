@@ -918,6 +918,80 @@ mod builtin_signature_table_tests {
         assert_eq!(BUILTIN_SIGNATURES.len(), 61);
     }
 
+    /// `BUILTIN_SIGNATURES` must match the pinned jsonata-js exactly, both in
+    /// which names it covers and in what each maps to.
+    ///
+    /// This table had silently drifted to a strict *subset* -- 55 of the
+    /// reference's 63, every one byte-identical, with eight simply absent
+    /// (#126 group 2). A missing entry is not a weaker check but no check at
+    /// all: `validate_builtin_args` returns `Ok(None)` for a name with no
+    /// signature, so those six builtins validated nothing and hand-rolled
+    /// their own arity and type guards instead. Subset drift is invisible
+    /// precisely because everything present is correct, which is what this
+    /// test exists to catch.
+    ///
+    /// Regenerate the fixture with `node scripts/gen_fastpath_corpus.js`.
+    #[test]
+    fn signature_table_matches_reference() {
+        // Two builtins the reference declares that jsonata-core does not
+        // implement at all. Removing a name from here without adding the
+        // builtin is the mistake this list is shaped to prevent.
+        const NOT_IMPLEMENTED: &[&str] = &[
+            // `$clone` exists only as the transform operator's internal deep
+            // copy here; there is no user-facing builtin to bind it to.
+            "clone",
+            // `$eval` is implemented, but in `evaluate_function_call` rather
+            // than `dispatch_pure` -- it needs the evaluator. Giving it a
+            // signature would newly validate that arm, which is its own
+            // change with its own blast radius.
+            "eval",
+        ];
+
+        let fixture_text = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/builtin_signatures.json"),
+        )
+        .expect("tests/fixtures/builtin_signatures.json should exist");
+        let reference: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(&fixture_text).expect("fixture should be valid JSON");
+
+        let ours: std::collections::BTreeMap<&str, &str> =
+            BUILTIN_SIGNATURES.iter().copied().collect();
+
+        let mut wrong = Vec::new();
+        let mut missing = Vec::new();
+        for (name, expected) in &reference {
+            if NOT_IMPLEMENTED.contains(&name.as_str()) {
+                assert!(
+                    !ours.contains_key(name.as_str()),
+                    "{} is listed as not implemented but has a signature",
+                    name
+                );
+                continue;
+            }
+            match ours.get(name.as_str()) {
+                None => missing.push(name.clone()),
+                Some(got) if got != expected => {
+                    wrong.push(format!("{}: ours {}, reference {}", name, got, expected))
+                }
+                Some(_) => {}
+            }
+        }
+        let extra: Vec<&str> = ours
+            .keys()
+            .copied()
+            .filter(|n| !reference.contains_key(*n))
+            .collect();
+
+        assert!(
+            missing.is_empty() && wrong.is_empty() && extra.is_empty(),
+            "signature table drifted from jsonata-js:\n  missing: {:?}\n  wrong: {:?}\n  not in reference: {:?}",
+            missing,
+            wrong,
+            extra
+        );
+    }
+
     #[test]
     fn lookup_returns_parsed_signatures() {
         assert!(builtin_signature("count").is_some());
