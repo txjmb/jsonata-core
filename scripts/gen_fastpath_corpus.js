@@ -39,7 +39,12 @@ const DATASETS = {
   // Operand fixtures for the operator matrix below. Each field supplies one
   // *scalar* operand shape; the matrix crosses them so every binary operator is
   // exercised against every value kind on both sides.
-  operands:    { nul: null, arr: [1, 2], obj: { k: 1 }, emptyarr: [], num: 5, str: 'a' },
+  //
+  // `obj.nul` is a second, nested explicit null (distinct from the top-level
+  // `nul`), needed by the null-context path probes below: `obj.nul.{}` pins
+  // the guard that fires on a *step result* being null, not just on a bare
+  // field reference being null.
+  operands:    { nul: null, arr: [1, 2], obj: { k: 1, nul: null }, emptyarr: [], num: 5, str: 'a' },
 };
 
 const EXPRESSIONS = [];
@@ -274,6 +279,51 @@ const BUILTIN_PROBES = [
   // had no test pinning it.
   'nul.(1)',
   'nul.($*2)',
+  // Null-context path/pipe probes (issues #114, #116). Two sites in the
+  // tree-walker short-circuit on an explicit `null` as though it meant
+  // "no value" -- the `~>` operator's LHS check, and the path-step loop's
+  // current-value guard -- when jsonata-js treats null as an ordinary value
+  // that flows into each step/function like any other. Undefined genuinely
+  // is absence and must keep short-circuiting; only the null half of each
+  // guard is wrong.
+  //
+  // These specifically need `dataset: 'operands'` (the only dataset with a
+  // literal `nul: null` field) run through the `json` entry route: the
+  // `dict` route collapses jsonatapy's Undefined and explicit Null to the
+  // same Python `None`, so it cannot tell "the guard short-circuited"
+  // (wrong) from "the guard ran and correctly produced null/undefined"
+  // (right) -- see #109. Mixed with these are same-shaped cases that must
+  // NOT change: `missing.x` (genuinely undefined, not null) must keep
+  // short-circuiting, and a handful of already-correct null-context shapes
+  // serve as a control group the way the builtin-undefined probes above do.
+  'nul ~> $string()',
+  'nul ~> $uppercase()',
+  'nul ~> |$|{}|',
+  'missing.x ~> $string()',
+  'nul.{}',
+  'nul.{"a":1}',
+  'nul.*',
+  'nul.()',
+  'obj.nul.{}',
+  'nul.{}.a',
+  'nul.foo',
+  'nul[0]',
+  'nul[true]',
+  'nul.**',
+  'nul.a.b',
+  'nul.$keys()',
+  'nul.$type()',
+  '[nul].{}',
+  'missing.x.{}',
+  'missing.x.*',
+  // `nul.(foo.bar)` reaches a THIRD null-context site: the block step binds
+  // `$` to the (null) current value and evaluates its inner expression as a
+  // fresh path whose `data` argument is that null -- a multi-step path's
+  // first-step handling has its own `JValue::Null` short-circuit, separate
+  // from the loop guard the other cases above exercise (`nul.(foo)` is only
+  // one step and hits an unrelated len==1 fast path, so it doesn't pin this).
+  'nul.(foo.bar)',
+  '{"k": nul.(foo.bar)}',
 ];
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 
