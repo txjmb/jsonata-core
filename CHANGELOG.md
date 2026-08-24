@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- `#$i` positional binding now unwraps a one-value result, matching every other
+  sequence-producing step: `num#$i` is `5` rather than `[5]`, and `deep#$i.$i` is `0` rather
+  than `[0]`. The rule holds for every input kind — `arr#$i` and `arrobj#$i` only ever looked
+  correct because a multi-element result has no singleton to unwrap, and the filtered form
+  `arr#$i[$i=0]` was right for the unrelated reason that a filter predicate already forced
+  the unwrap. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - `*` applied to anything without children is now `undefined` rather than `null`, and its
   result unwraps a lone value the way every other sequence-producing step does. jsonata-js
   guards the wildcard with `typeof input === 'object' && input !== null`, so `num.*`,

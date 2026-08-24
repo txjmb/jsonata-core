@@ -5734,8 +5734,17 @@ impl Evaluator {
         // `*` (Wildcard) is a sequence for exactly the same reason and was
         // simply missing from the list: `deep.*` over `{"a": {"b": 1}}` is the
         // inner object, not a one-element array wrapping it (#126 group 1).
+        //
+        // `#$i` (positional binding) is a third: it turns its step into a
+        // tuple stream, and a stream of one unwraps like any other sequence
+        // (`num#$i` is `5`, not `[5]`). It is a *modifier* on the step rather
+        // than a node, which is why it was missed here -- everything else in
+        // this list is matched on `step.node`. The rule holds for every input
+        // kind; `arr#$i` and `arrobj#$i` only ever looked right because a
+        // multi-element result has no singleton to unwrap.
         let has_array_op = steps.iter().any(|step| {
             !step.stages.is_empty()
+                || step.index_var.is_some()
                 || matches!(&step.node, AstNode::Predicate(p) if !matches!(**p, AstNode::Number(_)))
                 || matches!(&step.node, AstNode::Descendant | AstNode::Wildcard)
         });
