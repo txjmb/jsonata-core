@@ -12,12 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Every builtin that needs only its arguments is now implemented once, in `src/builtins.rs`,
   and shared by the compiled path and the tree-walker instead of being written out in each.
-  Fifty-two builtins were spread across three dispatch sites: twenty-eight were implemented
-  twice, twenty-four existed in exactly one, and `$not` was implemented differently in each
-  (`$boolean` coercion in one, raw truthiness in the other). No behaviour changes — the
-  differential corpus and the 1686-case reference suite produce identical results before and
-  after — but a builtin can no longer be correct in one dispatch path and wrong or absent in
-  another, which is what let `$type(x)` work while `$map(arr, $type)` raised.
+  Fifty-three builtins were spread across two dispatch sites: twenty-nine were implemented
+  twice, and twenty-four existed in exactly one, which is why `$type(x)` worked while
+  `$map(arr, $type)` raised. No behaviour changes — the differential corpus and the
+  1686-case reference suite produce identical results before and after, and the twenty-nine
+  duplicated builtins were all measured as reaching the shared dispatcher, so none of them
+  had a winner picked silently. `evaluate_function_call` drops from 2688 lines to 1266.
   ([#107](https://github.com/txjmb/jsonata-core/issues/107))
 
 ### Deprecated
