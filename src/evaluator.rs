@@ -4819,12 +4819,15 @@ impl Evaluator {
             // Early return if current is null/undefined - no point continuing
             // This handles cases like `blah.{}` where blah doesn't exist.
             //
-            // A function-application step (`.$fn()`) is the one exception: it
-            // calls a function with `current` as context rather than indexing
-            // into it, and jsonata-js runs that call normally on an explicit
-            // null context (issue #110 -- `nul.$string()` is "null", not
-            // undefined). Undefined still short-circuits unconditionally:
-            // there is no value to hand the function either way.
+            // A `FunctionApplication` step is the one exception: it covers
+            // both `.$fn()` calls and parenthesised block steps (`.(expr)`,
+            // including the empty `.()`) -- see parser.rs. Both *call*
+            // something with `current` as context rather than indexing into
+            // it, and jsonata-js runs both normally on an explicit null
+            // context (issue #110 -- `nul.$string()` is "null", not
+            // undefined; likewise `nul.(1)`). Undefined still short-circuits
+            // unconditionally: there is no value to hand the function/block
+            // either way.
             if current.is_null() && !matches!(&step.node, AstNode::FunctionApplication(_)) {
                 return Ok(JValue::Null);
             }

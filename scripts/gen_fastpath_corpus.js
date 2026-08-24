@@ -265,6 +265,15 @@ const BUILTIN_PROBES = [
   // the *argument*, not the context.
   'nul.$string()',
   '{"k": nul.$string()}',
+  // The null-context guard's exception is `AstNode::FunctionApplication`,
+  // which covers parenthesised block steps (`.(expr)`) as well as `.$fn()`
+  // calls -- so a block step run on an explicit null must behave the same
+  // way a function-application step does. `nul.($*2)` is the sharpest case:
+  // it used to return `null` and now raises T2001 (can't multiply null),
+  // which is the guard's largest observable behaviour change and previously
+  // had no test pinning it.
+  'nul.(1)',
+  'nul.($*2)',
 ];
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 
