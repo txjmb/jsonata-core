@@ -8135,20 +8135,34 @@ impl Evaluator {
                         ))),
                     }
                 } else {
-                    // With predicate - find exactly 1 matching element
-                    let arr_value = JValue::array(arr.clone());
+                    // With predicate - find exactly 1 matching element.
+                    // Detect how many parameters the callback expects so a
+                    // by-reference builtin (e.g. `$single(arr, $exists)`)
+                    // isn't handed arguments it never declared -- mirrors
+                    // the `$filter`/`$map`/`$each` call sites above.
+                    let param_count = self.get_callback_param_count(&args[1]);
+                    // Only create the array value if callback uses 3 parameters
+                    let arr_value = if param_count >= 3 {
+                        Some(JValue::array(arr.clone()))
+                    } else {
+                        None
+                    };
                     let mut matches = Vec::new();
                     for (index, item) in arr.into_iter().enumerate() {
-                        // Apply predicate function with (item, index, array)
-                        let predicate_result = self.apply_function(
-                            &args[1],
-                            &[
+                        // Build argument list based on what callback expects.
+                        // Mirrors jsonata-js's hofFuncArgs: the value is
+                        // always passed regardless of declared arity -- a
+                        // 0-arity callback still gets 1 argument here, not 0.
+                        let call_args = match param_count {
+                            0 | 1 => vec![item.clone()],
+                            2 => vec![item.clone(), JValue::Number(index as f64)],
+                            _ => vec![
                                 item.clone(),
                                 JValue::Number(index as f64),
-                                arr_value.clone(),
+                                arr_value.as_ref().unwrap().clone(),
                             ],
-                            data,
-                        )?;
+                        };
+                        let predicate_result = self.apply_function(&args[1], &call_args, data)?;
                         if self.is_truthy(&predicate_result) {
                             matches.push(item);
                         }
