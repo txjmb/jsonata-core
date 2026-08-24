@@ -8097,7 +8097,7 @@ impl Evaluator {
                     // jsonata-js would have raised D3050 before ever reaching
                     // this loop for such a callback.
                     let call_args = match param_count {
-                        0 | 1 | 2 => vec![accumulator.clone(), item.clone()],
+                        0..=2 => vec![accumulator.clone(), item.clone()],
                         3 => vec![
                             accumulator.clone(),
                             item.clone(),
