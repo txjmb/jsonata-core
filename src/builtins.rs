@@ -191,6 +191,47 @@ pub(crate) fn builtin_arity(name: &str) -> Option<usize> {
     })
 }
 
+/// Collapse a sequence-shaped result at the jsonata-js `evaluate()` boundary,
+/// or skip that collapse for a by-reference callback invocation.
+///
+/// Several builtins (`keys`, `lookup`, `spread`) build their result via
+/// jsonata-js's `this.createSequence()` -- a value jsonata-js's own
+/// top-level `evaluate()` boundary collapses (empty -> undefined, one item
+/// -> that item unwrapped) exactly once, for whichever expression is the
+/// true outermost result. A direct call (`$keys({"a":1})`) IS that
+/// outermost boundary, so collapsing here is correct (and array-literal
+/// construction independently re-flattens a nested sequence result one
+/// level, so `[$keys(...)]` comes out right regardless). But `$map`'s own
+/// native `result.push(res)` does NOT flatten `res` -- it treats it as one
+/// opaque element, and `$map` applies ITS OWN collapse once at the end
+/// (`hof_result_sequence`). If the builtin also collapses before that push,
+/// the result collapses twice: `$map([{"k":1}], $keys)` is `["k"]` in the
+/// reference (map's own single-result collapse unwraps to reveal keys()'s
+/// *raw*, uncollapsed `["k"]`), but doubly-collapsing gives the wrong
+/// `"k"`. This is why jsonata-js's `evaluateFunction`
+/// (`tests/jsonata-js/src/jsonata.js:1461-1471`) wraps a function passed
+/// *as an argument* in a closure invoked with a literal `null` input, so the
+/// top-level sequence collapse never runs on it -- but a builtin-valued
+/// variable called directly is not wrapped, and does still collapse.
+///
+/// `by_reference` (threaded down from `dispatch_pure`) tells the caller
+/// which situation it's in: skip the collapse and return the raw,
+/// sequence-shaped array (leaving the one collapse that's actually needed
+/// to the HOF's own `hof_result_sequence` call), or perform it here because
+/// this dispatch IS the outermost boundary.
+fn boundary_collapse(
+    items: Vec<JValue>,
+    by_reference: bool,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
+    if by_reference {
+        crate::evaluator::check_sequence_length(items.len(), options)?;
+        Ok(JValue::array(items))
+    } else {
+        crate::evaluator::hof_result_sequence(items, options)
+    }
+}
+
 /// Dispatch a builtin that needs nothing but its arguments.
 ///
 /// `context` is the JSONata context value (`$`) at the call site. It is used
@@ -199,26 +240,15 @@ pub(crate) fn builtin_arity(name: &str) -> Option<usize> {
 ///
 /// `by_reference` distinguishes the by-reference dispatch site
 /// (`Evaluator::call_builtin_with_values`, reached from `$map`/`$filter`/
-/// `$reduce`/`$sift`/`$each` invoking a builtin passed as a bare callback)
-/// from the two direct-call sites (compiled path, tree-walker). It matters
-/// for exactly two builtins, `keys` and `spread`, whose jsonata-js
-/// implementations build their result via `this.createSequence()` -- a
-/// value jsonata-js's own top-level `evaluate()` boundary collapses (empty
-/// -> undefined, one item -> that item unwrapped) exactly once, for
-/// whichever expression is the true outermost result. A direct call
-/// (`$keys({"a":1})`) IS that outermost boundary, so collapsing inside the
-/// builtin is correct there (and array-literal construction independently
-/// re-flattens a nested sequence result one level, so `[$keys(...)]` comes
-/// out right regardless). But `$map`'s own native `result.push(res)` does
-/// NOT flatten `res` -- it treats it as one opaque element, and `$map`
-/// applies ITS OWN collapse once at the end (`hof_result_sequence`). If
-/// `keys`/`spread` also collapse before that push, the result collapses
-/// twice: `$map([{"k":1}], $keys)` is `["k"]` in the reference (map's own
-/// single-result collapse unwraps to reveal keys()'s *raw*, uncollapsed
-/// `["k"]`), but doubly-collapsing gives the wrong `"k"`. `by_reference`
-/// tells the `keys`/`spread` arms to skip their own collapse and return the
-/// raw sequence-shaped array, leaving the one collapse that's actually
-/// needed to the HOF's own `hof_result_sequence` call.
+/// `$reduce`/`$sift`/`$each`/`$single`/`$sort` invoking a builtin passed as a
+/// bare callback) from the two direct-call sites (compiled path,
+/// tree-walker). It matters for the four sequence-collapse sites reached
+/// through `boundary_collapse` (`keys`'s two branches, `lookup`, `spread`)
+/// -- see that helper's doc comment for the full explanation. Keep this
+/// parameter (rather than switching to `context: Option<&JValue>`): every
+/// `apply_function` call site supplies at least one real argument, so an
+/// `Option<&JValue>` context would never actually be `None` and carries no
+/// extra information.
 pub(crate) fn dispatch_pure(
     name: &str,
     args: &[JValue],
@@ -987,32 +1017,17 @@ pub(crate) fn dispatch_pure(
             //
             // That collapse (and the one-key -> unwrapped-scalar case below) is
             // jsonata-js's *outer evaluate() boundary* collapsing the sequence
-            // `this.createSequence()` builds -- see the `by_reference` doc
-            // comment on `dispatch_pure`. It fires once, for whichever call is
-            // the true outermost result; a direct `$keys(...)` call is that
-            // boundary, but a by-reference call from `$map`/`$each`/etc. is
-            // not -- the HOF's own `hof_result_sequence` is. So `by_reference`
-            // skips the collapse here and returns the raw array (possibly
-            // empty, possibly one element) unconditionally.
+            // `this.createSequence()` builds -- see `boundary_collapse`'s doc
+            // comment. It fires once, for whichever call is the true
+            // outermost result; a direct `$keys(...)` call is that boundary,
+            // but a by-reference call from `$map`/`$each`/etc. is not -- the
+            // HOF's own `hof_result_sequence` is. So `by_reference` skips
+            // the collapse here and returns the raw array (possibly empty,
+            // possibly one element) unconditionally.
             None | Some(JValue::Undefined) => Ok(JValue::Undefined),
-            Some(JValue::Null) if by_reference => Ok(JValue::array(vec![])),
-            Some(JValue::Null) => Ok(JValue::Undefined),
-            Some(JValue::Lambda { .. } | JValue::Builtin { .. }) if by_reference => {
-                Ok(JValue::array(vec![]))
-            }
-            Some(JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(JValue::Undefined),
             Some(JValue::Object(obj)) => {
                 let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
-                crate::evaluator::check_sequence_length(keys.len(), options)?;
-                if by_reference {
-                    Ok(JValue::array(keys))
-                } else if keys.is_empty() {
-                    Ok(JValue::Undefined)
-                } else if keys.len() == 1 {
-                    Ok(keys.into_iter().next().unwrap())
-                } else {
-                    Ok(JValue::array(keys))
-                }
+                boundary_collapse(keys, by_reference, options)
             }
             Some(JValue::Array(arr)) => {
                 let mut all_keys: Vec<JValue> = Vec::new();
@@ -1027,19 +1042,13 @@ pub(crate) fn dispatch_pure(
                         }
                     }
                 }
-                crate::evaluator::check_sequence_length(all_keys.len(), options)?;
-                if by_reference {
-                    Ok(JValue::array(all_keys))
-                } else if all_keys.is_empty() {
-                    Ok(JValue::Undefined)
-                } else if all_keys.len() == 1 {
-                    Ok(all_keys.into_iter().next().unwrap())
-                } else {
-                    Ok(JValue::array(all_keys))
-                }
+                boundary_collapse(all_keys, by_reference, options)
             }
-            _ if by_reference => Ok(JValue::array(vec![])),
-            _ => Ok(JValue::Undefined),
+            // An explicit null, a function value, or any other non-container
+            // scalar all produce zero keys -- collapse the empty result
+            // (raw `[]` when by_reference, else undefined) the same way as
+            // the Object/Array arms above.
+            _ => boundary_collapse(vec![], by_reference, options),
         },
         "lookup" => {
             if args.len() != 2 {
@@ -1101,13 +1110,18 @@ pub(crate) fn dispatch_pure(
             }
 
             let results = lookup_recursive(&args[0], key)?;
-            if results.is_empty() {
-                Ok(JValue::Undefined)
-            } else if results.len() == 1 {
-                Ok(results[0].clone())
+            // jsonata-js's lookup() only builds a sequence (createSequence +
+            // push) on the top-level Array branch -- the Object branch just
+            // returns `input[key]` directly, a raw scalar (or leaves the
+            // result undefined), never a sequence. So the by_reference
+            // collapse-skip only applies when the top-level subject is an
+            // array; a top-level object's single result (lookup_recursive
+            // returns at most one element for a non-array subject) is
+            // unwrapped unconditionally.
+            if matches!(&args[0], JValue::Array(_)) {
+                boundary_collapse(results, by_reference, options)
             } else {
-                crate::evaluator::check_sequence_length(results.len(), options)?;
-                Ok(JValue::array(results))
+                Ok(results.into_iter().next().unwrap_or(JValue::Undefined))
             }
         }
         "spread" => {
@@ -1135,16 +1149,13 @@ pub(crate) fn dispatch_pure(
                     // one-element array, and `$spread({})` is undefined.
                     //
                     // Except when `by_reference`: that collapse is the outer
-                    // evaluate() boundary's job (see `dispatch_pure`'s
-                    // `by_reference` doc comment), which for a by-reference
-                    // call is the HOF's own `hof_result_sequence`, not this
-                    // one. Return the raw, uncollapsed array.
+                    // evaluate() boundary's job (see `boundary_collapse`'s
+                    // doc comment), which for a by-reference call is the
+                    // HOF's own `hof_result_sequence`, not this one. Return
+                    // the raw, uncollapsed array.
                     match functions::object::spread(obj)? {
-                        JValue::Array(entries) if by_reference => {
-                            Ok(JValue::array(entries.to_vec()))
-                        }
                         JValue::Array(entries) => {
-                            crate::evaluator::hof_result_sequence(entries.to_vec(), options)
+                            boundary_collapse(entries.to_vec(), by_reference, options)
                         }
                         other => Ok(other),
                     }
@@ -1161,11 +1172,7 @@ pub(crate) fn dispatch_pure(
                     // empty sequence is undefined -- unless `by_reference`,
                     // per the same outer-boundary reasoning as above.
                     if arr.is_empty() {
-                        return if by_reference {
-                            Ok(JValue::array(vec![]))
-                        } else {
-                            Ok(JValue::Undefined)
-                        };
+                        return boundary_collapse(vec![], by_reference, options);
                     }
                     // Spread each object in the array
                     let mut result = Vec::new();
