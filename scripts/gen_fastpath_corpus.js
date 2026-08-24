@@ -56,6 +56,36 @@ function buildBuiltinArity() {
   return arity;
 }
 
+// The reference's signature strings live only as literals in its
+// `staticFrame.bind(name, defineFunction(impl, '<sig>'))` calls -- nothing
+// exports them -- so they are read out of the source. `$now` and `$millis`
+// bind to `environment`, not `staticFrame`, and are deliberately absent.
+//
+// The count assertion is the point: if a future submodule bump changes how
+// builtins are registered, this must fail loudly rather than quietly return a
+// short list that then reads as "jsonatapy has every signature".
+function buildBuiltinSignatures() {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'tests', 'jsonata-js', 'src', 'jsonata.js'),
+    'utf8'
+  );
+  const bindCount = (source.match(/staticFrame\.bind\(/g) || []).length;
+  const pattern =
+    /staticFrame\.bind\('([A-Za-z0-9]+)', *defineFunction\([A-Za-z0-9._]+, *'([^']+)'\)\)/g;
+  const sigs = {};
+  for (const m of source.matchAll(pattern)) sigs[m[1]] = m[2];
+  const found = Object.keys(sigs).length;
+  if (found !== bindCount) {
+    throw new Error(
+      `signature extraction found ${found} of ${bindCount} staticFrame.bind calls -- ` +
+        'the registration shape in jsonata.js changed; update the pattern above'
+    );
+  }
+  const sorted = {};
+  for (const k of Object.keys(sigs).sort()) sorted[k] = sigs[k];
+  return sorted;
+}
+
 // Payloads. Each keeps the same field names so one expression can be run
 // against all of them; the shapes differ in the ways fast paths care about.
 const DATASETS = {
@@ -212,6 +242,14 @@ const BUILTINS_SECOND_ARG = [
   ['split', '"a,b"'],
   ['join', '["a","b"]'],
   ['substring', '"abcdef"'],
+  // The four multi-parameter builtins from #126 group 2. Their second
+  // parameter was guarded by hand before they had a signature, so the
+  // matrix is what makes deleting those guards provable rather than
+  // assumed.
+  ['toMillis', '"2018-01-01"'],
+  ['fromMillis', '0'],
+  ['formatInteger', '1'],
+  ['parseInteger', '"1"'],
 ];
 
 const BUILTIN_EXPRESSIONS = [];
@@ -415,6 +453,53 @@ const BUILTIN_PROBES = [
   'num ~> |$|{}|',
   'obj.k ~> |$|{}|',
   'obj ~> |$|{"z":9}|',
+  // Six builtins carried no entry in BUILTIN_SIGNATURES, so
+  // `validate_builtin_args` returned `Ok(None)` and *nothing* checked their
+  // arguments -- an explicit null sailed through to the implementation
+  // instead of raising T0410 (#126 group 2). Restoring the reference's own
+  // signature is the fix, but a signature does more than reject nulls: its
+  // `-` marker switches on context substitution, and the padding it adds
+  // moves what the `propagates_undefined` guard reads. So the null forms
+  // below are the target, and the undefined, zero-argument and arity forms
+  // are regression guards for behaviour that is already correct.
+  '$base64encode(nul)',
+  '$base64decode(nul)',
+  '$toMillis(nul)',
+  '$fromMillis(nul)',
+  '$formatInteger(nul, "0")',
+  '$parseInteger(nul, "0")',
+  '$base64encode(missing.x)',
+  '$base64decode(missing.x)',
+  '$toMillis(missing.x)',
+  '$fromMillis(missing.x)',
+  '$formatInteger(missing.x, "0")',
+  '$parseInteger(missing.x, "0")',
+  // Context substitution through the `-` marker: a context of the right type
+  // fills the first parameter, one of the wrong type is T0411, and no
+  // context at all (the top-level object) is T0411 too.
+  'str.$base64encode()',
+  '("YQ==").$base64decode()',
+  'num.$fromMillis()',
+  'num.$formatInteger("0")',
+  'str.$parseInteger("0")',
+  'num.$base64encode()',
+  'str.$fromMillis()',
+  'str.$toMillis()',
+  '$base64encode()',
+  '$toMillis()',
+  // $formatInteger and $parseInteger declare a *required* second parameter,
+  // so the one-argument forms are errors -- T0410 for the missing picture,
+  // T0411 when the substituted context takes the first slot.
+  '$formatInteger(1)',
+  '$parseInteger("1")',
+  // $fromMillis is the only one of the six with a *third* parameter, and the
+  // second-argument matrix cannot reach it. Its `<n-s?s?:s>` timezone slot
+  // rejects a null and trims a trailing undefined, which is what makes
+  // dropping the arm's hand-rolled `Some(JValue::Null) => None` safe.
+  '$fromMillis(0, "[Y0001]", null)',
+  '$fromMillis(0, "[Y0001]", nul)',
+  '$fromMillis(0, "[Y0001]", missing.x)',
+  '$fromMillis(0, "[Y0001]", 1)',
 ];
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 
@@ -495,6 +580,11 @@ async function main() {
   for (const k of Object.keys(arity).sort()) sortedArity[k] = arity[k];
   fs.writeFileSync(arityDest, JSON.stringify(sortedArity) + '\n');
   console.log(`wrote ${Object.keys(sortedArity).length} builtin arities to ${arityDest}`);
+
+  const sigDest = path.join(__dirname, '..', 'tests', 'fixtures', 'builtin_signatures.json');
+  const sigs = buildBuiltinSignatures();
+  fs.writeFileSync(sigDest, JSON.stringify(sigs, null, 2) + '\n');
+  console.log(`wrote ${Object.keys(sigs).length} builtin signatures to ${sigDest}`);
 
   const dest = path.join(__dirname, '..', 'tests', 'fixtures', 'fastpath_differential.json');
   // Compact: this file is generated and regenerated, and pretty-printing it

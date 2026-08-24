@@ -30,6 +30,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- Six builtins — `$base64encode`, `$base64decode`, `$toMillis`, `$fromMillis`,
+  `$formatInteger` and `$parseInteger` — now validate their arguments. They had no entry in
+  the builtin signature table, and a missing entry is not a weaker check but no check at
+  all: validation returns early for a name it does not know, so these six fell back to
+  hand-rolled arity and type guards. An explicit null returned `null` where jsonata-js
+  raises `T0410` (`$base64encode(null)`), the `-` context marker never fired
+  (`str.$base64encode()` was `null`, not `"YQ=="`), `$formatInteger`'s context form was
+  rejected as an arity error, and `$base64encode`/`$base64decode` raised a type error on a
+  missing argument instead of propagating `undefined`. The table had drifted to a strict
+  *subset* of jsonata-js's own — 55 of its 63 entries, every one byte-identical, with eight
+  simply absent — which is why nothing caught it; a new test compares the two tables in
+  both directions against a generated fixture, so a submodule bump that adds or changes a
+  signature now fails CI. The two entries still absent are deliberate and named in that
+  test: `$clone` is not implemented here at all, and `$eval` needs the evaluator.
+  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - `$sum`, `$max`, `$min` and `$average` over a path of the form `array.field` no longer
   silently skip non-numeric values. The fused aggregate fast path
   (`Evaluator::try_fused_aggregate`) reimplemented aggregate semantics rather than

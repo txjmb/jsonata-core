@@ -789,16 +789,12 @@ pub(crate) fn dispatch_pure(
             }
         }
         "formatInteger" => {
-            if args.len() != 2 {
-                return Err(EvaluatorError::EvaluationError(
-                    "formatInteger() requires exactly 2 arguments".to_string(),
-                ));
-            }
+            // `<n-s:s>` fixes the arity at two and rejects a null in either
+            // slot as T0410; an undefined first argument still reaches here.
             match (&args[0], &args[1]) {
                 (JValue::Number(n), JValue::String(picture)) => {
                     Ok(crate::datetime::format_integer(*n, picture)?)
                 }
-                (JValue::Null, _) => Ok(JValue::Null),
                 (JValue::Undefined, _) => Ok(JValue::Undefined),
                 _ => Err(EvaluatorError::TypeError(
                     "formatInteger() requires a number and a string".to_string(),
@@ -806,16 +802,11 @@ pub(crate) fn dispatch_pure(
             }
         }
         "parseInteger" => {
-            if args.len() != 2 {
-                return Err(EvaluatorError::EvaluationError(
-                    "parseInteger() requires exactly 2 arguments".to_string(),
-                ));
-            }
+            // `<s-s:n>`: same as $formatInteger above.
             match (&args[0], &args[1]) {
                 (JValue::String(value), JValue::String(picture)) => {
                     Ok(crate::datetime::parse_integer(value, picture)?)
                 }
-                (JValue::Null, _) => Ok(JValue::Null),
                 (JValue::Undefined, _) => Ok(JValue::Undefined),
                 _ => Err(EvaluatorError::TypeError(
                     "parseInteger() requires a string and a string".to_string(),
@@ -1257,14 +1248,9 @@ pub(crate) fn dispatch_pure(
 
         // ── Encoding functions ──────────────────────────────────────────
         "base64encode" => {
-            if args.is_empty() || args[0].is_null() {
-                return Ok(JValue::Null);
-            }
-            if args.len() != 1 {
-                return Err(EvaluatorError::EvaluationError(
-                    "base64encode() requires exactly 1 argument".to_string(),
-                ));
-            }
+            // `<s-:s>`: validation rejects a wrong arity, a null and a
+            // non-string before the arm runs, and the undefined guard has
+            // already returned, so only a string reaches the match below.
             match &args[0] {
                 JValue::String(s) => Ok(functions::encoding::base64encode(s)?),
                 _ => Err(EvaluatorError::TypeError(
@@ -1273,14 +1259,9 @@ pub(crate) fn dispatch_pure(
             }
         }
         "base64decode" => {
-            if args.is_empty() || args[0].is_null() {
-                return Ok(JValue::Null);
-            }
-            if args.len() != 1 {
-                return Err(EvaluatorError::EvaluationError(
-                    "base64decode() requires exactly 1 argument".to_string(),
-                ));
-            }
+            // `<s-:s>`: validation rejects a wrong arity, a null and a
+            // non-string before the arm runs, and the undefined guard has
+            // already returned, so only a string reaches the match below.
             match &args[0] {
                 JValue::String(s) => Ok(functions::encoding::base64decode(s)?),
                 _ => Err(EvaluatorError::TypeError(
@@ -1440,12 +1421,7 @@ pub(crate) fn dispatch_pure(
             Ok(crate::datetime::millis())
         }
         "toMillis" => {
-            if args.is_empty() || args.len() > 2 {
-                return Err(EvaluatorError::EvaluationError(
-                    "toMillis() requires 1 or 2 arguments".to_string(),
-                ));
-            }
-
+            // `<s-s?:n>` bounds the arity and rejects a null in either slot.
             match &args[0] {
                 JValue::String(s) => {
                     // Optional second argument is a picture string for custom parsing
@@ -1455,8 +1431,6 @@ pub(crate) fn dispatch_pure(
                                 // Use custom picture format parsing
                                 Ok(crate::datetime::to_millis_with_picture(s, picture)?)
                             }
-                            JValue::Null => Ok(JValue::Null),
-                            JValue::Undefined => Ok(JValue::Undefined),
                             _ => Err(EvaluatorError::TypeError(
                                 "toMillis() second argument must be a string".to_string(),
                             )),
@@ -1466,7 +1440,6 @@ pub(crate) fn dispatch_pure(
                         Ok(crate::datetime::to_millis(s)?)
                     }
                 }
-                JValue::Null => Ok(JValue::Null),
                 JValue::Undefined => Ok(JValue::Undefined),
                 _ => Err(EvaluatorError::TypeError(
                     "toMillis() requires a string argument".to_string(),
@@ -1474,12 +1447,7 @@ pub(crate) fn dispatch_pure(
             }
         }
         "fromMillis" => {
-            if args.is_empty() || args.len() > 3 {
-                return Err(EvaluatorError::EvaluationError(
-                    "fromMillis() requires 1 to 3 arguments".to_string(),
-                ));
-            }
-
+            // `<n-s?s?:s>` bounds the arity and rejects a null in any slot.
             match &args[0] {
                 JValue::Number(n) => {
                     let millis = (if n.fract() == 0.0 {
@@ -1492,7 +1460,7 @@ pub(crate) fn dispatch_pure(
                     })?;
 
                     let picture = match args.get(1) {
-                        None | Some(JValue::Undefined) | Some(JValue::Null) => None,
+                        None | Some(JValue::Undefined) => None,
                         Some(JValue::String(s)) => Some(s.to_string()),
                         Some(_) => {
                             return Err(EvaluatorError::TypeError(
@@ -1501,7 +1469,7 @@ pub(crate) fn dispatch_pure(
                         }
                     };
                     let timezone = match args.get(2) {
-                        None | Some(JValue::Undefined) | Some(JValue::Null) => None,
+                        None | Some(JValue::Undefined) => None,
                         Some(JValue::String(s)) => Some(s.to_string()),
                         Some(_) => {
                             return Err(EvaluatorError::TypeError(
