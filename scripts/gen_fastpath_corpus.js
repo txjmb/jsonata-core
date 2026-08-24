@@ -222,6 +222,36 @@ for (const [fn, first] of BUILTINS_SECOND_ARG) {
   for (const o of OPERANDS) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_second_arg', expr: `$${fn}(${first}, ${o})` });
 }
 
+// -- By-reference matrix: builtins passed as a bare callback to
+// $map/$filter/$sift/$each, e.g. `$map(arr, $uppercase)`. This is a THIRD
+// dispatch path (`call_builtin_with_values`) that neither BUILTINS_ONE_ARG/
+// SECOND_ARG (which only exercise explicit argument lists) nor the hand
+// probes below (a handful of specific shapes) cover systematically -- issue
+// #107 stage 2. `now` (embeds a live timestamp) and `shuffle` (randomised
+// output) are excluded for the same non-determinism reason BUILTINS_ONE_ARG
+// excludes them.
+const BUILTINS_BY_REFERENCE = Object.keys(buildBuiltinArity()).filter(
+  (name) => name !== 'now' && name !== 'shuffle'
+);
+
+// Array shapes crossed with every by-reference builtin through $map: the
+// empty array, the real two-element numeric array, and single-element
+// arrays built from each scalar/container operand -- covering every operand
+// *kind* the way BUILTINS_ONE_ARG does for explicit calls, but through the
+// untruncated, unvalidated-before-stage-2 by-reference path.
+const MAP_ARRAY_SHAPES = ['emptyarr', 'arr', '[nul]', '[num]', '[str]', '[obj]', '[arr]'];
+for (const fn of BUILTINS_BY_REFERENCE) {
+  for (const shape of MAP_ARRAY_SHAPES) {
+    BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$map(${shape}, $${fn})` });
+  }
+  // Narrower cross for the other three HOFs that consult
+  // get_callback_param_count -- one representative operand each, matching
+  // BUILTINS_SECOND_ARG's "narrower" convention.
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$filter(arr, $${fn})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$sift(obj, $${fn})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$each(obj, $${fn})` });
+}
+
 // Hand-written probes for shapes neither matrix can reach. Both cross one
 // varying operand against a fixed partner, which leaves out three-argument
 // calls, second arguments that interact with the *content* of the first, and
