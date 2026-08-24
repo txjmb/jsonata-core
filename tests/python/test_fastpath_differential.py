@@ -67,6 +67,16 @@ ENTRIES = ("dict", "json")
 # Sentinel distinguishing "raised" from any legitimate return value.
 ERROR = object()
 
+# Sentinel distinguishing "undefined" from "null" on the json route only.
+# evaluate_json_or_none returns Python None for an explicit JSON null and the
+# raw None (no text at all) for undefined -- that is the one place this
+# harness can tell the two apart, since the dict route hands values back
+# through PyO3's own null/undefined collapse and genuinely cannot. Using this
+# sentinel here (instead of collapsing to None like normalize() does) is what
+# makes issues #109/#110/#112 visible: builtins that returned an explicit
+# null where jsonata-js returns undefined.
+UNDEFINED = object()
+
 
 def case_key(case, engine, entry):
     """Baseline key. Includes the engine and the data-entry route: a case that
@@ -104,11 +114,11 @@ def evaluate(case, entry):
     expr = jsonatapy.compile(case["expr"])
     try:
         if entry == "json":
-            # evaluate_json_or_none returns None for Undefined and the text
-            # "null" for an explicit null, which keeps this route's undefined
-            # handling identical to the dict route's.
+            # evaluate_json_or_none returns raw=None for Undefined and the
+            # text "null" for an explicit null -- surface that distinction
+            # via UNDEFINED rather than collapsing it, see UNDEFINED above.
             raw = expr.evaluate_json_or_none(json.dumps(data))
-            return None if raw is None else json.loads(raw)
+            return UNDEFINED if raw is None else json.loads(raw)
         return expr.evaluate(data)
     except Exception:
         return ERROR
@@ -142,7 +152,22 @@ def diverges(case, entry="dict"):
             return None
         return f"jsonata-js returned {want}, jsonatapy {got!r}"
 
-    want = None if expected["kind"] == "undefined" else expected["value"]
+    # Only the json route can tell undefined and explicit null apart (see the
+    # UNDEFINED sentinel comment above), so only it gets the sharper check.
+    # The dict route keeps the historical collapsed comparison verbatim.
+    if expected["kind"] == "undefined":
+        if entry == "json":
+            if got is UNDEFINED:
+                return None
+            if got is ERROR:
+                return "jsonata-js returned undefined, jsonatapy raised"
+            return f"jsonata-js undefined, jsonatapy returned {got!r}"
+        want = None
+    else:
+        want = expected["value"]
+        if entry == "json" and got is UNDEFINED:
+            return f"jsonata-js returned {want!r}, jsonatapy returned undefined"
+
     if got is ERROR:
         return f"jsonata-js returned {want!r}, jsonatapy raised"
     if normalize(got) != normalize(want):

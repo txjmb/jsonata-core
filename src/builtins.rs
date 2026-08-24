@@ -128,14 +128,13 @@ pub(crate) fn dispatch_pure(
     let args: &[JValue] = if args.is_empty() {
         match name {
             "string" => {
-                // $string() with an undefined context is undefined; with an
-                // explicit null context it stays Null (baseline behaviour,
-                // see git show 30e2794:src/evaluator.rs ~line 7782).
+                // $string() with an undefined context is undefined -- there is
+                // nothing to stringify. An explicit null context is a value
+                // like any other for this signature (`x` admits `l`), so it
+                // substitutes normally and reaches the "string" dispatch arm
+                // below, which turns it into "null" (issue #110).
                 if context.is_undefined() {
                     return Ok(JValue::Undefined);
-                }
-                if context.is_null() {
-                    return Ok(JValue::Null);
                 }
                 args_storage = vec![context.clone()];
                 &args_storage
@@ -874,19 +873,18 @@ pub(crate) fn dispatch_pure(
 
         // ── Object functions ────────────────────────────────────────────
         "keys" => match args.first() {
-            // Signature `<x-:a<s>>` (Any) admits an explicit null unwrapped, so this
-            // branch is reached: `$keys(null)` stays `Null`, preserving pre-existing
-            // baseline behaviour on both routes. That diverges from jsonata-js, which
-            // gives `undefined` for `$keys(null)`; the divergence predates this branch
-            // and is deliberately not fixed here (tracked separately). Undefined (and
-            // a genuinely absent argument) must still propagate as Undefined, not Null:
-            // `{"k": $keys(missing.x)}` is `{}` in the reference, not `{"k": null}`.
+            // jsonata-js's $keys returns undefined whenever there are no keys to
+            // report -- a missing/undefined argument, an explicit null, a
+            // non-container scalar, a function value, or a container (object or
+            // array-of-objects) that yields an empty key list (issue #112). Only
+            // an object (or array containing at least one object) with at least
+            // one key produces a value.
             None | Some(JValue::Undefined) => Ok(JValue::Undefined),
-            Some(JValue::Null) => Ok(JValue::Null),
-            Some(JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(JValue::Null),
+            Some(JValue::Null) => Ok(JValue::Undefined),
+            Some(JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(JValue::Undefined),
             Some(JValue::Object(obj)) => {
                 if obj.is_empty() {
-                    Ok(JValue::Null)
+                    Ok(JValue::Undefined)
                 } else {
                     let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
                     crate::evaluator::check_sequence_length(keys.len(), options)?;
@@ -911,7 +909,7 @@ pub(crate) fn dispatch_pure(
                     }
                 }
                 if all_keys.is_empty() {
-                    Ok(JValue::Null)
+                    Ok(JValue::Undefined)
                 } else if all_keys.len() == 1 {
                     Ok(all_keys.into_iter().next().unwrap())
                 } else {
@@ -919,7 +917,7 @@ pub(crate) fn dispatch_pure(
                     Ok(JValue::array(all_keys))
                 }
             }
-            _ => Ok(JValue::Null),
+            _ => Ok(JValue::Undefined),
         },
         "lookup" => {
             if args.len() != 2 {
@@ -927,10 +925,11 @@ pub(crate) fn dispatch_pure(
                     "lookup() requires exactly 2 arguments".to_string(),
                 ));
             }
-            if args[0].is_null() {
-                return Ok(JValue::Null);
-            }
-            if args[0].is_undefined() {
+            // jsonata-js's $lookup has no null-vs-undefined subject distinction:
+            // any non-object subject (including an explicit null) yields
+            // undefined, since lookup_recursive below returns no results for
+            // it either way.
+            if args[0].is_null() || args[0].is_undefined() {
                 return Ok(JValue::Undefined);
             }
 
@@ -981,7 +980,7 @@ pub(crate) fn dispatch_pure(
 
             let results = lookup_recursive(&args[0], key)?;
             if results.is_empty() {
-                Ok(JValue::Null)
+                Ok(JValue::Undefined)
             } else if results.len() == 1 {
                 Ok(results[0].clone())
             } else {
@@ -1268,7 +1267,9 @@ pub(crate) fn dispatch_pure(
                 )));
             }
 
-            Ok(JValue::Null)
+            // jsonata-js: $assert() has no return value on success -- undefined,
+            // not null.
+            Ok(JValue::Undefined)
         }
 
         // ── Date/time functions ─────────────────────────────────────────
