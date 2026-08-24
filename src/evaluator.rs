@@ -1220,7 +1220,7 @@ fn eval_compiled_inner(
                     arg, data, vars, ctx, shape, options, start_time,
                 )?);
             }
-            crate::builtins::dispatch_pure(name, &evaled_args, data, options)
+            crate::builtins::dispatch_pure(name, &evaled_args, data, options, false)
         }
 
         // Block: evaluate each expression in sequence, return the last value.
@@ -2988,6 +2988,28 @@ impl Evaluator {
                     if let Some(stored_lambda) = self.lookup_lambda_from_value(value) {
                         return stored_lambda.params.len();
                     }
+                }
+                // A host-registered function (`register_fn`/`register_fn_override`)
+                // shadows any built-in of the same name in call position (see
+                // `evaluate_function_call`'s `host_fns` check), so its arity
+                // here must not fall back to the built-in's table entry --
+                // jsonata-js truncates to the *override's own*
+                // `implementation.length`, which this Rust API has no way to
+                // introspect for an arbitrary host closure. Return MAX
+                // instead: an override receives every argument uncut, rather
+                // than being silently truncated to a same-named builtin's
+                // arity it may not share.
+                if !self.host_fns.is_empty() && self.host_fns.contains_key(var_name) {
+                    return usize::MAX;
+                }
+                // A builtin passed by reference (e.g. `$map(arr, $uppercase)`)
+                // parses as this same AstNode::Variable shape. jsonata-js
+                // truncates the callback's arguments to the underlying
+                // JavaScript function's parameter count -- see
+                // `builtins::builtin_arity`. Names it doesn't cover (unknown
+                // variables) fall through to the safe MAX default below.
+                if let Some(arity) = crate::builtins::builtin_arity(var_name) {
+                    return arity;
                 }
                 // Unknown, return max to be safe
                 usize::MAX
@@ -7020,12 +7042,15 @@ impl Evaluator {
                 return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
             }
             if let JValue::Builtin { name: builtin_name } = &value {
-                // This is a built-in function reference (e.g., $f bound to $sum)
+                // This is a built-in function reference (e.g., $f bound to $sum),
+                // called directly with an explicit argument list -- not passed as
+                // an argument to another function, so jsonata-js does not wrap it
+                // in a closure. `by_reference: false` (see call_builtin_with_values).
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for arg in args {
                     evaluated_args.push(self.evaluate_internal(arg, data)?);
                 }
-                return self.call_builtin_with_values(builtin_name, &evaluated_args);
+                return self.call_builtin_with_values(builtin_name, &evaluated_args, data, false);
             }
         }
 
@@ -7241,7 +7266,13 @@ impl Evaluator {
         // per-function logic. Only the builtins that call back into evaluation
         // are still handled below.
         if crate::builtins::is_pure_builtin(name) {
-            return crate::builtins::dispatch_pure(name, &evaluated_args, data, &self.options);
+            return crate::builtins::dispatch_pure(
+                name,
+                &evaluated_args,
+                data,
+                &self.options,
+                false,
+            );
         }
 
         // JSONata feature: when a function is called with one fewer argument than
@@ -7502,9 +7533,14 @@ impl Evaluator {
 
                     let mut result = IndexMap::new();
                     for (key, value) in obj.iter() {
-                        // Build argument list based on what callback expects
+                        // Build argument list based on what callback expects.
+                        // Mirrors jsonata-js's hofFuncArgs: the value is
+                        // always passed regardless of declared arity (JS
+                        // ignores extra parameters a function didn't
+                        // declare) -- a 0-arity callback still gets 1 here,
+                        // not 0.
                         let call_args = match param_count {
-                            1 => vec![value.clone()],
+                            0 | 1 => vec![value.clone()],
                             2 => vec![value.clone(), JValue::string(key.clone())],
                             _ => vec![
                                 value.clone(),
@@ -7722,9 +7758,13 @@ impl Evaluator {
 
                         let mut result = Vec::with_capacity(arr.len());
                         for (index, item) in arr.iter().enumerate() {
-                            // Build argument list based on what callback expects
+                            // Build argument list based on what callback expects.
+                            // Mirrors jsonata-js's hofFuncArgs: the value is
+                            // always passed regardless of declared arity -- a
+                            // 0-arity callback still gets 1 argument here,
+                            // not 0.
                             let call_args = match param_count {
-                                1 => vec![item.clone()],
+                                0 | 1 => vec![item.clone()],
                                 2 => vec![item.clone(), JValue::Number(index as f64)],
                                 _ => vec![
                                     item.clone(),
@@ -7877,9 +7917,12 @@ impl Evaluator {
                 let mut result = Vec::with_capacity(items.len() / 2);
 
                 for (index, item) in items.iter().enumerate() {
-                    // Build argument list based on what callback expects
+                    // Build argument list based on what callback expects.
+                    // Mirrors jsonata-js's hofFuncArgs: the value is always
+                    // passed regardless of declared arity -- a 0-arity
+                    // callback still gets 1 argument here, not 0.
                     let call_args = match param_count {
-                        1 => vec![item.clone()],
+                        0 | 1 => vec![item.clone()],
                         2 => vec![item.clone(), JValue::Number(index as f64)],
                         _ => vec![
                             item.clone(),
@@ -8046,9 +8089,15 @@ impl Evaluator {
                     // Callbacks may use any subset of these parameters
                     let actual_idx = start_idx + idx;
 
-                    // Build argument list based on what callback expects
+                    // Build argument list based on what callback expects. The
+                    // D3050 check above only inspects a literal inline
+                    // lambda; a by-reference callback (stored lambda or
+                    // builtin) with arity below 2 slips past it, so guard
+                    // here too rather than let `arr_value.unwrap()` panic --
+                    // jsonata-js would have raised D3050 before ever reaching
+                    // this loop for such a callback.
                     let call_args = match param_count {
-                        2 => vec![accumulator.clone(), item.clone()],
+                        0..=2 => vec![accumulator.clone(), item.clone()],
                         3 => vec![
                             accumulator.clone(),
                             item.clone(),
@@ -8098,20 +8147,34 @@ impl Evaluator {
                         ))),
                     }
                 } else {
-                    // With predicate - find exactly 1 matching element
-                    let arr_value = JValue::array(arr.clone());
+                    // With predicate - find exactly 1 matching element.
+                    // Detect how many parameters the callback expects so a
+                    // by-reference builtin (e.g. `$single(arr, $exists)`)
+                    // isn't handed arguments it never declared -- mirrors
+                    // the `$filter`/`$map`/`$each` call sites above.
+                    let param_count = self.get_callback_param_count(&args[1]);
+                    // Only create the array value if callback uses 3 parameters
+                    let arr_value = if param_count >= 3 {
+                        Some(JValue::array(arr.clone()))
+                    } else {
+                        None
+                    };
                     let mut matches = Vec::new();
                     for (index, item) in arr.into_iter().enumerate() {
-                        // Apply predicate function with (item, index, array)
-                        let predicate_result = self.apply_function(
-                            &args[1],
-                            &[
+                        // Build argument list based on what callback expects.
+                        // Mirrors jsonata-js's hofFuncArgs: the value is
+                        // always passed regardless of declared arity -- a
+                        // 0-arity callback still gets 1 argument here, not 0.
+                        let call_args = match param_count {
+                            0 | 1 => vec![item.clone()],
+                            2 => vec![item.clone(), JValue::Number(index as f64)],
+                            _ => vec![
                                 item.clone(),
                                 JValue::Number(index as f64),
-                                arr_value.clone(),
+                                arr_value.as_ref().unwrap().clone(),
                             ],
-                            data,
-                        )?;
+                        };
+                        let predicate_result = self.apply_function(&args[1], &call_args, data)?;
                         if self.is_truthy(&predicate_result) {
                             matches.push(item);
                         }
@@ -8157,11 +8220,20 @@ impl Evaluator {
                     JValue::Object(obj) => {
                         let mut result = Vec::new();
                         for (key, value) in obj.iter() {
-                            // Build argument list based on what callback expects
-                            // The callback receives the value as the first argument and key as second
+                            // Build argument list based on what callback expects.
+                            // Mirrors jsonata-js's hofFuncArgs: the value is
+                            // always passed regardless of declared arity (a
+                            // 0-arity callback still gets 1 argument, not 0);
+                            // the key is added only at arity >= 2, and the
+                            // whole object only at arity >= 3.
                             let call_args = match param_count {
-                                1 => vec![value.clone()],
-                                _ => vec![value.clone(), JValue::string(key.clone())],
+                                0 | 1 => vec![value.clone()],
+                                2 => vec![value.clone(), JValue::string(key.clone())],
+                                _ => vec![
+                                    value.clone(),
+                                    JValue::string(key.clone()),
+                                    JValue::Object(obj.clone()),
+                                ],
                             };
 
                             let fn_result = self.apply_function(func_arg, &call_args, data)?;
@@ -8330,9 +8402,13 @@ impl Evaluator {
                         self.evaluate_internal(func_node, &values[0])
                     }
                 } else if self.is_builtin_function(var_name) {
-                    // This is a built-in function reference (e.g., $string, $number)
-                    // Call it directly with the provided values (already evaluated)
-                    self.call_builtin_with_values(var_name, values)
+                    // This is a built-in function reference (e.g., $string, $number).
+                    // Every caller of `apply_function` -- $map/$filter/$reduce/$sift/
+                    // $each's per-element loop, $single's predicate, $sort's
+                    // comparator, $match's matcher -- passes the callback as an
+                    // ARGUMENT to another function, the shape jsonata-js wraps in a
+                    // closure. `by_reference: true` (see call_builtin_with_values).
+                    self.call_builtin_with_values(var_name, values, data, true)
                 } else {
                     // Unknown variable - evaluate with first value as context
                     if values.is_empty() {
@@ -9416,20 +9492,41 @@ impl Evaluator {
         )
     }
 
-    /// Call a built-in function directly with pre-evaluated Values
-    /// This is used when passing built-in functions to higher-order functions like $map
+    /// Call a built-in function directly with pre-evaluated Values.
+    ///
+    /// Reached from two genuinely different call shapes, and `by_reference`
+    /// tells them apart:
+    ///
+    /// - A builtin-valued variable called directly, `$f := $uppercase;
+    ///   $f("x")`. jsonata-js evaluates `$f` to the builtin's own `proc`
+    ///   object and applies it exactly as it would `$uppercase("x")` --
+    ///   no wrapping happens. `by_reference: false`.
+    /// - A builtin passed as an ARGUMENT to another function -- a HOF
+    ///   callback (`$map(arr, $uppercase)`), a `$sort` comparator, a
+    ///   `$match` matcher. jsonata-js's `evaluateFunction` wraps any
+    ///   function-valued *argument* in a closure (`jsonata.js:1461-1471`)
+    ///   before the callee ever sees it, and that closure calls `apply(arg,
+    ///   params, null, environment)` -- note the literal `null` for
+    ///   `input`. `by_reference: true`.
+    ///
+    /// Getting this wrong previously showed up as `$f := $keys; $f({"a":
+    /// 1})` wrongly returning `["a"]` instead of `"a"` -- the by-reference
+    /// (HOF-argument) collapse-skipping described on `dispatch_pure`'s
+    /// `by_reference` parameter was leaking into the direct-call shape,
+    /// which must collapse exactly like a literal `$keys({"a":1})` does.
     fn call_builtin_with_values(
         &mut self,
         name: &str,
         values: &[JValue],
+        context: &JValue,
+        by_reference: bool,
     ) -> Result<JValue, EvaluatorError> {
-        use crate::functions;
-
         // A host override applied in value position (e.g. `$f := $now; $f()`) or
         // passed to a higher-order function reaches dispatch here rather than
         // through `evaluate_function_call`. Check the registry first so the
-        // override is honoured consistently in both positions. Runs before the
-        // arity guard below so a zero-arg override (`$now`/`$uuid`) is allowed.
+        // override is honoured consistently in both positions, and before
+        // `dispatch_pure` so a host override shadows a same-named builtin here
+        // exactly as it does at the other two dispatch sites.
         if !self.host_fns.is_empty() {
             if let Some(f) = self.host_fns.get(name).cloned() {
                 let mut ctx = HostCtx::new();
@@ -9437,260 +9534,32 @@ impl Evaluator {
             }
         }
 
-        if values.is_empty() {
-            return Err(EvaluatorError::EvaluationError(format!(
-                "{}() requires at least 1 argument",
-                name
-            )));
+        // Every builtin that needs nothing but its arguments, the context,
+        // and the evaluation options -- the full set this function used to
+        // hand-implement 22 arms of -- is handled by the one shared
+        // dispatcher the compiled path and the tree-walker also use. This
+        // runs before any arity check: `dispatch_pure` does its own
+        // signature-driven validation (including its own implicit-context
+        // insertion for a zero-arg call like bare `$string`), and gating on
+        // "at least 1 argument" first would wrongly reject `$zip`/`$millis`
+        // (arity 0) reached by reference.
+        if crate::builtins::is_pure_builtin(name) {
+            return crate::builtins::dispatch_pure(
+                name,
+                values,
+                context,
+                &self.options,
+                by_reference,
+            );
         }
 
-        // Normalize every lazy top-level argument so a conversion failure raises
-        // TypeError here rather than being swallowed by a downstream function that
-        // maps `LazyPyDict`/failed-conversion to a misleading result (e.g. `string()`'s
-        // lazy arm silently stringifying to `"null"`). This is reachable from
-        // higher-order functions passed a bare builtin reference, e.g.
-        // `$map(items, $string)` where `items` elements are lazy (first argument),
-        // or `$f := $append; $f(a, x)` where `x` is a lazy non-first argument.
-        // Mirrors the blanket normalization `evaluate_function_call` applies to
-        // ALL `evaluated_args` for inline builtin calls. Only top-level lazy
-        // values are normalized -- arrays/objects containing lazy elements are
-        // left as-is (pass-through preservation), same as every other dispatch
-        // site. Guarded by `is_lazy` so the common (no lazy operand) path pays
-        // no allocation.
-        let normalized_values: Vec<JValue>;
-        let values: &[JValue] = if values.iter().any(|v| v.is_lazy()) {
-            normalized_values = values
-                .iter()
-                .map(|v| {
-                    if v.is_lazy() {
-                        normalize_lazy(v)
-                    } else {
-                        Ok(v.clone())
-                    }
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            &normalized_values
-        } else {
-            values
-        };
-        // NOT signature-validated yet, unlike the other two dispatch paths. A
-        // builtin reaching here was passed by reference to a higher-order
-        // function, and that changes the arity contract in two ways this helper
-        // does not yet model: a context-capable parameter (`<s-:s>`) is counted
-        // as taking no arguments, and a HOF hands its callback more arguments
-        // than the builtin declares ($sift calls its callback with value and
-        // key). Wiring it in without handling both rejects `$map(arr, $uppercase)`.
-        let arg = &values[0];
-
-        match name {
-            "string" => Ok(functions::string::string(arg, None)?),
-            "number" => Ok(functions::numeric::number(arg)?),
-            "boolean" => Ok(functions::boolean::boolean(arg)?),
-            "not" => {
-                let b = functions::boolean::boolean(arg)?;
-                match b {
-                    JValue::Bool(val) => Ok(JValue::Bool(!val)),
-                    _ => Err(EvaluatorError::TypeError(
-                        "not() requires a boolean".to_string(),
-                    )),
-                }
-            }
-            "exists" => Ok(JValue::Bool(!arg.is_undefined())),
-            "abs" => match arg {
-                JValue::Number(n) => Ok(functions::numeric::abs(*n)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "abs() requires a number argument".to_string(),
-                )),
-            },
-            "floor" => match arg {
-                JValue::Number(n) => Ok(functions::numeric::floor(*n)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "floor() requires a number argument".to_string(),
-                )),
-            },
-            "ceil" => match arg {
-                JValue::Number(n) => Ok(functions::numeric::ceil(*n)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "ceil() requires a number argument".to_string(),
-                )),
-            },
-            "round" => match arg {
-                JValue::Number(n) => Ok(functions::numeric::round(*n, None)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "round() requires a number argument".to_string(),
-                )),
-            },
-            "sqrt" => match arg {
-                JValue::Number(n) => Ok(functions::numeric::sqrt(*n)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "sqrt() requires a number argument".to_string(),
-                )),
-            },
-            "uppercase" => match arg {
-                JValue::String(s) => Ok(JValue::string(s.to_uppercase())),
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "uppercase() requires a string argument".to_string(),
-                )),
-            },
-            "lowercase" => match arg {
-                JValue::String(s) => Ok(JValue::string(s.to_lowercase())),
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "lowercase() requires a string argument".to_string(),
-                )),
-            },
-            "trim" => match arg {
-                JValue::String(s) => Ok(JValue::string(s.trim().to_string())),
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "trim() requires a string argument".to_string(),
-                )),
-            },
-            "length" => match arg {
-                JValue::String(s) => Ok(JValue::Number(s.chars().count() as f64)),
-                JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "length() requires a string or array argument".to_string(),
-                )),
-            },
-            "sum" => match arg {
-                JValue::Array(arr) => {
-                    let mut total = 0.0;
-                    for item in arr.iter() {
-                        match item {
-                            JValue::Number(n) => {
-                                total += *n;
-                            }
-                            _ => {
-                                return Err(EvaluatorError::TypeError(
-                                    "sum() requires all array elements to be numbers".to_string(),
-                                ));
-                            }
-                        }
-                    }
-                    Ok(JValue::Number(total))
-                }
-                JValue::Number(n) => Ok(JValue::Number(*n)),
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "sum() requires an array of numbers".to_string(),
-                )),
-            },
-            "count" => {
-                match arg {
-                    JValue::Array(arr) => Ok(JValue::Number(arr.len() as f64)),
-                    JValue::Null => Ok(JValue::Number(0.0)),
-                    _ => Ok(JValue::Number(1.0)), // Single value counts as 1
-                }
-            }
-            "max" => match arg {
-                JValue::Array(arr) => {
-                    let mut max_val: Option<f64> = None;
-                    for item in arr.iter() {
-                        if let JValue::Number(n) = item {
-                            let f = *n;
-                            max_val = Some(max_val.map_or(f, |m| m.max(f)));
-                        }
-                    }
-                    max_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m)))
-                }
-                JValue::Number(n) => Ok(JValue::Number(*n)),
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "max() requires an array of numbers".to_string(),
-                )),
-            },
-            "min" => match arg {
-                JValue::Array(arr) => {
-                    let mut min_val: Option<f64> = None;
-                    for item in arr.iter() {
-                        if let JValue::Number(n) = item {
-                            let f = *n;
-                            min_val = Some(min_val.map_or(f, |m| m.min(f)));
-                        }
-                    }
-                    min_val.map_or(Ok(JValue::Null), |m| Ok(JValue::Number(m)))
-                }
-                JValue::Number(n) => Ok(JValue::Number(*n)),
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "min() requires an array of numbers".to_string(),
-                )),
-            },
-            "average" => match arg {
-                JValue::Array(arr) => {
-                    let nums: Vec<f64> = arr.iter().filter_map(|v| v.as_f64()).collect();
-                    if nums.is_empty() {
-                        Ok(JValue::Null)
-                    } else {
-                        let avg = nums.iter().sum::<f64>() / nums.len() as f64;
-                        Ok(JValue::Number(avg))
-                    }
-                }
-                JValue::Number(n) => Ok(JValue::Number(*n)),
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "average() requires an array of numbers".to_string(),
-                )),
-            },
-            "append" => {
-                // append(array1, array2) - append second array to first
-                if values.len() < 2 {
-                    return Err(EvaluatorError::EvaluationError(
-                        "append() requires 2 arguments".to_string(),
-                    ));
-                }
-                let first = &values[0];
-                let second = &values[1];
-
-                // Convert first to array if needed
-                let mut result = match first {
-                    JValue::Array(arr) => arr.to_vec(),
-                    JValue::Null => vec![],
-                    other => vec![other.clone()],
-                };
-
-                // Append second (flatten if array)
-                match second {
-                    JValue::Array(arr) => result.extend(arr.iter().cloned()),
-                    JValue::Null => {}
-                    other => result.push(other.clone()),
-                }
-
-                check_sequence_length(result.len(), &self.options)?;
-                Ok(JValue::array(result))
-            }
-            "reverse" => match arg {
-                JValue::Array(arr) => {
-                    let mut reversed = arr.to_vec();
-                    reversed.reverse();
-                    Ok(JValue::array(reversed))
-                }
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "reverse() requires an array".to_string(),
-                )),
-            },
-            "keys" => match arg {
-                JValue::Object(obj) => {
-                    let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
-                    check_sequence_length(keys.len(), &self.options)?;
-                    Ok(JValue::array(keys))
-                }
-                JValue::Null => Ok(JValue::Null),
-                _ => Err(EvaluatorError::TypeError(
-                    "keys() requires an object".to_string(),
-                )),
-            },
-
-            // Add more functions as needed
-            _ => Err(EvaluatorError::ReferenceError(format!(
-                "Built-in function {} cannot be called with values directly",
-                name
-            ))),
-        }
+        // Everything else ($map, $filter, $reduce, $single, $sift, $each,
+        // $sort, $eval, $match, $replace) takes AST arguments and calls back
+        // into evaluation -- it cannot run from already-evaluated values.
+        Err(EvaluatorError::ReferenceError(format!(
+            "Built-in function {} cannot be called with values directly",
+            name
+        )))
     }
 
     /// Collect all descendant values recursively

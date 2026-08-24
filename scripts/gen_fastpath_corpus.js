@@ -19,7 +19,42 @@
 const fs = require('fs');
 const path = require('path');
 const jsonata = require(path.join(__dirname, '..', 'tests', 'jsonata-js', 'src', 'jsonata.js'));
+const jsFunctions = require(path.join(__dirname, '..', 'tests', 'jsonata-js', 'src', 'functions.js'));
+const jsDatetime = require(path.join(__dirname, '..', 'tests', 'jsonata-js', 'src', 'datetime.js'));
 const refVersion = require(path.join(__dirname, '..', 'tests', 'jsonata-js', 'package.json')).version;
+
+// Arity of every builtin that a higher-order function can pass a callback
+// by reference (`$map(arr, $uppercase)`). jsonata-js truncates the arguments
+// it hands the callback to the *JavaScript function's parameter count*
+// (`hofFuncArgs` -> `getFunctionArity` -> `implementation.length`), not to
+// the JSONata signature -- `$string` has two signature parameters but arity
+// 1, and `$substring` has arity 3, which is why `$map([1,2], $substring)` is
+// a T0410 in the reference (arity 3 > the 1 argument $map supplies).
+//
+// `now` and `millis` are inline closures bound in jsonata.js's `evaluate`
+// (tests/jsonata-js/src/jsonata.js:2140 and :2143), not entries in
+// functions.js, so their arity is hard-coded here rather than read off a
+// `.length`.
+const FUNCTIONS_JS_ARITY_NAMES = [
+  'abs', 'append', 'assert', 'average', 'base64decode', 'base64encode',
+  'boolean', 'ceil', 'contains', 'count', 'decodeUrl', 'decodeUrlComponent',
+  'distinct', 'encodeUrl', 'encodeUrlComponent', 'error', 'exists', 'floor',
+  'formatBase', 'formatNumber', 'join', 'keys', 'length', 'lookup',
+  'lowercase', 'max', 'merge', 'min', 'not', 'number', 'pad', 'power',
+  'reverse', 'round', 'shuffle', 'split', 'spread', 'sqrt', 'string',
+  'substring', 'substringAfter', 'substringBefore', 'sum', 'trim', 'type',
+  'uppercase', 'zip',
+];
+const DATETIME_JS_ARITY_NAMES = ['toMillis', 'fromMillis', 'formatInteger', 'parseInteger'];
+
+function buildBuiltinArity() {
+  const arity = {};
+  for (const name of FUNCTIONS_JS_ARITY_NAMES) arity[name] = jsFunctions[name].length;
+  for (const name of DATETIME_JS_ARITY_NAMES) arity[name] = jsDatetime[name].length;
+  arity.now = 2; // jsonata.js:2140 -- function(picture, timezone)
+  arity.millis = 0; // jsonata.js:2143 -- function()
+  return arity;
+}
 
 // Payloads. Each keeps the same field names so one expression can be run
 // against all of them; the shapes differ in the ways fast paths care about.
@@ -185,6 +220,52 @@ for (const fn of BUILTINS_ONE_ARG) {
 }
 for (const [fn, first] of BUILTINS_SECOND_ARG) {
   for (const o of OPERANDS) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_second_arg', expr: `$${fn}(${first}, ${o})` });
+}
+
+// -- By-reference matrix: builtins passed as a bare callback to
+// $map/$filter/$sift/$each/$single/$sort, e.g. `$map(arr, $uppercase)`. This
+// is a THIRD dispatch path (`call_builtin_with_values`) that neither
+// BUILTINS_ONE_ARG/SECOND_ARG (which only exercise explicit argument lists)
+// nor the hand probes below (a handful of specific shapes) cover
+// systematically -- issue #107 stage 2. `now` (embeds a live timestamp) and
+// `shuffle` (randomised output) are excluded for the same non-determinism
+// reason BUILTINS_ONE_ARG excludes them.
+//
+// `$single` and `$sort` were missing from this matrix even though they
+// dispatch through the same by-reference path as $filter/$sift/$each --
+// `$single`'s own HOF call site was the one spot that never consulted
+// callback arity at all (hard-coded a 3-arg call), so this matrix could not
+// have caught that regression. Keep both here going forward.
+const BUILTINS_BY_REFERENCE = Object.keys(buildBuiltinArity()).filter(
+  (name) => name !== 'now' && name !== 'shuffle'
+);
+
+// Array shapes crossed with every by-reference builtin through $map: the
+// empty array, the real two-element numeric array, and single-element
+// arrays built from each scalar/container operand -- covering every operand
+// *kind* the way BUILTINS_ONE_ARG does for explicit calls, but through the
+// untruncated, unvalidated-before-stage-2 by-reference path.
+const MAP_ARRAY_SHAPES = ['emptyarr', 'arr', '[nul]', '[num]', '[str]', '[obj]', '[arr]'];
+for (const fn of BUILTINS_BY_REFERENCE) {
+  for (const shape of MAP_ARRAY_SHAPES) {
+    BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$map(${shape}, $${fn})` });
+  }
+  // Narrower cross for the other five HOFs that consult
+  // get_callback_param_count (or, for $sort, dispatch a builtin comparator
+  // through the same by-reference path even though it always calls it with
+  // exactly 2 args) -- one representative operand each, matching
+  // BUILTINS_SECOND_ARG's "narrower" convention.
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$filter(arr, $${fn})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$sift(obj, $${fn})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$each(obj, $${fn})` });
+  // `$single` errors for any predicate over a 2-element array (0 or 2
+  // matches, never exactly 1), and the harness only asserts error *kind*,
+  // not code/message -- so a 2-element array here would make every case
+  // error both before and after a callback-arity regression, blind to the
+  // very bug this line exists to catch. `[obj]` is a single-element array,
+  // so a truthy predicate produces a real value to compare byte-for-byte.
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$single([obj], $${fn})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$sort(arr, $${fn})` });
 }
 
 // Hand-written probes for shapes neither matrix can reach. Both cross one
@@ -407,6 +488,13 @@ async function main() {
     }) + '\n'
   );
   console.log(`wrote ${builtinCases.length} builtin cases`);
+
+  const arityDest = path.join(__dirname, '..', 'tests', 'fixtures', 'builtin_arity.json');
+  const arity = buildBuiltinArity();
+  const sortedArity = {};
+  for (const k of Object.keys(arity).sort()) sortedArity[k] = arity[k];
+  fs.writeFileSync(arityDest, JSON.stringify(sortedArity) + '\n');
+  console.log(`wrote ${Object.keys(sortedArity).length} builtin arities to ${arityDest}`);
 
   const dest = path.join(__dirname, '..', 'tests', 'fixtures', 'fastpath_differential.json');
   // Compact: this file is generated and regenerated, and pretty-printing it

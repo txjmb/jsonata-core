@@ -105,6 +105,24 @@ class TestOverride:
         with pytest.raises(ValueError, match="compiled fast path"):
             expr.register_override("round", lambda x: 0)
 
+    def test_override_gets_full_hof_args_not_builtin_arity(self):
+        # `now` has table arity 2 (picture, timezone), but a host override
+        # replacing it is an arbitrary closure -- jsonata-js truncates a
+        # by-reference HOF callback to the *override's own*
+        # implementation.length, which this API can't introspect. So the
+        # override must receive $map's full (item, index, array) triple
+        # uncut, not get truncated to the shadowed builtin's table arity.
+        calls = []
+
+        def spy(*args):
+            calls.append(args)
+            return "x"
+
+        expr = jsonatapy.compile('$map(["a", "b"], $now)')
+        expr.register_override("now", spy)
+        assert expr.evaluate(None) == ["x", "x"]
+        assert calls == [("a", 0, ["a", "b"]), ("b", 1, ["a", "b"])]
+
 
 class TestNoImpact:
     def test_no_host_fns_unchanged(self):
