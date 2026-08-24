@@ -874,7 +874,13 @@ pub(crate) fn dispatch_pure(
 
         // ── Object functions ────────────────────────────────────────────
         "keys" => match args.first() {
-            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            // Signature `<x-:a<s>>` (Any) admits an explicit null unwrapped,
+            // so this branch is live -- $keys(null) stays Null. Undefined
+            // (and a genuinely absent argument) must propagate as Undefined,
+            // not Null: `{"k": $keys(missing.x)}` is `{}` in the reference,
+            // not `{"k": null}`.
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(JValue::Null) => Ok(JValue::Null),
             Some(JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(JValue::Null),
             Some(JValue::Object(obj)) => {
                 if obj.is_empty() {
