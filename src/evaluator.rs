@@ -3408,6 +3408,7 @@ impl Evaluator {
     ) -> Result<JValue, EvaluatorError> {
         match node {
             AstNode::String(s) => Ok(JValue::string(s.clone())),
+            AstNode::KeepArray => Ok(Self::keep_array(data)),
 
             // Name nodes represent field access on the current data
             AstNode::Name(field_name) => {
@@ -3666,9 +3667,14 @@ impl Evaluator {
                 // grouping and produces `{}`. We mirror that by mapping undefined
                 // to an empty item list here (rather than short-circuiting), and
                 // let the empty-input handling below generate the `{}`.
+                //
+                // An explicit null is a value and groups like any other scalar:
+                // `nul{"a": $}` is `{"a": null}`. The early return that used to
+                // sit here predates the Null/Undefined split, and made the
+                // undotted form disagree with the dotted `nul.{"a": $}`, which
+                // takes a different route and was already right.
                 let items: Vec<JValue> = match input_value {
                     JValue::Array(ref arr) => (**arr).clone(),
-                    JValue::Null => return Ok(JValue::Null),
                     JValue::Undefined => Vec::new(),
                     other => vec![other],
                 };
@@ -4095,8 +4101,12 @@ impl Evaluator {
     /// This matches the JavaScript reference where stages apply to sequences
     fn apply_stages(&mut self, value: JValue, stages: &[Stage]) -> Result<JValue, EvaluatorError> {
         // Wrap non-arrays in an array for filtering (JSONata semantics)
+        // An explicit null is a *value*, so it wraps into a one-element
+        // sequence like any other scalar: `nul[]` is `[null]` and `nul[0]` is
+        // `null`. This arm used to return early, a leftover from before the
+        // Null/Undefined split, which made every stage over a null a no-op.
+        // Undefined never reaches here -- the step loop returns before stages.
         let mut result = match value {
-            JValue::Null => return Ok(JValue::Null), // Null passes through unchanged
             JValue::Array(_) => value,
             other => JValue::array(vec![other]),
         };
@@ -4107,6 +4117,9 @@ impl Evaluator {
                     // When applying stages, use stage-specific predicate logic
                     result = self.evaluate_predicate_as_stage(&result, predicate_expr)?;
                 }
+                // `[]` keeps whatever it is handed; `apply_stages` has already
+                // wrapped a non-array into a one-element sequence above.
+                Stage::KeepArray => {}
                 // Positional index stages are meaningful only over a tuple stream
                 // (they set a variable to each tuple's position); they are applied
                 // in `create_tuple_stream`, not on a plain value sequence here.
@@ -4148,15 +4161,6 @@ impl Evaluator {
         current: &JValue,
         predicate: &AstNode,
     ) -> Result<JValue, EvaluatorError> {
-        // Special case: empty brackets [] (represented as Boolean(true))
-        if matches!(predicate, AstNode::Boolean(true)) {
-            return match current {
-                JValue::Array(arr) => Ok(JValue::Array(arr.clone())),
-                JValue::Null => Ok(JValue::Null),
-                other => Ok(JValue::array(vec![other.clone()])),
-            };
-        }
-
         match current {
             JValue::Array(arr) => {
                 // For stages: if we have an array of values (from field extraction),
@@ -4845,6 +4849,7 @@ impl Evaluator {
                     // Predicate as first step
                     self.evaluate_predicate(data, pred_expr)?
                 }
+                AstNode::KeepArray => Self::keep_array(data),
                 _ => {
                     // Complex first step - evaluate it. When the step is
                     // tuple-carrying (e.g. a parenthesized `(Account.Order.Product)`
@@ -5491,6 +5496,7 @@ impl Evaluator {
                     // Predicate in path - filter or index into current value
                     self.evaluate_predicate(&current, pred_expr)?
                 }
+                AstNode::KeepArray => Self::keep_array(&current),
                 AstNode::ArrayGroup(elements) => {
                     // Array grouping: map expression over array but keep results grouped
                     // .[expr] means evaluate expr for each array element
@@ -5756,7 +5762,19 @@ impl Evaluator {
             // as undefined so a following `.field` and object/array construction
             // drop it rather than keeping an explicit null). `[]` array-keep is
             // handled separately above via has_explicit_array_keep.
-            JValue::Array(arr) if arr.is_empty() => JValue::Undefined,
+            // ... unless `[]` asked for the array to be kept *and* the empty
+            // array is a value rather than an empty result sequence.
+            // `emptyarr[]` is `[]` -- the field holds a real empty array --
+            // while `arr.p[]` over `{"arr": []}` mapped over nothing and stays
+            // undefined. `did_array_mapping` is what tells the two apart; a
+            // path that found nothing never even reaches the predicate,
+            // because the step loop returns undefined first, which is why
+            // `nope[]` needs no special case here.
+            JValue::Array(arr)
+                if arr.is_empty() && (did_array_mapping || !has_explicit_array_keep) =>
+            {
+                JValue::Undefined
+            }
             // Unwrap singleton arrays when appropriate
             JValue::Array(arr) if arr.len() == 1 && should_unwrap => arr[0].clone(),
             // Keep arrays otherwise
@@ -5766,13 +5784,14 @@ impl Evaluator {
         // An explicit `[]` keep-array forces the result to remain an array even
         // after a later singleton index collapses it to a scalar (jsonata's
         // keepSingleton), e.g. `$#$pos[][$pos<3]^($)[-1]` must yield `[4]`.
-        let result = if has_explicit_array_keep
-            && !matches!(result, JValue::Array(_) | JValue::Null | JValue::Undefined)
-        {
-            JValue::array(vec![result])
-        } else {
-            result
-        };
+        // An explicit null is re-wrapped like any other value -- `nul[][0]`
+        // is `[null]`. Only undefined stays out: there is nothing to keep.
+        let result =
+            if has_explicit_array_keep && !matches!(result, JValue::Array(_) | JValue::Undefined) {
+                JValue::array(vec![result])
+            } else {
+                result
+            };
 
         if let JValue::Array(arr) = &result {
             check_sequence_length(arr.len(), &self.options)?;
@@ -5794,16 +5813,22 @@ impl Evaluator {
     /// path. The keep-array-ness of an inner `[]` must survive an enclosing sort
     /// and trailing index so a singleton result stays wrapped (`$#$pos[]...^()[-1]`
     /// -> `[4]`).
+    /// `[]` -- jsonata's keepSingleton. Forces the value to be an array,
+    /// leaving an existing one alone. An explicit null is a value like any
+    /// other, so `nul[]` is `[null]`.
+    fn keep_array(value: &JValue) -> JValue {
+        match value {
+            JValue::Array(arr) => JValue::Array(arr.clone()),
+            other => JValue::array(vec![other.clone()]),
+        }
+    }
+
     fn path_keeps_singleton_array(steps: &[PathStep]) -> bool {
         steps.iter().any(|step| {
-            if let AstNode::Predicate(pred) = &step.node {
-                if matches!(**pred, AstNode::Boolean(true)) {
-                    return true;
-                }
+            if matches!(&step.node, AstNode::KeepArray) {
+                return true;
             }
-            if step.stages.iter().any(
-                |s| matches!(s, Stage::Filter(pred) if matches!(**pred, AstNode::Boolean(true))),
-            ) {
+            if step.stages.iter().any(|s| matches!(s, Stage::KeepArray)) {
                 return true;
             }
             if let AstNode::Sort { input, .. } = &step.node {
@@ -6108,6 +6133,9 @@ impl Evaluator {
                         }
                     }
                 }
+                // `[]` keeps the stream as-is; the keep-singleton decision is
+                // made when the tuple stream is turned back into values.
+                Stage::KeepArray => {}
             }
         }
         Ok(tuples)
@@ -6559,6 +6587,11 @@ impl Evaluator {
                                             )?;
                                         }
                                         Stage::Index(_) => {}
+                                        // `[]` only forces the result to stay
+                                        // an array, which the caller's
+                                        // keep-singleton handling already
+                                        // does; there is nothing to apply.
+                                        Stage::KeepArray => {}
                                     }
                                 }
 
@@ -6594,6 +6627,11 @@ impl Evaluator {
                                             )?;
                                         }
                                         Stage::Index(_) => {}
+                                        // `[]` only forces the result to stay
+                                        // an array, which the caller's
+                                        // keep-singleton handling already
+                                        // does; there is nothing to apply.
+                                        Stage::KeepArray => {}
                                     }
                                 }
 
@@ -9346,6 +9384,7 @@ impl Evaluator {
 
     fn collect_free_vars_walk(node: &AstNode, bound: &HashSet<&str>, free: &mut HashSet<String>) {
         match node {
+            AstNode::KeepArray => {}
             AstNode::Variable(name) => {
                 if !bound.contains(name.as_str()) {
                     free.insert(name.clone());
@@ -9385,8 +9424,9 @@ impl Evaluator {
                         match stage {
                             Stage::Filter(expr) => Self::collect_free_vars_walk(expr, bound, free),
                             // An index stage binds a variable; it introduces no
-                            // free variable references.
-                            Stage::Index(_) => {}
+                            // free variable references, and `[]` carries no
+                            // expression at all.
+                            Stage::Index(_) | Stage::KeepArray => {}
                         }
                     }
                 }
@@ -9645,16 +9685,6 @@ impl Evaluator {
         current: &JValue,
         predicate: &AstNode,
     ) -> Result<JValue, EvaluatorError> {
-        // Special case: empty brackets [] (represented as Boolean(true))
-        // This forces the value to be wrapped in an array
-        if matches!(predicate, AstNode::Boolean(true)) {
-            return match current {
-                JValue::Array(arr) => Ok(JValue::Array(arr.clone())),
-                JValue::Null => Ok(JValue::Null),
-                other => Ok(JValue::array(vec![other.clone()])),
-            };
-        }
-
         match current {
             JValue::Array(_arr) => {
                 // Standalone predicates: jsonata-js evaluates the predicate once

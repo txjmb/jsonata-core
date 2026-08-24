@@ -545,6 +545,30 @@ BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: 'arrobj#$i.{"i":$i,"
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: 'arr#$i^($i)' });
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: 'arr#$i[0]' });
 
+// Object construction and the `[]` array-keep applied to a step value. Both
+// treat their input as a *value*, so an explicit null is constructed over and
+// wrapped like any other -- `nul[]` is `[null]`, not `null` (#126 group 1).
+// The dotted `.{...}` form is carried alongside the undotted one because the
+// two reach different sites and only the dotted one was ever right.
+for (const o of PATH_OPERANDS) {
+  for (const form of ['{"a":$}', '[]', '.{"a":$}', '[][0]', '[true]']) {
+    BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: `${o}${form}` });
+  }
+}
+// `nope` is absent, which is the control that keeps "null is a value" from
+// being over-applied: a path that finds nothing stays undefined.
+//
+// `[true]` is carried alongside `[]` because the two are *different
+// operators* that are easy to conflate: `[]` keeps the array (`num[]` is
+// `[5]`) while `[true]` is an ordinary filter that keeps everything and then
+// unwraps a lone result (`num[true]` is `5`). They parsed to the same node
+// until `AstNode::KeepArray` split them, so every one of these was wrong for
+// one input kind or the other.
+for (const e of ['obj.nul{"a":$}', 'obj.nul[]', 'obj.nul.{"a":$}', 'nope[]', 'nope{"a":$}',
+                 'obj.k[]', 'nul[0]', 'nul[true]']) {
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: e });
+}
+
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 
 async function main() {

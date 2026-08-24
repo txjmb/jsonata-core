@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 pub enum Stage {
     /// Filter/predicate stage `[expr]`
     Filter(Box<AstNode>),
+    /// Empty-bracket stage `[]` -- see `AstNode::KeepArray`. Distinct from
+    /// `Filter(Boolean(true))`, which is the literal `[true]`.
+    KeepArray,
     /// Positional index stage `#$var` that lands on a step already carrying an
     /// index/stages (jsonata-js's `{type: 'index', value}` stage). Binds the
     /// variable to each surviving tuple's position in the CURRENT (post-earlier-
@@ -160,6 +163,16 @@ pub enum AstNode {
 
     /// Descendant operator (**) in path expressions
     Descendant,
+
+    /// Empty brackets `[]` -- jsonata's keepSingleton marker.
+    ///
+    /// Distinct from `Predicate(Boolean(true))`, which is the literal filter
+    /// `[true]`. The two are different operators: `[]` forces the result to
+    /// stay an array (`num[]` is `[5]`), while `[true]` is an ordinary filter
+    /// that keeps everything and then unwraps a lone result (`num[true]` is
+    /// `5`). Both used to parse to the same node, so neither could be right
+    /// for every input.
+    KeepArray,
 
     /// Parent-reference operator (%) in path expressions, resolved.
     /// Carries the synthetic ancestor label ("!0", "!1", ...) assigned by
