@@ -7030,12 +7030,15 @@ impl Evaluator {
                 return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
             }
             if let JValue::Builtin { name: builtin_name } = &value {
-                // This is a built-in function reference (e.g., $f bound to $sum)
+                // This is a built-in function reference (e.g., $f bound to $sum),
+                // called directly with an explicit argument list -- not passed as
+                // an argument to another function, so jsonata-js does not wrap it
+                // in a closure. `by_reference: false` (see call_builtin_with_values).
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for arg in args {
                     evaluated_args.push(self.evaluate_internal(arg, data)?);
                 }
-                return self.call_builtin_with_values(builtin_name, &evaluated_args, data);
+                return self.call_builtin_with_values(builtin_name, &evaluated_args, data, false);
             }
         }
 
@@ -8373,9 +8376,13 @@ impl Evaluator {
                         self.evaluate_internal(func_node, &values[0])
                     }
                 } else if self.is_builtin_function(var_name) {
-                    // This is a built-in function reference (e.g., $string, $number)
-                    // Call it directly with the provided values (already evaluated)
-                    self.call_builtin_with_values(var_name, values, data)
+                    // This is a built-in function reference (e.g., $string, $number).
+                    // Every caller of `apply_function` -- $map/$filter/$reduce/$sift/
+                    // $each's per-element loop, $single's predicate, $sort's
+                    // comparator, $match's matcher -- passes the callback as an
+                    // ARGUMENT to another function, the shape jsonata-js wraps in a
+                    // closure. `by_reference: true` (see call_builtin_with_values).
+                    self.call_builtin_with_values(var_name, values, data, true)
                 } else {
                     // Unknown variable - evaluate with first value as context
                     if values.is_empty() {
@@ -9459,13 +9466,34 @@ impl Evaluator {
         )
     }
 
-    /// Call a built-in function directly with pre-evaluated Values
-    /// This is used when passing built-in functions to higher-order functions like $map
+    /// Call a built-in function directly with pre-evaluated Values.
+    ///
+    /// Reached from two genuinely different call shapes, and `by_reference`
+    /// tells them apart:
+    ///
+    /// - A builtin-valued variable called directly, `$f := $uppercase;
+    ///   $f("x")`. jsonata-js evaluates `$f` to the builtin's own `proc`
+    ///   object and applies it exactly as it would `$uppercase("x")` --
+    ///   no wrapping happens. `by_reference: false`.
+    /// - A builtin passed as an ARGUMENT to another function -- a HOF
+    ///   callback (`$map(arr, $uppercase)`), a `$sort` comparator, a
+    ///   `$match` matcher. jsonata-js's `evaluateFunction` wraps any
+    ///   function-valued *argument* in a closure (`jsonata.js:1461-1471`)
+    ///   before the callee ever sees it, and that closure calls `apply(arg,
+    ///   params, null, environment)` -- note the literal `null` for
+    ///   `input`. `by_reference: true`.
+    ///
+    /// Getting this wrong previously showed up as `$f := $keys; $f({"a":
+    /// 1})` wrongly returning `["a"]` instead of `"a"` -- the by-reference
+    /// (HOF-argument) collapse-skipping described on `dispatch_pure`'s
+    /// `by_reference` parameter was leaking into the direct-call shape,
+    /// which must collapse exactly like a literal `$keys({"a":1})` does.
     fn call_builtin_with_values(
         &mut self,
         name: &str,
         values: &[JValue],
         context: &JValue,
+        by_reference: bool,
     ) -> Result<JValue, EvaluatorError> {
         // A host override applied in value position (e.g. `$f := $now; $f()`) or
         // passed to a higher-order function reaches dispatch here rather than
@@ -9490,7 +9518,13 @@ impl Evaluator {
         // "at least 1 argument" first would wrongly reject `$zip`/`$millis`
         // (arity 0) reached by reference.
         if crate::builtins::is_pure_builtin(name) {
-            return crate::builtins::dispatch_pure(name, values, context, &self.options, true);
+            return crate::builtins::dispatch_pure(
+                name,
+                values,
+                context,
+                &self.options,
+                by_reference,
+            );
         }
 
         // Everything else ($map, $filter, $reduce, $single, $sift, $each,
