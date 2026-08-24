@@ -2150,6 +2150,12 @@ const UNDEFINED_PROPAGATING_FUNCTIONS: &[&str] = &[
     "floor",
     "round",
     "sqrt",
+    // Same `<s-:s>` shape as $uppercase/$lowercase above. These two only
+    // reached the list once they had a signature to be validated against
+    // (#126 group 2); before that their arms raised a hand-rolled type
+    // error on an undefined argument instead of propagating it.
+    "base64encode",
+    "base64decode",
 ];
 
 /// Check whether a function propagates undefined values

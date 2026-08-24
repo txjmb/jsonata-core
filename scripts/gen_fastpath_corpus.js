@@ -415,6 +415,45 @@ const BUILTIN_PROBES = [
   'num ~> |$|{}|',
   'obj.k ~> |$|{}|',
   'obj ~> |$|{"z":9}|',
+  // Six builtins carried no entry in BUILTIN_SIGNATURES, so
+  // `validate_builtin_args` returned `Ok(None)` and *nothing* checked their
+  // arguments -- an explicit null sailed through to the implementation
+  // instead of raising T0410 (#126 group 2). Restoring the reference's own
+  // signature is the fix, but a signature does more than reject nulls: its
+  // `-` marker switches on context substitution, and the padding it adds
+  // moves what the `propagates_undefined` guard reads. So the null forms
+  // below are the target, and the undefined, zero-argument and arity forms
+  // are regression guards for behaviour that is already correct.
+  '$base64encode(nul)',
+  '$base64decode(nul)',
+  '$toMillis(nul)',
+  '$fromMillis(nul)',
+  '$formatInteger(nul, "0")',
+  '$parseInteger(nul, "0")',
+  '$base64encode(missing.x)',
+  '$base64decode(missing.x)',
+  '$toMillis(missing.x)',
+  '$fromMillis(missing.x)',
+  '$formatInteger(missing.x, "0")',
+  '$parseInteger(missing.x, "0")',
+  // Context substitution through the `-` marker: a context of the right type
+  // fills the first parameter, one of the wrong type is T0411, and no
+  // context at all (the top-level object) is T0411 too.
+  'str.$base64encode()',
+  '("YQ==").$base64decode()',
+  'num.$fromMillis()',
+  'num.$formatInteger("0")',
+  'str.$parseInteger("0")',
+  'num.$base64encode()',
+  'str.$fromMillis()',
+  'str.$toMillis()',
+  '$base64encode()',
+  '$toMillis()',
+  // $formatInteger and $parseInteger declare a *required* second parameter,
+  // so the one-argument forms are errors -- T0410 for the missing picture,
+  // T0411 when the substituted context takes the first slot.
+  '$formatInteger(1)',
+  '$parseInteger("1")',
 ];
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 

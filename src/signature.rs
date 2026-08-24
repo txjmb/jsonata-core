@@ -830,6 +830,8 @@ pub(crate) const BUILTIN_SIGNATURES: &[(&str, &str)] = &[
     ("join", "<a<s>s?:s>"),
     ("formatNumber", "<n-so?:s>"),
     ("formatBase", "<n-n?:s>"),
+    ("formatInteger", "<n-s:s>"),
+    ("parseInteger", "<s-s:n>"),
     ("number", "<(nsb)-:n>"),
     ("floor", "<n-:n>"),
     ("ceil", "<n-:n>"),
@@ -864,6 +866,10 @@ pub(crate) const BUILTIN_SIGNATURES: &[(&str, &str)] = &[
     ("encodeUrl", "<s-:s>"),
     ("decodeUrlComponent", "<s-:s>"),
     ("decodeUrl", "<s-:s>"),
+    ("base64encode", "<s-:s>"),
+    ("base64decode", "<s-:s>"),
+    ("toMillis", "<s-s?:n>"),
+    ("fromMillis", "<n-s?s?:s>"),
 ];
 
 /// Look up a builtin's parsed signature, or `None` if it has no declared one.
@@ -909,7 +915,7 @@ mod builtin_signature_table_tests {
             BUILTIN_SIGNATURES.len(),
             bad.join("\n")
         );
-        assert_eq!(BUILTIN_SIGNATURES.len(), 55);
+        assert_eq!(BUILTIN_SIGNATURES.len(), 61);
     }
 
     #[test]
