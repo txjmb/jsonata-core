@@ -3873,7 +3873,14 @@ impl Evaluator {
                 // Blocks create a new scope - push scope instead of clone/restore
                 self.context.push_scope();
 
-                let mut result = JValue::Null;
+                // An empty block (`()`) is undefined in jsonata-js, not null.
+                // A non-empty block always overwrites this before it's read,
+                // so this default only matters for the empty case -- reachable
+                // via `.()` as a path step (parser.rs routes a bare top-level
+                // `()` around this arm entirely, straight to
+                // `AstNode::Undefined`, but a `.()` step keeps it as an empty
+                // `Block` so the ancestry pass can walk past it; see #114).
+                let mut result = JValue::Undefined;
                 for expr in expressions {
                     result = self.evaluate_internal(expr, data)?;
                 }
@@ -4641,6 +4648,13 @@ impl Evaluator {
                             JValue::array(result)
                         }
                         JValue::Array(arr) => JValue::Array(arr.clone()),
+                        // jsonata-js's wildcard guards with `typeof input ===
+                        // 'object'`, which JS's `typeof null === 'object'`
+                        // quirk would satisfy -- except the guard also checks
+                        // `input !== null` explicitly, so null maps over
+                        // nothing: `nul.*` is undefined (issue #114), not
+                        // null.
+                        JValue::Null => JValue::Undefined,
                         _ => JValue::Null,
                     }
                 }
@@ -4766,8 +4780,13 @@ impl Evaluator {
                             }
                             JValue::array(result)
                         }
-                        JValue::Null => JValue::Null,
-                        // Accessing field on non-object returns undefined (not an error)
+                        // Accessing field on non-object returns undefined (not an
+                        // error) -- including when that non-object is an explicit
+                        // null (issue #114): a pre-migration leftover here used to
+                        // special-case null back to itself instead of falling
+                        // through to this arm, e.g. `nul.(foo.bar)`'s inner path
+                        // hits this via the FunctionApplication step below binding
+                        // `data = null`.
                         _ => JValue::Undefined,
                     }
                 }
@@ -4816,21 +4835,22 @@ impl Evaluator {
         // Process remaining steps
         for (step_idx, step) in steps[1..].iter().enumerate() {
             let is_last_step = step_idx == steps.len() - 2;
-            // Early return if current is null/undefined - no point continuing
-            // This handles cases like `blah.{}` where blah doesn't exist.
+            // Undefined means "no value" and short-circuits unconditionally --
+            // there is nothing for any step kind to index into, call, or
+            // build from. This handles cases like `blah.{}` where `blah`
+            // doesn't exist.
             //
-            // A `FunctionApplication` step is the one exception: it covers
-            // both `.$fn()` calls and parenthesised block steps (`.(expr)`,
-            // including the empty `.()`) -- see parser.rs. Both *call*
-            // something with `current` as context rather than indexing into
-            // it, and jsonata-js runs both normally on an explicit null
-            // context (issue #110 -- `nul.$string()` is "null", not
-            // undefined; likewise `nul.(1)`). Undefined still short-circuits
-            // unconditionally: there is no value to hand the function/block
-            // either way.
-            if current.is_null() && !matches!(&step.node, AstNode::FunctionApplication(_)) {
-                return Ok(JValue::Null);
-            }
+            // An explicit null is NOT short-circuited (issue #114): null is
+            // an ordinary value in jsonata-js, and every step kind below
+            // already has its own correct null handling once it actually
+            // runs -- an object-constructor step ignores its context
+            // entirely (`nul.{}` is `{}`), a `FunctionApplication` step
+            // (`.$fn()` calls and parenthesised block steps `.(expr)`,
+            // including the empty `.()`) hands null to the function/block
+            // like any other value (issue #110 -- `nul.$string()` is
+            // "null"), and a `Name`/`Wildcard` step correctly falls out of
+            // the sequence to undefined the same way it would for a number
+            // or string current value.
             if current.is_undefined() {
                 return Ok(JValue::Undefined);
             }
@@ -5097,6 +5117,9 @@ impl Evaluator {
                             }
                             JValue::array(all_values)
                         }
+                        // See the matching first-step Wildcard arm above: null
+                        // maps over nothing (issue #114).
+                        JValue::Null => JValue::Undefined,
                         _ => JValue::Null,
                     };
 
@@ -5410,8 +5433,9 @@ impl Evaluator {
                                 JValue::array(result)
                             }
                         }
-                        JValue::Null => JValue::Null,
-                        // Accessing field on non-object returns undefined (not an error)
+                        // Accessing field on non-object returns undefined (not an
+                        // error) -- including when that non-object is an explicit
+                        // null (issue #114): `nul.foo`, `nul.a.b`.
                         _ => JValue::Undefined,
                     }
                 }
@@ -5669,9 +5693,17 @@ impl Evaluator {
         // predicate returns a sequence, which is what the singleton rule
         // unwraps. Counting index access here would unwrap it a second time
         // and turn `a[0]` over `[[5]]` into `5` instead of `[5]`.
+        //
+        // `**` (Descendant) always produces a query-result sequence too --
+        // `collect_descendants` returns exactly one item for any leaf value
+        // (`a.**` over `{"a": 5}` is `5`, not `[5]`; `nul.**` is `null`, not
+        // `[null]`, issue #114) -- so it belongs in this list the same way a
+        // filter predicate does, independent of whether `did_array_mapping`
+        // got set for this particular current value.
         let has_array_op = steps.iter().any(|step| {
             !step.stages.is_empty()
                 || matches!(&step.node, AstNode::Predicate(p) if !matches!(**p, AstNode::Number(_)))
+                || matches!(&step.node, AstNode::Descendant)
         });
         let should_unwrap = !has_explicit_array_keep && (has_array_op || did_array_mapping);
 
@@ -6316,10 +6348,16 @@ impl Evaluator {
                 };
             }
 
-            // Early check: if LHS evaluates to undefined, return undefined
-            // This matches JSONata behavior where undefined ~> anyFunc returns undefined
+            // Early check: if LHS evaluates to undefined, return undefined.
+            // This matches JSONata behavior where undefined ~> anyFunc returns
+            // undefined. An explicit null LHS is NOT short-circuited here
+            // (issue #116): null is an ordinary value in jsonata-js, and each
+            // RHS kind below evaluates `lhs` again on its own terms -- as a
+            // function argument (`nul ~> $string()` == `$string(nul)` ==
+            // "null"), as a transform's `$` binding, etc. -- so it gets the
+            // same null-vs-undefined handling a direct call would.
             let lhs_value_for_check = self.evaluate_internal(lhs, data)?;
-            if lhs_value_for_check.is_undefined() || lhs_value_for_check.is_null() {
+            if lhs_value_for_check.is_undefined() {
                 return Ok(JValue::Undefined);
             }
 
@@ -6399,6 +6437,23 @@ impl Evaluator {
                     // RHS is a transform - invoke it with LHS as input
                     // Evaluate LHS first
                     let lhs_value = self.evaluate_internal(lhs, data)?;
+
+                    // jsonata-js compiles the transform operator into a
+                    // function with signature `<(oa):o>` (first argument:
+                    // object or array), so piping any other type into it --
+                    // including an explicit null (issue #116) -- is a type
+                    // error, not a silent passthrough.
+                    if !matches!(lhs_value, JValue::Object(_) | JValue::Array(_)) {
+                        #[cfg(feature = "python")]
+                        let is_lazy = matches!(lhs_value, JValue::LazyPyDict(_));
+                        #[cfg(not(feature = "python"))]
+                        let is_lazy = false;
+                        if !is_lazy {
+                            return Err(EvaluatorError::TypeError(
+                                "T0410: Argument 1 of function undefined does not match function signature".to_string(),
+                            ));
+                        }
+                    }
 
                     // Bind $ to the LHS value, then evaluate the transform
                     let saved_binding = self.context.lookup("$").cloned();
@@ -9643,10 +9698,19 @@ impl Evaluator {
         let mut descendants = Vec::new();
 
         match value {
-            // Neither a null nor a missing value has descendants. Undefined used
-            // to fall through to the catch-all and collect *itself*, so `**`
-            // with no input produced `[null]` instead of undefined.
-            JValue::Null | JValue::Undefined => {
+            // A missing value has no descendants: Undefined used to fall
+            // through to the catch-all and collect *itself*, so `**` with no
+            // input produced `[null]` instead of undefined.
+            //
+            // An explicit null is NOT grouped with Undefined here (issue
+            // #114): jsonata-js treats null as an ordinary primitive for
+            // `**` just like a number or string -- it collects itself, both
+            // as the whole result of `nul.**` and for a null value found
+            // while descending into a structure (`{"a": {"b": null}}.**`
+            // includes that `null` as one of the descendants). It falls
+            // through to the primitive catch-all below rather than getting
+            // its own arm.
+            JValue::Undefined => {
                 return Ok(descendants);
             }
             JValue::Object(obj) => {
