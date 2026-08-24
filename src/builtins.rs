@@ -16,6 +16,33 @@ use crate::evaluator::{EvaluatorError, EvaluatorOptions};
 use crate::value::JValue;
 use std::rc::Rc;
 
+/// What JavaScript makes of an undefined argument in a string position.
+///
+/// jsonata-js validates a call and then hands the arguments to the function
+/// body unchanged, so an undefined that the signature admitted reaches a
+/// JavaScript string operation -- `indexOf`, `hasOwnProperty` -- which
+/// stringifies it to the literal text "undefined" rather than treating it as
+/// absent. Observable whenever the subject contains that text:
+/// `$substringBefore("xundefinedy", missing.x)` is "x", not the whole string.
+const JS_UNDEFINED_AS_STRING: &str = "undefined";
+
+/// `$substring` with an undefined start, which JavaScript's arithmetic rather
+/// than any JSONata rule decides.
+///
+/// `strLength + undefined` is NaN, which is not `< 0`, so the start stays
+/// undefined and `Array.prototype.slice` reads it as 0. Supply a length and
+/// the end becomes NaN as well, and `slice(0, NaN)` is empty -- so the same
+/// undefined start yields the whole string or none of it depending only on
+/// whether a length was given. Nothing here can be derived from "treat the
+/// missing start as 0"; that gets the second case wrong.
+fn substring_with_undefined_start(s: &str, has_length: bool) -> JValue {
+    if has_length {
+        JValue::string("")
+    } else {
+        JValue::string(s)
+    }
+}
+
 /// The builtins `dispatch_pure` can handle: everything that needs only its
 /// arguments, the context value, and the evaluation options.
 ///
@@ -101,9 +128,14 @@ pub(crate) fn dispatch_pure(
     let args: &[JValue] = if args.is_empty() {
         match name {
             "string" => {
-                // $string() with a null/undefined context is undefined, not "null".
-                if context.is_undefined() || context.is_null() {
+                // $string() with an undefined context is undefined; with an
+                // explicit null context it stays Null (baseline behaviour,
+                // see git show 30e2794:src/evaluator.rs ~line 7782).
+                if context.is_undefined() {
                     return Ok(JValue::Undefined);
+                }
+                if context.is_null() {
+                    return Ok(JValue::Null);
                 }
                 args_storage = vec![context.clone()];
                 &args_storage
@@ -214,7 +246,15 @@ pub(crate) fn dispatch_pure(
             )),
         },
         "trim" => match args.first() {
-            None | Some(JValue::Null | JValue::Undefined) => Ok(JValue::Null),
+            // Signature `<s-:s>` rejects an explicit null before this arm is
+            // ever reached (Null's type symbol 'l' isn't in the "[sm]" class),
+            // so this branch is dead in practice via any validated call path
+            // -- kept for defensiveness, matching the tree-walker's pre-merge
+            // behaviour. Undefined (and a genuinely absent argument) must
+            // propagate as Undefined, not Null: `{"k": $trim(missing.x)}` is
+            // `{}` in the reference, not `{"k": null}`.
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(JValue::Null) => Ok(JValue::Null),
             Some(JValue::String(s)) => Ok(functions::string::trim(s)?),
             _ => Err(EvaluatorError::TypeError(
                 "trim() requires a string argument".to_string(),
@@ -241,9 +281,9 @@ pub(crate) fn dispatch_pure(
                     };
                     Ok(functions::string::substring(s, *start as i64, length)?)
                 }
-                (JValue::String(s), JValue::Undefined) => Ok(
-                    crate::evaluator::substring_with_undefined_start(s, args.len() > 2),
-                ),
+                (JValue::String(s), JValue::Undefined) => {
+                    Ok(substring_with_undefined_start(s, args.len() > 2))
+                }
                 _ => Err(EvaluatorError::TypeError(
                     "T0410: Argument 1 of function substring does not match function signature"
                         .to_string(),
@@ -261,7 +301,7 @@ pub(crate) fn dispatch_pure(
                     Ok(functions::string::substring_before(s, sep)?)
                 }
                 (JValue::String(s), JValue::Undefined) => {
-                    Ok(functions::string::substring_before(s, crate::evaluator::JS_UNDEFINED_AS_STRING)?)
+                    Ok(functions::string::substring_before(s, JS_UNDEFINED_AS_STRING)?)
                 }
                 // Undefined propagates; null is a type error.
                 (JValue::Undefined, _) => Ok(JValue::Undefined),
@@ -281,7 +321,7 @@ pub(crate) fn dispatch_pure(
                     Ok(functions::string::substring_after(s, sep)?)
                 }
                 (JValue::String(s), JValue::Undefined) => {
-                    Ok(functions::string::substring_after(s, crate::evaluator::JS_UNDEFINED_AS_STRING)?)
+                    Ok(functions::string::substring_after(s, JS_UNDEFINED_AS_STRING)?)
                 }
                 // Undefined propagates; null is a type error.
                 (JValue::Undefined, _) => Ok(JValue::Undefined),
@@ -351,7 +391,13 @@ pub(crate) fn dispatch_pure(
                 ));
             }
             match &args[0] {
-                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                // Signature `<a<s>s?:s>` rejects an explicit null before this
+                // arm is reached (a scalar Null fails the array's element-type
+                // check, T0412), so this branch is dead in practice via any
+                // validated call path -- kept for defensiveness. Undefined
+                // must propagate as Undefined, not Null.
+                JValue::Undefined => Ok(JValue::Undefined),
+                JValue::Null => Ok(JValue::Null),
                 // Signature: <a<s>s?:s> — first arg must be an array of strings.
                 JValue::Bool(_) | JValue::Number(_) | JValue::Object(_) => {
                     Err(EvaluatorError::TypeError(
@@ -645,7 +691,7 @@ pub(crate) fn dispatch_pure(
             Some(JValue::Null) => Ok(JValue::Null),
             Some(JValue::Array(arr)) => Ok(crate::evaluator::aggregation::sum(arr)?),
             Some(JValue::Number(n)) => Ok(JValue::Number(*n)),
-            Some(other) => Ok(functions::numeric::sum(&[other.clone()])?),
+            Some(other) => Ok(functions::numeric::sum(std::slice::from_ref(other))?),
         },
         "max" => match args.first() {
             Some(v) if v.is_undefined() => Ok(JValue::Undefined),
@@ -724,17 +770,28 @@ pub(crate) fn dispatch_pure(
             Ok(functions::array::append(&arr, second)?)
         }
         "reverse" => match args.first() {
-            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            // Signature `<a:a>` has no element-type constraint, so a scalar
+            // explicit null is wrapped into `[null]` by signature coercion
+            // before this arm is reached -- `Some(JValue::Null)` here is dead
+            // in practice via any validated call path, kept for defensiveness.
+            // Undefined (and a genuinely absent argument) must propagate as
+            // Undefined, not Null.
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(JValue::Null) => Ok(JValue::Null),
             Some(JValue::Array(arr)) => Ok(functions::array::reverse(arr)?),
             _ => Err(EvaluatorError::TypeError(
                 "reverse() requires an array argument".to_string(),
             )),
         },
         "distinct" => match args.first() {
-            Some(JValue::Null | JValue::Undefined) | None => Ok(JValue::Null),
+            // Signature `<x:x>` (Any) lets an explicit null reach here
+            // unwrapped, and it must stay Null; only Undefined (and a
+            // genuinely absent argument) moves to Undefined.
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
             Some(JValue::Array(arr)) if arr.len() > 1 => Ok(functions::array::distinct(arr)?),
-            // Non-array input, and arrays of length <= 1, pass through unchanged
-            // (jsonata-js functions.js: `if(!Array.isArray(arr) || arr.length <= 1) return arr;`)
+            // Non-array input (including Null), and arrays of length <= 1,
+            // pass through unchanged (jsonata-js functions.js:
+            // `if(!Array.isArray(arr) || arr.length <= 1) return arr;`)
             Some(other) => Ok(other.clone()),
         },
 
@@ -875,7 +932,7 @@ pub(crate) fn dispatch_pure(
                 // stringifies an undefined key to "undefined" instead of
                 // rejecting it -- so `$lookup(obj, missing.x)` is undefined
                 // for an ordinary object but 7 for `{"undefined": 7}`.
-                JValue::Undefined => crate::evaluator::JS_UNDEFINED_AS_STRING,
+                JValue::Undefined => JS_UNDEFINED_AS_STRING,
                 _ => {
                     return Err(EvaluatorError::TypeError(
                         "lookup() requires a string key".to_string(),
@@ -1001,7 +1058,13 @@ pub(crate) fn dispatch_pure(
             )),
             1 => match &args[0] {
                 JValue::Array(arr) => Ok(functions::object::merge(arr)?),
-                JValue::Null | JValue::Undefined => Ok(JValue::Null),
+                // Signature `<a<o>:o>` rejects an explicit null before this
+                // arm is reached (a scalar Null fails the array's
+                // element-type check, T0412), so this branch is dead in
+                // practice via any validated call path -- kept for
+                // defensiveness. Undefined must propagate as Undefined.
+                JValue::Undefined => Ok(JValue::Undefined),
+                JValue::Null => Ok(JValue::Null),
                 JValue::Object(_) => Ok(args[0].clone()),
                 _ => Err(EvaluatorError::TypeError(
                     "merge() requires objects or an array of objects".to_string(),

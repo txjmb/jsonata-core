@@ -2061,33 +2061,6 @@ pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
     Ok(value.clone())
 }
 
-/// What JavaScript makes of an undefined argument in a string position.
-///
-/// jsonata-js validates a call and then hands the arguments to the function
-/// body unchanged, so an undefined that the signature admitted reaches a
-/// JavaScript string operation -- `indexOf`, `hasOwnProperty` -- which
-/// stringifies it to the literal text "undefined" rather than treating it as
-/// absent. Observable whenever the subject contains that text:
-/// `$substringBefore("xundefinedy", missing.x)` is "x", not the whole string.
-pub(crate) const JS_UNDEFINED_AS_STRING: &str = "undefined";
-
-/// `$substring` with an undefined start, which JavaScript's arithmetic rather
-/// than any JSONata rule decides.
-///
-/// `strLength + undefined` is NaN, which is not `< 0`, so the start stays
-/// undefined and `Array.prototype.slice` reads it as 0. Supply a length and
-/// the end becomes NaN as well, and `slice(0, NaN)` is empty -- so the same
-/// undefined start yields the whole string or none of it depending only on
-/// whether a length was given. Nothing here can be derived from "treat the
-/// missing start as 0"; that gets the second case wrong.
-pub(crate) fn substring_with_undefined_start(s: &str, has_length: bool) -> JValue {
-    if has_length {
-        JValue::string("")
-    } else {
-        JValue::string(s)
-    }
-}
-
 /// Validate and coerce a builtin's arguments against its jsonata-js signature.
 ///
 /// One copy shared by all three dispatch paths -- the compiled/VM path via

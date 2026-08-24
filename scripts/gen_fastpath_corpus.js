@@ -234,6 +234,30 @@ const BUILTIN_PROBES = [
   '$sift(obj, $boolean)',
   '$each(obj, $string)',
   '$map([[1,2],[3]], $count)',
+  // Object construction is the only common construct that distinguishes
+  // `null` from `undefined` through the public API: a null-valued key is
+  // kept, an undefined-valued key is dropped. Evaluating `$f(missing.x)`
+  // directly hides that distinction -- both a JS `undefined` and an engine
+  // `Null` returned at the top level end up looking like the same missing
+  // result once compared. Crossing a missing operand with object
+  // construction is what caught issue #107's five-builtin regression
+  // (`$trim`, `$merge`, `$reverse`, `$distinct`, `$join` all started
+  // returning `{"k": null}` instead of `{}`), and is why it survived a
+  // 14928-case differential corpus that never wrapped a result this way.
+  '{"k": $trim(missing.x)}',
+  '{"k": $merge(missing.x)}',
+  '{"k": $reverse(missing.x)}',
+  '{"k": $distinct(missing.x)}',
+  '{"k": $join(missing.x)}',
+  // Already-correct builtins, kept alongside the five above as a control
+  // group: if these ever start failing, the bug is in the probe or the
+  // harness, not in one specific builtin's undefined handling.
+  '{"k": $uppercase(missing.x)}',
+  '{"k": $string(missing.x)}',
+  '{"k": $count(missing.x)}',
+  '{"k": $sum(missing.x)}',
+  '{"k": $keys(missing.x)}',
+  '{"k": $spread(missing.x)}',
 ];
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 

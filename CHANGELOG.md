@@ -15,9 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fifty-three builtins were spread across two dispatch sites: twenty-nine were implemented
   twice, and twenty-four existed in exactly one, which is why `$type(x)` worked while
   `$map(arr, $type)` raised. No behaviour changes — the differential corpus and the
-  1686-case reference suite produce identical results before and after, and the twenty-nine
-  duplicated builtins were all measured as reaching the shared dispatcher, so none of them
-  had a winner picked silently. `evaluate_function_call` drops from 2688 lines to 1266.
+  1686-case reference suite produce identical results before and after.
+  `evaluate_function_call` drops from 2688 lines to 1266.
   ([#107](https://github.com/txjmb/jsonata-core/issues/107))
 
 ### Deprecated
