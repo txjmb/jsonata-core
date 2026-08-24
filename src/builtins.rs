@@ -128,14 +128,13 @@ pub(crate) fn dispatch_pure(
     let args: &[JValue] = if args.is_empty() {
         match name {
             "string" => {
-                // $string() with an undefined context is undefined; with an
-                // explicit null context it stays Null (baseline behaviour,
-                // see git show 30e2794:src/evaluator.rs ~line 7782).
+                // $string() with an undefined context is undefined -- there is
+                // nothing to stringify. An explicit null context is a value
+                // like any other for this signature (`x` admits `l`), so it
+                // substitutes normally and reaches the "string" dispatch arm
+                // below, which turns it into "null" (issue #110).
                 if context.is_undefined() {
                     return Ok(JValue::Undefined);
-                }
-                if context.is_null() {
-                    return Ok(JValue::Null);
                 }
                 args_storage = vec![context.clone()];
                 &args_storage

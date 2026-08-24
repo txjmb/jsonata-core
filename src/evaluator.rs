@@ -4817,8 +4817,15 @@ impl Evaluator {
         for (step_idx, step) in steps[1..].iter().enumerate() {
             let is_last_step = step_idx == steps.len() - 2;
             // Early return if current is null/undefined - no point continuing
-            // This handles cases like `blah.{}` where blah doesn't exist
-            if current.is_null() {
+            // This handles cases like `blah.{}` where blah doesn't exist.
+            //
+            // A function-application step (`.$fn()`) is the one exception: it
+            // calls a function with `current` as context rather than indexing
+            // into it, and jsonata-js runs that call normally on an explicit
+            // null context (issue #110 -- `nul.$string()` is "null", not
+            // undefined). Undefined still short-circuits unconditionally:
+            // there is no value to hand the function either way.
+            if current.is_null() && !matches!(&step.node, AstNode::FunctionApplication(_)) {
                 return Ok(JValue::Null);
             }
             if current.is_undefined() {

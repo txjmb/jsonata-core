@@ -258,6 +258,13 @@ const BUILTIN_PROBES = [
   '{"k": $sum(missing.x)}',
   '{"k": $keys(missing.x)}',
   '{"k": $spread(missing.x)}',
+  // Zero-argument $string against an explicit-null context (issue #110):
+  // jsonata-js's `x` signature type admits null unwrapped, so `string(null)`
+  // runs and returns "null" -- unlike a genuinely undefined context, which
+  // stays undefined. `$f(missing.x)` above can't reach this: it puts null on
+  // the *argument*, not the context.
+  'nul.$string()',
+  '{"k": nul.$string()}',
 ];
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 
