@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- `*` applied to anything without children is now `undefined` rather than `null`, and its
+  result unwraps a lone value the way every other sequence-producing step does. jsonata-js
+  guards the wildcard with `typeof input === 'object' && input !== null`, so `num.*`,
+  `str.*`, `true.*` and the rest all map over nothing; only the `null` case had been fixed
+  here, leaving the arm inconsistent with the catch-all beside it, and the two collapse into
+  one now that they give the same answer. Separately, `*` was missing from the list of steps
+  that produce a query-result sequence — the list `**` and filter predicates are already on —
+  so a one-value result stayed wrapped: `deep.*` over `{"a": {"b": 1}}` was `[{"b": 1}]` and
+  is now `{"b": 1}`, which also lets `deep.*.*` reach the inner value instead of an array.
+  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - Six builtins — `$base64encode`, `$base64decode`, `$toMillis`, `$fromMillis`,
   `$formatInteger` and `$parseInteger` — now validate their arguments. They had no entry in
   the builtin signature table, and a missing entry is not a weaker check but no check at
