@@ -2989,13 +2989,25 @@ impl Evaluator {
                         return stored_lambda.params.len();
                     }
                 }
+                // A host-registered function (`register_fn`/`register_fn_override`)
+                // shadows any built-in of the same name in call position (see
+                // `evaluate_function_call`'s `host_fns` check), so its arity
+                // here must not fall back to the built-in's table entry --
+                // jsonata-js truncates to the *override's own*
+                // `implementation.length`, which this Rust API has no way to
+                // introspect for an arbitrary host closure. Return MAX
+                // instead: an override receives every argument uncut, rather
+                // than being silently truncated to a same-named builtin's
+                // arity it may not share.
+                if !self.host_fns.is_empty() && self.host_fns.contains_key(var_name) {
+                    return usize::MAX;
+                }
                 // A builtin passed by reference (e.g. `$map(arr, $uppercase)`)
                 // parses as this same AstNode::Variable shape. jsonata-js
                 // truncates the callback's arguments to the underlying
                 // JavaScript function's parameter count -- see
                 // `builtins::builtin_arity`. Names it doesn't cover (unknown
-                // variables, host-fn overrides with no declared arity) fall
-                // through to the safe MAX default below.
+                // variables) fall through to the safe MAX default below.
                 if let Some(arity) = crate::builtins::builtin_arity(var_name) {
                     return arity;
                 }
