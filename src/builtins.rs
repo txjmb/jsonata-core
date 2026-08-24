@@ -196,11 +196,35 @@ pub(crate) fn builtin_arity(name: &str) -> Option<usize> {
 /// `context` is the JSONata context value (`$`) at the call site. It is used
 /// for implicit-argument insertion and for the signature's `-` modifier, and
 /// jsonata-js passes the same value (`input`) in all three dispatch positions.
+///
+/// `by_reference` distinguishes the by-reference dispatch site
+/// (`Evaluator::call_builtin_with_values`, reached from `$map`/`$filter`/
+/// `$reduce`/`$sift`/`$each` invoking a builtin passed as a bare callback)
+/// from the two direct-call sites (compiled path, tree-walker). It matters
+/// for exactly two builtins, `keys` and `spread`, whose jsonata-js
+/// implementations build their result via `this.createSequence()` -- a
+/// value jsonata-js's own top-level `evaluate()` boundary collapses (empty
+/// -> undefined, one item -> that item unwrapped) exactly once, for
+/// whichever expression is the true outermost result. A direct call
+/// (`$keys({"a":1})`) IS that outermost boundary, so collapsing inside the
+/// builtin is correct there (and array-literal construction independently
+/// re-flattens a nested sequence result one level, so `[$keys(...)]` comes
+/// out right regardless). But `$map`'s own native `result.push(res)` does
+/// NOT flatten `res` -- it treats it as one opaque element, and `$map`
+/// applies ITS OWN collapse once at the end (`hof_result_sequence`). If
+/// `keys`/`spread` also collapse before that push, the result collapses
+/// twice: `$map([{"k":1}], $keys)` is `["k"]` in the reference (map's own
+/// single-result collapse unwraps to reveal keys()'s *raw*, uncollapsed
+/// `["k"]`), but doubly-collapsing gives the wrong `"k"`. `by_reference`
+/// tells the `keys`/`spread` arms to skip their own collapse and return the
+/// raw sequence-shaped array, leaving the one collapse that's actually
+/// needed to the HOF's own `hof_result_sequence` call.
 pub(crate) fn dispatch_pure(
     name: &str,
     args: &[JValue],
     context: &JValue,
     options: &EvaluatorOptions,
+    by_reference: bool,
 ) -> Result<JValue, EvaluatorError> {
     // 1. Implicit context insertion. The union of what the two paths used to
     //    do separately: only the tree-walker had `fromMillis` here and
@@ -960,20 +984,34 @@ pub(crate) fn dispatch_pure(
             // array-of-objects) that yields an empty key list (issue #112). Only
             // an object (or array containing at least one object) with at least
             // one key produces a value.
+            //
+            // That collapse (and the one-key -> unwrapped-scalar case below) is
+            // jsonata-js's *outer evaluate() boundary* collapsing the sequence
+            // `this.createSequence()` builds -- see the `by_reference` doc
+            // comment on `dispatch_pure`. It fires once, for whichever call is
+            // the true outermost result; a direct `$keys(...)` call is that
+            // boundary, but a by-reference call from `$map`/`$each`/etc. is
+            // not -- the HOF's own `hof_result_sequence` is. So `by_reference`
+            // skips the collapse here and returns the raw array (possibly
+            // empty, possibly one element) unconditionally.
             None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(JValue::Null) if by_reference => Ok(JValue::array(vec![])),
             Some(JValue::Null) => Ok(JValue::Undefined),
+            Some(JValue::Lambda { .. } | JValue::Builtin { .. }) if by_reference => {
+                Ok(JValue::array(vec![]))
+            }
             Some(JValue::Lambda { .. } | JValue::Builtin { .. }) => Ok(JValue::Undefined),
             Some(JValue::Object(obj)) => {
-                if obj.is_empty() {
+                let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
+                crate::evaluator::check_sequence_length(keys.len(), options)?;
+                if by_reference {
+                    Ok(JValue::array(keys))
+                } else if keys.is_empty() {
                     Ok(JValue::Undefined)
+                } else if keys.len() == 1 {
+                    Ok(keys.into_iter().next().unwrap())
                 } else {
-                    let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.clone())).collect();
-                    crate::evaluator::check_sequence_length(keys.len(), options)?;
-                    if keys.len() == 1 {
-                        Ok(keys.into_iter().next().unwrap())
-                    } else {
-                        Ok(JValue::array(keys))
-                    }
+                    Ok(JValue::array(keys))
                 }
             }
             Some(JValue::Array(arr)) => {
@@ -989,15 +1027,18 @@ pub(crate) fn dispatch_pure(
                         }
                     }
                 }
-                if all_keys.is_empty() {
+                crate::evaluator::check_sequence_length(all_keys.len(), options)?;
+                if by_reference {
+                    Ok(JValue::array(all_keys))
+                } else if all_keys.is_empty() {
                     Ok(JValue::Undefined)
                 } else if all_keys.len() == 1 {
                     Ok(all_keys.into_iter().next().unwrap())
                 } else {
-                    crate::evaluator::check_sequence_length(all_keys.len(), options)?;
                     Ok(JValue::array(all_keys))
                 }
             }
+            _ if by_reference => Ok(JValue::array(vec![])),
             _ => Ok(JValue::Undefined),
         },
         "lookup" => {
@@ -1092,7 +1133,16 @@ pub(crate) fn dispatch_pure(
                     // unwraps and none at all is undefined. Hence
                     // `$spread({"k": 1})` is the object back, not a
                     // one-element array, and `$spread({})` is undefined.
+                    //
+                    // Except when `by_reference`: that collapse is the outer
+                    // evaluate() boundary's job (see `dispatch_pure`'s
+                    // `by_reference` doc comment), which for a by-reference
+                    // call is the HOF's own `hof_result_sequence`, not this
+                    // one. Return the raw, uncollapsed array.
                     match functions::object::spread(obj)? {
+                        JValue::Array(entries) if by_reference => {
+                            Ok(JValue::array(entries.to_vec()))
+                        }
                         JValue::Array(entries) => {
                             crate::evaluator::hof_result_sequence(entries.to_vec(), options)
                         }
@@ -1108,9 +1158,14 @@ pub(crate) fn dispatch_pure(
                     // So `$spread([{"k": 1}])` stays `[{"k": 1}]`. The one
                     // exception is an empty input: the fold never runs, the
                     // sequence created up front survives untouched, and an
-                    // empty sequence is undefined.
+                    // empty sequence is undefined -- unless `by_reference`,
+                    // per the same outer-boundary reasoning as above.
                     if arr.is_empty() {
-                        return Ok(JValue::Undefined);
+                        return if by_reference {
+                            Ok(JValue::array(vec![]))
+                        } else {
+                            Ok(JValue::Undefined)
+                        };
                     }
                     // Spread each object in the array
                     let mut result = Vec::new();
@@ -1653,6 +1708,7 @@ mod tests {
             &[JValue::Undefined],
             &JValue::Number(5.0),
             &opts,
+            false,
         )
         .expect_err("a numeric context cannot satisfy substring's first parameter");
         assert!(
@@ -1670,7 +1726,7 @@ mod tests {
         // assert on the member only one list had.
         let opts = EvaluatorOptions::default();
         // $fromMillis() with a numeric context formats that context.
-        let got = dispatch_pure("fromMillis", &[], &JValue::Number(0.0), &opts)
+        let got = dispatch_pure("fromMillis", &[], &JValue::Number(0.0), &opts, false)
             .expect("fromMillis should read the context");
         assert!(
             matches!(&got, JValue::String(s) if s.starts_with("1970-01-01")),
