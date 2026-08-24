@@ -223,13 +223,19 @@ for (const [fn, first] of BUILTINS_SECOND_ARG) {
 }
 
 // -- By-reference matrix: builtins passed as a bare callback to
-// $map/$filter/$sift/$each, e.g. `$map(arr, $uppercase)`. This is a THIRD
-// dispatch path (`call_builtin_with_values`) that neither BUILTINS_ONE_ARG/
-// SECOND_ARG (which only exercise explicit argument lists) nor the hand
-// probes below (a handful of specific shapes) cover systematically -- issue
-// #107 stage 2. `now` (embeds a live timestamp) and `shuffle` (randomised
-// output) are excluded for the same non-determinism reason BUILTINS_ONE_ARG
-// excludes them.
+// $map/$filter/$sift/$each/$single/$sort, e.g. `$map(arr, $uppercase)`. This
+// is a THIRD dispatch path (`call_builtin_with_values`) that neither
+// BUILTINS_ONE_ARG/SECOND_ARG (which only exercise explicit argument lists)
+// nor the hand probes below (a handful of specific shapes) cover
+// systematically -- issue #107 stage 2. `now` (embeds a live timestamp) and
+// `shuffle` (randomised output) are excluded for the same non-determinism
+// reason BUILTINS_ONE_ARG excludes them.
+//
+// `$single` and `$sort` were missing from this matrix even though they
+// dispatch through the same by-reference path as $filter/$sift/$each --
+// `$single`'s own HOF call site was the one spot that never consulted
+// callback arity at all (hard-coded a 3-arg call), so this matrix could not
+// have caught that regression. Keep both here going forward.
 const BUILTINS_BY_REFERENCE = Object.keys(buildBuiltinArity()).filter(
   (name) => name !== 'now' && name !== 'shuffle'
 );
@@ -244,12 +250,22 @@ for (const fn of BUILTINS_BY_REFERENCE) {
   for (const shape of MAP_ARRAY_SHAPES) {
     BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$map(${shape}, $${fn})` });
   }
-  // Narrower cross for the other three HOFs that consult
-  // get_callback_param_count -- one representative operand each, matching
+  // Narrower cross for the other five HOFs that consult
+  // get_callback_param_count (or, for $sort, dispatch a builtin comparator
+  // through the same by-reference path even though it always calls it with
+  // exactly 2 args) -- one representative operand each, matching
   // BUILTINS_SECOND_ARG's "narrower" convention.
   BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$filter(arr, $${fn})` });
   BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$sift(obj, $${fn})` });
   BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$each(obj, $${fn})` });
+  // `$single` errors for any predicate over a 2-element array (0 or 2
+  // matches, never exactly 1), and the harness only asserts error *kind*,
+  // not code/message -- so a 2-element array here would make every case
+  // error both before and after a callback-arity regression, blind to the
+  // very bug this line exists to catch. `[obj]` is a single-element array,
+  // so a truthy predicate produces a real value to compare byte-for-byte.
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$single([obj], $${fn})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference', expr: `$sort(arr, $${fn})` });
 }
 
 // Hand-written probes for shapes neither matrix can reach. Both cross one
