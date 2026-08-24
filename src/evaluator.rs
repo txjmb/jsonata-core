@@ -3977,7 +3977,12 @@ impl Evaluator {
                         // For arrays, wildcard returns all elements
                         Ok(JValue::Array(arr.clone()))
                     }
-                    _ => Ok(JValue::Null),
+                    // Anything else has no children to collect. jsonata-js
+                    // guards the wildcard with `typeof input === 'object' &&
+                    // input !== null`, so every scalar -- and null, which only
+                    // reaches that guard because of JS's `typeof null` quirk --
+                    // maps over nothing and yields undefined, not null.
+                    _ => Ok(JValue::Undefined),
                 }
             }
 
@@ -4677,13 +4682,11 @@ impl Evaluator {
                         }
                         JValue::Array(arr) => JValue::Array(arr.clone()),
                         // jsonata-js's wildcard guards with `typeof input ===
-                        // 'object'`, which JS's `typeof null === 'object'`
-                        // quirk would satisfy -- except the guard also checks
-                        // `input !== null` explicitly, so null maps over
-                        // nothing: `nul.*` is undefined (issue #114), not
-                        // null.
-                        JValue::Null => JValue::Undefined,
-                        _ => JValue::Null,
+                        // 'object' && input !== null`, so null maps over
+                        // nothing (issue #114) -- and so does every scalar,
+                        // which is the same answer, hence one arm rather than
+                        // the two this used to carry.
+                        _ => JValue::Undefined,
                     }
                 }
                 AstNode::Descendant => {
@@ -5145,10 +5148,9 @@ impl Evaluator {
                             }
                             JValue::array(all_values)
                         }
-                        // See the matching first-step Wildcard arm above: null
-                        // maps over nothing (issue #114).
-                        JValue::Null => JValue::Undefined,
-                        _ => JValue::Null,
+                        // See the matching first-step Wildcard arm above:
+                        // null and every scalar alike map over nothing.
+                        _ => JValue::Undefined,
                     };
 
                     // Apply stages (predicates) if present
@@ -5728,10 +5730,14 @@ impl Evaluator {
         // `[null]`, issue #114) -- so it belongs in this list the same way a
         // filter predicate does, independent of whether `did_array_mapping`
         // got set for this particular current value.
+        //
+        // `*` (Wildcard) is a sequence for exactly the same reason and was
+        // simply missing from the list: `deep.*` over `{"a": {"b": 1}}` is the
+        // inner object, not a one-element array wrapping it (#126 group 1).
         let has_array_op = steps.iter().any(|step| {
             !step.stages.is_empty()
                 || matches!(&step.node, AstNode::Predicate(p) if !matches!(**p, AstNode::Number(_)))
-                || matches!(&step.node, AstNode::Descendant)
+                || matches!(&step.node, AstNode::Descendant | AstNode::Wildcard)
         });
         let should_unwrap = !has_explicit_array_keep && (has_array_op || did_array_mapping);
 

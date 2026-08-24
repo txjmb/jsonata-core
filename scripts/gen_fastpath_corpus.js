@@ -109,7 +109,15 @@ const DATASETS = {
   // `nul`), needed by the null-context path probes below: `obj.nul.{}` pins
   // the guard that fires on a *step result* being null, not just on a bare
   // field reference being null.
-  operands:    { nul: null, arr: [1, 2], obj: { k: 1, nul: null }, emptyarr: [], num: 5, str: 'a' },
+  // `tf`/`ff`/`zero`/`estr` are the remaining scalar kinds, `deep` a
+  // nested object, `one` a single-element array and `arrobj` an array of
+  // objects. The path-operator matrix below crosses every one of these
+  // against `.*`, `.**` and friends: those operators branch on the *kind*
+  // of value they are applied to, so a fixture per kind is what makes the
+  // coverage systematic rather than anecdotal.
+  operands:    { nul: null, arr: [1, 2], obj: { k: 1, nul: null }, emptyarr: [], num: 5, str: 'a',
+                 tf: true, ff: false, zero: 0, estr: '', deep: { a: { b: 1 } }, one: [7],
+                 arrobj: [{ x: 1 }, { y: 2 }] },
 };
 
 const EXPRESSIONS = [];
@@ -501,6 +509,28 @@ const BUILTIN_PROBES = [
   '$fromMillis(0, "[Y0001]", missing.x)',
   '$fromMillis(0, "[Y0001]", 1)',
 ];
+// -- Path operators crossed with every value kind ---------------------------
+// `*` and `**` dispatch on the kind of value the step is applied to, and the
+// arms that decide "this kind has no children" are the ones that historically
+// answered `null` where jsonata-js answers `undefined` (#126 group 1). Crossing
+// the operators with the operand fixtures covers every arm rather than the
+// handful a hand probe would reach.
+const PATH_OPERANDS = [
+  'nul', 'arr', 'obj', 'emptyarr', 'num', 'str', 'tf', 'ff', 'zero', 'estr',
+  'deep', 'one', 'arrobj',
+];
+for (const o of PATH_OPERANDS) {
+  for (const op of ['*', '**']) {
+    BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: `${o}.${op}` });
+  }
+  // Chained, to pin singleton unwrapping: a one-value result unwraps, so
+  // `deep.*` is the inner object rather than a one-element array, and the
+  // second step then has an object to work on.
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: `${o}.*.*` });
+}
+BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '*' });
+BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '**' });
+
 for (const expr of BUILTIN_PROBES) BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_probe', expr });
 
 async function main() {
