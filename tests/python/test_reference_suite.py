@@ -104,18 +104,22 @@ def extract_error_code(error_msg: str) -> str | None:
 # Note what does NOT belong here: a case we satisfy only because our error
 # carries no code for the suite to compare. That is not a known divergence, it
 # is an unverified case -- counted by UNVERIFIED_ERROR_CEILING above.
+# Tracked in #150 -- both need the parser to recognise a construct, not an
+# error-variant mapping.
 KNOWN_DIVERGENCES: dict[str, str] = {
     "errors/case005": (
         "`unknown(function)` is T1006 upstream. `function` is a keyword here, so the parser "
         "commits to a lambda and fails on its shape (S0202) before anything decides the call "
         "target is not a function. Getting T1006 means recognising the call context first, "
-        "which is a parser restructure rather than an error-code mapping."
+        "which is a parser restructure rather than an error-code mapping. The trigger is the "
+        "keyword `function` in argument position, not the call target: `foo(function)` fails "
+        "the same way and `unknown(fn)` is already correct. See #150."
     ),
     "function-signatures/case034": (
         "`<(sa<n>)>` -- a choice group containing a parameterized type -- is S0402 upstream. "
         "Our signature parser rejects the shape while still reading tokens, so it surfaces as "
-        "S0202. Needs the signature grammar to recognise the construct in order to reject it "
-        "specifically."
+        "S0202. Needs the signature grammar to parse a choice group's contents far enough to "
+        "detect a parameterized type inside one; `<(sa)>` without the parameter works. See #150."
     ),
 }
 
