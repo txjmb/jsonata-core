@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- The last uncoded errors carry their code: calling a non-function is `T1006`, partially
+  applying one (a call carrying a `?` placeholder) is `T1008`, assigning to something that is
+  not a variable is `S0212`, and a type parameter applied to something other than a function or
+  array is `S0401`. Every reference case that names an error code now has that code compared
+  against ours, except two that cannot be reached at all — `$encodeUrl` on an unpaired
+  surrogate, where the expression never crosses into Rust to be parsed.
+  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
 - Parse errors carry their JSONata code. Unterminated strings are `S0101`, unsupported escapes
   `S0103`, a malformed `\u` escape `S0104`, an unterminated backquoted name `S0105`, a wrong
   token `S0202`, running out of input while expecting one `S0203`, an unknown operator `S0204`,

@@ -39,6 +39,17 @@ fn invalid_escape_message(seq: &str) -> String {
     }
 }
 
+/// Calling something that is not a function. jsonata-js distinguishes an
+/// ordinary invocation (T1006) from a *partial* application -- a call carrying
+/// a `?` placeholder -- which is T1008.
+fn invalid_call_message(args: &[AstNode]) -> String {
+    if args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
+        "T1008: Attempted to partially apply a non-function".to_string()
+    } else {
+        "T1006: Attempted to invoke a non-function".to_string()
+    }
+}
+
 /// Running out of input while expecting something is S0203; finding the wrong
 /// thing is S0202. A missing *parameter name* is its own code, S0208.
 fn expected_message(expected: &str, found: &str) -> String {
@@ -1656,7 +1667,7 @@ impl Parser {
                                         };
                                     } else {
                                         return Err(ParserError::InvalidSyntax(
-                                            "Invalid function call".to_string(),
+                                            invalid_call_message(&args),
                                         ));
                                     }
                                 }
@@ -1670,9 +1681,9 @@ impl Parser {
                                     };
                                 }
                                 _ => {
-                                    return Err(ParserError::InvalidSyntax(
-                                        "Invalid function call".to_string(),
-                                    ))
+                                    return Err(ParserError::InvalidSyntax(invalid_call_message(
+                                        &args,
+                                    )))
                                 }
                             };
                         }

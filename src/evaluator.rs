@@ -6720,7 +6720,8 @@ impl Evaluator {
                 AstNode::Variable(name) => name.clone(),
                 _ => {
                     return Err(EvaluatorError::TypeError(
-                        "Left side of := must be a variable".to_string(),
+                        "S0212: The left side of := must be a variable name (start with $)"
+                            .to_string(),
                     ))
                 }
             };

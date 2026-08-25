@@ -104,18 +104,22 @@ def extract_error_code(error_msg: str) -> str | None:
 # Note what does NOT belong here: a case we satisfy only because our error
 # carries no code for the suite to compare. That is not a known divergence, it
 # is an unverified case -- counted by UNVERIFIED_ERROR_CEILING above.
+# Tracked in #150 -- both need the parser to recognise a construct, not an
+# error-variant mapping.
 KNOWN_DIVERGENCES: dict[str, str] = {
     "errors/case005": (
         "`unknown(function)` is T1006 upstream. `function` is a keyword here, so the parser "
         "commits to a lambda and fails on its shape (S0202) before anything decides the call "
         "target is not a function. Getting T1006 means recognising the call context first, "
-        "which is a parser restructure rather than an error-code mapping."
+        "which is a parser restructure rather than an error-code mapping. The trigger is the "
+        "keyword `function` in argument position, not the call target: `foo(function)` fails "
+        "the same way and `unknown(fn)` is already correct. See #150."
     ),
     "function-signatures/case034": (
         "`<(sa<n>)>` -- a choice group containing a parameterized type -- is S0402 upstream. "
         "Our signature parser rejects the shape while still reading tokens, so it surfaces as "
-        "S0202. Needs the signature grammar to recognise the construct in order to reject it "
-        "specifically."
+        "S0202. Needs the signature grammar to parse a choice group's contents far enough to "
+        "detect a parameterized type inside one; `<(sa)>` without the parameter works. See #150."
     ),
 }
 
@@ -144,14 +148,21 @@ print(f"Loaded {len(test_cases)} test cases")
 print(f"{'=' * 70}\n")
 
 
-# How many reference cases the suite currently cannot actually verify: we raise
-# an error carrying no JSONata code (and an uncoded error is accepted for any
-# expected code), or the case specifies an error object nothing inspects.
+# How many reference cases the suite cannot actually verify: we raise an error
+# carrying no JSONata code, and an uncoded error is accepted for any expected
+# code.
 #
-# A ceiling, not a target. It only ever goes down -- see #144. The point of
-# asserting it is that "1686 passing" says less than it sounds for these cases,
-# and a new uncoded error would otherwise slip in unnoticed.
-UNVERIFIED_ERROR_CEILING = 12
+# Down from 107 at 2.2.7 to 2, and 2 is the floor rather than a to-do. Both are
+# `$encodeUrl`/`$encodeUrlComponent` on an unpaired surrogate: a Python str can
+# hold one and a Rust String cannot, so the expression never crosses the
+# boundary to be parsed and there is no point at which D3140 could be raised.
+# We fail with a ValueError naming the surrogate instead of leaking PyO3's
+# codec error.
+#
+# The assertion cuts both ways -- it fails if the number grows, and fails
+# telling you to lower it if it shrinks -- so a new uncoded error cannot slip
+# in unnoticed and an improvement cannot go unrecorded. See #144.
+UNVERIFIED_ERROR_CEILING = 2
 
 
 @pytest.mark.reference

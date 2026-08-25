@@ -427,7 +427,8 @@ impl Signature {
                 _ => {
                     // '<' not valid after other types
                     return Err(SignatureError::InvalidSignature(format!(
-                        "Type parameter '<' not valid after type {:?}",
+                        "S0401: Type parameters can only be applied to functions and arrays \
+                         (got {:?})",
                         param_type
                     )));
                 }
