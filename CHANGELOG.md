@@ -156,7 +156,7 @@ cannot grow unnoticed.
   pre-branch baseline: the compiled path answered `undefined`, the tree-walker answered
   `null`. The shared dispatcher answers `null` on both. `evaluate_function_call` drops from
   2688 lines to 1266.
-  ([#107](https://github.com/txjmb/jsonata-core/issues/107))
+  (issue [#107](https://github.com/txjmb/jsonata-core/issues/107))
 
 ### Deprecated
 
@@ -190,7 +190,7 @@ cannot grow unnoticed.
   uncoded error is accepted for any expected code. 36 cases that emit exactly the right code
   were passing without it ever being compared, and one emitting the wrong code passed the same
   way. Now 228 of the 273 code-expecting cases are genuinely compared, up from 191.
-  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
+  (issue [#144](https://github.com/txjmb/jsonata-core/issues/144))
 - Five rustdoc warnings that rendered as broken links on docs.rs are gone. JSONata syntax in
   doc comments — `[expr]`, `|location|update[,delete]|` — was being parsed as intra-doc links,
   and `Rc<str>` as an unclosed HTML tag. `cargo doc` is now warning-free under both the default
@@ -221,7 +221,7 @@ cannot grow unnoticed.
 - `$single` is recognised as a builtin when passed by reference. The internal name list carried
   `singletonArray`, which is not a JSONata function and appears nowhere in jsonata-js, and
   omitted `single` — so `$map(arr, $single)` raised "Argument 2 must be Function" while direct
-  calls worked. ([#140](https://github.com/txjmb/jsonata-core/issues/140))
+  calls worked. (issue [#140](https://github.com/txjmb/jsonata-core/issues/140))
 - `$eval(null)` now raises `T0410` rather than returning `null`. The reference's signature is
   `<sx?:x>`, and `s` admits *missing* but not null; `$eval(nothing)` still propagates undefined.
 - Truthiness is now one rule, applied recursively, matching `$boolean`. JSONata coerces a
@@ -234,7 +234,7 @@ cannot grow unnoticed.
   lambda whose result is coerced — 54 measured cases across those seven consumers — whenever
   the value is a container whose contents are all falsy. The `?:`-only rule is deleted rather
   than realigned: with `is_truthy` correct the two agree exactly.
-  ([#111](https://github.com/txjmb/jsonata-core/issues/111))
+  (issue [#111](https://github.com/txjmb/jsonata-core/issues/111))
 - `$formatNumber` now produces the same value as jsonata-js. Four separate defects, all in
   picture analysis and formatting:
   - **Rounding was half-away-from-zero, not half-to-even.** The reference routes this through
@@ -254,7 +254,7 @@ cannot grow unnoticed.
   percent/per-mille. Values at or beyond `1e21` are deliberately excluded: JavaScript switches
   to exponential notation there and the reference formats the resulting text as if it were
   digits, so `$formatNumber(1e21, "#,##0.00")` is `"1e,+21.00"` upstream — a grouping separator
-  inside the exponent. ([#136](https://github.com/txjmb/jsonata-core/issues/136))
+  inside the exponent. (issue [#136](https://github.com/txjmb/jsonata-core/issues/136))
 - `$formatNumber` now reports the same picture-string error as jsonata-js. The reference runs
   every sub-picture check in sequence and lets the *last* failure name the error (F&O 4.7.3);
   ours returned on the first, so a picture failing several checks reported the wrong one —
@@ -262,7 +262,7 @@ cannot grow unnoticed.
   and `"e"` was `D3085`. A picture containing no active character at all was also swallowed
   whole as a prefix rather than treated as the active part, which is what stopped `D3086` from
   ever firing for `"k"` or `"%%"`. 29 pictures now agree where 7 diverged.
-  ([#135](https://github.com/txjmb/jsonata-core/issues/135))
+  (issue [#135](https://github.com/txjmb/jsonata-core/issues/135))
 - Error *codes* now match jsonata-js where they did not. The differential harness compared
   only "did it raise", so any error satisfied an expected error — `$replace(1)` raising
   "Argument count mismatch" read as a match for the reference's `T0410`. Comparing codes
@@ -272,7 +272,7 @@ cannot grow unnoticed.
   by a higher-order function report `T0410`; and `$error`/`$assert` treat an undefined argument
   as the signature says they must — `s`/`b` admit *missing*, so `$error(missing.x)` is
   `D3137` ("no message") and `$assert(missing.x)` is `D3141` (a failed assertion), not type
-  errors. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+  errors. (issue [#126](https://github.com/txjmb/jsonata-core/issues/126))
 - A builtin bound to a variable now works as a callback: `($f := $uppercase; $map(arr, $f))`
   is `["A", "B"]` rather than `["", ""]`. Binding stores a `JValue::Builtin`, which is not a
   lambda, so `apply_function` fell through to evaluating `$f` as an ordinary variable and the
@@ -281,7 +281,7 @@ cannot grow unnoticed.
   Both now resolve through the bound builtin, and a host-registered override of the same name
   still suppresses arity truncation. Every builtin was affected, not just the reported
   `$uppercase`; direct invocation (`$f("a")`) always worked, which is why this looked narrow.
-  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+  (issue [#126](https://github.com/txjmb/jsonata-core/issues/126))
 - `$base64decode` now accepts what jsonata-js accepts. The reference decodes through Node's
   `Buffer`, which ignores characters outside the base64 alphabet, stops at the first padding
   character, takes the URL-safe alphabet alongside the standard one, and drops an incomplete
@@ -293,7 +293,7 @@ cannot grow unnoticed.
   `parseInt`: a leading run of digits, or `NaN` when there is none. `$parseInteger("12a", "000")`
   is `12` and `$parseInteger("abc", "000")` is `NaN`. A malformed *picture* still raises
   `D3130`, and the letters/roman/words parsers are untouched because date-time component
-  parsing shares them and needs the error. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+  parsing shares them and needs the error. (issue [#126](https://github.com/txjmb/jsonata-core/issues/126))
 
 - An explicit null now behaves as a value in object construction and in the `[]` array-keep,
   rather than short-circuiting them: `nul{"a": $}` is `{"a": null}` (it was `null`, and
@@ -307,13 +307,13 @@ cannot grow unnoticed.
   `[true]` is an ordinary filter that keeps everything and then unwraps a lone result. One of
   the two therefore had to be wrong for every input — `num[]` and `num[true]` were both `[5]`
   where the reference gives `[5]` and `5`. A dedicated `AstNode::KeepArray`/`Stage::KeepArray`
-  marker separates them. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+  marker separates them. (issue [#126](https://github.com/txjmb/jsonata-core/issues/126))
 - `#$i` positional binding now unwraps a one-value result, matching every other
   sequence-producing step: `num#$i` is `5` rather than `[5]`, and `deep#$i.$i` is `0` rather
   than `[0]`. The rule holds for every input kind — `arr#$i` and `arrobj#$i` only ever looked
   correct because a multi-element result has no singleton to unwrap, and the filtered form
   `arr#$i[$i=0]` was right for the unrelated reason that a filter predicate already forced
-  the unwrap. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+  the unwrap. (issue [#126](https://github.com/txjmb/jsonata-core/issues/126))
 - `*` applied to anything without children is now `undefined` rather than `null`, and its
   result unwraps a lone value the way every other sequence-producing step does. jsonata-js
   guards the wildcard with `typeof input === 'object' && input !== null`, so `num.*`,
@@ -323,7 +323,7 @@ cannot grow unnoticed.
   that produce a query-result sequence — the list `**` and filter predicates are already on —
   so a one-value result stayed wrapped: `deep.*` over `{"a": {"b": 1}}` was `[{"b": 1}]` and
   is now `{"b": 1}`, which also lets `deep.*.*` reach the inner value instead of an array.
-  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+  (issue [#126](https://github.com/txjmb/jsonata-core/issues/126))
 - Six builtins — `$base64encode`, `$base64decode`, `$toMillis`, `$fromMillis`,
   `$formatInteger` and `$parseInteger` — now validate their arguments. They had no entry in
   the builtin signature table, and a missing entry is not a weaker check but no check at
@@ -338,7 +338,7 @@ cannot grow unnoticed.
   both directions against a generated fixture, so a submodule bump that adds or changes a
   signature now fails CI. The two entries still absent are deliberate and named in that
   test: `$clone` is not implemented here at all, and `$eval` needs the evaluator.
-  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+  (issue [#126](https://github.com/txjmb/jsonata-core/issues/126))
 - `$sum`, `$max`, `$min` and `$average` over a path of the form `array.field` no longer
   silently skip non-numeric values. The fused aggregate fast path
   (`Evaluator::try_fused_aggregate`) reimplemented aggregate semantics rather than
@@ -347,7 +347,7 @@ cannot grow unnoticed.
   raising `T0412` — a plausible but wrong number rather than an error. The same path also
   returned `0`/`null` for an empty sequence where jsonata-js returns `undefined`. The fast
   path now declines when its assumptions do not hold, so the canonical aggregate produces
-  both the error and the empty-sequence semantics. ([#97](https://github.com/txjmb/jsonata-core/issues/97))
+  both the error and the empty-sequence semantics. (issue [#97](https://github.com/txjmb/jsonata-core/issues/97))
 - Builtin argument handling now matches jsonata-js for a missing argument in a *required*
   slot. The reference validates a call and then hands the arguments to the function body
   unchanged, so an undefined that the signature admitted reaches a JavaScript expression
@@ -369,7 +369,7 @@ cannot grow unnoticed.
   results.
 - `$sift(obj)` now raises instead of returning `undefined`. The one-argument form is
   `$sift(function)`, with the object taken from the context.
-  ([#104](https://github.com/txjmb/jsonata-core/issues/104))
+  (issue [#104](https://github.com/txjmb/jsonata-core/issues/104))
 - `$trim`, `$merge`, `$reverse`, `$distinct`, `$join` and `$keys` given a missing argument
   now yield `undefined` rather than `null`, matching jsonata-js. This was visible through
   object construction, which drops an undefined-valued key but keeps a null-valued one:
@@ -378,7 +378,7 @@ cannot grow unnoticed.
   tree-walker returned `undefined` — and the shared dispatcher makes them agree. `$keys`
   was wrong on both routes; the tree-walker arm had no `Undefined` case at all, and the new
   shared dispatcher's corpus is what exposed it.
-  ([#107](https://github.com/txjmb/jsonata-core/issues/107))
+  (issue [#107](https://github.com/txjmb/jsonata-core/issues/107))
 
 ### Deliberately not changed
 - `$base64encode`/`$base64decode` keep treating their payload as UTF-8, because jsonata's own
@@ -394,7 +394,7 @@ cannot grow unnoticed.
   (`$base64encode("héllo")` is `"aOlsbG8="` upstream, `"aMOpbGxv"` here); matching it would
   require latin1 decode too, which would then contradict the decode docs. A unit test pins our
   choice, with the full reasoning, so it cannot flip unnoticed.
-  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+  (issue [#126](https://github.com/txjmb/jsonata-core/issues/126))
 
 ### Security
 
