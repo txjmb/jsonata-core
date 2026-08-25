@@ -5,6 +5,18 @@
 #### Crates.io stats
 [![downloads](https://shieldcn.dev/crates/d/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
 
+[![Test Suite](https://github.com/txjmb/jsonata-core/actions/workflows/test.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/test.yml)
+[![Code Quality](https://github.com/txjmb/jsonata-core/actions/workflows/lint.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/lint.yml)
+[![Security](https://github.com/txjmb/jsonata-core/actions/workflows/security.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/security.yml)
+
+[![Crates.io](https://img.shields.io/crates/v/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
+[![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
+[![Python versions](https://img.shields.io/pypi/pyversions/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
+[![docs.rs](https://img.shields.io/docsrs/jsonata-core.svg)](https://docs.rs/jsonata-core)
+[![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://txjmb.github.io/jsonata-core)
+[![JSONata conformance](https://img.shields.io/badge/JSONata%20conformance-1686%2F1686-brightgreen.svg)](https://github.com/jsonata-js/jsonata/tree/master/test/test-suite)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 > ### ⚠️ Upgrading to 2.2.8 — please test before you deploy
 >
 > 2.2.8 is primarily a **conformance** release: it corrects a number of places where this
@@ -41,18 +53,6 @@ Many, many thanks to the incredible work of all the maintainers of the [JSONata]
 Release versions will follow the reference jsonata-js project major and minor release numbers, but not necessarily patches.  This will make it easier for adopters of this library to understand each release's JSONata API compatibility.  As an example, 2.2.8 should be compliant with 2.2.x jsonata-js tests, but may have fixes specific to this library.  If a patch release for jsonata-js is relevant for this project, it will be included in a patch release that may or may not follow the patch numbers of the upstream project.
 
 This project currently chooses not to implement async at this time, because it has limited value for most of the most common use-cases and the overhead of the async functionality would slow down synchronous use cases.  We focused on sync performance instead.
-
-[![Test Suite](https://github.com/txjmb/jsonata-core/actions/workflows/test.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/test.yml)
-[![Code Quality](https://github.com/txjmb/jsonata-core/actions/workflows/lint.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/lint.yml)
-[![Security](https://github.com/txjmb/jsonata-core/actions/workflows/security.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/security.yml)
-
-[![Crates.io](https://img.shields.io/crates/v/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
-[![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
-[![Python versions](https://img.shields.io/pypi/pyversions/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
-[![docs.rs](https://img.shields.io/docsrs/jsonata-core.svg)](https://docs.rs/jsonata-core)
-[![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://txjmb.github.io/jsonata-core)
-[![JSONata conformance](https://img.shields.io/badge/JSONata%20conformance-1686%2F1686-brightgreen.svg)](https://github.com/jsonata-js/jsonata/tree/master/test/test-suite)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
 
