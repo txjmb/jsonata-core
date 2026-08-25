@@ -3654,7 +3654,7 @@ impl Evaluator {
                                     continue;
                                 }
                                 return Err(EvaluatorError::TypeError(format!(
-                                    "Object key must be a string, got: {:?}",
+                                    "T1003: Key in object structure must evaluate to a string; got: {:?}",
                                     other
                                 )));
                             }
@@ -6706,7 +6706,7 @@ impl Evaluator {
                 }
                 _ => {
                     return Err(EvaluatorError::TypeError(
-                        "Right side of ~> must be a function call or function reference"
+                        "T2006: The right side of the function application operator ~> must be a function"
                             .to_string(),
                     ));
                 }
@@ -7180,10 +7180,20 @@ impl Evaluator {
         // If the function was called without $ prefix and it's not a stored lambda,
         // it's an error (unknown function without $ prefix)
         if !is_builtin && name != "__lambda__" {
-            return Err(EvaluatorError::ReferenceError(format!(
-                "Unknown function: {}",
-                name
-            )));
+            // Reached only for a call written WITHOUT the `$`. jsonata-js
+            // separates the two cases: a name that is a builtin was almost
+            // certainly missing its sigil, and gets T1005 with the suggestion;
+            // anything else is T1006.
+            return Err(if self.is_builtin_function(name) {
+                EvaluatorError::ReferenceError(format!(
+                    "T1005: Attempted to invoke a non-function. Did you mean ${}?",
+                    name
+                ))
+            } else {
+                EvaluatorError::ReferenceError(
+                    "T1006: Attempted to invoke a non-function".to_string(),
+                )
+            });
         }
 
         // Special handling for $exists function
@@ -8283,7 +8293,8 @@ impl Evaluator {
                         )),
                         1 => Ok(matches.into_iter().next().unwrap()),
                         count => Err(EvaluatorError::EvaluationError(format!(
-                            "single() predicate matches {} values (expected exactly 1)",
+                            "D3138: The $single() function expected exactly 1 matching result.  \
+                             Instead it matched more. ({} values)",
                             count
                         ))),
                     }
@@ -8359,8 +8370,10 @@ impl Evaluator {
             }
             "eval" => self.eval_from_values(&evaluated_args, data),
 
+            // `$notreal(1)` -- written with the sigil, so no "did you mean"
+            // suggestion applies; jsonata-js calls this T1006.
             _ => Err(EvaluatorError::ReferenceError(format!(
-                "Unknown function: {}",
+                "T1006: Attempted to invoke a non-function: ${}",
                 name
             ))),
         }
@@ -9683,7 +9696,15 @@ impl Evaluator {
             Err(e) => {
                 // D3121 is the error code for evaluation errors in $eval
                 let err_msg = e.to_string();
-                if err_msg.starts_with("D3121") || err_msg.contains("Unknown function") {
+                // An unknown function inside $eval is D3121, not the T100x the
+                // inner evaluation produced. Matched on the codes rather than
+                // on the prose it used to say ("Unknown function: x"), which
+                // is exactly the coupling that broke when those messages
+                // gained their JSONata codes.
+                if err_msg.starts_with("D3121")
+                    || err_msg.contains("T1005")
+                    || err_msg.contains("T1006")
+                {
                     Err(EvaluatorError::EvaluationError(format!(
                         "D3121: {}",
                         err_msg

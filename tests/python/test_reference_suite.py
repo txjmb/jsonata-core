@@ -138,7 +138,7 @@ print(f"{'=' * 70}\n")
 # A ceiling, not a target. It only ever goes down -- see #144. The point of
 # asserting it is that "1686 passing" says less than it sounds for these cases,
 # and a new uncoded error would otherwise slip in unnoticed.
-UNVERIFIED_ERROR_CEILING = 45
+UNVERIFIED_ERROR_CEILING = 32
 
 
 @pytest.mark.reference
