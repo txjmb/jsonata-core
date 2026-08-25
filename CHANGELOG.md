@@ -21,10 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.2.8] - 2026-08-25
 
-A conformance release. Almost everything here brings `jsonatapy` closer to the pinned
-jsonata-js (v2.2.2), and a fair amount of it **changes the answer** for expressions that
-already run today. If you are upgrading, the summary below is the part worth reading; the
-itemised entries follow.
+Primarily a conformance release, with documentation work on the Rust crate alongside it. Most
+of what follows brings `jsonatapy` closer to the pinned jsonata-js (v2.2.2), and a fair amount
+of it **changes the answer** for expressions that already run today. If you are upgrading, the
+summary below is the part worth reading; the itemised entries follow.
 
 ### What changed, and who it affects
 
@@ -82,6 +82,11 @@ generic errors now carry `T0410`, `D3061`, `D3110`, `D3137`, `D3138`, `D3139` or
 builtins that worked in direct calls but raised when passed to `$map`/`$filter` now behave
 identically either way.
 
+**Documentation.** The `jsonata-core` crate's examples now compile and are run as doctests
+rather than being marked `ignore`, docs.rs renders without the broken links five rustdoc
+warnings were producing, and the module list no longer advertises private modules. The Python
+package is classified Production/Stable rather than Beta.
+
 **Internals with no behavioural intent.** Builtin dispatch is now a single shared
 implementation rather than three partial copies, and the differential harness gained the
 ability to see distinctions it was previously blind to — `null` vs `undefined`, error codes,
@@ -96,8 +101,15 @@ first time. The one deliberate exception is base64's character set, documented b
 
 
 ### Added
+- The `jsonata-core` crate documentation now carries four compiling examples — quick start,
+  compile-once/evaluate-many, error handling, and host functions via `register_fn`. The
+  crate-level example was previously marked `rust,ignore`, so nothing verified it was correct;
+  `cargo test --doc` now runs 5 doctests.
 
 ### Changed
+- The published Python package is now classified `Development Status :: 5 - Production/Stable`.
+  It still read `4 - Beta` at full reference-suite parity, and that classifier is the only
+  signal the PyPI sidebar and downstream trend trackers read.
 - Every builtin that needs only its arguments is now implemented once, in `src/builtins.rs`,
   and shared by the compiled path and the tree-walker instead of being written out in each.
   Fifty-three builtins were spread across two dispatch sites: twenty-nine were implemented
@@ -118,6 +130,13 @@ first time. The one deliberate exception is base64's character set, documented b
 ### Removed
 
 ### Fixed
+- Five rustdoc warnings that rendered as broken links on docs.rs are gone. JSONata syntax in
+  doc comments — `[expr]`, `|location|update[,delete]|` — was being parsed as intra-doc links,
+  and `Rc<str>` as an unclosed HTML tag. `cargo doc` is now warning-free under both the default
+  features and `--all-features`.
+- The crate's documentation header said `jsonatapy` (the crate is `jsonata-core`), and its
+  module list advertised `datetime` and `signature` as public when both are private while
+  omitting the feature-gated `lazy` and `capi`.
 - A positional predicate that names the same index more than once now repeats the element, as
   jsonata-js does: `nums[[0,0]]` is `[10, 10]`, not `10`. The reference walks the selector array
   and pushes the item on every hit; we used an `any()`-style membership test, which can only ever
