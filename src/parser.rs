@@ -7,12 +7,58 @@ use crate::ast::{AstNode, BinaryOp, PathStep, Stage, UnaryOp};
 use thiserror::Error;
 
 /// Parser errors
+/// The JSONata code for a token that turned up where an operand was expected.
+///
+/// jsonata-js splits this two ways: a *recognised* symbol used in prefix
+/// position is S0211 ("cannot be used as a unary operator"), while something
+/// that is not an operator at all is S0204 ("Unknown operator"). End of input
+/// is neither -- it is S0207.
+fn unexpected_token_message(token: &str) -> String {
+    if token == "Eof" {
+        return "S0207: Unexpected end of expression".to_string();
+    }
+    // A named token variant (`RightParen`, `GreaterThan`, `At`, `Colon`, ...)
+    // is a symbol the lexer knows; a bare punctuation character is not.
+    if token.chars().next().is_some_and(char::is_alphabetic) {
+        format!("S0211: The symbol {token} cannot be used as a unary operator")
+    } else {
+        format!("S0204: Unknown operator: {token}")
+    }
+}
+
+/// `\u` needs four hex digits (S0104); any other escape is simply unsupported
+/// (S0103).
+fn invalid_escape_message(seq: &str) -> String {
+    if seq.starts_with('u') || seq.starts_with("\\u") {
+        "S0104: The escape sequence \\u must be followed by 4 hex digits".to_string()
+    } else {
+        format!(
+            "S0103: Unsupported escape sequence: \\{}",
+            seq.trim_start_matches('\\')
+        )
+    }
+}
+
+/// Running out of input while expecting something is S0203; finding the wrong
+/// thing is S0202. A missing *parameter name* is its own code, S0208.
+fn expected_message(expected: &str, found: &str) -> String {
+    if expected == "parameter name" {
+        return "S0208: Parameter of function definition must be a variable name (start with $)"
+            .to_string();
+    }
+    if found == "Eof" {
+        format!("S0203: Expected {expected} before end of expression")
+    } else {
+        format!("S0202: Expected {expected}, got {found}")
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum ParserError {
-    #[error("Unexpected token: {0}")]
+    #[error("{}", unexpected_token_message(.0))]
     UnexpectedToken(String),
 
-    #[error("Unexpected end of expression")]
+    #[error("S0207: Unexpected end of expression")]
     UnexpectedEnd,
 
     #[error("Invalid syntax: {0}")]
@@ -21,19 +67,19 @@ pub enum ParserError {
     #[error("Invalid number: {0}")]
     InvalidNumber(String),
 
-    #[error("Unclosed string literal")]
+    #[error("S0101: String literal must be terminated by a matching quote")]
     UnclosedString,
 
-    #[error("Invalid escape sequence: {0}")]
+    #[error("{}", invalid_escape_message(.0))]
     InvalidEscape(String),
 
     #[error("Unclosed comment")]
     UnclosedComment,
 
-    #[error("Unclosed backtick name")]
+    #[error("S0105: Quoted property name must be terminated with a backquote (`)")]
     UnclosedBacktick,
 
-    #[error("Expected {expected}, found {found}")]
+    #[error("{}", expected_message(expected, found))]
     Expected { expected: String, found: String },
 
     /// A JSONata-spec-coded parse error (S0214-S0217 for the %/@ operators).
@@ -78,8 +124,52 @@ mod parser_error_display_message_tests {
 
     #[test]
     fn uncoded_error_gets_parse_error_prefix() {
-        let e = ParserError::UnexpectedToken("foo".to_string());
-        assert_eq!(e.display_message(), "Parse error: Unexpected token: foo");
+        // `InvalidNumber` is one of the variants that still carries no JSONata
+        // code. It used to be `UnexpectedToken`, which now always produces one
+        // (S0204/S0207/S0211) and so no longer exercises the uncoded path.
+        let e = ParserError::InvalidNumber("1e999".to_string());
+        assert_eq!(e.display_message(), "Parse error: Invalid number: 1e999");
+    }
+
+    /// The variants that gained codes render them *inside* the message, so the
+    /// `Parse error:` prefix still applies -- `display_message` only strips the
+    /// prefix for `Coded`, which carries its code structurally.
+    #[test]
+    fn variant_derived_codes_appear_in_the_message() {
+        for (error, expected) in [
+            (
+                ParserError::UnexpectedToken("Eof".to_string()),
+                "Parse error: S0207: Unexpected end of expression",
+            ),
+            (
+                ParserError::UnexpectedToken("At".to_string()),
+                "Parse error: S0211: The symbol At cannot be used as a unary operator",
+            ),
+            (
+                ParserError::UnexpectedToken("!".to_string()),
+                "Parse error: S0204: Unknown operator: !",
+            ),
+            (
+                ParserError::UnclosedString,
+                "Parse error: S0101: String literal must be terminated by a matching quote",
+            ),
+            (
+                ParserError::Expected {
+                    expected: "RightParen".to_string(),
+                    found: "Eof".to_string(),
+                },
+                "Parse error: S0203: Expected RightParen before end of expression",
+            ),
+            (
+                ParserError::Expected {
+                    expected: "RightBracket".to_string(),
+                    found: "Colon".to_string(),
+                },
+                "Parse error: S0202: Expected RightBracket, got Colon",
+            ),
+        ] {
+            assert_eq!(error.display_message(), expected);
+        }
     }
 }
 
