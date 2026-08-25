@@ -29,8 +29,12 @@ def run(version, cargo="2.2.8", pyproject=None, tmp_path=None):
     (tmp_path / "pyproject.toml").write_text(
         f'[project]\nname = "jsonatapy"\nversion = "{pyproject}"\n'
     )
+    # Invoked via `bash` rather than directly: the Windows leg of the matrix has no
+    # kernel support for a shebang, so `subprocess.run([script])` cannot work there.
+    # The executable bit still matters -- release.yml calls `./scripts/...` -- so it
+    # is asserted separately, in test_the_script_is_committed_executable.
     return subprocess.run(
-        [str(SCRIPT), version],
+        ["bash", str(SCRIPT), version],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -88,9 +92,26 @@ def test_the_repos_own_manifests_agree_and_accept_a_patch_bump():
     )
     major, minor, patch = (int(p) for p in version.split("."))
     result = subprocess.run(
-        [str(SCRIPT), f"{major}.{minor}.{patch + 1}"],
+        ["bash", str(SCRIPT), f"{major}.{minor}.{patch + 1}"],
         cwd=REPO,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_the_script_is_committed_executable():
+    """`release.yml` invokes it as `./scripts/check-release-version.sh`.
+
+    Without the executable bit in the index that is a PermissionError on the
+    runner -- and a local `chmod +x` does not reach git when `core.fileMode` is
+    false, which is how it was first committed 0644.
+    """
+    entry = subprocess.run(
+        ["git", "ls-files", "-s", "scripts/check-release-version.sh"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert entry.startswith("100755"), f"expected mode 100755, got: {entry.strip()}"
