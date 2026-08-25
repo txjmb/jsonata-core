@@ -102,9 +102,13 @@ class ReferenceSuiteReporter:
                     self.by_group.setdefault(group, {"passed": 0, "failed": 0, "skipped": 0})
                     self.by_group[group]["failed"] += 1
 
-                # Track failed test details
-                test_id = item.callspec.params.get("test_id", "unknown")
-                expr = item.callspec.params.get("spec", {}).get("expr", "unknown")
+                # Track failed test details. Guarded: the branch above is, and
+                # this one was not, so any *non-parametrized* failing test in
+                # this module crashed the reporter with an INTERNALERROR
+                # instead of reporting the failure.
+                params = item.callspec.params if hasattr(item, "callspec") else {}
+                test_id = params.get("test_id", item.nodeid)
+                expr = params.get("spec", {}).get("expr", "unknown")
                 self.failed_tests.append(
                     {
                         "test_id": test_id,

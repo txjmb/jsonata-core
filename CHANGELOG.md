@@ -21,10 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.2.8] - 2026-08-25
 
-A conformance release. Almost everything here brings `jsonatapy` closer to the pinned
-jsonata-js (v2.2.2), and a fair amount of it **changes the answer** for expressions that
-already run today. If you are upgrading, the summary below is the part worth reading; the
-itemised entries follow.
+Primarily a conformance release, with documentation work on the Rust crate alongside it. Most
+of what follows brings `jsonatapy` closer to the pinned jsonata-js (v2.2.2), and a fair amount
+of it **changes the answer** for expressions that already run today. If you are upgrading, the
+summary below is the part worth reading; the itemised entries follow.
 
 ### What changed, and who it affects
 
@@ -82,6 +82,11 @@ generic errors now carry `T0410`, `D3061`, `D3110`, `D3137`, `D3138`, `D3139` or
 builtins that worked in direct calls but raised when passed to `$map`/`$filter` now behave
 identically either way.
 
+**Documentation.** The `jsonata-core` crate's examples now compile and are run as doctests
+rather than being marked `ignore`, docs.rs renders without the broken links five rustdoc
+warnings were producing, and the module list no longer advertises private modules. The Python
+package is classified Production/Stable rather than Beta.
+
 **Internals with no behavioural intent.** Builtin dispatch is now a single shared
 implementation rather than three partial copies, and the differential harness gained the
 ability to see distinctions it was previously blind to — `null` vs `undefined`, error codes,
@@ -90,14 +95,32 @@ hiding real divergences, which is where most of this release came from.
 
 ### Compatibility
 
-All 1686 reference-suite cases pass, and the differential corpus (over 20,000 comparisons
-against jsonata-js across two engines and two input paths) has **no known divergences** for the
-first time. The one deliberate exception is base64's character set, documented below.
+The differential corpus — over 20,000 comparisons against jsonata-js across two engines and two
+input paths — has **no known divergences** for the first time. The one deliberate exception is
+base64's character set, documented below.
+
+All 1686 reference-suite cases pass, and each now runs through **both** evaluation engines —
+the suite previously ran only whichever the default resolved to, so the tree-walker was
+exercised by the differential corpus and nowhere else.
+
+Worth stating plainly rather than quoting the pass count: 43 of its error-expecting cases still
+assert only that *something* was raised, because the errors we produce for them carry no JSONata
+code to compare, and 15 more specify an error object that is not inspected. That is
+[#144](https://github.com/txjmb/jsonata-core/issues/144), and it is mostly parser errors. It is
+a gap in what the suite verifies, not a set of known failures — a test now pins the count so it
+cannot grow unnoticed.
 
 
 ### Added
+- The `jsonata-core` crate documentation now carries four compiling examples — quick start,
+  compile-once/evaluate-many, error handling, and host functions via `register_fn`. The
+  crate-level example was previously marked `rust,ignore`, so nothing verified it was correct;
+  `cargo test --doc` now runs 5 doctests.
 
 ### Changed
+- The published Python package is now classified `Development Status :: 5 - Production/Stable`.
+  It still read `4 - Beta` at full reference-suite parity, and that classifier is the only
+  signal the PyPI sidebar and downstream trend trackers read.
 - Every builtin that needs only its arguments is now implemented once, in `src/builtins.rs`,
   and shared by the compiled path and the tree-walker instead of being written out in each.
   Fifty-three builtins were spread across two dispatch sites: twenty-nine were implemented
@@ -118,6 +141,31 @@ first time. The one deliberate exception is base64's character set, documented b
 ### Removed
 
 ### Fixed
+- `$.7a` now raises `S0201`, not `S0213`. jsonata-js raises `S0213` ("literal value cannot be
+  used as a step") from a pass that runs *after* parsing, so an unexpected trailing token fails
+  the parse first; we raised it inline, before the trailing token was reached. Our `S0213` was
+  already right for `$.7` and `a.7` — only the ordering was wrong. A leftover token now also
+  carries `S0201`, the code the reference uses for it, instead of an uncoded "Expected end of
+  expression".
+- Every reference-suite case now runs through both evaluation engines, and the suite pins how
+  many of its error cases it cannot actually verify. At 2.2.7 four cases had the two engines
+  raising different errors, each accepted because both were errors and the check was loose.
+- The test reporter no longer crashes the run with an `INTERNALERROR` when a non-parametrized
+  test fails; it read `item.callspec` unguarded on the failure path.
+- The reference-suite harness compares error codes it previously ignored. `extract_error_code`
+  was anchored to the start of the message, so any coded error carrying a prefix — `"Runtime
+  error: D3030: ..."`, `"Parse error: Invalid syntax: S0209: ..."` — read as *uncoded*, and an
+  uncoded error is accepted for any expected code. 36 cases that emit exactly the right code
+  were passing without it ever being compared, and one emitting the wrong code passed the same
+  way. Now 228 of the 273 code-expecting cases are genuinely compared, up from 191.
+  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
+- Five rustdoc warnings that rendered as broken links on docs.rs are gone. JSONata syntax in
+  doc comments — `[expr]`, `|location|update[,delete]|` — was being parsed as intra-doc links,
+  and `Rc<str>` as an unclosed HTML tag. `cargo doc` is now warning-free under both the default
+  features and `--all-features`.
+- The crate's documentation header said `jsonatapy` (the crate is `jsonata-core`), and its
+  module list advertised `datetime` and `signature` as public when both are private while
+  omitting the feature-gated `lazy` and `capi`.
 - A positional predicate that names the same index more than once now repeats the element, as
   jsonata-js does: `nums[[0,0]]` is `[10, 10]`, not `10`. The reference walks the selector array
   and pushes the item on every hit; we used an `any()`-style membership test, which can only ever

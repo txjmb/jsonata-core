@@ -743,6 +743,15 @@ pub struct Parser {
     /// to a deeper node every iteration without a new recursive call).
     /// Both must be bounded by this one counter; see `MAX_PARSE_DEPTH`.
     depth: usize,
+    /// An S0213 ("literal value cannot be used as a step") noticed while
+    /// parsing, held until the whole expression has parsed.
+    ///
+    /// jsonata-js raises S0213 from `processAST`, a pass that runs after
+    /// parsing, so a *parse* error beats it: `$.7a` is S0201 for the
+    /// unexpected trailing `a`, even though the `7` step is also invalid.
+    /// Raising it inline made us answer S0213 there. Deferring restores the
+    /// ordering without moving the check itself into a post-parse pass.
+    pending_literal_step: Option<String>,
 }
 
 impl Parser {
@@ -753,6 +762,7 @@ impl Parser {
             lexer,
             current_token,
             depth: 0,
+            pending_literal_step: None,
         })
     }
 
@@ -1313,23 +1323,22 @@ impl Parser {
 
                         // S0213: The literal value cannot be used as a step within a path expression
                         // Numbers, booleans (true/false), and null cannot be path steps
-                        match &rhs {
-                            AstNode::Number(n) => {
-                                return Err(ParserError::InvalidSyntax(
-                                    format!("S0213: The literal value {} cannot be used as a step within a path expression", n),
+                        let literal_step = match &rhs {
+                            AstNode::Number(n) => Some(n.to_string()),
+                            AstNode::Boolean(b) => Some(b.to_string()),
+                            AstNode::Null => Some("null".to_string()),
+                            _ => None,
+                        };
+                        if let Some(literal) = literal_step {
+                            // Recorded, not raised: see `pending_literal_step`.
+                            // The first one wins, matching a post-parse pass
+                            // walking the tree in order.
+                            if self.pending_literal_step.is_none() {
+                                self.pending_literal_step = Some(format!(
+                                    "S0213: The literal value {} cannot be used as a step within a path expression",
+                                    literal
                                 ));
                             }
-                            AstNode::Boolean(b) => {
-                                return Err(ParserError::InvalidSyntax(
-                                    format!("S0213: The literal value {} cannot be used as a step within a path expression", b),
-                                ));
-                            }
-                            AstNode::Null => {
-                                return Err(ParserError::InvalidSyntax(
-                                    "S0213: The literal value null cannot be used as a step within a path expression".to_string(),
-                                ));
-                            }
-                            _ => {}
                         }
 
                         match rhs {
@@ -1793,11 +1802,18 @@ impl Parser {
     pub fn parse(&mut self) -> Result<AstNode, ParserError> {
         let ast = self.parse_expression(0)?;
 
+        // A token left over is S0201 in jsonata-js -- its general "syntax
+        // error at this token" -- and it beats a deferred S0213, which the
+        // reference only reaches in its post-parse pass.
         if self.current_token != Token::Eof {
-            return Err(ParserError::Expected {
-                expected: "end of expression".to_string(),
-                found: format!("{:?}", self.current_token),
-            });
+            return Err(ParserError::InvalidSyntax(format!(
+                "S0201: Syntax error: {:?}",
+                self.current_token
+            )));
+        }
+
+        if let Some(message) = self.pending_literal_step.take() {
+            return Err(ParserError::InvalidSyntax(message));
         }
 
         Ok(ast)
