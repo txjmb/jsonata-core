@@ -1316,16 +1316,47 @@ pub mod numeric {
             .chars()
             .filter(|&c| is_digit_in_family(c, zero_digit))
             .count();
-        let mut max_fractional_digits = fractional_part
+        let max_fractional_digits = fractional_part
             .chars()
             .filter(|&c| is_digit_in_family(c, zero_digit) || c == digit_char)
             .count();
 
-        // If there's a decimal point but no fractional digits specified, default to 1
-        // This handles cases like "#.e0" where some fractional precision is expected
-        if decimal_pos.is_some() && max_fractional_digits == 0 {
-            max_fractional_digits = 1;
+        // F&O 4.7.4's adjustments, which jsonata-js applies verbatim. They are
+        // what makes `#` an *optional* integer digit: `"#.#"` leaves
+        // `min_integer_digits` at 0, so `$formatNumber(0.25, "#.#")` is ".2"
+        // with no leading zero, while the third rule below still guarantees a
+        // fractional digit so it is not the empty string.
+        //
+        // `scaling_factor` is captured from the UNADJUSTED count -- it drives
+        // the exponent, and taking it after the adjustments would move the
+        // decimal point.
+        let scaling_factor = min_integer_digits;
+        let exponent_present = exponent_pos.is_some();
+        let (mut min_integer_digits, mut min_fractional_digits, mut max_fractional_digits) = (
+            min_integer_digits,
+            min_fractional_digits,
+            max_fractional_digits,
+        );
+        if min_integer_digits == 0 && max_fractional_digits == 0 {
+            if exponent_present {
+                min_fractional_digits = 1;
+                max_fractional_digits = 1;
+            } else {
+                min_integer_digits = 1;
+            }
         }
+        if exponent_present && min_integer_digits == 0 && integer_part.contains(digit_char) {
+            min_integer_digits = 1;
+        }
+        if min_integer_digits == 0 && min_fractional_digits == 0 {
+            min_fractional_digits = 1;
+        }
+
+        // No invented precision. jsonata-js derives the fractional digit counts
+        // solely from the digit characters in the picture's fractional part, so
+        // a picture like "0." has ZERO fractional digits -- which means the
+        // value is rounded to an integer and no separator is shown:
+        // `$formatNumber(1.5, "0.")` is "2", not "1.5" (#136).
 
         // Find grouping positions in integer part
         let mut grouping_positions = Vec::new();
@@ -1384,9 +1415,6 @@ pub mod numeric {
             0
         };
 
-        // Scaling factor = minimum integer digits in mantissa
-        let scaling_factor = min_integer_digits;
-
         Ok(PictureParts {
             prefix,
             suffix,
@@ -1396,8 +1424,6 @@ pub mod numeric {
             grouping_positions,
             fractional_grouping_positions,
             regular_grouping,
-            has_decimal: decimal_pos.is_some(),
-            has_integer_part: !integer_part.is_empty(),
             has_percent,
             has_per_mille,
             min_exponent_digits,
@@ -1422,14 +1448,20 @@ pub mod numeric {
             let mut m = value;
             let mut e = 0_i32;
 
-            // Scale mantissa to be within [min_mantissa, max_mantissa)
-            while m < min_mantissa && m != 0.0 {
-                m *= 10.0;
-                e -= 1;
-            }
-            while m >= max_mantissa {
-                m /= 10.0;
-                e += 1;
+            // Magnitudes, and the upper bound is strictly-greater: with
+            // `>=`, a picture of `"#.e0"` (scaling factor 0, so
+            // max_mantissa 1) pushed a value of exactly 1 to "0.1e1" where
+            // the reference leaves it at "1.0e0". Zero keeps exponent 0 --
+            // F&O bullet 5 says so, and the loops would not terminate.
+            if m != 0.0 {
+                while m.abs() < min_mantissa {
+                    m *= 10.0;
+                    e -= 1;
+                }
+                while m.abs() > max_mantissa {
+                    m /= 10.0;
+                    e += 1;
+                }
             }
 
             (m, Some(e))
@@ -1437,9 +1469,18 @@ pub mod numeric {
             (value, None)
         };
 
-        // Round mantissa to max fractional digits
-        let factor = 10_f64.powi(parts.max_fractional_digits as i32);
-        let rounded = (mantissa * factor).round() / factor;
+        // Round mantissa to max fractional digits.
+        //
+        // jsonata-js routes this through the same `round()` helper `$round`
+        // uses, which is half-to-EVEN. `f64::round` is half-away-from-zero, so
+        // `$formatNumber(0.25, "0.0")` came out "0.3" where the reference says
+        // "0.2", and `$formatNumber(12.345, "#,##0.00")` was "12.35" not
+        // "12.34" -- wrong numbers in ordinary pictures, not just edge cases
+        // (#136).
+        let rounded = match numeric::round(mantissa, Some(parts.max_fractional_digits as i32))? {
+            JValue::Number(n) => n,
+            _ => mantissa,
+        };
 
         // Convert to string with fixed decimal places
         let mut num_str = format!("{:.prec$}", rounded, prec = parts.max_fractional_digits);
@@ -1462,12 +1503,16 @@ pub mod numeric {
         while integer_str.len() > 1 && integer_str.starts_with(zero_digit) {
             integer_str.remove(0);
         }
-        // If we stripped down to a single zero and picture has no integer part, remove it
-        if integer_str == zero_digit.to_string() && !parts.has_integer_part {
+        // Whether a lone zero is shown is decided by the *minimum* integer
+        // digit count, not by whether the picture had an integer part at all.
+        // `"#.#"` has an integer part, but `#` is optional and the F&O
+        // adjustments leave the minimum at zero, so `$formatNumber(0.25,
+        // "#.#")` is ".2" -- no leading zero. `"#"` alone is different: the
+        // adjustment raises its minimum to 1, so it keeps the "0".
+        if integer_str == zero_digit.to_string() && parts.min_integer_digits == 0 {
             integer_str.clear();
         }
-        // If integer part is empty and picture had integer part, add one zero
-        if integer_str.is_empty() && parts.has_integer_part {
+        if integer_str.is_empty() && parts.min_integer_digits > 0 {
             integer_str.push(zero_digit);
         }
 
@@ -1538,7 +1583,9 @@ pub mod numeric {
         }
 
         // Combine integer and fractional parts
-        let mut result = if parts.has_decimal || !fractional_str.is_empty() {
+        // The separator is shown only when there are fractional digits to
+        // show -- not merely because the picture contained one.
+        let mut result = if !fractional_str.is_empty() {
             format!("{}{}{}", integer_str, decimal_sep, fractional_str)
         } else {
             integer_str
@@ -1605,8 +1652,6 @@ pub mod numeric {
         grouping_positions: Vec<usize>,
         fractional_grouping_positions: Vec<usize>,
         regular_grouping: usize,
-        has_decimal: bool,
-        has_integer_part: bool,
         has_percent: bool,
         has_per_mille: bool,
         min_exponent_digits: usize,

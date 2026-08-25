@@ -30,6 +30,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- `$formatNumber` now produces the same value as jsonata-js. Four separate defects, all in
+  picture analysis and formatting:
+  - **Rounding was half-away-from-zero, not half-to-even.** The reference routes this through
+    the same helper `$round` uses. `$formatNumber(12.345, "#,##0.00")` was `"12.35"` and is
+    `"12.34"`; `$formatNumber(0.25, "0.0")` was `"0.3"` and is `"0.2"`. Our `$round` builtin
+    was already correct — `$formatNumber` simply did not use it. This produced wrong numbers
+    for ordinary pictures, not just edge cases.
+  - **An empty fractional part invented a digit and a separator.** Fractional digit counts now
+    come only from the picture, so `"0."` has none: `$formatNumber(1.5, "0.")` was `"1.5"` and
+    is `"2"`, and `$formatNumber(1, "0.")` was `"1."` and is `"1"`.
+  - **`#` did not suppress a leading zero.** `$formatNumber(0.25, "#.#")` was `"0.3"` and is
+    `".2"`, per F&O 4.7.4's adjustments to the minimum digit counts.
+  - **The exponent's upper bound was inclusive.** `$formatNumber(1, "#.e0")` was `"0.1e1"` and
+    is `"1.0e0"`.
+
+  326 cases across 21 pictures now agree, including negatives, grouping, sub-pictures and
+  percent/per-mille. Values at or beyond `1e21` are deliberately excluded: JavaScript switches
+  to exponential notation there and the reference formats the resulting text as if it were
+  digits, so `$formatNumber(1e21, "#,##0.00")` is `"1e,+21.00"` upstream — a grouping separator
+  inside the exponent. ([#136](https://github.com/txjmb/jsonata-core/issues/136))
 - `$formatNumber` now reports the same picture-string error as jsonata-js. The reference runs
   every sub-picture check in sequence and lets the *last* failure name the error (F&O 4.7.3);
   ours returned on the first, so a picture failing several checks reported the wrong one —

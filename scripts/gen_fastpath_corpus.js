@@ -617,6 +617,32 @@ for (const picture of [
   });
 }
 
+// Values crossed with the pictures above. The formatter is where the picture
+// actually gets used, and it diverged in four separate ways (#136): rounding
+// mode (jsonata-js rounds half-to-EVEN, via the same helper $round uses), an
+// empty fractional part inventing a digit and a separator, `#` failing to
+// suppress a leading zero, and the exponent's upper bound being inclusive.
+// Negative values, grouping and the percent/per-mille and sub-picture forms
+// are here because that is where rounding and grouping interact.
+//
+// Values at or beyond 1e21 are deliberately absent: JavaScript switches to
+// exponential notation there and the reference formats the resulting text as
+// if it were digits, so `$formatNumber(1e21, "#,##0.00")` is "1e,+21.00" --
+// a grouping separator inside the exponent. There is no behaviour to match.
+const FORMAT_NUMBER_PICTURES = [
+  '0.', '#.', '0.#', '#.#', '0.00', '#,##0.00', '#,##0', '0.0e0', '#.e0',
+  '0e0', '0.a', '#0.', '0.##', '#.##', '0.0', '#', '0', '0.e0', '0;(0)',
+  '0.0%', '0.0\u2030',
+];
+for (const picture of FORMAT_NUMBER_PICTURES) {
+  for (const value of ['1', '1.5', '0.25', '12.345', '0', '-0.25', '-1.5', '1234.567', '999.995', '0.005']) {
+    BUILTIN_EXPRESSIONS.push({
+      fastpath: 'format_number_value',
+      expr: `$formatNumber(${value}, "${picture}")`,
+    });
+  }
+}
+
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '*' });
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '**' });
 
