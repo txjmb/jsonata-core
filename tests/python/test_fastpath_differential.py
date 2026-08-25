@@ -41,6 +41,7 @@ this harness exists to catch under message-format noise.
 import json
 import math
 import pathlib
+import re
 
 import jsonatapy
 import pytest
@@ -64,8 +65,27 @@ ENGINES = {False: "vm_preferred", True: "forced_tree_walker"}
 # so a dict-only harness never reaches the code that carried issue #97.
 ENTRIES = ("dict", "json")
 
-# Sentinel distinguishing "raised" from any legitimate return value.
-ERROR = object()
+
+# Marker distinguishing "raised" from any legitimate return value.
+#
+# It carries the message because the corpus records the *code* jsonata-js
+# raised, and an error that merely raises is not conformance -- `$replace(1)`
+# raising "Argument count mismatch" where the reference raises T0410 used to
+# read as a match. `Raised` instances are compared with isinstance, never with
+# `is`; there is no singleton.
+class Raised:
+    """An evaluation that raised, plus the code its message carried."""
+
+    _CODE = re.compile(r"\b([TDSQ]\d{4})\b")
+
+    def __init__(self, exc):
+        self.message = str(exc)
+        found = self._CODE.search(self.message)
+        self.code = found.group(1) if found else None
+
+    def __repr__(self):
+        return f"raised {self.code or '(no code)'}: {self.message!r}"
+
 
 # Sentinel distinguishing "undefined" from "null" on the json route only.
 # evaluate_json_or_none returns Python None for an explicit JSON null and the
@@ -109,7 +129,7 @@ def normalize(value):
 
 
 def evaluate(case, entry):
-    """Return the jsonatapy result for a case, or ERROR if it raised."""
+    """Return the jsonatapy result for a case, or a `Raised` if it raised."""
     data = DATASETS[case["dataset"]]
     expr = jsonatapy.compile(case["expr"])
     try:
@@ -120,8 +140,8 @@ def evaluate(case, entry):
             raw = expr.evaluate_json_or_none(json.dumps(data))
             return UNDEFINED if raw is None else json.loads(raw)
         return expr.evaluate(data)
-    except Exception:
-        return ERROR
+    except Exception as exc:  # any failure at all is a divergence signal
+        return Raised(exc)
 
 
 def diverges(case, entry="dict"):
@@ -130,9 +150,19 @@ def diverges(case, entry="dict"):
     expected = case["expected"]
 
     if expected["kind"] == "error":
-        if got is ERROR:
+        if not isinstance(got, Raised):
+            return f"jsonata-js raised {expected['code'] or 'an error'}, jsonatapy returned {got!r}"
+        # Both raised. When the reference names a code, ours must be the same
+        # one: a JSONata error code is part of the contract, and callers
+        # branch on it. When it does not -- a raw JavaScript TypeError
+        # escaping the reference rather than a JSONata error -- there is
+        # nothing to compare, and raising at all is the whole expectation.
+        want = expected.get("code")
+        if want is None or got.code == want:
             return None
-        return f"jsonata-js raised {expected['code'] or 'an error'}, jsonatapy returned {got!r}"
+        return (
+            f"jsonata-js raised {want}, jsonatapy raised {got.code or 'no code'} ({got.message!r})"
+        )
 
     if expected["kind"] == "nonfinite":
         # Infinity/NaN cannot round-trip through JSON, so the corpus records the
@@ -146,7 +176,7 @@ def diverges(case, entry="dict"):
         if entry == "json" and got is None:
             return None
         want = {"inf": float("inf"), "-inf": float("-inf"), "nan": float("nan")}[expected["value"]]
-        if got is ERROR:
+        if isinstance(got, Raised):
             return f"jsonata-js returned {want}, jsonatapy raised"
         if isinstance(got, float) and (got == want or (math.isnan(got) and math.isnan(want))):
             return None
@@ -159,7 +189,7 @@ def diverges(case, entry="dict"):
         if entry == "json":
             if got is UNDEFINED:
                 return None
-            if got is ERROR:
+            if isinstance(got, Raised):
                 return "jsonata-js returned undefined, jsonatapy raised"
             return f"jsonata-js undefined, jsonatapy returned {got!r}"
         want = None
@@ -168,7 +198,7 @@ def diverges(case, entry="dict"):
         if entry == "json" and got is UNDEFINED:
             return f"jsonata-js returned {want!r}, jsonatapy returned undefined"
 
-    if got is ERROR:
+    if isinstance(got, Raised):
         return f"jsonata-js returned {want!r}, jsonatapy raised"
     if normalize(got) != normalize(want):
         return f"jsonata-js {want!r}, jsonatapy {got!r}"

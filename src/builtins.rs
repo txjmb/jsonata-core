@@ -256,6 +256,17 @@ fn boundary_collapse(
 /// `apply_function` call site supplies at least one real argument, so an
 /// `Option<&JValue>` context would never actually be `None` and carries no
 /// extra information.
+/// Render a value the way jsonata-js interpolates one into an error message:
+/// a number as JavaScript would print it, an absent value as the literal
+/// "undefined".
+fn describe_operand(v: &JValue) -> String {
+    match v {
+        JValue::Undefined => "undefined".to_string(),
+        // JValue's Display renders a number the way JavaScript prints one.
+        other => format!("{}", other),
+    }
+}
+
 pub(crate) fn dispatch_pure(
     name: &str,
     args: &[JValue],
@@ -719,9 +730,16 @@ pub(crate) fn dispatch_pure(
                 (JValue::Number(base), JValue::Number(exp)) => {
                     Ok(functions::numeric::power(*base, *exp)?)
                 }
-                _ => Err(EvaluatorError::TypeError(
-                    "power() requires number arguments".to_string(),
-                )),
+                // The signature `<n-n:n>` has already rejected a non-number,
+                // and an undefined base returned above, so the only value
+                // left here is an undefined exponent -- which JavaScript
+                // evaluates to NaN and the reference reports as D3061.
+                (base, exp) => Err(EvaluatorError::EvaluationError(format!(
+                    "D3061: The power function has resulted in a value that cannot be \
+                     represented as a JSON number: base={}, exponent={}",
+                    describe_operand(base),
+                    describe_operand(exp),
+                ))),
             }
         }
         "formatNumber" => {
@@ -1358,9 +1376,12 @@ pub(crate) fn dispatch_pure(
 
             match &args[0] {
                 JValue::String(s) => Err(EvaluatorError::EvaluationError(format!("D3137: {}", s))),
-                _ => Err(EvaluatorError::TypeError(
-                    "T0410: Argument 1 of function error does not match function signature"
-                        .to_string(),
+                // The signature is `<s?:x>` and `s` admits `m`, so an
+                // undefined argument is valid and simply means "no message" --
+                // the reference reaches `message || "$error() function
+                // evaluated"` and raises D3137, not a type error.
+                _ => Err(EvaluatorError::EvaluationError(
+                    "D3137: $error() function evaluated".to_string(),
                 )),
             }
         }
@@ -1372,16 +1393,11 @@ pub(crate) fn dispatch_pure(
                 ));
             }
 
-            // First argument must be a boolean
-            let condition = match &args[0] {
-                JValue::Bool(b) => *b,
-                _ => {
-                    return Err(EvaluatorError::TypeError(
-                        "T0410: Argument 1 of function $assert does not match function signature"
-                            .to_string(),
-                    ));
-                }
-            };
+            // The reference tests `if (!condition)`, so anything that is not
+            // `true` fails the assertion -- including an undefined, which the
+            // `<bs?:x>` signature admits because `b` covers `m`. It is a
+            // failed assertion (D3141), not a type error.
+            let condition = matches!(&args[0], JValue::Bool(true));
 
             if !condition {
                 let message = if args.len() == 2 {
@@ -1407,7 +1423,7 @@ pub(crate) fn dispatch_pure(
         "now" => {
             if !args.is_empty() {
                 return Err(EvaluatorError::EvaluationError(
-                    "now() takes no arguments".to_string(),
+                    "T0410: now() takes no arguments".to_string(),
                 ));
             }
             Ok(crate::datetime::now())
@@ -1415,7 +1431,7 @@ pub(crate) fn dispatch_pure(
         "millis" => {
             if !args.is_empty() {
                 return Err(EvaluatorError::EvaluationError(
-                    "millis() takes no arguments".to_string(),
+                    "T0410: millis() takes no arguments".to_string(),
                 ));
             }
             Ok(crate::datetime::millis())

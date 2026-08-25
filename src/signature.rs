@@ -11,7 +11,11 @@ pub enum SignatureError {
     #[error("Invalid signature: {0}")]
     InvalidSignature(String),
 
-    #[error("Argument count mismatch: expected {expected}, got {actual}")]
+    /// jsonata-js has no distinct arity error: too few or too many arguments
+    /// both fail the signature regex and surface as T0410 against the first
+    /// argument that does not fit. Carrying the code matters because callers
+    /// branch on it -- and because the differential harness compares codes.
+    #[error("T0410: Argument count mismatch: expected {expected}, got {actual}")]
     ArgumentCountMismatch { expected: usize, actual: usize },
 
     #[error("T0410: Argument {index} must be {expected}")]
