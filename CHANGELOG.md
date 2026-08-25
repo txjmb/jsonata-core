@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- `$formatNumber` now reports the same picture-string error as jsonata-js. The reference runs
+  every sub-picture check in sequence and lets the *last* failure name the error (F&O 4.7.3);
+  ours returned on the first, so a picture failing several checks reported the wrong one —
+  `"k"` fails both `D3085` and `D3086` and is `D3086`, `"%%"` was `D3082`, `".."` was `D3081`
+  and `"e"` was `D3085`. A picture containing no active character at all was also swallowed
+  whole as a prefix rather than treated as the active part, which is what stopped `D3086` from
+  ever firing for `"k"` or `"%%"`. 29 pictures now agree where 7 diverged.
+  ([#135](https://github.com/txjmb/jsonata-core/issues/135))
 - Error *codes* now match jsonata-js where they did not. The differential harness compared
   only "did it raise", so any error satisfied an expected error — `$replace(1)` raising
   "Argument count mismatch" read as a match for the reference's `T0410`. Comparing codes
