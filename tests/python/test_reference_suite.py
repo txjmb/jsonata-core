@@ -83,17 +83,42 @@ def extract_error_code(error_msg: str) -> str | None:
     Returns:
         The error code if found, None otherwise
     """
-    # Error format: "T2001: Unknown function: foo"
-    match = re.match(r"^([TDUS]\d{4}):", str(error_msg))
+    # Not anchored. Our messages are not uniformly "CODE: text" -- many carry a
+    # prefix ("Runtime error: D3030: ...", "Parse error: Invalid syntax:
+    # S0209: ..."). An anchored match read all of those as *uncoded*, and the
+    # caller accepts an uncoded error for any expected code, so 36 cases that
+    # emit exactly the right code were passing without it ever being compared
+    # -- and one case emitting the WRONG code passed the same way.
+    match = re.search(r"\b([TDUS]\d{4})\b", str(error_msg))
     return match.group(1) if match else None
+
+
+# Reference cases that are known to diverge, each with the reason. Marked
+# xfail(strict), so one that starts passing fails the suite and has to be
+# removed from here. Empty is the goal.
+KNOWN_DIVERGENCES = {
+    "token-conversion/case002": (
+        "`$.7a` is S0201 upstream and S0213 here. Both are syntax errors and our "
+        "S0213 is correct for `$.7` and `a.7`; the difference is *ordering*. "
+        "jsonata-js raises S0213 from processAST, a post-parse pass, so the "
+        "unexpected trailing token `a` fails the parse first. We validate the step "
+        "during DOT parsing, before the trailing token is ever reached. Matching it "
+        "means deferring the check to a post-parse pass -- see the parser error-code "
+        "issue."
+    ),
+}
 
 
 def _build_pytest_params(
     cases: list[tuple[str, str, dict[str, Any]]],
 ) -> list["pytest.mark.structures.ParameterSet"]:
-    return [
-        pytest.param(test_id, group_name, spec, id=test_id) for test_id, group_name, spec in cases
-    ]
+    params = []
+    for test_id, group_name, spec in cases:
+        marks = []
+        if test_id in KNOWN_DIVERGENCES:
+            marks.append(pytest.mark.xfail(strict=True, reason=KNOWN_DIVERGENCES[test_id]))
+        params.append(pytest.param(test_id, group_name, spec, id=test_id, marks=marks))
+    return params
 
 
 # Load all test cases

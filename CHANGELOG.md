@@ -95,9 +95,17 @@ hiding real divergences, which is where most of this release came from.
 
 ### Compatibility
 
-All 1686 reference-suite cases pass, and the differential corpus (over 20,000 comparisons
-against jsonata-js across two engines and two input paths) has **no known divergences** for the
-first time. The one deliberate exception is base64's character set, documented below.
+The differential corpus — over 20,000 comparisons against jsonata-js across two engines and two
+input paths — has **no known divergences** for the first time. The one deliberate exception is
+base64's character set, documented below.
+
+The reference suite runs 1685 of its 1686 cases green, with one pinned as a known divergence
+(`$.7a` is `S0201` upstream and `S0213` here — both syntax errors, differing in *when* the step
+is validated). Worth stating plainly rather than quoting the pass count: 44 of its
+error-expecting cases still assert only that *something* was raised, because the errors we
+produce for them carry no JSONata code to compare, and 15 more specify an error object that is
+not inspected. That is [#144](https://github.com/txjmb/jsonata-core/issues/144), and it is
+mostly parser errors. It is a gap in what the suite verifies, not a set of known failures.
 
 
 ### Added
@@ -130,6 +138,13 @@ first time. The one deliberate exception is base64's character set, documented b
 ### Removed
 
 ### Fixed
+- The reference-suite harness compares error codes it previously ignored. `extract_error_code`
+  was anchored to the start of the message, so any coded error carrying a prefix — `"Runtime
+  error: D3030: ..."`, `"Parse error: Invalid syntax: S0209: ..."` — read as *uncoded*, and an
+  uncoded error is accepted for any expected code. 36 cases that emit exactly the right code
+  were passing without it ever being compared, and one emitting the wrong code passed the same
+  way. Now 228 of the 273 code-expecting cases are genuinely compared, up from 191.
+  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
 - Five rustdoc warnings that rendered as broken links on docs.rs are gone. JSONata syntax in
   doc comments — `[expr]`, `|location|update[,delete]|` — was being parsed as intra-doc links,
   and `Rc<str>` as an unclosed HTML tag. `cargo doc` is now warning-free under both the default
