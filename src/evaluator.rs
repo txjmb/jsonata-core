@@ -2994,6 +2994,19 @@ impl Evaluator {
                     if let Some(stored_lambda) = self.lookup_lambda_from_value(value) {
                         return stored_lambda.params.len();
                     }
+                    // `$f := $uppercase` stores a `JValue::Builtin`, so the
+                    // arity belongs to the builtin it names, not to `$f`.
+                    // Without this the lookup below asks for the arity of "f"
+                    // and gets MAX, and the callback is handed every argument
+                    // the HOF has (#126 group 5).
+                    if let JValue::Builtin { name } = value {
+                        if !self.host_fns.is_empty() && self.host_fns.contains_key(&**name) {
+                            return usize::MAX;
+                        }
+                        if let Some(arity) = crate::builtins::builtin_arity(name) {
+                            return arity;
+                        }
+                    }
                 }
                 // A host-registered function (`register_fn`/`register_fn_override`)
                 // shadows any built-in of the same name in call position (see
@@ -8453,6 +8466,16 @@ impl Evaluator {
                     // This handles lambdas passed as bound arguments in partial applications
                     if let Some(stored) = self.lookup_lambda_from_value(&value) {
                         return self.invoke_stored_lambda(&stored, values, data);
+                    }
+                    // `$f := $uppercase` binds a `JValue::Builtin`, which is
+                    // not a lambda and so fell through to "evaluate as a plain
+                    // variable" below -- the callback yielded the builtin value
+                    // itself rather than calling it. It takes the same
+                    // by-reference route a literal `$uppercase` callback takes
+                    // (#126 group 5).
+                    if let JValue::Builtin { name } = &value {
+                        let name = name.to_string();
+                        return self.call_builtin_with_values(&name, values, data, true);
                     }
                     // Regular variable value - evaluate with first value as context
                     if values.is_empty() {

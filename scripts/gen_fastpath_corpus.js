@@ -558,6 +558,47 @@ for (const o of PATH_OPERANDS) {
   // second step then has an object to work on.
   BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: `${o}.*.*` });
 }
+// -- Indirectly-bound builtins ----------------------------------------------
+// `($f := $uppercase; $map(arr, $f))` must do what `$map(arr, $uppercase)`
+// does. It did not: binding a builtin to a variable stores a `JValue::Builtin`,
+// and `apply_function`'s Variable arm found the binding, failed to read it as a
+// lambda, and fell through to "evaluate as a plain variable" -- so the callback
+// silently produced nothing instead of dispatching (#126 group 5).
+//
+// One shape per builtin, deliberately mirroring the direct `$map(arr, $NAME)`
+// row above so the two are comparable case by case.
+for (const fn of BUILTINS_BY_REFERENCE) {
+  BUILTIN_EXPRESSIONS.push({
+    fastpath: 'builtin_indirect',
+    expr: `($f := $${fn}; $map(arr, $f))`,
+  });
+}
+for (const e of [
+  // The other higher-order call sites, which each consult callback arity
+  // separately.
+  '($f := $boolean; $filter([1,0,2], $f))',
+  '($f := $string; $each(obj, $f))',
+  '($f := $boolean; $sift(obj, $f))',
+  '($f := $boolean; $single([obj], $f))',
+  '($f := $string; $sort(arr, $f))',
+  // Re-binding: the value must stay dispatchable through a second variable.
+  '($f := $uppercase; $g := $f; $map(["a"], $g))',
+  // Direct invocation of a bound builtin already worked; it is the control
+  // that says this is about the by-reference path, not about binding.
+  '($f := $uppercase; $f("a"))',
+  '($f := $substring; $f("abcdef", 1, 2))',
+  // Arity must come from the builtin, not from the variable: $map hands its
+  // callback three arguments, and $string takes one.
+  '($f := $string; $map([1,2], $f))',
+  '($f := $count; $map([[1,2],[3]], $f))',
+  // A user-defined lambda through the same route, as the control that the
+  // Variable arm still handles lambdas.
+  '($g := function($x){$uppercase($x)}; $map(["a"], $g))',
+  '($f := $uppercase; $reduce(["a","b"], function($a,$b){$a & $f($b)}, ""))',
+]) {
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_indirect', expr: e });
+}
+
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '*' });
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '**' });
 
