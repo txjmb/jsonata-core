@@ -47,11 +47,14 @@ import jsonatapy
 import pytest
 
 _FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures"
-_corpus = json.loads((_FIXTURES / "fastpath_differential.json").read_text())
+# `encoding="utf-8"` is not optional: the fixtures are UTF-8 and Windows would
+# otherwise decode them as cp1252, which turns a per-mille picture (U+2030)
+# into mojibake and fails only on that platform.
+_corpus = json.loads((_FIXTURES / "fastpath_differential.json").read_text(encoding="utf-8"))
 # The builtin matrix lives in its own fixture: one combined file crosses the
 # repo's 500KB per-file CI limit.
-_builtins = json.loads((_FIXTURES / "builtin_differential.json").read_text())
-_known = json.loads((_FIXTURES / "fastpath_known_divergences.json").read_text())
+_builtins = json.loads((_FIXTURES / "builtin_differential.json").read_text(encoding="utf-8"))
+_known = json.loads((_FIXTURES / "fastpath_known_divergences.json").read_text(encoding="utf-8"))
 
 DATASETS = {**_corpus["datasets"], **_builtins["datasets"]}
 CASES = _corpus["cases"] + _builtins["cases"]
