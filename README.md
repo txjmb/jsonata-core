@@ -42,9 +42,16 @@ Release versions will follow the reference jsonata-js project major and minor re
 
 This project currently chooses not to implement async at this time, because it has limited value for most of the most common use-cases and the overhead of the async functionality would slow down synchronous use cases.  We focused on sync performance instead.
 
+[![Test Suite](https://github.com/txjmb/jsonata-core/actions/workflows/test.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/test.yml)
+[![Code Quality](https://github.com/txjmb/jsonata-core/actions/workflows/lint.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/lint.yml)
+[![Security](https://github.com/txjmb/jsonata-core/actions/workflows/security.yml/badge.svg)](https://github.com/txjmb/jsonata-core/actions/workflows/security.yml)
+
 [![Crates.io](https://img.shields.io/crates/v/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
 [![PyPI version](https://badge.fury.io/py/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
 [![Python versions](https://img.shields.io/pypi/pyversions/jsonatapy.svg)](https://pypi.org/project/jsonatapy/)
+[![docs.rs](https://img.shields.io/docsrs/jsonata-core.svg)](https://docs.rs/jsonata-core)
+[![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://txjmb.github.io/jsonata-core)
+[![JSONata conformance](https://img.shields.io/badge/JSONata%20conformance-1686%2F1686-brightgreen.svg)](https://github.com/jsonata-js/jsonata/tree/master/test/test-suite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
