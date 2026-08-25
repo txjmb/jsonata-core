@@ -5,23 +5,12 @@
 #### Crates.io stats
 [![downloads](https://shieldcn.dev/crates/d/jsonata-core.svg)](https://crates.io/crates/jsonata-core)
 
-High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python binding and C ABI/library.  If you use this library, please add a github star!
-
-Much of this project was built using Claude Code with significant human oversight. There was no performant
-JSONata implementation in Python, so the goal was to port JSONata to Rust (with a PyO3 wrapper
-for Python) and see how fast it could go. The answer: faster than V8 for most expression
-workloads, and faster than the next pure-Rust implementation.  The rust versions are published on crates.io, and the python wheels on pypi.  There is also a command-line binary and Python command-line available (works great with uvx) for use in scripting.  The Python library is also usable in a command-line fashion, and a C-compatible library is available for those who want to easily use jsonata in C/C++.
-
-Many, many thanks to the incredible work of all the maintainers of the [JSONata](https://github.com/jsonata-js/jsonata) reference library.  JSONata is a very powerful, well-designed, and useful language that has made an impact on many projects.  This project leverages their outstanding work to extend that capability to Python and Rust and would not be possible without that project.  The implementation in Rust was strongly influenced by their implementation.  The 1600+ (1686/1686 passing for last build of this project) tests they created provided the scaffolding and validation for all of this project.  This project will continue to follow and be a derivative of the reference project as the JSONata reference library evolves.
-
-Release versions will follow the reference jsonata-js project major and minor release numbers, but not necessarily patches.  This will make it easier for adopters of this library to understand each release's JSONata API compatibility.  As an example, 2.2.8 should be compliant with 2.2.x jsonata-js tests, but may have fixes specific to this library.  If a patch release for jsonata-js is relevant for this project, it will be included in a patch release that may or may not follow the patch numbers of the upstream project.
-
 > ### ⚠️ Upgrading to 2.2.8 — please test before you deploy
 >
 > 2.2.8 is primarily a **conformance** release: it corrects a number of places where this
-> library disagreed with the jsonata-js reference. Most of those corrections **change the
+> library disagreed with the jsonata-js reference. These issues were found during routine quality checks and documentation improvements.  The test harness was inadvertently missing some important edge cases.  Many of those corrections **change the
 > result** of expressions that already run today, so an upgrade is not guaranteed to be
-> drop-in.
+> drop-in.  A lot of work went into this release and a significant amount of test coverage was added to improve future results.  If you encounter any issues in testing that are not caused by the conformance changes or if you believe a change is in error, please file an issue and we'll work on it as soon as possible.
 >
 > The areas most likely to affect you:
 >
@@ -39,6 +28,17 @@ Release versions will follow the reference jsonata-js project major and minor re
 > written against the old behaviour, they may need review. **Read the
 > [release notes](CHANGELOG.md) before upgrading**; the 2.2.8 section opens with a summary of
 > what changed and who is affected by each item, ahead of the detailed entries.
+
+High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python binding and C ABI/library.  If you use this library, please add a github star!
+
+Much of this project was built using Claude Code with significant human oversight. There was no performant
+JSONata implementation in Python, so the goal was to port JSONata to Rust (with a PyO3 wrapper
+for Python) and see how fast it could go. The answer: faster than V8 for most expression
+workloads, and faster than the next pure-Rust implementation.  The rust versions are published on crates.io, and the python wheels on pypi.  There is also a command-line binary and Python command-line available (works great with uvx) for use in scripting.  The Python library is also usable in a command-line fashion, and a C-compatible library is available for those who want to easily use jsonata in C/C++.
+
+Many, many thanks to the incredible work of all the maintainers of the [JSONata](https://github.com/jsonata-js/jsonata) reference library.  JSONata is a very powerful, well-designed, and useful language that has made an impact on many projects.  This project leverages their outstanding work to extend that capability to Python and Rust and would not be possible without that project.  The implementation in Rust was strongly influenced by their implementation.  The 1600+ (1686/1686 passing for last build of this project) tests they created provided the scaffolding and validation for all of this project.  This project will continue to follow and be a derivative of the reference project as the JSONata reference library evolves.
+
+Release versions will follow the reference jsonata-js project major and minor release numbers, but not necessarily patches.  This will make it easier for adopters of this library to understand each release's JSONata API compatibility.  As an example, 2.2.8 should be compliant with 2.2.x jsonata-js tests, but may have fixes specific to this library.  If a patch release for jsonata-js is relevant for this project, it will be included in a patch release that may or may not follow the patch numbers of the upstream project.
 
 This project currently chooses not to implement async at this time, because it has limited value for most of the most common use-cases and the overhead of the async functionality would slow down synchronous use cases.  We focused on sync performance instead.
 
