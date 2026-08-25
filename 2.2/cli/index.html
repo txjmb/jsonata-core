@@ -1667,11 +1667,11 @@ JSONPath.</p>
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Python</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span>jsonatapy
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>jsonatapy<span class="w"> </span><span class="s1">&#39;orders[price &gt; 100].product&#39;</span><span class="w"> </span>data.json
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>jsonatapy<span class="w"> </span><span class="s1">'orders[price &gt; 100].product'</span><span class="w"> </span>data.json
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Rust (from source)</span>
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>cargo<span class="w"> </span>install<span class="w"> </span>jsonata-core<span class="w"> </span>--features<span class="w"> </span>cli
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>jsonata<span class="w"> </span><span class="s1">&#39;orders[price &gt; 100].product&#39;</span><span class="w"> </span>data.json
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>jsonata<span class="w"> </span><span class="s1">'orders[price &gt; 100].product'</span><span class="w"> </span>data.json
 </span></code></pre></div>
 <h2 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>jsonata   [OPTIONS] [EXPRESSION] [FILE]
@@ -1680,11 +1680,11 @@ JSONPath.</p>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>&lt;tool&gt; [OPTIONS] --from-file &lt;EXPR_FILE&gt; [FILE]
 </span></code></pre></div>
 <p>If <code>FILE</code> is omitted, input is read from stdin.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;name&quot;: &quot;Alice&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jsonatapy<span class="w"> </span><span class="s1">&#39;name&#39;</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># &quot;Alice&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">'{"name": "Alice"}'</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jsonatapy<span class="w"> </span><span class="s1">'name'</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># "Alice"</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>jsonatapy<span class="w"> </span><span class="s1">&#39;name&#39;</span><span class="w"> </span>data.json
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># &quot;Alice&quot;</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>jsonatapy<span class="w"> </span><span class="s1">'name'</span><span class="w"> </span>data.json
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># "Alice"</span>
 </span></code></pre></div>
 <h2 id="flags">Flags<a class="headerlink" href="#flags" title="Permanent link">&para;</a></h2>
 <table>
@@ -1729,8 +1729,8 @@ JSONPath.</p>
 </tr>
 </tbody>
 </table>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>jsonatapy<span class="w"> </span>--arg<span class="w"> </span><span class="nv">region</span><span class="o">=</span>us<span class="w"> </span>--argjson<span class="w"> </span><span class="nv">limit</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="s1">&#39;$region &amp; &quot;: &quot; &amp; $limit&#39;</span><span class="w"> </span>-n
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># &quot;us: 5&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>jsonatapy<span class="w"> </span>--arg<span class="w"> </span><span class="nv">region</span><span class="o">=</span>us<span class="w"> </span>--argjson<span class="w"> </span><span class="nv">limit</span><span class="o">=</span><span class="m">5</span><span class="w"> </span><span class="s1">'$region &amp; ": " &amp; $limit'</span><span class="w"> </span>-n
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># "us: 5"</span>
 </span></code></pre></div>
 <p>(The quotes are part of the JSON output — the result is a string. Use <code>-r</code> to print it unquoted.)</p>
 <h2 id="-n-null-input"><code>-n</code>/<code>--null-input</code><a class="headerlink" href="#-n-null-input" title="Permanent link">&para;</a></h2>
@@ -1738,13 +1738,13 @@ JSONPath.</p>
 JSONata <code>Undefined</code>, not an explicit <code>null</code>. Useful for expressions that
 don't depend on external data (<code>$now()</code>, arithmetic, <code>--arg</code>/<code>--argjson</code>
 bindings):</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>jsonatapy<span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;1 + 1&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>jsonatapy<span class="w"> </span>-n<span class="w"> </span><span class="s1">'1 + 1'</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># 2</span>
 </span></code></pre></div>
 <p>This is only observable for expressions that reference <code>$</code> directly — an
 explicit <code>null</code> context would print <code>null</code> for the bare expression <code>$</code>,
 while <code>Undefined</code> prints nothing:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>jsonatapy<span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;$&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>jsonatapy<span class="w"> </span>-n<span class="w"> </span><span class="s1">'$'</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># (no output, exit 0)</span>
 </span></code></pre></div>
 <h2 id="output">Output<a class="headerlink" href="#output" title="Permanent link">&para;</a></h2>
@@ -1788,7 +1788,7 @@ while <code>Undefined</code> prints nothing:</p>
 parsing — codes match <code>^[TDUS]\d{4}:</code>) are printed exactly as <code>CODE: message</code>
 with no extra prefix, so scripts/agents can pattern-match on the code
 directly:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>jsonatapy<span class="w"> </span><span class="s1">&#39;null + 1&#39;</span><span class="w"> </span>-n
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>jsonatapy<span class="w"> </span><span class="s1">'null + 1'</span><span class="w"> </span>-n
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># T2002: The left side of the + operator must evaluate to a number</span>
 </span></code></pre></div>
 <p>All other errors are prefixed with <code>error:</code> (or, for non-spec-coded parse
@@ -1796,7 +1796,7 @@ errors specifically, <code>Parse error:</code>).</p>
 <h2 id="mcp-server-python-only">MCP server (Python only)<a class="headerlink" href="#mcp-server-python-only" title="Permanent link">&para;</a></h2>
 <p><code>jsonatapy</code> can also run as an <a href="https://modelcontextprotocol.io/">MCP</a> server,
 exposing JSONata evaluation as tools for AI agents:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;jsonatapy[mcp]&#39;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'jsonatapy[mcp]'</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>jsonatapy<span class="w"> </span>mcp<span class="w">          </span><span class="c1"># stdio transport</span>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>jsonatapy<span class="w"> </span>mcp<span class="w"> </span>--http<span class="w">   </span><span class="c1"># HTTP transport (default port 8000)</span>
 </span></code></pre></div>

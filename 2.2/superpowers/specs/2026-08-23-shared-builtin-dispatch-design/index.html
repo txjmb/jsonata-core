@@ -12,31 +12,27 @@
         <meta name="author" content="jsonatapy contributors">
       
       
-        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.2/development/parser/">
+        <link rel="canonical" href="https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-08-23-shared-builtin-dispatch-design/">
       
       
-        <link rel="prev" href="../building/">
-      
-      
-        <link rel="next" href="../contributing/">
       
       
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../../assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Parser Details - jsonata-core + jsonatapy</title>
+        <title>Shared builtin dispatch - jsonata-core + jsonatapy</title>
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -55,9 +51,9 @@
       
     
     
-      <link rel="stylesheet" href="../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
   
@@ -92,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#jsonata-parser-implementation" class="md-skip">
+        <a href="#shared-builtin-dispatch" class="md-skip">
           Skip to content
         </a>
       
@@ -110,7 +106,7 @@
 
 <header class="md-header" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../.." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-header__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -130,7 +126,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Parser Details
+              Shared builtin dispatch
             
           </span>
         </div>
@@ -243,7 +239,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../.." class="md-tabs__link">
+      <a href="../../.." class="md-tabs__link">
         
   
   
@@ -264,7 +260,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../installation/" class="md-tabs__link">
+        <a href="../../../installation/" class="md-tabs__link">
           
   
   
@@ -284,7 +280,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../rust-crate/" class="md-tabs__link">
+        <a href="../../../rust-crate/" class="md-tabs__link">
           
   
   
@@ -304,7 +300,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../api/" class="md-tabs__link">
+        <a href="../../../api/" class="md-tabs__link">
           
   
   
@@ -324,7 +320,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../performance/" class="md-tabs__link">
+        <a href="../../../performance/" class="md-tabs__link">
           
   
   
@@ -344,7 +340,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../compatibility/" class="md-tabs__link">
+        <a href="../../../compatibility/" class="md-tabs__link">
           
   
   
@@ -360,13 +356,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../building/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../../development/building/" class="md-tabs__link">
           
   
   
@@ -386,7 +380,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../changelog/" class="md-tabs__link">
+        <a href="../../../changelog/" class="md-tabs__link">
           
   
   
@@ -420,7 +414,7 @@
 
 <nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../.." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
+    <a href="../../.." title="jsonata-core + jsonatapy" class="md-nav__button md-logo" aria-label="jsonata-core + jsonatapy" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -450,7 +444,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../.." class="md-nav__link">
+      <a href="../../.." class="md-nav__link">
         
   
   
@@ -531,7 +525,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../installation/" class="md-nav__link">
+      <a href="../../../installation/" class="md-nav__link">
         
   
   
@@ -559,7 +553,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../usage/" class="md-nav__link">
+      <a href="../../../usage/" class="md-nav__link">
         
   
   
@@ -587,7 +581,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../examples/" class="md-nav__link">
+      <a href="../../../examples/" class="md-nav__link">
         
   
   
@@ -676,7 +670,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../rust-crate/" class="md-nav__link">
+      <a href="../../../rust-crate/" class="md-nav__link">
         
   
   
@@ -765,7 +759,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/" class="md-nav__link">
+      <a href="../../../api/" class="md-nav__link">
         
   
   
@@ -793,7 +787,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../jsonata-language/" class="md-nav__link">
+      <a href="../../../jsonata-language/" class="md-nav__link">
         
   
   
@@ -821,7 +815,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../error-handling/" class="md-nav__link">
+      <a href="../../../error-handling/" class="md-nav__link">
         
   
   
@@ -910,7 +904,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../performance/" class="md-nav__link">
+      <a href="../../../performance/" class="md-nav__link">
         
   
   
@@ -938,7 +932,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../benchmarks/" class="md-nav__link">
+      <a href="../../../benchmarks/" class="md-nav__link">
         
   
   
@@ -966,7 +960,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../optimization-tips/" class="md-nav__link">
+      <a href="../../../optimization-tips/" class="md-nav__link">
         
   
   
@@ -1055,7 +1049,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../compatibility/" class="md-nav__link">
+      <a href="../../../compatibility/" class="md-nav__link">
         
   
   
@@ -1083,7 +1077,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../migration-from-js/" class="md-nav__link">
+      <a href="../../../migration-from-js/" class="md-nav__link">
         
   
   
@@ -1111,7 +1105,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../migration-from-jsonata-python/" class="md-nav__link">
+      <a href="../../../migration-from-jsonata-python/" class="md-nav__link">
         
   
   
@@ -1143,31 +1137,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
         
           
-          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
             
   
   
@@ -1185,7 +1176,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_7">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1203,7 +1194,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../building/" class="md-nav__link">
+      <a href="../../../development/building/" class="md-nav__link">
         
   
   
@@ -1228,37 +1219,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Parser Details
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../../development/parser/" class="md-nav__link">
         
   
   
@@ -1274,98 +1238,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#file-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        File Location
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#features" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Features
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Features">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#lexer" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lexer
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#parser" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Parser
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#testing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Testing
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1378,7 +1250,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../contributing/" class="md-nav__link">
+      <a href="../../../development/contributing/" class="md-nav__link">
         
   
   
@@ -1406,7 +1278,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../testing/" class="md-nav__link">
+      <a href="../../../development/testing/" class="md-nav__link">
         
   
   
@@ -1434,7 +1306,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../architecture/" class="md-nav__link">
+      <a href="../../../development/architecture/" class="md-nav__link">
         
   
   
@@ -1462,7 +1334,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../releasing/" class="md-nav__link">
+      <a href="../../../development/releasing/" class="md-nav__link">
         
   
   
@@ -1551,7 +1423,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../changelog/" class="md-nav__link">
+      <a href="../../../changelog/" class="md-nav__link">
         
   
   
@@ -1579,7 +1451,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../license/" class="md-nav__link">
+      <a href="../../../license/" class="md-nav__link">
         
   
   
@@ -1607,7 +1479,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../credits/" class="md-nav__link">
+      <a href="../../../credits/" class="md-nav__link">
         
   
   
@@ -1662,44 +1534,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#file-location" class="md-nav__link">
+  <a href="#context" class="md-nav__link">
     <span class="md-ellipsis">
       
-        File Location
+        Context
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Start
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#features" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Features
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Features">
+    <nav class="md-nav" aria-label="Context">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#lexer" class="md-nav__link">
+  <a href="#three-paths-measured" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Lexer
+        Three paths, measured
       
     </span>
   </a>
@@ -1707,10 +1557,49 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#parser" class="md-nav__link">
+  <a href="#why-now" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Parser
+        Why now
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-1-extract-builtinsdispatch_pure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 1 — extract builtins::dispatch_pure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-2-107-by-reference-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage 2 — #107, by-reference dispatch
       
     </span>
   </a>
@@ -1727,6 +1616,28 @@
     <span class="md-ellipsis">
       
         Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope
       
     </span>
   </a>
@@ -1753,48 +1664,220 @@
   
 
 
-<h1 id="jsonata-parser-implementation">JSONata Parser Implementation<a class="headerlink" href="#jsonata-parser-implementation" title="Permanent link">&para;</a></h1>
-<p>Complete implementation of the JSONata parser in Rust.</p>
-<h2 id="file-location">File Location<a class="headerlink" href="#file-location" title="Permanent link">&para;</a></h2>
-<p><code>src/parser.rs</code> (1,242 lines)</p>
-<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<div class="language-rust highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">use</span><span class="w"> </span><span class="n">jsonatapy</span><span class="p">::</span><span class="n">parser</span><span class="p">::</span><span class="n">parse</span><span class="p">;</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1">// Parse an expression</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">ast</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parse</span><span class="p">(</span><span class="s">"orders[price &gt; 100].product"</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+<h1 id="shared-builtin-dispatch">Shared builtin dispatch<a class="headerlink" href="#shared-builtin-dispatch" title="Permanent link">&para;</a></h1>
+<p>Covers the extraction of a single pure-builtin dispatcher, and
+<a href="https://github.com/txjmb/jsonata-core/issues/107">#107</a> — by-reference builtin calls —
+which lands on top of it.</p>
+<blockquote>
+<p><strong>Revised 2026-08-23.</strong> The first version of this document scoped the work as "delegate
+by-reference calls to <code>call_pure_builtin</code>" and put unification in <em>Out of scope</em>. That was
+wrong, and the measurements in <a href="#three-paths-measured">Three paths, measured</a> are why: the
+duplication is larger than assumed, and doing #107 alone would mean writing ~21 new arms
+into a copy that unification then deletes. The design below is the revised plan.</p>
+</blockquote>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>A builtin can reach evaluation two ways. Written out — <code>$uppercase(name)</code> — it goes through
+<code>call_pure_builtin</code> (compiled/VM) or <code>evaluate_function_call</code> (tree-walker). Passed <em>by
+reference</em> — <code>$map(names, $uppercase)</code> — it arrives as a <code>JValue::Builtin</code> with its arguments
+already evaluated and lands in a third function, <code>call_builtin_with_values</code>.</p>
+<p>That third function is a ~270-line hand-rolled reimplementation with 27 arms, no signature
+validation, and a fallback reading <code>// Add more functions as needed</code>. A 262-case sweep of
+by-reference shapes against the pinned jsonata-js found <strong>52 divergences</strong> in two families:
+nine builtins with no arm at all (<code>$type</code>, <code>$zip</code>, <code>$spread</code>, <code>$distinct</code>, <code>$keys</code>, <code>$merge</code>,
+<code>$base64encode</code>, <code>$encodeUrl</code>, <code>$reverse</code>), and unvalidated argument types in the arms that
+do exist (<code>$map([null], $uppercase)</code> is <code>T0410</code> in the reference; we return null).</p>
+<p>Four of those nine already have correct implementations a few hundred lines up in the same
+file. That is the shape of the problem: not "this path forgot to validate", but "there are
+three copies and the third is a stub that drifted."</p>
+<h3 id="three-paths-measured">Three paths, measured<a class="headerlink" href="#three-paths-measured" title="Permanent link">&para;</a></h3>
+<p>Classifying every arm in <code>evaluate_function_call</code>'s 2688-line builtin match by what it
+actually reaches for:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>count</th>
+<th>needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>pure arm-groups</td>
+<td><strong>52</strong></td>
+<td>values + <code>options</code></td>
+</tr>
+<tr>
+<td>evaluator-dependent</td>
+<td><strong>11</strong></td>
+<td><code>apply_function</code>, <code>evaluate_internal</code>, <code>self.context</code>, <code>start_time</code></td>
+</tr>
+</tbody>
+</table>
+<p>The eleven are <code>$map</code>, <code>$filter</code>, <code>$reduce</code>, <code>$single</code>, <code>$sift</code>, <code>$each</code>, <code>$sort</code>, <code>$eval</code>,
+<code>$match</code>, <code>$replace</code> and <code>$not</code>.</p>
+<p><code>call_pure_builtin</code> has 29 arms. Twenty-eight of them overlap the pure 52; the odd one out is
+<code>$not</code>, which the VM implements purely (<code>functions::boolean::boolean</code>, negated) while the
+tree-walker routes it through <code>self.is_truthy</code>. So the partition is:</p>
+<ul>
+<li><strong>28</strong> implemented twice, in <code>call_pure_builtin</code> and the tree-walker</li>
+<li><strong>24</strong> existing only in the tree-walker — <code>$type</code>, <code>$zip</code>, <code>$spread</code>, <code>$lookup</code>, <code>$pad</code>,
+  <code>$power</code>, <code>$shuffle</code>, <code>$exists</code>, <code>$error</code>, <code>$assert</code>, the four URL codecs, both base64
+  codecs, the four <code>format*</code>/<code>parse*</code> numerics, and the four date/time functions. This is
+  precisely the set that fails when passed by reference.</li>
+<li><strong>1</strong> (<code>$not</code>) implemented differently in each</li>
+</ul>
+<p>The three paths are therefore not three copies of one thing. They are one genuinely
+evaluator-dependent set of 11, and one pure set of 52 that has been copied unevenly across
+three sites.</p>
+<h3 id="why-now">Why now<a class="headerlink" href="#why-now" title="Permanent link">&para;</a></h3>
+<p><code>call_pure_builtin</code> was instrumented and the differential corpus run against it: <strong>29 of 29</strong>
+shared builtins are genuinely routed through it, not merely nominally covered. (<code>vm_preferred</code>
+does not by itself imply the compiled path ran — compilation declines for many shapes — so
+this needed measuring rather than assuming.)</p>
+<p>With the divergence baseline empty as of <a href="https://github.com/txjmb/jsonata-core/pull/106">#106</a>,
+that means the two implementations of all 29 are <em>proven</em> to agree across 3732 cases × 4
+routes. Merging them is low-risk in a way it was not before #106. That window is the argument
+for doing the extraction now rather than adding to the third copy first.</p>
+<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">&para;</a></h2>
+<h3 id="stage-1-extract-builtinsdispatch_pure">Stage 1 — extract <code>builtins::dispatch_pure</code><a class="headerlink" href="#stage-1-extract-builtinsdispatch_pure" title="Permanent link">&para;</a></h3>
+<p>A new module <code>src/builtins.rs</code> owning one function:</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">dispatch_pure</span><span class="p">(</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span><span class="n">name</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">,</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="n">args</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="p">[</span><span class="n">JValue</span><span class="p">],</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="n">context</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">JValue</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="n">options</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">EvaluatorOptions</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">JValue</span><span class="p">,</span><span class="w"> </span><span class="n">EvaluatorError</span><span class="o">&gt;</span>
 </span></code></pre></div>
-<h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
-<h3 id="lexer">Lexer<a class="headerlink" href="#lexer" title="Permanent link">&para;</a></h3>
-<p>The lexer converts JSONata expressions into tokens:</p>
-<div class="language-rust highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">lexer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Lexer</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="s">"1 + 2"</span><span class="p">.</span><span class="n">to_string</span><span class="p">());</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kd">let</span><span class="w"> </span><span class="n">token1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lexer</span><span class="p">.</span><span class="n">next_token</span><span class="p">()</span><span class="o">?</span><span class="p">;</span><span class="w"> </span><span class="c1">// Token::Number(1.0)</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="kd">let</span><span class="w"> </span><span class="n">token2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lexer</span><span class="p">.</span><span class="n">next_token</span><span class="p">()</span><span class="o">?</span><span class="p">;</span><span class="w"> </span><span class="c1">// Token::Plus</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kd">let</span><span class="w"> </span><span class="n">token3</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">lexer</span><span class="p">.</span><span class="n">next_token</span><span class="p">()</span><span class="o">?</span><span class="p">;</span><span class="w"> </span><span class="c1">// Token::Number(2.0)</span>
-</span></code></pre></div>
-<p><strong>Supported tokens:</strong>
-- Literals: numbers, strings, booleans, null
-- Identifiers: <code>foo</code>, <code>bar_baz</code>, <code>`with spaces`</code>
-- Variables: <code>$var</code>
-- Operators: <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>=</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>and</code>, <code>or</code>, <code>in</code>, <code>&amp;</code>, <code>.</code>, <code>..</code>, <code>:=</code>
-- Delimiters: <code>()</code>, <code>[]</code>, <code>{}</code>, <code>,</code>, <code>;</code>, <code>:</code>, <code>?</code>
-- Comments: <code>/* ... */</code></p>
-<h3 id="parser">Parser<a class="headerlink" href="#parser" title="Permanent link">&para;</a></h3>
-<p>The parser uses Pratt parsing (Top-Down Operator Precedence) to build an AST.</p>
-<p><strong>Operator precedence:</strong>
-1. Function call <code>()</code>, array access <code>[]</code> - 80
-2. Dot operator <code>.</code> - 75
-3. Multiplication <code>*</code>, division <code>/</code>, modulo <code>%</code> - 60
-4. Addition <code>+</code>, subtraction <code>-</code>, concatenation <code>&amp;</code> - 50
-5. Comparison <code>=</code>, <code>!=</code>, <code>&lt;</code>, <code>&gt;</code>, etc. - 40
-6. Logical AND <code>and</code> - 30
-7. Logical OR <code>or</code> - 25
-8. Range <code>..</code>, ternary <code>?</code> - 20
-9. Assignment <code>:=</code> - 10 (right-associative)</p>
+<p>paired with <code>pub(crate) fn is_pure_builtin(name: &amp;str) -&gt; bool</code>. It admits <strong>53</strong> names: the
+52 above plus <code>not</code>, which the tree-walker classifies as evaluator-dependent only because it
+reaches for <code>self.is_truthy</code>, while the compiled path already implements it purely. The predicate-plus-dispatcher
+pairing mirrors the existing <code>is_compilable_builtin</code> / <code>call_pure_builtin</code> convention rather
+than inventing a new one, and lets the match keep its <code>unreachable!()</code> fallback — a name can
+only arrive here if the predicate admitted it.</p>
+<p>Internal order, which is the VM path's order and the one #106 established as correct:</p>
+<ol>
+<li>implicit context insertion</li>
+<li>lazy normalisation</li>
+<li><code>validate_builtin_args</code></li>
+<li>the <code>propagates_undefined</code> guard — <strong>after</strong> validation, per #106</li>
+<li>the match</li>
+</ol>
+<p>Then:</p>
+<ul>
+<li><code>call_pure_builtin</code> is deleted; the VM calls <code>dispatch_pure</code> (<code>is_compilable_builtin</code> stays
+  as the <em>compilation</em> gate, which is a separate question from what dispatch can handle).</li>
+<li><code>evaluate_function_call</code> keeps its 10 remaining evaluator arms and delegates everything
+  else. <code>$not</code> moves to <code>dispatch_pure</code> using the VM's implementation; the corpus exercises
+  <code>$not</code> against every operand shape in two matrices, so the swap is checked, not hoped.</li>
+<li><code>call_builtin_with_values</code> delegates the 53 and keeps only what it must.</li>
+</ul>
+<p><strong>Unify the context-insertion lists deliberately.</strong> The two paths disagree today: the
+tree-walker's zero-argument list includes <code>fromMillis</code> and its missing-first list includes
+<code>replace</code>; the VM's include neither. This is benign only because neither builtin is
+compilable, so the VM never sees them. Merging must take the union knowingly, not silently
+adopt whichever list is copied first.</p>
+<p><strong>The 24 tree-walker-only builtins move rather than get rewritten.</strong> They are already correct;
+extraction relocates them.</p>
+<h3 id="stage-2-107-by-reference-dispatch">Stage 2 — #107, by-reference dispatch<a class="headerlink" href="#stage-2-107-by-reference-dispatch" title="Permanent link">&para;</a></h3>
+<p>On top of Stage 1:</p>
+<p><strong>Arity.</strong> <code>get_callback_param_count</code> already exists and is already the single place deciding
+how many arguments a higher-order function hands its callback (<code>$map</code>, <code>$filter</code>, <code>$sift</code>,
+<code>$each</code> all consult it). Its <code>AstNode::Variable</code> arm currently falls through to <code>usize::MAX</code>
+for a builtin reference. Add a table lookup before that default.</p>
+<p>This is where jsonata-js puts it: <code>hofFuncArgs</code> truncates to <code>getFunctionArity(func)</code> and
+<code>applyInner</code> then validates whatever it was handed. Keeping truncation at the HOF call site —
+not inside dispatch — also keeps explicit calls honest for free, since
+<code>call_builtin_with_values</code> is <em>also</em> reached by <code>$f := $substring; $f("abcdef", 1, 2)</code>, where
+truncating would be wrong.</p>
+<p>The table cannot be derived from <code>BUILTIN_SIGNATURES</code>; for a builtin the reference's arity is
+its JavaScript function's parameter count:</p>
+<table>
+<thead>
+<tr>
+<th>builtin</th>
+<th>signature</th>
+<th>signature params</th>
+<th><code>implementation.length</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$uppercase</code></td>
+<td><code>&lt;s-:s&gt;</code></td>
+<td>1</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>$substring</code></td>
+<td><code>&lt;s-nn?:s&gt;</code></td>
+<td>3</td>
+<td>3</td>
+</tr>
+<tr>
+<td><code>$string</code></td>
+<td><code>&lt;x-b?:s&gt;</code></td>
+<td>2</td>
+<td><strong>1</strong></td>
+</tr>
+</tbody>
+</table>
+<p>This is why <code>$map([1,2], $substring)</code> is <code>T0410</code> in jsonata-js while <code>$map(arr, $uppercase)</code>
+is fine.</p>
+<p><strong>Dispatch.</strong> <code>call_builtin_with_values</code> gains a <code>context: &amp;JValue</code> parameter (both call sites,
+<code>evaluator.rs:7540</code> and <code>:10269</code>, have one in scope; the reference validates with the call-site
+<code>input</code> as context) and delegates to <code>dispatch_pure</code> for the 53.</p>
+<p><strong>The evaluator-dependent remainder.</strong> Extraction does <strong>not</strong> make this fall out. <code>$sort</code>,
+<code>$sift</code> and <code>$each</code> are evaluator-dependent <em>and</em> reachable by reference — <code>$map([[3,1]],
+$sort)</code> has no arm today and still will not after Stage 1. These need explicit handling, and
+they are the reason #107 remains real work rather than a consequence of the refactor.</p>
 <h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
-<p>Run the comprehensive test suite:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--lib<span class="w"> </span>parser
-</span></code></pre></div>
-<p>The test suite includes 35+ tests covering all features.</p>
+<p>The corpus is the acceptance test, as it was for #104.</p>
+<p><strong>Stage 1</strong> claims behaviour-neutrality on everything the corpus reaches — which, per the
+measurement above, is all 29 shared builtins across four routes. Where the implementations
+disagree in shapes the corpus does <em>not</em> reach, extraction silently picks a winner; that is a
+known and accepted limit, not an oversight. The reference suite (1686) and the full Python
+suite are the second and third nets.</p>
+<p><strong>Stage 2</strong> adds a by-reference matrix to <code>scripts/gen_fastpath_corpus.js</code> — builtins crossed
+with operand shapes through <code>$map</code>, plus a narrower cross through <code>$filter</code>, <code>$sift</code> and
+<code>$each</code> — following the existing <code>BUILTINS_ONE_ARG</code> / <code>BUILTINS_SECOND_ARG</code> matrices rather
+than a new mechanism. It also emits <code>tests/fixtures/builtin_arity.json</code> from the reference's
+own <code>implementation.length</code>, with a Rust test asserting the table matches, so a submodule bump
+that changes an arity fails CI instead of drifting.</p>
+<p>Order is not negotiable, and was the trap in #104:</p>
+<ol>
+<li>add the matrix, regenerate, <strong>watch it fail</strong> — the baseline is empty, so new divergences
+   appear as real failures rather than xfails</li>
+<li>fix until green</li>
+<li>only then regenerate the baseline, and <code>git diff</code> it to confirm it is still empty</li>
+</ol>
+<p>Regenerating first would write the new divergences in as fresh <code>xfail</code> entries and turn
+everything green while fixing nothing.</p>
+<p>Full gate for each stage: the differential suite (four routes, zero xfails), the 1686-case
+reference suite, <code>tests/python</code> in full, <code>cargo test --release --features cli</code>,
+<code>cargo fmt --check</code>, <code>cargo clippy</code>. The benchmark CI's 10%-regression check covers Stage 1's
+main performance risk.</p>
+<h2 id="risks">Risks<a class="headerlink" href="#risks" title="Permanent link">&para;</a></h2>
+<p><strong>Churn in the hottest file.</strong> <code>src/evaluator.rs</code> is 13,731 lines and Stage 1 moves ~2000 of
+them. The mitigation is that the move is mechanical — the 52 pure arms reach for nothing on
+<code>self</code> except <code>options</code>, verified by census — and that the oracle is at maximum strength right
+now.</p>
+<p><strong>Performance.</strong> Dispatch gains one function-call indirection. <code>hof_result_sequence</code>,
+<code>check_sequence_length</code> and <code>normalize_lazy</code> are already free <code>pub(crate)</code> functions, so no
+new borrows are introduced. Benchmark CI is the check.</p>
+<p><strong>Silent winner-picking.</strong> Stated above under Testing; called out in the PR rather than
+buried.</p>
+<p><strong>Residual divergences in Stage 2.</strong> If a case cannot be matched because the reference crashes
+rather than specifies — as <code>$substringAfter("xundefinedy", missing.x)</code> turned out to in #104 —
+it goes into the baseline <em>with a stated reason</em> and is reported. Growing the baseline is a
+last resort and each entry must justify itself.</p>
+<h2 id="out-of-scope">Out of scope<a class="headerlink" href="#out-of-scope" title="Permanent link">&para;</a></h2>
+<p>Unifying the 11 evaluator-dependent arms as well, by threading an evaluator callback into the
+dispatcher. That would remove the pure/impure split entirely, but it couples the shared table
+back to the evaluator and is a materially larger design. The pure/impure line is a real
+boundary in the reference too, and is worth keeping as the seam.</p>
+<p>Expanding <code>is_compilable_builtin</code> beyond its current 29. A shared dispatcher plausibly makes
+this cheap, and more expressions compiling to bytecode would be a genuine win — but that is a
+performance change with its own measurements, and it is not required by either stage here.</p>
 
 
 
@@ -1883,10 +1966,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
