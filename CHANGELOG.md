@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- Error *codes* now match jsonata-js where they did not. The differential harness compared
+  only "did it raise", so any error satisfied an expected error — `$replace(1)` raising
+  "Argument count mismatch" read as a match for the reference's `T0410`. Comparing codes
+  surfaced 112 cases across nine shapes, all now fixed: signature arity failures carry `T0410`;
+  `$single` reports `D3138`/`D3139`; `$power` with a missing exponent reports `D3061`;
+  `$toMillis` on an unparseable timestamp reports `D3110`; `$millis`/`$now` handed arguments
+  by a higher-order function report `T0410`; and `$error`/`$assert` treat an undefined argument
+  as the signature says they must — `s`/`b` admit *missing*, so `$error(missing.x)` is
+  `D3137` ("no message") and `$assert(missing.x)` is `D3141` (a failed assertion), not type
+  errors. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - A builtin bound to a variable now works as a callback: `($f := $uppercase; $map(arr, $f))`
   is `["A", "B"]` rather than `["", ""]`. Binding stores a `JValue::Builtin`, which is not a
   lambda, so `apply_function` fell through to evaluating `$f` as an ordinary variable and the

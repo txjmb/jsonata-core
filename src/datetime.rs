@@ -128,7 +128,18 @@ pub fn millis() -> JValue {
 
 /// $toMillis(timestamp) - Convert ISO 8601 timestamp to milliseconds since epoch
 pub fn to_millis(timestamp: &str) -> Result<JValue, DateTimeError> {
-    let millis = parse_iso8601_partial(timestamp)?;
+    // The reference reports one error for anything the ISO 8601 parser cannot
+    // read, naming the offending value; the parser's own complaint about
+    // *where* it gave up is an implementation detail with no code attached.
+    let millis = parse_iso8601_partial(timestamp).map_err(|_| {
+        coded(
+            "D3110",
+            format!(
+                "The argument of the toMillis function must be an ISO 8601 formatted timestamp. Given \"{}\"",
+                timestamp
+            ),
+        )
+    })?;
     Ok(JValue::Number(millis as f64))
 }
 

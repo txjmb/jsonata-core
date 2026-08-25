@@ -8210,11 +8210,12 @@ impl Evaluator {
                     // No predicate - array must have exactly 1 element
                     match arr.len() {
                         0 => Err(EvaluatorError::EvaluationError(
-                            "single() argument is empty".to_string(),
+                            "D3139: The $single() function expected exactly 1 matching result.  Instead it matched 0.".to_string(),
                         )),
                         1 => Ok(arr.into_iter().next().unwrap()),
                         count => Err(EvaluatorError::EvaluationError(format!(
-                            "single() argument has {} values (expected exactly 1)",
+                            "D3138: The $single() function expected exactly 1 matching \
+                             result.  Instead it matched more. ({} values)",
                             count
                         ))),
                     }
@@ -8254,7 +8255,7 @@ impl Evaluator {
 
                     match matches.len() {
                         0 => Err(EvaluatorError::EvaluationError(
-                            "single() predicate matches no values".to_string(),
+                            "D3139: The $single() function expected exactly 1 matching result.  Instead it matched 0.".to_string(),
                         )),
                         1 => Ok(matches.into_iter().next().unwrap()),
                         count => Err(EvaluatorError::EvaluationError(format!(
