@@ -10,7 +10,7 @@
 > 2.2.8 is primarily a **conformance** release: it corrects a number of places where this
 > library disagreed with the jsonata-js reference. These issues were found during routine quality checks and documentation improvements.  The test harness was inadvertently missing some edge cases.  Many of those corrections **change the
 > result** of expressions that already run today, so an upgrade is not guaranteed to be
-> drop-in.  A lot of work went into this release and a significant amount of test coverage was added to improve future results.  If you encounter any issues in testing that are not caused by the conformance changes or if you believe a change is in error, please file an issue and we'll work on it as soon as possible.
+> drop-in.  A lot of work went into this release and a significant amount of test coverage was added to improve future results with the goal of maintaining the highest level of conformance to the jsonata standard.  If you encounter any issues in testing that are not caused by the conformance changes or if you believe a change is in error, please file an issue and we'll work on it as soon as possible.
 >
 > The areas most likely to affect you:
 >
