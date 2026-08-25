@@ -643,6 +643,38 @@ for (const picture of FORMAT_NUMBER_PICTURES) {
   }
 }
 
+// -- Truthiness ------------------------------------------------------------
+// JSONata has ONE truthiness rule -- $boolean -- and applies it recursively
+// everywhere a value is coerced. A container is truthy only if some element is
+// truthy, checked recursively, so `[0]`, `[[0]]` and `[0,0]` are all falsy.
+//
+// Every value below is a container whose contents are entirely falsy: exactly
+// the shape that separates a recursive rule from a flat "is it non-empty?"
+// one, and exactly the shape the operand fixtures never contained, which is
+// why this went unnoticed (#111). The truthy and scalar-falsy controls are
+// here so a recursive rule cannot be mistaken for "everything is falsy".
+const TRUTHY_OPERANDS = [
+  '0', '""', 'false', 'null', '[]', '{}',
+  '[0]', '[""]', '[false]', '[null]', '[[]]', '[[0]]', '[0,0]', '[{}]',
+  '1', '"a"', 'true', '[1]', '[0,1]', '{"a":1}', '[{"a":1}]',
+];
+for (const v of TRUTHY_OPERANDS) {
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'truthiness', expr: `$boolean(${v})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'truthiness', expr: `$not(${v})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'truthiness', expr: `${v} ? "t" : "f"` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'truthiness', expr: `(${v}) and true` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'truthiness', expr: `(${v}) or false` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'truthiness', expr: `$filter([${v}], function($x){$x})` });
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'truthiness', expr: `$count($filter([1], function($x){${v}}))` });
+  // A filter predicate coerces its result the same way -- except when the
+  // result is a numeric array, which JSONata reads as a list of index
+  // selectors rather than a truthiness test, so those are excluded here
+  // rather than mixed into the truthiness question.
+  if (!['[0]', '[0,0]', '[1]', '[0,1]', '0', '1'].includes(v)) {
+    BUILTIN_EXPRESSIONS.push({ fastpath: 'truthiness', expr: `[1][${v}]` });
+  }
+}
+
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '*' });
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '**' });
 
