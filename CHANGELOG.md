@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- A builtin bound to a variable now works as a callback: `($f := $uppercase; $map(arr, $f))`
+  is `["A", "B"]` rather than `["", ""]`. Binding stores a `JValue::Builtin`, which is not a
+  lambda, so `apply_function` fell through to evaluating `$f` as an ordinary variable and the
+  callback yielded the function value instead of calling it. Callback arity was resolved from
+  the variable's name too, so `$map` handed a one-argument builtin all three of its arguments.
+  Both now resolve through the bound builtin, and a host-registered override of the same name
+  still suppresses arity truncation. Every builtin was affected, not just the reported
+  `$uppercase`; direct invocation (`$f("a")`) always worked, which is why this looked narrow.
+  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - `$base64decode` now accepts what jsonata-js accepts. The reference decodes through Node's
   `Buffer`, which ignores characters outside the base64 alphabet, stops at the first padding
   character, takes the URL-safe alphabet alongside the standard one, and drops an incomplete
