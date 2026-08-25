@@ -53,12 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parsing shares them and needs the error. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 
 ### Deliberately not changed
-- `$base64encode`/`$base64decode` keep treating their payload as UTF-8. jsonata-js reads it as
-  latin1 (`Buffer.from(str, 'binary')`), which truncates each UTF-16 code unit to one byte:
-  in jsonata-js 2.2.2 `$base64encode("🙂")` is `"PUI="` and decoding that gives `"=B"`. Matching
-  it would round-trip ASCII and corrupt everything else, and would silently change results for
-  anyone encoding non-ASCII today. The reference's own suite pins only an ASCII round-trip, so
-  nothing upstream settles it; a unit test now pins our choice so it cannot flip unnoticed.
+- `$base64encode`/`$base64decode` keep treating their payload as UTF-8, because jsonata's own
+  documentation asks for both latin1 *and* UTF-8 and its implementation matches only the first.
+  `$base64encode` is documented as latin1 — "all characters in the string are in the 0x00 to
+  0xFF range... Unicode characters outside of that range are not supported" — while
+  `$base64decode` is documented as "using a UTF-8 Unicode codepage", which its implementation
+  does not do. No reading of the reference is self-consistent, and UTF-8 on both sides is the
+  half that matches a documented contract exactly while also round-tripping. Above `0xFF`
+  nothing is defined at all: `window.btoa` throws `InvalidCharacterError` where Node truncates
+  each UTF-16 code unit to a byte, so browser and Node disagree. The cost is real but narrow —
+  for `0x80`–`0xFF`, encode has an environment-independent documented answer we do not give
+  (`$base64encode("héllo")` is `"aOlsbG8="` upstream, `"aMOpbGxv"` here); matching it would
+  require latin1 decode too, which would then contradict the decode docs. A unit test pins our
+  choice, with the full reasoning, so it cannot flip unnoticed.
   ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - An explicit null now behaves as a value in object construction and in the `[]` array-keep,
   rather than short-circuiting them: `nul{"a": $}` is `{"a": null}` (it was `null`, and

@@ -2637,21 +2637,42 @@ mod tests {
         }
     }
 
-    /// $base64decode follows jsonata-js in what it *accepts*, not in how it
-    /// reads the bytes.
+    /// $base64 follows jsonata-js in what it *accepts*, not in how it reads
+    /// the bytes. Deliberate, and the reasoning is worth keeping because
+    /// jsonata's own documentation contradicts itself here.
     ///
-    /// jsonata-js decodes through Node's Buffer and calls `.toString('binary')`,
-    /// i.e. latin1, and encodes with `Buffer.from(str, 'binary')`, which
-    /// truncates each UTF-16 code unit to one byte. That round-trips ASCII and
-    /// destroys everything else -- in jsonata-js 2.2.2,
-    /// `$base64encode("\u{1f642}")` is "PUI=" and decoding it back gives "=B".
-    /// jsonata-core treats the payload as UTF-8 instead, so the round-trip
-    /// holds for any string.
+    /// `functions.js` delegates to the platform: `window.btoa`/`window.atob`
+    /// in a browser, and under Node `Buffer.from(str, 'binary')` /
+    /// `.toString('binary')` -- chosen, per its own comment, only to emulate
+    /// btoa/atob without pulling in the Buffer polyfill. So latin1 is the
+    /// intent, not an accident of Node.
     ///
-    /// This is a deliberate divergence, not an oversight (#126 group 3), and
-    /// the reference's own suite pins only an ASCII round-trip, so nothing
-    /// upstream settles it. If it is ever revisited, this test is the thing
-    /// that has to change first.
+    /// The docs then say two different things (docs/string-functions.md):
+    ///
+    ///   $base64encode -- "Each character in the string is treated as a byte
+    ///   of binary data. This requires that all characters in the string are
+    ///   in the 0x00 to 0xFF range... Unicode characters outside of that range
+    ///   are not supported."   -> latin1, out-of-range explicitly unsupported
+    ///
+    ///   $base64decode -- "Converts base 64 encoded bytes to a string, using a
+    ///   UTF-8 Unicode codepage."                                   -> UTF-8
+    ///
+    /// The decode implementation does not do what the decode docs say. So
+    /// there is no reading of the reference that is self-consistent, and
+    /// UTF-8 on both sides is the half that matches a documented contract
+    /// exactly while also round-tripping.
+    ///
+    /// Above 0xFF nothing is defined at all: `window.btoa("\u{1f642}")` throws
+    /// InvalidCharacterError, while Node truncates each UTF-16 code unit to a
+    /// byte and yields "PUI=", which decodes back to "=B". Browser and Node
+    /// disagree, so there is no conformance target to hit.
+    ///
+    /// What this does cost: for 0x80..=0xFF, encode has a documented,
+    /// environment-independent answer we do not give --
+    /// `$base64encode("h\u{e9}llo")` is "aOlsbG8=" in jsonata-js and
+    /// "aMOpbGxv" here. Matching it would require latin1 decode too (or the
+    /// round-trip breaks), which would then contradict the decode docs.
+    /// See #126 group 3. If this is ever revisited, start here.
     #[test]
     fn base64_round_trips_non_ascii_where_jsonata_js_does_not() {
         for original in [
