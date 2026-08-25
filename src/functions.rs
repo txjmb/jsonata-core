@@ -2028,9 +2028,12 @@ pub mod encoding {
     pub fn decode_url_component(s: &str) -> Result<JValue, FunctionError> {
         match percent_encoding::percent_decode_str(s).decode_utf8() {
             Ok(decoded) => Ok(JValue::string(decoded.to_string())),
-            Err(_) => Err(FunctionError::RuntimeError(
-                "Invalid percent-encoded string".to_string(),
-            )),
+            // jsonata-js reports every malformed-URL failure as D3140, naming
+            // the function and quoting the offending value.
+            Err(_) => Err(FunctionError::RuntimeError(format!(
+                "D3140: Malformed URL passed to ${}(): \"{}\"",
+                "decodeUrlComponent", s
+            ))),
         }
     }
 
@@ -2047,9 +2050,12 @@ pub mod encoding {
     pub fn decode_url(s: &str) -> Result<JValue, FunctionError> {
         match percent_encoding::percent_decode_str(s).decode_utf8() {
             Ok(decoded) => Ok(JValue::string(decoded.to_string())),
-            Err(_) => Err(FunctionError::RuntimeError(
-                "Invalid percent-encoded URL".to_string(),
-            )),
+            // jsonata-js reports every malformed-URL failure as D3140, naming
+            // the function and quoting the offending value.
+            Err(_) => Err(FunctionError::RuntimeError(format!(
+                "D3140: Malformed URL passed to ${}(): \"{}\"",
+                "decodeUrl", s
+            ))),
         }
     }
 }

@@ -141,6 +141,16 @@ cannot grow unnoticed.
 ### Removed
 
 ### Fixed
+- `$decodeUrl` and `$decodeUrlComponent` report `D3140` on malformed input, naming the function
+  and quoting the value as jsonata-js does, instead of an uncoded "Invalid percent-encoded URL".
+- An expression containing an unpaired surrogate no longer leaks a raw `UnicodeEncodeError`. A
+  Python `str` can hold one and a Rust `String` cannot, so such an expression cannot cross the
+  boundary to be parsed at all; PyO3's codec error now becomes a `ValueError` naming the
+  surrogate and its position, so the library keeps a single error type. (`$encodeUrl` on a lone
+  surrogate is `D3140` upstream; there is no point at which we could raise it, since the
+  expression never parses.)
+- The reference suite compares the `code` of cases that specify an error *object*, not just
+  those with a bare `code` field. Nothing about those 15 was checked before.
 - `$.7a` now raises `S0201`, not `S0213`. jsonata-js raises `S0213` ("literal value cannot be
   used as a step") from a pass that runs *after* parsing, so an unexpected trailing token fails
   the parse first; we raised it inline, before the trailing token was reached. Our `S0213` was

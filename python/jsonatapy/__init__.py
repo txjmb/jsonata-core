@@ -507,7 +507,20 @@ def compile(
         is more efficient than calling `evaluate()` repeatedly with
         the same expression string.
     """
-    return JsonataExpression(_compile(expression, timeout, max_stack_depth, max_sequence_length))
+    try:
+        return JsonataExpression(
+            _compile(expression, timeout, max_stack_depth, max_sequence_length)
+        )
+    except UnicodeEncodeError as exc:
+        # A Python str may hold an unpaired surrogate; a Rust String may not,
+        # so such an expression cannot cross the boundary at all and PyO3
+        # raises a bare UnicodeEncodeError. Re-raise as ValueError so the
+        # library keeps one error type, and say why rather than leaking a
+        # codec message.
+        raise ValueError(
+            "Expression contains an unpaired surrogate and cannot be compiled: "
+            f"{exc.object[exc.start : exc.end]!r} at position {exc.start}"
+        ) from exc
 
 
 def evaluate(
