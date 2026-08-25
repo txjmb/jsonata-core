@@ -84,16 +84,19 @@ jobs:
       version: ${{ steps.validate.outputs.version }}
 
     steps:
-      - name: Validate version format
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate version
         id: validate
         run: |
           VERSION="${{ github.event.inputs.version }}"
 
-          # Validate format X.Y.Z (semver)
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Invalid version format. Expected X.Y.Z (e.g., 2.1.0)"
-            exit 1
-          fi
+          # Checks the shape AND that the version is a legal successor of the one in
+          # the manifests. Shape alone is not enough: this input is free text and the
+          # publish steps downstream are irreversible, so a fat-fingered "2.8.8" for
+          # 2.2.8 passes a semver regex and would have tagged and published 2.8.8.
+          ./scripts/check-release-version.sh "$VERSION"
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
