@@ -13,12 +13,28 @@ exactly one component.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check-release-version.sh"
+
+# The script is bash, and `release.yml` runs it only on ubuntu-latest, so these
+# cases carry no Windows coverage to lose. They are skipped there rather than
+# taught to find a shell: on windows-latest `bash` resolves to
+# C:\Windows\System32\bash.exe -- the WSL launcher, not Git Bash -- which has no
+# distro installed, prints "Windows Subsystem for Linux has no installed
+# distributions" in UTF-16 on stdout, and exits 1 without reading the script at
+# all. Every assertion below then fails against empty stderr.
+#
+# test_the_script_is_committed_executable is deliberately NOT skipped: it shells
+# out to git, not bash, and the mode it checks is what the release job depends on.
+needs_bash = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bash script, run only on ubuntu-latest; `bash` on windows-latest is the WSL stub",
+)
 
 
 def run(version, cargo="2.2.8", pyproject=None, tmp_path=None):
@@ -41,6 +57,7 @@ def run(version, cargo="2.2.8", pyproject=None, tmp_path=None):
     )
 
 
+@needs_bash
 @pytest.mark.parametrize(
     "version",
     [
@@ -55,6 +72,7 @@ def test_accepts_the_current_version_and_its_legal_successors(version, tmp_path)
     assert result.returncode == 0, result.stderr
 
 
+@needs_bash
 @pytest.mark.parametrize(
     "version",
     [
@@ -73,17 +91,20 @@ def test_rejects_versions_that_are_not_a_single_step_from_the_manifest(version, 
     assert "2.2.8" in result.stderr, "the error must name the version it compared against"
 
 
+@needs_bash
 @pytest.mark.parametrize("version", ["2.2", "v2.2.9", "2.2.9-rc1", "", "2.2.9 "])
 def test_rejects_malformed_versions(version, tmp_path):
     assert run(version, tmp_path=tmp_path).returncode != 0
 
 
+@needs_bash
 def test_rejects_manifests_that_disagree_with_each_other(tmp_path):
     result = run("2.2.9", cargo="2.2.8", pyproject="2.2.7", tmp_path=tmp_path)
     assert result.returncode != 0
     assert "pyproject.toml" in result.stderr
 
 
+@needs_bash
 def test_the_repos_own_manifests_agree_and_accept_a_patch_bump():
     """The real files, not a fixture -- catches drift landing on main."""
     cargo = (REPO / "Cargo.toml").read_text()
