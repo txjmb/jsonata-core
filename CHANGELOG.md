@@ -16,28 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
-- The last uncoded errors carry their code: calling a non-function is `T1006`, partially
-  applying one (a call carrying a `?` placeholder) is `T1008`, assigning to something that is
-  not a variable is `S0212`, and a type parameter applied to something other than a function or
-  array is `S0401`. Every reference case that names an error code now has that code compared
-  against ours, except two that cannot be reached at all — `$encodeUrl` on an unpaired
-  surrogate, where the expression never crosses into Rust to be parsed.
-  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
-- Parse errors carry their JSONata code. Unterminated strings are `S0101`, unsupported escapes
-  `S0103`, a malformed `\u` escape `S0104`, an unterminated backquoted name `S0105`, a wrong
-  token `S0202`, running out of input while expecting one `S0203`, an unknown operator `S0204`,
-  an unexpected end of expression `S0207`, and a symbol used where an operand belongs `S0211`.
-  Previously all of these were uncoded prose, so callers branching on error codes could not
-  distinguish a syntax error from any other failure.
-  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
-- Nine more evaluator errors carry their JSONata code: `$sqrt` of a negative number is `D3060`,
-  `$power` overflowing is `D3061`, the single-argument `$sort` on mixed types is `D3070`,
-  `$single` matching more than one value is `D3138`, a non-string object key is `T1003`, a
-  non-function right side of `~>` is `T2006`, and `$split` given a matcher function that does
-  not produce the expected structure is `T1010`. Calling a function without its `$` splits the
-  way jsonata-js splits it: a name that *is* a builtin gets `T1005` with the "did you mean
-  `$name`?" suggestion, anything else gets `T1006`.
-  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
 
 ### Security
 
@@ -94,9 +72,13 @@ raising `D3136`.
 
 *You are exposed if* you depended on those raising to detect bad input.
 
-**Error codes.** Roughly 112 error shapes reported the wrong code, or none at all. If you branch
-on JSONata error codes, more of them are now correct — and a few that previously surfaced as
-generic errors now carry `T0410`, `D3061`, `D3110`, `D3137`, `D3138`, `D3139` or `D3141`.
+**Error codes.** This is the largest single change by count. Errors across the evaluator and the
+parser reported the wrong JSONata code, or none at all — an error with no code is not something
+a caller can branch on. Of the reference suite's 273 code-bearing cases, 107 could not be
+verified at 2.2.7 because our error carried no code to compare; that is now 2, and those two are
+unreachable rather than unfixed. Parse errors in particular went from uncoded prose to carrying
+`S0101`, `S0103`, `S0104`, `S0105`, `S0202`, `S0203`, `S0204`, `S0207`, `S0208`, `S0211`, `S0212`
+and `S0401`, so a syntax error is now distinguishable from any other failure.
 
 **Things that used to fail and now work.** Passing a builtin by reference through a variable
 (`$f := $uppercase; $map(arr, $f)`) returned empty strings and now works, for every builtin.
@@ -163,6 +145,28 @@ cannot grow unnoticed.
 ### Removed
 
 ### Fixed
+- The last uncoded errors carry their code: calling a non-function is `T1006`, partially
+  applying one (a call carrying a `?` placeholder) is `T1008`, assigning to something that is
+  not a variable is `S0212`, and a type parameter applied to something other than a function or
+  array is `S0401`. Every reference case that names an error code now has that code compared
+  against ours, except two that cannot be reached at all — `$encodeUrl` on an unpaired
+  surrogate, where the expression never crosses into Rust to be parsed.
+  (issue [#144](https://github.com/txjmb/jsonata-core/issues/144))
+- Parse errors carry their JSONata code. Unterminated strings are `S0101`, unsupported escapes
+  `S0103`, a malformed `\u` escape `S0104`, an unterminated backquoted name `S0105`, a wrong
+  token `S0202`, running out of input while expecting one `S0203`, an unknown operator `S0204`,
+  an unexpected end of expression `S0207`, and a symbol used where an operand belongs `S0211`.
+  Previously all of these were uncoded prose, so callers branching on error codes could not
+  distinguish a syntax error from any other failure.
+  (issue [#144](https://github.com/txjmb/jsonata-core/issues/144))
+- Nine more evaluator errors carry their JSONata code: `$sqrt` of a negative number is `D3060`,
+  `$power` overflowing is `D3061`, the single-argument `$sort` on mixed types is `D3070`,
+  `$single` matching more than one value is `D3138`, a non-string object key is `T1003`, a
+  non-function right side of `~>` is `T2006`, and `$split` given a matcher function that does
+  not produce the expected structure is `T1010`. Calling a function without its `$` splits the
+  way jsonata-js splits it: a name that *is* a builtin gets `T1005` with the "did you mean
+  `$name`?" suggestion, anything else gets `T1006`.
+  (issue [#144](https://github.com/txjmb/jsonata-core/issues/144))
 - `$decodeUrl` and `$decodeUrlComponent` report `D3140` on malformed input, naming the function
   and quoting the value as jsonata-js does, instead of an uncoded "Invalid percent-encoded URL".
 - An expression containing an unpaired surrogate no longer leaks a raw `UnicodeEncodeError`. A
