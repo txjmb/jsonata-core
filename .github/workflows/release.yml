@@ -145,8 +145,13 @@ jobs:
           # at this same version already flushed [Unreleased] into [$VERSION] and
           # pushed it, [Unreleased] is now legitimately empty - re-running the bump
           # script would fail loudly on that (by design, for the FIRST run), so skip
-          # entirely once the version's own entry already exists.
-          if grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
+          # entirely once the version's own entry already exists. The same guard covers
+          # a changelog section finalised by hand before dispatch.
+          #
+          # Match the heading prefix only, NOT "] - $DATE": a named release writes
+          # "## [2.2.8] \"Conform-ata\" - 2026-08-25", so anchoring on " - " would miss it,
+          # run the bump anyway, and emit a SECOND, duplicate heading for the same version.
+          if grep -q "^## \[$VERSION\]" CHANGELOG.md; then
             echo "CHANGELOG.md already has a [$VERSION] entry - skipping (re-run case)"
           else
             ./scripts/bump-changelog.sh "$VERSION"
