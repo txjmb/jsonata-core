@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-## [2.2.8] - 2026-08-25
+## [2.2.8] "Conform-ata" - 2026-08-25
 
 Primarily a conformance release, with documentation work on the Rust crate alongside it. Most
 of what follows brings `jsonatapy` closer to the pinned jsonata-js (v2.2.2), and a fair amount
@@ -86,10 +86,12 @@ and `S0401`, so a syntax error is now distinguishable from any other failure.
 builtins that worked in direct calls but raised when passed to `$map`/`$filter` now behave
 identically either way.
 
-**Documentation.** The `jsonata-core` crate's examples now compile and are run as doctests
-rather than being marked `ignore`, docs.rs renders without the broken links five rustdoc
-warnings were producing, and the module list no longer advertises private modules. The Python
-package is classified Production/Stable rather than Beta.
+**Documentation — the Rust crate.** Its examples were marked `rust,ignore`, so nothing verified
+they were correct; they are now four compiling doctests. Five rustdoc warnings that rendered as
+broken links on docs.rs are gone, the crate header no longer names the wrong crate, and the
+module list no longer advertises two private modules while omitting two feature-gated ones. On
+the Python side, the package is classified Production/Stable rather than Beta — it still said
+Beta at full reference-suite parity. Itemised under Added, Changed and Fixed below.
 
 **Internals with no behavioural intent.** Builtin dispatch is now a single shared
 implementation rather than three partial copies, and the differential harness gained the

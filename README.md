@@ -17,7 +17,7 @@
 [![JSONata conformance](https://img.shields.io/badge/JSONata%20conformance-1686%2F1686-brightgreen.svg)](https://github.com/jsonata-js/jsonata/tree/master/test/test-suite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> ### ⚠️ Upgrading to 2.2.8 — please test before you deploy
+> ### ⚠️ Upgrading to 2.2.8 "Conform-ata" — please test before you deploy
 >
 > 2.2.8 is primarily a **conformance** release: it corrects a number of places where this
 > library disagreed with the jsonata-js reference. These issues were found during routine quality checks and documentation improvements.  The test harness was inadvertently missing some edge cases.  Many of those corrections **change the
