@@ -84,16 +84,19 @@ jobs:
       version: ${{ steps.validate.outputs.version }}
 
     steps:
-      - name: Validate version format
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate version
         id: validate
         run: |
           VERSION="${{ github.event.inputs.version }}"
 
-          # Validate format X.Y.Z (semver)
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Invalid version format. Expected X.Y.Z (e.g., 2.1.0)"
-            exit 1
-          fi
+          # Checks the shape AND that the version is a legal successor of the one in
+          # the manifests. Shape alone is not enough: this input is free text and the
+          # publish steps downstream are irreversible, so a fat-fingered "2.8.8" for
+          # 2.2.8 passes a semver regex and would have tagged and published 2.8.8.
+          ./scripts/check-release-version.sh "$VERSION"
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
@@ -145,8 +148,13 @@ jobs:
           # at this same version already flushed [Unreleased] into [$VERSION] and
           # pushed it, [Unreleased] is now legitimately empty - re-running the bump
           # script would fail loudly on that (by design, for the FIRST run), so skip
-          # entirely once the version's own entry already exists.
-          if grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
+          # entirely once the version's own entry already exists. The same guard covers
+          # a changelog section finalised by hand before dispatch.
+          #
+          # Match the heading prefix only, NOT "] - $DATE": a named release writes
+          # "## [2.2.8] \"Conform-ata\" - 2026-08-25", so anchoring on " - " would miss it,
+          # run the bump anyway, and emit a SECOND, duplicate heading for the same version.
+          if grep -q "^## \[$VERSION\]" CHANGELOG.md; then
             echo "CHANGELOG.md already has a [$VERSION] entry - skipping (re-run case)"
           else
             ./scripts/bump-changelog.sh "$VERSION"
