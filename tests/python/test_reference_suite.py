@@ -97,6 +97,13 @@ def extract_error_code(error_msg: str) -> str | None:
 # Reference cases that are known to diverge, each with the reason. Marked
 # xfail(strict), so one that starts passing fails the suite and has to be
 # removed from here. Empty is the goal, and currently the state.
+# Reference cases that are known to diverge, each with the reason. Marked
+# xfail(strict), so one that starts passing fails the suite and has to be
+# removed from here. Empty is the goal, and currently the state.
+#
+# Note what does NOT belong here: a case we satisfy only because our error
+# carries no code for the suite to compare. That is not a known divergence, it
+# is an unverified case -- counted by UNVERIFIED_ERROR_CEILING above.
 KNOWN_DIVERGENCES: dict[str, str] = {}
 
 
@@ -131,7 +138,7 @@ print(f"{'=' * 70}\n")
 # A ceiling, not a target. It only ever goes down -- see #144. The point of
 # asserting it is that "1686 passing" says less than it sounds for these cases,
 # and a new uncoded error would otherwise slip in unnoticed.
-UNVERIFIED_ERROR_CEILING = 58
+UNVERIFIED_ERROR_CEILING = 45
 
 
 @pytest.mark.reference
@@ -162,7 +169,12 @@ def test_unverified_error_cases_do_not_grow():
             else:
                 compiled.evaluate(data, bindings) if bindings else compiled.evaluate(data)
         except Exception as exc:  # any raise is what these cases expect
-            if "code" not in spec or extract_error_code(str(exc)) is None:
+            # Unverified means *we* gave the suite nothing to compare: our
+            # error carries no JSONata code. Cases specifying an error object
+            # count the same way -- only its `code` is compared, so an uncoded
+            # error satisfies them too.
+            wants_code = spec.get("code") or spec.get("error", {}).get("code")
+            if wants_code and extract_error_code(str(exc)) is None:
                 unverified.append(test_id)
 
     assert len(unverified) <= UNVERIFIED_ERROR_CEILING, (
@@ -322,10 +334,18 @@ def test_reference_suite(test_id: str, group_name: str, spec: dict[str, Any], en
                 )
 
         elif has_error_obj:
-            # Expected an error with specific error object
-            # TODO: Validate full error object structure
-            # For now, just accept that an error occurred
-            pass
+            # The case gives an error *object*. Only its `code` is compared;
+            # the other fields (functionName, value, token) are not modelled
+            # here. Previously nothing was compared at all.
+            expected_code = spec["error"].get("code")
+            actual_code = extract_error_code(error_msg)
+            if expected_code and actual_code and actual_code != expected_code:
+                pytest.fail(
+                    f"Error code mismatch for expression: {expr}\n"
+                    f"Expected code: {expected_code}\n"
+                    f"Actual code:   {actual_code}\n"
+                    f"Error message: {error_msg}"
+                )
 
         elif has_result or has_undefined:
             # Unexpected error when expecting successful result
