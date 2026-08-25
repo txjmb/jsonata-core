@@ -10,6 +10,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.8] - 2026-08-25
+
+A conformance release. Almost everything here brings `jsonatapy` closer to the pinned
+jsonata-js (v2.2.2), and a fair amount of it **changes the answer** for expressions that
+already run today. If you are upgrading, the summary below is the part worth reading; the
+itemised entries follow.
+
+### What changed, and who it affects
+
+**Boolean coercion of containers — the broadest change.** JSONata has one truthiness rule and
+applies it recursively: a container is truthy only if some element is truthy, all the way down.
+`jsonatapy` had three rules, and the one every implicit consumer used asked only "is it
+non-empty?". A single-element array holding a falsy value — `[0]`, `[""]`, `[false]`, `[null]` —
+was therefore truthy where the reference says false. That affects `? :`, `and`, `or`, `$not`,
+filter predicates, `$filter`, and any lambda whose result is coerced.
+
+*You are exposed if* your data holds one-element arrays of falsy values (`{"flags": [false]}`,
+`{"counts": [0]}`) or you build them (`[expr]`, `expr[]`, `$map`, `$filter`). Ordinary path
+expressions are unaffected — a path matching one value unwraps to the scalar, so
+`items[v=0].v` was already `0`, not `[0]`.
+
+**`$formatNumber` produces different numbers.** Rounding was half-away-from-zero; the reference
+rounds half-to-even. `$formatNumber(12.345, "#,##0.00")` was `"12.35"` and is now `"12.34"`.
+Three further defects around empty fractional parts, optional digits and exponents are fixed in
+the same pass.
+
+*You are exposed if* you format numbers for display or comparison and depend on the previous
+rounding.
+
+**Sequence and null handling in paths.** `*` on a value with no children is `undefined` rather
+than `null`; `*` and `#$i` now unwrap a lone result like every other sequence-producing step;
+an explicit null is treated as a value by object construction and `[]` rather than
+short-circuiting them; and `[]` and `[true]` are finally distinct operators.
+
+*You are exposed if* you rely on the shape (wrapped vs unwrapped) of single-result expressions,
+or on `null` where the reference produces `undefined` — the two differ in object construction,
+which drops undefined-valued keys but keeps null-valued ones.
+
+**Stricter argument validation.** Six builtins (`$base64encode`, `$base64decode`, `$toMillis`,
+`$fromMillis`, `$formatInteger`, `$parseInteger`) had no signature at all and so validated
+nothing. They now reject an explicit null with `T0410` where they previously returned `null`,
+and they accept the context forms (`str.$base64encode()`) that never worked.
+
+*You are exposed if* you pass a possibly-null value to any of those six and relied on getting
+`null` back rather than an error.
+
+**More permissive parsing in two places.** `$base64decode` now accepts what the reference
+accepts — partial quanta, characters outside the alphabet, the URL-safe alphabet — instead of
+raising. `$parseInteger` returns `NaN` for a value that does not match its picture rather than
+raising `D3136`.
+
+*You are exposed if* you depended on those raising to detect bad input.
+
+**Error codes.** Roughly 112 error shapes reported the wrong code, or none at all. If you branch
+on JSONata error codes, more of them are now correct — and a few that previously surfaced as
+generic errors now carry `T0410`, `D3061`, `D3110`, `D3137`, `D3138`, `D3139` or `D3141`.
+
+**Things that used to fail and now work.** Passing a builtin by reference through a variable
+(`$f := $uppercase; $map(arr, $f)`) returned empty strings and now works, for every builtin.
+`$eval` works as a callback. `$single` is recognised when passed by reference. Twenty-four
+builtins that worked in direct calls but raised when passed to `$map`/`$filter` now behave
+identically either way.
+
+**Internals with no behavioural intent.** Builtin dispatch is now a single shared
+implementation rather than three partial copies, and the differential harness gained the
+ability to see distinctions it was previously blind to — `null` vs `undefined`, error codes,
+and by-reference dispatch of evaluator-dependent builtins. Each of those blind spots was
+hiding real divergences, which is where most of this release came from.
+
+### Compatibility
+
+All 1686 reference-suite cases pass, and the differential corpus (over 20,000 comparisons
+against jsonata-js across two engines and two input paths) has **no known divergences** for the
+first time. The one deliberate exception is base64's character set, documented below.
+
+
+### Added
+
+### Changed
 - Every builtin that needs only its arguments is now implemented once, in `src/builtins.rs`,
   and shared by the compiled path and the tree-walker instead of being written out in each.
   Fifty-three builtins were spread across two dispatch sites: twenty-nine were implemented
@@ -127,21 +215,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `D3130`, and the letters/roman/words parsers are untouched because date-time component
   parsing shares them and needs the error. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 
-### Deliberately not changed
-- `$base64encode`/`$base64decode` keep treating their payload as UTF-8, because jsonata's own
-  documentation asks for both latin1 *and* UTF-8 and its implementation matches only the first.
-  `$base64encode` is documented as latin1 — "all characters in the string are in the 0x00 to
-  0xFF range... Unicode characters outside of that range are not supported" — while
-  `$base64decode` is documented as "using a UTF-8 Unicode codepage", which its implementation
-  does not do. No reading of the reference is self-consistent, and UTF-8 on both sides is the
-  half that matches a documented contract exactly while also round-tripping. Above `0xFF`
-  nothing is defined at all: `window.btoa` throws `InvalidCharacterError` where Node truncates
-  each UTF-16 code unit to a byte, so browser and Node disagree. The cost is real but narrow —
-  for `0x80`–`0xFF`, encode has an environment-independent documented answer we do not give
-  (`$base64encode("héllo")` is `"aOlsbG8="` upstream, `"aMOpbGxv"` here); matching it would
-  require latin1 decode too, which would then contradict the decode docs. A unit test pins our
-  choice, with the full reasoning, so it cannot flip unnoticed.
-  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - An explicit null now behaves as a value in object construction and in the `[]` array-keep,
   rather than short-circuiting them: `nul{"a": $}` is `{"a": null}` (it was `null`, and
   disagreed with the dotted `nul.{"a": $}`, which was already right), `nul[]` is `[null]`,
@@ -226,6 +299,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was wrong on both routes; the tree-walker arm had no `Undefined` case at all, and the new
   shared dispatcher's corpus is what exposed it.
   ([#107](https://github.com/txjmb/jsonata-core/issues/107))
+
+### Deliberately not changed
+- `$base64encode`/`$base64decode` keep treating their payload as UTF-8, because jsonata's own
+  documentation asks for both latin1 *and* UTF-8 and its implementation matches only the first.
+  `$base64encode` is documented as latin1 — "all characters in the string are in the 0x00 to
+  0xFF range... Unicode characters outside of that range are not supported" — while
+  `$base64decode` is documented as "using a UTF-8 Unicode codepage", which its implementation
+  does not do. No reading of the reference is self-consistent, and UTF-8 on both sides is the
+  half that matches a documented contract exactly while also round-tripping. Above `0xFF`
+  nothing is defined at all: `window.btoa` throws `InvalidCharacterError` where Node truncates
+  each UTF-16 code unit to a byte, so browser and Node disagree. The cost is real but narrow —
+  for `0x80`–`0xFF`, encode has an environment-independent documented answer we do not give
+  (`$base64encode("héllo")` is `"aOlsbG8="` upstream, `"aMOpbGxv"` here); matching it would
+  require latin1 decode too, which would then contradict the decode docs. A unit test pins our
+  choice, with the full reasoning, so it cannot flip unnoticed.
+  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 
 ### Security
 
