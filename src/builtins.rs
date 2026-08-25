@@ -143,6 +143,9 @@ const BUILTIN_ARITY_TABLE: &[(&str, usize)] = &[
     ("decodeUrl", 1),
     ("decodeUrlComponent", 1),
     ("distinct", 1),
+    // Evaluator-dependent, but reachable by reference: see the note on
+    // the pure-builtin assertion in the drift test below.
+    ("eval", 2),
     ("encodeUrl", 1),
     ("encodeUrlComponent", 1),
     ("error", 1),
@@ -1553,17 +1556,22 @@ mod tests {
             "BUILTIN_ARITY_TABLE and the fixture cover different name sets"
         );
 
-        // The 53 names in the fixture are exactly the pure-builtin set, plus
-        // `now`/`millis` -- every builtin `dispatch_pure` can serve, since
-        // those are exactly the ones a HOF can be handed by reference and
-        // route into it. If this ever needs to diverge, that's a sign one of
-        // the two lists is wrong, not a reason to relax the assertion.
+        // The fixture is every builtin a higher-order function can be handed
+        // by reference and actually dispatch: the pure set, plus `now`/`millis`
+        // (no arguments at all) and `eval`.
+        //
+        // `eval` is the one evaluator-dependent builtin in the list, and
+        // deliberately so -- its arguments are ordinary values (an expression
+        // string and a focus), so unlike the other nine it runs from evaluated
+        // values and needs its callback arity truncated like anything else
+        // (#140). Adding a second name here would be a sign one of the two
+        // lists is wrong, not a reason to relax the assertion.
         let mut fixture_names: Vec<&str> = fixture.keys().map(String::as_str).collect();
         fixture_names.sort_unstable();
         for name in &fixture_names {
             assert!(
-                is_pure_builtin(name),
-                "{name} has an arity entry but is not a pure builtin"
+                is_pure_builtin(name) || matches!(*name, "now" | "millis" | "eval"),
+                "{name} has an arity entry but is neither a pure builtin nor a known exception"
             );
         }
         for name in [

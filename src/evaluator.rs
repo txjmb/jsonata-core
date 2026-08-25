@@ -8341,68 +8341,7 @@ impl Evaluator {
                     )),
                 }
             }
-            "eval" => {
-                // $eval(expression [, context]) - parse and evaluate a JSONata expression at runtime
-                if evaluated_args.is_empty() || evaluated_args.len() > 2 {
-                    return Err(EvaluatorError::EvaluationError(
-                        "T0410: Argument 1 of function $eval must be a string".to_string(),
-                    ));
-                }
-
-                // If the first argument is null/undefined, return undefined
-                if evaluated_args[0].is_null() {
-                    return Ok(JValue::Null);
-                }
-                if evaluated_args[0].is_undefined() {
-                    return Ok(JValue::Undefined);
-                }
-
-                // First argument must be a string expression
-                let expr_str = match &evaluated_args[0] {
-                    JValue::String(s) => &**s,
-                    _ => {
-                        return Err(EvaluatorError::EvaluationError(
-                            "T0410: Argument 1 of function $eval must be a string".to_string(),
-                        ));
-                    }
-                };
-
-                // Parse the expression
-                let parsed_ast = match parser::parse(expr_str) {
-                    Ok(ast) => ast,
-                    Err(e) => {
-                        // D3120 is the error code for parse errors in $eval
-                        return Err(EvaluatorError::EvaluationError(format!(
-                            "D3120: The expression passed to $eval cannot be parsed: {}",
-                            e
-                        )));
-                    }
-                };
-
-                // Determine the context to use for evaluation
-                let eval_context = if evaluated_args.len() == 2 {
-                    &evaluated_args[1]
-                } else {
-                    data
-                };
-
-                // Evaluate the parsed expression
-                match self.evaluate_internal(&parsed_ast, eval_context) {
-                    Ok(result) => Ok(result),
-                    Err(e) => {
-                        // D3121 is the error code for evaluation errors in $eval
-                        let err_msg = e.to_string();
-                        if err_msg.starts_with("D3121") || err_msg.contains("Unknown function") {
-                            Err(EvaluatorError::EvaluationError(format!(
-                                "D3121: {}",
-                                err_msg
-                            )))
-                        } else {
-                            Err(e)
-                        }
-                    }
-                }
-            }
+            "eval" => self.eval_from_values(&evaluated_args, data),
 
             _ => Err(EvaluatorError::ReferenceError(format!(
                 "Unknown function: {}",
@@ -9578,7 +9517,7 @@ impl Evaluator {
             "keys" | "lookup" | "spread" | "merge" | "sift" | "each" | "error" | "assert" | "type" |
 
             // Higher-order functions
-            "map" | "filter" | "reduce" | "singletonArray" |
+            "map" | "filter" | "reduce" | "single" |
 
             // Date/time functions
             "now" | "millis" | "fromMillis" | "toMillis"
@@ -9646,13 +9585,98 @@ impl Evaluator {
             );
         }
 
-        // Everything else ($map, $filter, $reduce, $single, $sift, $each,
-        // $sort, $eval, $match, $replace) takes AST arguments and calls back
-        // into evaluation -- it cannot run from already-evaluated values.
-        Err(EvaluatorError::ReferenceError(format!(
-            "Built-in function {} cannot be called with values directly",
+        // `$eval` is evaluator-dependent but its arguments are ordinary
+        // values -- an expression string and an optional focus -- so it runs
+        // from evaluated values like any other builtin. jsonata-js evaluates
+        // it as a callback for the same reason: `$map(["1+1"], $eval)` is 2.
+        if name == "eval" {
+            return self.eval_from_values(values, context);
+        }
+
+        // The other nine ($map, $filter, $reduce, $single, $sift, $each,
+        // $sort, $match, $replace) take AST arguments and call back into
+        // evaluation, so they cannot run from already-evaluated values. That
+        // is not a gap: each needs a *function* argument, and a higher-order
+        // function hands its callback a value and an index, so jsonata-js
+        // rejects these on the signature too. It raises T0410 -- which is
+        // what this used to get wrong, reporting an uncoded error instead.
+        Err(EvaluatorError::TypeError(format!(
+            "T0410: Argument 2 of function {} does not match function signature",
             name
         )))
+    }
+
+    /// `$eval(expression [, focus])` -- parse and evaluate a JSONata
+    /// expression at runtime.
+    ///
+    /// Split out of `evaluate_function_call` so the by-reference path can
+    /// reach it too. `$eval` is the one evaluator-dependent builtin that
+    /// genuinely works as a callback -- its second parameter is an
+    /// arbitrary focus value rather than a function, so `$map(["1+1"],
+    /// $eval)` is 2 (#140).
+    fn eval_from_values(
+        &mut self,
+        args: &[JValue],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
+        // $eval(expression [, context]) - parse and evaluate a JSONata expression at runtime
+        if args.is_empty() || args.len() > 2 {
+            return Err(EvaluatorError::EvaluationError(
+                "T0410: Argument 1 of function $eval must be a string".to_string(),
+            ));
+        }
+
+        // Undefined propagates -- `$eval(nothing)` is undefined. An explicit
+        // null does NOT: the reference's signature is `<sx?:x>`, and `s`
+        // admits missing but not null, so `$eval(null)` is T0410. The null
+        // passthrough here predates that distinction; it fell through to the
+        // non-string branch below on every other type already.
+
+        if args[0].is_undefined() {
+            return Ok(JValue::Undefined);
+        }
+
+        // First argument must be a string expression
+        let expr_str = match &args[0] {
+            JValue::String(s) => &**s,
+            _ => {
+                return Err(EvaluatorError::EvaluationError(
+                    "T0410: Argument 1 of function $eval must be a string".to_string(),
+                ));
+            }
+        };
+
+        // Parse the expression
+        let parsed_ast = match parser::parse(expr_str) {
+            Ok(ast) => ast,
+            Err(e) => {
+                // D3120 is the error code for parse errors in $eval
+                return Err(EvaluatorError::EvaluationError(format!(
+                    "D3120: The expression passed to $eval cannot be parsed: {}",
+                    e
+                )));
+            }
+        };
+
+        // Determine the context to use for evaluation
+        let eval_context = if args.len() == 2 { &args[1] } else { data };
+
+        // Evaluate the parsed expression
+        match self.evaluate_internal(&parsed_ast, eval_context) {
+            Ok(result) => Ok(result),
+            Err(e) => {
+                // D3121 is the error code for evaluation errors in $eval
+                let err_msg = e.to_string();
+                if err_msg.starts_with("D3121") || err_msg.contains("Unknown function") {
+                    Err(EvaluatorError::EvaluationError(format!(
+                        "D3121: {}",
+                        err_msg
+                    )))
+                } else {
+                    Err(e)
+                }
+            }
+        }
     }
 
     /// Collect all descendant values recursively
