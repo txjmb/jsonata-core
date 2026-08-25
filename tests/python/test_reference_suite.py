@@ -144,14 +144,21 @@ print(f"Loaded {len(test_cases)} test cases")
 print(f"{'=' * 70}\n")
 
 
-# How many reference cases the suite currently cannot actually verify: we raise
-# an error carrying no JSONata code (and an uncoded error is accepted for any
-# expected code), or the case specifies an error object nothing inspects.
+# How many reference cases the suite cannot actually verify: we raise an error
+# carrying no JSONata code, and an uncoded error is accepted for any expected
+# code.
 #
-# A ceiling, not a target. It only ever goes down -- see #144. The point of
-# asserting it is that "1686 passing" says less than it sounds for these cases,
-# and a new uncoded error would otherwise slip in unnoticed.
-UNVERIFIED_ERROR_CEILING = 12
+# Down from 107 at 2.2.7 to 2, and 2 is the floor rather than a to-do. Both are
+# `$encodeUrl`/`$encodeUrlComponent` on an unpaired surrogate: a Python str can
+# hold one and a Rust String cannot, so the expression never crosses the
+# boundary to be parsed and there is no point at which D3140 could be raised.
+# We fail with a ValueError naming the surrogate instead of leaking PyO3's
+# codec error.
+#
+# The assertion cuts both ways -- it fails if the number grows, and fails
+# telling you to lower it if it shrinks -- so a new uncoded error cannot slip
+# in unnoticed and an improvement cannot go unrecorded. See #144.
+UNVERIFIED_ERROR_CEILING = 2
 
 
 @pytest.mark.reference
