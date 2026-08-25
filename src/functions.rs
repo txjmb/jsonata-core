@@ -471,12 +471,17 @@ pub mod string {
             return Ok(JValue::array(result));
         }
 
-        // Handle string separator
+        // Handle string separator. The signature `<s-(sf)n?:a<s>>` admits a
+        // string or a function, and the regex/function branch is handled
+        // above, so anything left here is a plain function used as a matcher
+        // that did not produce the expected structure -- T1010 in jsonata-js.
         let sep = match separator {
             JValue::String(s) => &**s,
             _ => {
                 return Err(FunctionError::TypeError(
-                    "split() requires string arguments".to_string(),
+                    "T1010: The matcher function argument passed to function $split does not \
+                     return the correct object structure"
+                        .to_string(),
                 ))
             }
         };
@@ -1008,9 +1013,10 @@ pub mod numeric {
     /// $sqrt(number) - Square root
     pub fn sqrt(n: f64) -> Result<JValue, FunctionError> {
         if n < 0.0 {
-            return Err(FunctionError::ArgumentError(
-                "Cannot take square root of negative number".to_string(),
-            ));
+            return Err(FunctionError::ArgumentError(format!(
+                "D3060: The sqrt function cannot be applied to a negative number: {}",
+                n
+            )));
         }
         Ok(JValue::Number(n.sqrt()))
     }
@@ -1019,9 +1025,11 @@ pub mod numeric {
     pub fn power(base: f64, exponent: f64) -> Result<JValue, FunctionError> {
         let result = base.powf(exponent);
         if result.is_nan() || result.is_infinite() {
-            return Err(FunctionError::RuntimeError(
-                "Power operation resulted in invalid number".to_string(),
-            ));
+            return Err(FunctionError::RuntimeError(format!(
+                "D3061: The power function has resulted in a value that cannot be \
+                 represented as a JSON number: base={}, exponent={}",
+                base, exponent
+            )));
         }
         Ok(JValue::Number(result))
     }
@@ -1757,7 +1765,10 @@ pub mod array {
             // scalar into a singleton before we get here.
         } else {
             return Err(FunctionError::TypeError(
-                "sort() requires all elements to be of the same comparable type".to_string(),
+                "D3070: The single argument form of the sort function can only be applied to an \
+                 array of strings or an array of numbers.  Use the second argument to specify a \
+                 comparison function"
+                    .to_string(),
             ));
         }
 

@@ -16,6 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- Parse errors carry their JSONata code. Unterminated strings are `S0101`, unsupported escapes
+  `S0103`, a malformed `\u` escape `S0104`, an unterminated backquoted name `S0105`, a wrong
+  token `S0202`, running out of input while expecting one `S0203`, an unknown operator `S0204`,
+  an unexpected end of expression `S0207`, and a symbol used where an operand belongs `S0211`.
+  Previously all of these were uncoded prose, so callers branching on error codes could not
+  distinguish a syntax error from any other failure.
+  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
+- Nine more evaluator errors carry their JSONata code: `$sqrt` of a negative number is `D3060`,
+  `$power` overflowing is `D3061`, the single-argument `$sort` on mixed types is `D3070`,
+  `$single` matching more than one value is `D3138`, a non-string object key is `T1003`, a
+  non-function right side of `~>` is `T2006`, and `$split` given a matcher function that does
+  not produce the expected structure is `T1010`. Calling a function without its `$` splits the
+  way jsonata-js splits it: a name that *is* a builtin gets `T1005` with the "did you mean
+  `$name`?" suggestion, anything else gets `T1006`.
+  ([#144](https://github.com/txjmb/jsonata-core/issues/144))
 
 ### Security
 

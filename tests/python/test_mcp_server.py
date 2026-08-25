@@ -96,7 +96,13 @@ async def test_evaluate_batch_compile_error_is_not_double_prefixed() -> None:
             "evaluate_batch",
             {"expressions": ["a["], "data": "{}"},
         )
-        assert result.data[0] == "Parse error: Unexpected token: Eof"
+        message = result.data[0]
+        # The point of this test is the prefix, not the wording: assert the
+        # property rather than the exact text, which changed when parse errors
+        # gained their JSONata codes.
+        assert message.startswith("Parse error: ")
+        assert message.count("Parse error:") == 1, f"double-prefixed: {message}"
+        assert "S0207" in message
 
 
 async def test_explain_with_no_topic_returns_function_index() -> None:

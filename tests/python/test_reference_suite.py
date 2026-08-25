@@ -104,7 +104,20 @@ def extract_error_code(error_msg: str) -> str | None:
 # Note what does NOT belong here: a case we satisfy only because our error
 # carries no code for the suite to compare. That is not a known divergence, it
 # is an unverified case -- counted by UNVERIFIED_ERROR_CEILING above.
-KNOWN_DIVERGENCES: dict[str, str] = {}
+KNOWN_DIVERGENCES: dict[str, str] = {
+    "errors/case005": (
+        "`unknown(function)` is T1006 upstream. `function` is a keyword here, so the parser "
+        "commits to a lambda and fails on its shape (S0202) before anything decides the call "
+        "target is not a function. Getting T1006 means recognising the call context first, "
+        "which is a parser restructure rather than an error-code mapping."
+    ),
+    "function-signatures/case034": (
+        "`<(sa<n>)>` -- a choice group containing a parameterized type -- is S0402 upstream. "
+        "Our signature parser rejects the shape while still reading tokens, so it surfaces as "
+        "S0202. Needs the signature grammar to recognise the construct in order to reject it "
+        "specifically."
+    ),
+}
 
 
 def _build_pytest_params(
@@ -138,7 +151,7 @@ print(f"{'=' * 70}\n")
 # A ceiling, not a target. It only ever goes down -- see #144. The point of
 # asserting it is that "1686 passing" says less than it sounds for these cases,
 # and a new uncoded error would otherwise slip in unnoticed.
-UNVERIFIED_ERROR_CEILING = 45
+UNVERIFIED_ERROR_CEILING = 12
 
 
 @pytest.mark.reference
