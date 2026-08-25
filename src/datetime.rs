@@ -166,8 +166,25 @@ pub fn format_integer(value: f64, picture: &str) -> Result<JValue, DateTimeError
 /// unparseable value simply fails at the underlying number/word/numeral conversion.
 pub fn parse_integer(value: &str, picture: &str) -> Result<JValue, DateTimeError> {
     let format = analyse_integer_picture(picture)?;
+    // A malformed *picture* still raises (D3130), as it does in jsonata-js.
+    // A value that does not match does not: the reference runs the picture
+    // parse without validating the input first -- its own source marks that
+    // path "TODO validate input based on the matcher regex" -- so the answer
+    // is whatever JavaScript's `parseInt` returns. That reads a leading run of
+    // digits and gives NaN when there is none, which is why
+    // `$parseInteger("12a", "000")` is 12 and `$parseInteger("abc", "000")` is
+    // NaN rather than a D3136 error (#126 group 3).
+    //
+    // Only the decimal format goes this way. The letters/roman/words parsers
+    // are shared with date-time component parsing, where a D3136 on an
+    // unrecognised component is correct and load-bearing.
+    if format.primary == PrimaryFormat::Decimal {
+        return Ok(JValue::Number(js_parse_int(&decimal_digits(
+            &format, value,
+        ))));
+    }
     let parsed = parse_integer_format_value(&format, value)?;
-    Ok(JValue::Number(parsed as f64))
+    Ok(JValue::Number(parsed))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1403,6 +1420,59 @@ fn integer_format_regex(fmt: &IntegerFormat) -> Result<String, DateTimeError> {
 
 /// Returns `f64` (matching JS Number) since the `words` format can parse magnitudes far
 /// beyond `i64::MAX` (e.g. "ten billion trillion trillion trillion" -> 1e46).
+/// Strip an ordinal suffix, grouping separators and a non-ASCII zero digit,
+/// leaving the bare digit string the reference's `matcher.parse` works on.
+fn decimal_digits(fmt: &IntegerFormat, captured: &str) -> String {
+    let mut digits = captured.to_string();
+    if fmt.ordinal && digits.len() >= 2 {
+        digits.truncate(digits.len() - 2);
+    }
+    if fmt.regular {
+        // Faithful port of the JS reference, which strips a literal ','
+        // regardless of the actual grouping-separator character.
+        digits = digits.replace(',', "");
+    } else {
+        for sep in &fmt.grouping_separators {
+            digits = digits.replace(sep.character, "");
+        }
+    }
+    if fmt.zero_code != 0x30 {
+        digits = digits
+            .chars()
+            .map(|c| char::from_u32(c as u32 - fmt.zero_code + 0x30).unwrap())
+            .collect();
+    }
+    digits
+}
+
+/// JavaScript's `parseInt(digits, 10)`: read an optional sign and the leading
+/// run of digits, ignore whatever follows, and give NaN when there is no
+/// leading digit at all.
+fn js_parse_int(digits: &str) -> f64 {
+    let s = digits.trim_start();
+    let mut chars = s.char_indices();
+    let mut end = 0;
+    let mut started = false;
+    if let Some((_, c)) = chars.clone().next() {
+        if c == '+' || c == '-' {
+            end = c.len_utf8();
+            chars.next();
+        }
+    }
+    for (i, c) in chars {
+        if c.is_ascii_digit() {
+            started = true;
+            end = i + c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if !started {
+        return f64::NAN;
+    }
+    s[..end].parse::<f64>().unwrap_or(f64::NAN)
+}
+
 fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> Result<f64, DateTimeError> {
     match fmt.primary {
         PrimaryFormat::Letters => Ok(letters_to_decimal(
@@ -1419,30 +1489,9 @@ fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> Result<f64
         }
         PrimaryFormat::Words => words_to_number(&captured.to_lowercase())
             .ok_or_else(|| coded("D3136", "unrecognized number word")),
-        PrimaryFormat::Decimal => {
-            let mut digits = captured.to_string();
-            if fmt.ordinal && digits.len() >= 2 {
-                digits.truncate(digits.len() - 2);
-            }
-            if fmt.regular {
-                // Faithful port of the JS reference, which strips a literal ','
-                // regardless of the actual grouping-separator character.
-                digits = digits.replace(',', "");
-            } else {
-                for sep in &fmt.grouping_separators {
-                    digits = digits.replace(sep.character, "");
-                }
-            }
-            if fmt.zero_code != 0x30 {
-                digits = digits
-                    .chars()
-                    .map(|c| char::from_u32(c as u32 - fmt.zero_code + 0x30).unwrap())
-                    .collect();
-            }
-            digits
-                .parse::<f64>()
-                .map_err(|_| coded("D3136", "invalid number"))
-        }
+        PrimaryFormat::Decimal => decimal_digits(fmt, captured)
+            .parse::<f64>()
+            .map_err(|_| coded("D3136", "invalid number")),
         PrimaryFormat::Sequence => Err(coded("D3130", fmt.token.clone().unwrap_or_default())),
     }
 }
