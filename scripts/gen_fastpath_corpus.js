@@ -53,6 +53,10 @@ function buildBuiltinArity() {
   for (const name of DATETIME_JS_ARITY_NAMES) arity[name] = jsDatetime[name].length;
   arity.now = 2; // jsonata.js:2140 -- function(picture, timezone)
   arity.millis = 0; // jsonata.js:2143 -- function()
+  // $eval is evaluator-dependent, so it is not in `jsFunctions`, but it IS
+  // reachable by reference and so needs a callback arity like any other
+  // (#140). jsonata.js:1811 -- async function functionEval(expr, focus).
+  arity.eval = 2;
   return arity;
 }
 
@@ -641,6 +645,38 @@ for (const picture of FORMAT_NUMBER_PICTURES) {
       expr: `$formatNumber(${value}, "${picture}")`,
     });
   }
+}
+
+// -- Evaluator-dependent builtins passed by reference -----------------------
+// These ten take AST arguments and call back into evaluation, so they are the
+// one group `dispatch_pure` cannot serve -- and therefore the one group
+// BUILTINS_BY_REFERENCE structurally cannot contain, since that list is built
+// from the arity fixture, which by construction holds only pure builtins. The
+// blind spot was in how the matrix is *defined*, not in its operand list, so
+// it needs its own row (#140).
+//
+// Nine of the ten are T0410 in jsonata-js when handed to a higher-order
+// function: they need a *function* argument and a callback receives
+// `(value, index)`. `$eval` is the exception -- its second parameter is an
+// arbitrary focus value, so it really does evaluate.
+const BUILTINS_EVALUATOR_DEPENDENT = [
+  'map', 'filter', 'reduce', 'single', 'sift', 'each', 'sort', 'eval', 'match', 'replace',
+];
+for (const fn of BUILTINS_EVALUATOR_DEPENDENT) {
+  for (const shape of ['emptyarr', 'arr', '[obj]', '[str]', '["1+1"]', '[[3,1]]']) {
+    BUILTIN_EXPRESSIONS.push({
+      fastpath: 'builtin_by_reference_evaluator',
+      expr: `$map(${shape}, $${fn})`,
+    });
+  }
+}
+// $eval through the other higher-order call sites, since it is the only one
+// of the ten that returns a value rather than raising.
+for (const e of [
+  '$filter(["1+1"], $eval)', '$each({"k":"1+1"}, $eval)', '$sift({"k":"1+1"}, $eval)',
+  '$single(["1+1"], $eval)', '$sort(["1+1"], $eval)', '($f := $eval; $map(["1+1"], $f))',
+]) {
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference_evaluator', expr: e });
 }
 
 // -- Truthiness ------------------------------------------------------------

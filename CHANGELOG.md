@@ -30,6 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- `$eval` can be passed by reference: `$map(["1+1"], $eval)` is `2` rather than an error. It is
+  the one evaluator-dependent builtin whose arguments are ordinary values — an expression string
+  and an optional focus — so unlike the other nine it runs from evaluated values. Its
+  implementation is now shared by the two dispatch paths rather than living only in
+  `evaluate_function_call`.
+- The other nine evaluator-dependent builtins (`$map`, `$filter`, `$reduce`, `$single`, `$sift`,
+  `$each`, `$sort`, `$match`, `$replace`) now raise `T0410` when handed to a higher-order
+  function, matching jsonata-js, instead of an uncoded internal error. They still cannot run
+  as callbacks — each needs a *function* argument and a callback receives a value and an index,
+  which the reference rejects on the signature too — so this is the error code, not the
+  behaviour.
+- `$single` is recognised as a builtin when passed by reference. The internal name list carried
+  `singletonArray`, which is not a JSONata function and appears nowhere in jsonata-js, and
+  omitted `single` — so `$map(arr, $single)` raised "Argument 2 must be Function" while direct
+  calls worked. ([#140](https://github.com/txjmb/jsonata-core/issues/140))
+- `$eval(null)` now raises `T0410` rather than returning `null`. The reference's signature is
+  `<sx?:x>`, and `s` admits *missing* but not null; `$eval(nothing)` still propagates undefined.
 - Truthiness is now one rule, applied recursively, matching `$boolean`. JSONata coerces a
   value to boolean the same way everywhere: a container is truthy only if some element is
   truthy, checked all the way down, so `[0]`, `[[0]]` and `[0,0]` are falsy. `jsonata-core`
