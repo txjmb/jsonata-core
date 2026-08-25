@@ -679,6 +679,26 @@ for (const e of [
   BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_by_reference_evaluator', expr: e });
 }
 
+// -- Positional index selectors ---------------------------------------------
+// A numeric array in predicate position is a list of index selectors, not a
+// truthiness test. jsonata-js walks the selector array and pushes the item on
+// EVERY hit, so a repeated index repeats the element: `nums[[0,0]]` is
+// `[10, 10]`. A membership test can only ever yield each element once, which
+// is what this used to do -- and repeated indices are the only shape that
+// tells the two apart, so the distinct-index cases below are the controls.
+for (const e of [
+  'arr[[0,0]]', 'arr[[0,0,0]]', 'arr[[1,1]]', 'arr[[-1,-1]]',
+  'arr[[0,1]]', 'arr[[1,0]]', 'arr[[0,-1]]', 'arr[[0]]', 'arr[[1]]',
+  'arr[[5]]', 'arr[[0,5]]', 'arr[[]]', 'arr[[1.7]]', 'arr[[0.5,1]]',
+  'emptyarr[[0,0]]',
+  // Singleton sequences repeat too -- a scalar, an object and a string are
+  // each a one-element sequence for filtering purposes.
+  'num[[0,0]]', 'num[[0,0,0]]', 'num[[0]]', 'num[[1]]',
+  'obj[[0,0]]', 'str[[0,0]]', 'nul[[0,0]]',
+]) {
+  BUILTIN_EXPRESSIONS.push({ fastpath: 'index_selector', expr: e });
+}
+
 // -- Truthiness ------------------------------------------------------------
 // JSONata has ONE truthiness rule -- $boolean -- and applies it recursively
 // everywhere a value is coerced. A container is truthy only if some element is

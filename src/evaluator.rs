@@ -1480,7 +1480,17 @@ pub(crate) fn compiled_is_truthy(value: &JValue) -> bool {
 /// decision while keeping their own evaluation strategies. Each previously
 /// carried its own `is_truthy` call and so was wrong in the same way.
 #[inline]
-pub(crate) fn predicate_index_match(pred: &JValue, index: usize, len: usize) -> Option<bool> {
+/// How many times a positional predicate selects the element at `index`.
+///
+/// `None` means the predicate is not a positional selector at all and the
+/// caller should fall back to truthiness.
+///
+/// This counts rather than answering yes/no because jsonata-js pushes the
+/// item once per *matching selector*, not once per matching element: it walks
+/// the selector array with `forEach` and pushes on every hit. So `[0, 0]`
+/// selects element 0 twice and `nums[[0,0]]` is `[10, 10]`, where an
+/// `any()`-style membership test can only ever yield each element once.
+pub(crate) fn predicate_index_match(pred: &JValue, index: usize, len: usize) -> Option<usize> {
     fn matches_index(n: f64, index: usize, len: usize) -> bool {
         let mut i = n.floor() as i64;
         if i < 0 {
@@ -1490,13 +1500,15 @@ pub(crate) fn predicate_index_match(pred: &JValue, index: usize, len: usize) -> 
     }
 
     match pred {
-        JValue::Number(n) => Some(matches_index(*n, index, len)),
-        JValue::Array(arr) if arr.iter().all(|v| matches!(v, JValue::Number(_))) => {
-            Some(arr.iter().any(|v| match v {
-                JValue::Number(n) => matches_index(*n, index, len),
-                _ => false,
-            }))
-        }
+        JValue::Number(n) => Some(usize::from(matches_index(*n, index, len))),
+        JValue::Array(arr) if arr.iter().all(|v| matches!(v, JValue::Number(_))) => Some(
+            arr.iter()
+                .filter(|v| match v {
+                    JValue::Number(n) => matches_index(*n, index, len),
+                    _ => false,
+                })
+                .count(),
+        ),
         _ => None,
     }
 }
@@ -2015,11 +2027,11 @@ fn compiled_apply_filter(
                     options,
                     start_time,
                 )?;
-                let keep = match predicate_index_match(&pred, index, len) {
-                    Some(matched) if selects_by_index => matched,
-                    _ => compiled_is_truthy(&pred),
+                let repeats = match predicate_index_match(&pred, index, len) {
+                    Some(n) if selects_by_index => n,
+                    _ => usize::from(compiled_is_truthy(&pred)),
                 };
-                if keep {
+                for _ in 0..repeats {
                     result.push(item.clone());
                 }
             }
@@ -2037,11 +2049,15 @@ fn compiled_apply_filter(
         _ => {
             // A non-array is a singleton sequence: index 0, length 1.
             let pred = eval_compiled_inner(filter, value, vars, ctx, shape, options, start_time)?;
-            let keep = match predicate_index_match(&pred, 0, 1) {
-                Some(matched) if selects_by_index => matched,
-                _ => compiled_is_truthy(&pred),
+            let repeats = match predicate_index_match(&pred, 0, 1) {
+                Some(n) if selects_by_index => n,
+                _ => usize::from(compiled_is_truthy(&pred)),
             };
-            if keep {
+            // A selector can name position 0 more than once, and a singleton
+            // sequence repeats like any other: `num[[0,0]]` is `[5, 5]`.
+            if repeats > 1 {
+                Ok(JValue::array(vec![value.clone(); repeats]))
+            } else if repeats == 1 {
                 Ok(value.clone())
             } else {
                 Ok(JValue::Undefined)
@@ -4352,11 +4368,11 @@ impl Evaluator {
                 for (index, item) in arr.iter().enumerate() {
                     let item_result = self.evaluate_internal(predicate, item)?;
                     // A numeric predicate selects by position, not truthiness.
-                    let keep = match predicate_index_match(&item_result, index, len) {
-                        Some(matched) => matched,
-                        None => self.is_truthy(&item_result),
+                    let repeats = match predicate_index_match(&item_result, index, len) {
+                        Some(n) => n,
+                        None => usize::from(self.is_truthy(&item_result)),
                     };
-                    if keep {
+                    for _ in 0..repeats {
                         filtered.push(item.clone());
                     }
                 }
@@ -9781,14 +9797,14 @@ impl Evaluator {
                         }
                         (None, _) => self.evaluate_internal(predicate, item)?,
                     };
-                    let keep = match predicate_index_match(&result, index, len) {
-                        Some(matched) => matched,
+                    let repeats = match predicate_index_match(&result, index, len) {
+                        Some(n) => n,
                         None => {
                             all_index_selectors = false;
-                            self.is_truthy(&result)
+                            usize::from(self.is_truthy(&result))
                         }
                     };
-                    if keep {
+                    for _ in 0..repeats {
                         filtered.push(item.clone());
                     }
                 }
@@ -9811,11 +9827,13 @@ impl Evaluator {
                 let _ = obj;
                 let pred_result = self.evaluate_internal(predicate, current)?;
 
-                let keep = match predicate_index_match(&pred_result, 0, 1) {
-                    Some(matched) => matched,
-                    None => self.is_truthy(&pred_result),
+                let repeats = match predicate_index_match(&pred_result, 0, 1) {
+                    Some(n) => n,
+                    None => usize::from(self.is_truthy(&pred_result)),
                 };
-                if keep {
+                if repeats > 1 {
+                    Ok(JValue::array(vec![current.clone(); repeats]))
+                } else if repeats == 1 {
                     Ok(current.clone())
                 } else {
                     Ok(JValue::Undefined)
@@ -9837,26 +9855,29 @@ impl Evaluator {
                     }
                 }
 
-                // Try to evaluate the predicate to see if it's a numeric index
+                // Try to evaluate the predicate to see if it's a positional
+                // selector. This used to test only for a single `JValue::Number`,
+                // so an *array* of indices fell through to the truthiness branch
+                // below: `num[[0]]` was undefined (an all-falsy container is
+                // falsy) and `num[[1]]` was the value (a non-empty container is
+                // truthy) -- both inverted. The compiled path was already
+                // correct, so the two engines disagreed.
+                //
+                // Otherwise a filter: `value[true]` is the value,
+                // `value[false]` is undefined, which is what makes
+                // `$k[$v>2]` work.
                 let pred_result = self.evaluate_internal(predicate, current)?;
 
-                if let JValue::Number(n) = &pred_result {
-                    // It's a numeric index - treat scalar as single-element array
-                    let idx = n.floor() as i64;
-                    if idx == 0 || idx == -1 {
-                        return Ok(current.clone());
-                    } else {
-                        return Ok(JValue::Undefined);
-                    }
-                }
-
-                // For non-numeric predicates, treat as a filter:
-                // value[true] returns value, value[false] returns undefined
-                // This enables patterns like: $k[$v>2] which returns $k if $v>2, otherwise undefined
-                if self.is_truthy(&pred_result) {
+                let repeats = match predicate_index_match(&pred_result, 0, 1) {
+                    Some(n) => n,
+                    None => usize::from(self.is_truthy(&pred_result)),
+                };
+                if repeats > 1 {
+                    Ok(JValue::array(vec![current.clone(); repeats]))
+                } else if repeats == 1 {
                     Ok(current.clone())
                 } else {
-                    // Return undefined (not null) so $map can filter it out
+                    // Undefined (not null) so $map can filter it out.
                     Ok(JValue::Undefined)
                 }
             }

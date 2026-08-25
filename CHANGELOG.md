@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- A positional predicate that names the same index more than once now repeats the element, as
+  jsonata-js does: `nums[[0,0]]` is `[10, 10]`, not `10`. The reference walks the selector array
+  and pushes the item on every hit; we used an `any()`-style membership test, which can only ever
+  yield each element once. Singleton sequences repeat too — `num[[0,0]]` is `[5, 5]`.
+- The tree-walker now recognises an *array* of indices as a positional selector against a scalar.
+  It tested only for a single number, so `num[[0]]` was `undefined` and `num[[1]]` was `5` — both
+  inverted, because the array fell through to the truthiness branch where an all-falsy container
+  is falsy and a non-empty one is truthy. The compiled path was already correct, so the two
+  engines disagreed.
 - `$eval` can be passed by reference: `$map(["1+1"], $eval)` is `2` rather than an error. It is
   the one evaluator-dependent builtin whose arguments are ordinary values — an expression string
   and an optional focus — so unlike the other nine it runs from evaluated values. Its

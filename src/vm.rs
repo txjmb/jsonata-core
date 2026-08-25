@@ -585,11 +585,11 @@ fn run_inner(
                                 options,
                                 start_time,
                             )?;
-                            let keep = match predicate_index_match(&test, index, len) {
-                                Some(matched) if *selects_by_index => matched,
-                                _ => compiled_is_truthy(&test),
+                            let repeats = match predicate_index_match(&test, index, len) {
+                                Some(n) if *selects_by_index => n,
+                                _ => usize::from(compiled_is_truthy(&test)),
                             };
-                            if keep {
+                            for _ in 0..repeats {
                                 kept.push(item.clone());
                             }
                         }
@@ -610,11 +610,15 @@ fn run_inner(
                         // A non-array is a singleton sequence: index 0, length 1.
                         let test =
                             run_inner(sub_prog, &other, vars, &mut sub_stack, options, start_time)?;
-                        let keep = match predicate_index_match(&test, 0, 1) {
-                            Some(matched) if *selects_by_index => matched,
-                            _ => compiled_is_truthy(&test),
+                        let repeats = match predicate_index_match(&test, 0, 1) {
+                            Some(n) if *selects_by_index => n,
+                            _ => usize::from(compiled_is_truthy(&test)),
                         };
-                        if keep {
+                        // A singleton sequence repeats like any other when the
+                        // selector names position 0 more than once.
+                        if repeats > 1 {
+                            JValue::array(vec![other; repeats])
+                        } else if repeats == 1 {
                             other
                         } else {
                             JValue::Undefined
