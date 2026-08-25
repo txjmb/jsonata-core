@@ -1167,7 +1167,12 @@ pub mod numeric {
                     || c == digit_char
                     || is_digit_in_family(c, zero_digit)
             })
-            .unwrap_or(chars.len());
+            // No active character at all means there is no prefix -- the whole
+            // sub-picture is the active part, which is what makes `"k"` a
+            // D3086 (a passive character in the active part) rather than
+            // vanishing into a prefix. jsonata-js's prefix scan returns "" when
+            // its loop finds nothing.
+            .unwrap_or(0);
         let prefix: String = chars[..prefix_end].iter().collect();
 
         // Find suffix (chars after last active char)
@@ -1206,78 +1211,98 @@ pub mod numeric {
             (mantissa_part.clone(), String::new())
         };
 
-        // Validate: only one decimal separator
-        if active.matches(decimal_sep).count() > 1 {
-            return Err(FunctionError::ArgumentError(
-                "D3081: Multiple decimal separators in picture".to_string(),
-            ));
-        }
-
-        // Validate: no grouping separator adjacent to decimal
-        if let Some(pos) = decimal_pos {
-            if pos > 0 && active.chars().nth(pos - 1) == Some(grouping_sep) {
-                return Err(FunctionError::ArgumentError(
-                    "D3087: Grouping separator adjacent to decimal separator".to_string(),
-                ));
-            }
-            if pos + 1 < active.len() && active.chars().nth(pos + 1) == Some(grouping_sep) {
-                return Err(FunctionError::ArgumentError(
-                    "D3087: Grouping separator adjacent to decimal separator".to_string(),
-                ));
-            }
-        }
-
-        // Validate: no consecutive grouping separators
-        let grouping_str = format!("{}{}", grouping_sep, grouping_sep);
-        if picture.contains(&grouping_str) {
-            return Err(FunctionError::ArgumentError(
-                "D3089: Consecutive grouping separators in picture".to_string(),
-            ));
-        }
-
-        // Detect percent and per-mille symbols
+        // Picture-string validation, F&O 4.7.3.
+        //
+        // jsonata-js runs EVERY check in sequence, each assigning to one
+        // `error` variable, and raises whatever is left at the end -- so the
+        // LAST failing check names the error, not the first. These used to
+        // return early, which reported an earlier check's code: `"k"` fails
+        // both D3085 (no digit) and D3086 (passive character), and the
+        // reference calls it D3086. Order below mirrors the reference's
+        // exactly; do not sort it (#135).
         let has_percent = picture.contains(percent_symbol);
         let has_per_mille = picture.contains(per_mille_symbol);
-
-        // Validate: multiple percent signs
-        if picture.matches(percent_symbol).count() > 1 {
-            return Err(FunctionError::ArgumentError(
-                "D3082: Multiple percent signs in picture".to_string(),
-            ));
-        }
-
-        // Validate: multiple per-mille signs
-        if picture.matches(per_mille_symbol).count() > 1 {
-            return Err(FunctionError::ArgumentError(
-                "D3083: Multiple per-mille signs in picture".to_string(),
-            ));
-        }
-
-        // Validate: cannot have both percent and per-mille
-        if has_percent && has_per_mille {
-            return Err(FunctionError::ArgumentError(
-                "D3084: Cannot have both percent and per-mille in picture".to_string(),
-            ));
-        }
-
-        // Validate: integer part cannot end with grouping separator
-        if !integer_part.is_empty() && integer_part.ends_with(grouping_sep) {
-            return Err(FunctionError::ArgumentError(
-                "D3088: Integer part ends with grouping separator".to_string(),
-            ));
-        }
-
-        // Validate: at least one digit in mantissa (integer or fractional part)
         let has_digit_in_integer = integer_part
             .chars()
             .any(|c| is_digit_in_family(c, zero_digit) || c == digit_char);
         let has_digit_in_fractional = fractional_part
             .chars()
             .any(|c| is_digit_in_family(c, zero_digit) || c == digit_char);
+
+        let mut error: Option<String> = None;
+
+        if active.matches(decimal_sep).count() > 1 {
+            error = Some("D3081: Multiple decimal separators in picture".to_string());
+        }
+        if picture.matches(percent_symbol).count() > 1 {
+            error = Some("D3082: Multiple percent signs in picture".to_string());
+        }
+        if picture.matches(per_mille_symbol).count() > 1 {
+            error = Some("D3083: Multiple per-mille signs in picture".to_string());
+        }
+        if has_percent && has_per_mille {
+            error = Some("D3084: Cannot have both percent and per-mille in picture".to_string());
+        }
         if !has_digit_in_integer && !has_digit_in_fractional {
-            return Err(FunctionError::ArgumentError(
-                "D3085: Picture must contain at least one digit".to_string(),
-            ));
+            error = Some("D3085: Picture must contain at least one digit".to_string());
+        }
+        // Every character of the active part must be active. Percent and
+        // per-mille are deliberately NOT active characters, which is why a
+        // picture of only `%%` ends up here rather than at D3082.
+        let valid_chars = [decimal_sep, grouping_sep, zero_digit, digit_char, 'e', 'E'];
+        if let Some(c) = active
+            .chars()
+            .find(|&c| !is_digit_in_family(c, zero_digit) && !valid_chars.contains(&c))
+        {
+            error = Some(format!("D3086: Invalid character in picture: '{}'", c));
+        }
+        if let Some(pos) = decimal_pos {
+            let adjacent = (pos > 0 && active.chars().nth(pos - 1) == Some(grouping_sep))
+                || (pos + 1 < active.chars().count()
+                    && active.chars().nth(pos + 1) == Some(grouping_sep));
+            if adjacent {
+                error = Some("D3087: Grouping separator adjacent to decimal separator".to_string());
+            }
+        } else if !integer_part.is_empty() && integer_part.ends_with(grouping_sep) {
+            error = Some("D3088: Integer part ends with grouping separator".to_string());
+        }
+        if picture.contains(&format!("{}{}", grouping_sep, grouping_sep)) {
+            error = Some("D3089: Consecutive grouping separators in picture".to_string());
+        }
+        let mut seen_zero_in_integer = false;
+        for c in integer_part.chars() {
+            if is_digit_in_family(c, zero_digit) {
+                seen_zero_in_integer = true;
+            } else if c == digit_char && seen_zero_in_integer {
+                error = Some("D3090: Optional digit (#) cannot appear after mandatory digit (0) in integer part".to_string());
+                break;
+            }
+        }
+        let mut seen_hash_in_fractional = false;
+        for c in fractional_part.chars() {
+            if c == digit_char {
+                seen_hash_in_fractional = true;
+            } else if is_digit_in_family(c, zero_digit) && seen_hash_in_fractional {
+                error = Some("D3091: Mandatory digit (0) cannot appear after optional digit (#) in fractional part".to_string());
+                break;
+            }
+        }
+        let exponent_exists = exponent_pos.is_some();
+        if exponent_exists && !exponent_part.is_empty() && (has_percent || has_per_mille) {
+            error =
+                Some("D3092: Percent/per-mille not allowed with exponential notation".to_string());
+        }
+        if exponent_exists
+            && (exponent_part.is_empty()
+                || exponent_part
+                    .chars()
+                    .any(|c| !is_digit_in_family(c, zero_digit)))
+        {
+            error = Some("D3093: Exponent must contain only digit characters".to_string());
+        }
+
+        if let Some(code) = error {
+            return Err(FunctionError::ArgumentError(code));
         }
 
         // Count minimum integer digits (mandatory digits in digit family)
@@ -1358,70 +1383,6 @@ pub mod numeric {
         } else {
             0
         };
-
-        // Validate: exponent part must contain only digit characters (ASCII or custom digit family)
-        if !exponent_part.is_empty()
-            && exponent_part
-                .chars()
-                .any(|c| !is_digit_in_family(c, zero_digit))
-        {
-            return Err(FunctionError::ArgumentError(
-                "D3093: Exponent must contain only digit characters".to_string(),
-            ));
-        }
-
-        // Validate: exponent cannot be empty if 'e' is present
-        if exponent_pos.is_some() && min_exponent_digits == 0 {
-            return Err(FunctionError::ArgumentError(
-                "D3093: Exponent cannot be empty".to_string(),
-            ));
-        }
-
-        // Validate: percent/per-mille not allowed with exponential notation
-        if min_exponent_digits > 0 && (has_percent || has_per_mille) {
-            return Err(FunctionError::ArgumentError(
-                "D3092: Percent/per-mille not allowed with exponential notation".to_string(),
-            ));
-        }
-
-        // Validate: # cannot appear after 0 in integer part
-        // In integer part, # must come before 0 (e.g., "##00" valid, "00##" invalid)
-        let mut seen_zero_in_integer = false;
-        for c in integer_part.chars() {
-            if is_digit_in_family(c, zero_digit) {
-                seen_zero_in_integer = true;
-            } else if c == digit_char && seen_zero_in_integer {
-                return Err(FunctionError::ArgumentError(
-                    "D3090: Optional digit (#) cannot appear after mandatory digit (0) in integer part".to_string()
-                ));
-            }
-        }
-
-        // Validate: # cannot appear before 0 in fractional part
-        // In fractional part, 0 must come before # (e.g., "00##" valid, "##00" invalid)
-        let mut seen_hash_in_fractional = false;
-        for c in fractional_part.chars() {
-            if c == digit_char {
-                seen_hash_in_fractional = true;
-            } else if is_digit_in_family(c, zero_digit) && seen_hash_in_fractional {
-                return Err(FunctionError::ArgumentError(
-                    "D3091: Mandatory digit (0) cannot appear after optional digit (#) in fractional part".to_string()
-                ));
-            }
-        }
-
-        // Validate: invalid characters in picture
-        // All characters in the active part must be valid (digits, decimal, grouping, or 'e'/'E')
-        let valid_chars: Vec<char> =
-            vec![decimal_sep, grouping_sep, zero_digit, digit_char, 'e', 'E'];
-        for c in mantissa_part.chars() {
-            if !is_digit_in_family(c, zero_digit) && !valid_chars.contains(&c) {
-                return Err(FunctionError::ArgumentError(format!(
-                    "D3086: Invalid character in picture: '{}'",
-                    c
-                )));
-            }
-        }
 
         // Scaling factor = minimum integer digits in mantissa
         let scaling_factor = min_integer_digits;

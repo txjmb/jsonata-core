@@ -599,6 +599,24 @@ for (const e of [
   BUILTIN_EXPRESSIONS.push({ fastpath: 'builtin_indirect', expr: e });
 }
 
+// -- $formatNumber picture strings ------------------------------------------
+// The picture validator runs every sub-picture check and lets the LAST failure
+// win (F&O 4.7.3, and jsonata-js follows it literally by assigning to one
+// `error` variable). Ours returned on the first, so a picture failing several
+// checks reported the wrong code -- `"k"` fails both D3085 and D3086 and is
+// D3086. Well-formed pictures are carried alongside the malformed ones so a
+// reordering cannot quietly break them (#135).
+for (const picture of [
+  'k', 'a', '#', '0', '##', '0.0', '.', ',', '0,', '0,,0', '#0', '0#', '0.#0',
+  '%%', '\u2030\u2030', '%\u2030', 'a0', '0a', '0.a', '#,##0.00', 'e', '0e0',
+  '9', '0;0', 'x0x', '..', '0..0', ',0', '0,.0',
+]) {
+  BUILTIN_EXPRESSIONS.push({
+    fastpath: 'format_number_picture',
+    expr: `$formatNumber(1, "${picture}")`,
+  });
+}
+
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '*' });
 BUILTIN_EXPRESSIONS.push({ fastpath: 'path_operator', expr: '**' });
 
