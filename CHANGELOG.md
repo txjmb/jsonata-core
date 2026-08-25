@@ -99,13 +99,16 @@ The differential corpus — over 20,000 comparisons against jsonata-js across tw
 input paths — has **no known divergences** for the first time. The one deliberate exception is
 base64's character set, documented below.
 
-The reference suite runs 1685 of its 1686 cases green, with one pinned as a known divergence
-(`$.7a` is `S0201` upstream and `S0213` here — both syntax errors, differing in *when* the step
-is validated). Worth stating plainly rather than quoting the pass count: 44 of its
-error-expecting cases still assert only that *something* was raised, because the errors we
-produce for them carry no JSONata code to compare, and 15 more specify an error object that is
-not inspected. That is [#144](https://github.com/txjmb/jsonata-core/issues/144), and it is
-mostly parser errors. It is a gap in what the suite verifies, not a set of known failures.
+All 1686 reference-suite cases pass, and each now runs through **both** evaluation engines —
+the suite previously ran only whichever the default resolved to, so the tree-walker was
+exercised by the differential corpus and nowhere else.
+
+Worth stating plainly rather than quoting the pass count: 43 of its error-expecting cases still
+assert only that *something* was raised, because the errors we produce for them carry no JSONata
+code to compare, and 15 more specify an error object that is not inspected. That is
+[#144](https://github.com/txjmb/jsonata-core/issues/144), and it is mostly parser errors. It is
+a gap in what the suite verifies, not a set of known failures — a test now pins the count so it
+cannot grow unnoticed.
 
 
 ### Added
@@ -138,6 +141,17 @@ mostly parser errors. It is a gap in what the suite verifies, not a set of known
 ### Removed
 
 ### Fixed
+- `$.7a` now raises `S0201`, not `S0213`. jsonata-js raises `S0213` ("literal value cannot be
+  used as a step") from a pass that runs *after* parsing, so an unexpected trailing token fails
+  the parse first; we raised it inline, before the trailing token was reached. Our `S0213` was
+  already right for `$.7` and `a.7` — only the ordering was wrong. A leftover token now also
+  carries `S0201`, the code the reference uses for it, instead of an uncoded "Expected end of
+  expression".
+- Every reference-suite case now runs through both evaluation engines, and the suite pins how
+  many of its error cases it cannot actually verify. At 2.2.7 four cases had the two engines
+  raising different errors, each accepted because both were errors and the check was loose.
+- The test reporter no longer crashes the run with an `INTERNALERROR` when a non-parametrized
+  test fails; it read `item.callspec` unguarded on the failure path.
 - The reference-suite harness compares error codes it previously ignored. `extract_error_code`
   was anchored to the start of the message, so any coded error carrying a prefix — `"Runtime
   error: D3030: ..."`, `"Parse error: Invalid syntax: S0209: ..."` — read as *uncoded*, and an
