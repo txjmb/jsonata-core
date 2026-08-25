@@ -1351,20 +1351,21 @@ impl Parser {
                         while self.current_token == Token::LeftBracket {
                             self.advance()?;
 
-                            let predicate_expr = if self.current_token == Token::RightBracket {
-                                // Empty brackets []
-                                Box::new(AstNode::Boolean(true))
+                            // `[]` is the keepSingleton marker, not the filter
+                            // `[true]`: it keeps the result an array instead of
+                            // filtering and unwrapping. They parsed to the same
+                            // node until KeepArray split them.
+                            let stage = if self.current_token == Token::RightBracket {
+                                Stage::KeepArray
                             } else {
-                                // Normal predicate expression
-                                let pred = self.parse_expression(0)?;
-                                Box::new(pred)
+                                Stage::Filter(Box::new(self.parse_expression(0)?))
                             };
 
                             self.expect(Token::RightBracket)?;
 
                             // Attach predicate as stage to the last step
                             if let Some(last_step) = steps.last_mut() {
-                                last_step.stages.push(Stage::Filter(predicate_expr));
+                                last_step.stages.push(stage);
                             }
                         }
 
@@ -1395,9 +1396,7 @@ impl Parser {
                             _ => vec![PathStep::new(lhs)],
                         };
 
-                        steps.push(PathStep::new(AstNode::Predicate(Box::new(
-                            AstNode::Boolean(true),
-                        ))));
+                        steps.push(PathStep::new(AstNode::KeepArray));
                         self.bump_parse_depth()?;
                         lhs = AstNode::Path { steps };
                     } else {
@@ -2031,14 +2030,33 @@ mod tests {
         let mut parser = Parser::new("foo[]".to_string()).unwrap();
         let ast = parser.parse().unwrap();
 
-        // Should create a Path with two steps: Name("foo") and Predicate(Boolean(true))
+        // Path with two steps: Name("foo") and the keepSingleton marker.
         if let AstNode::Path { steps } = ast {
             assert_eq!(steps.len(), 2);
             assert!(matches!(steps[0].node, AstNode::Name(ref s) if s == "foo"));
-            if let AstNode::Predicate(pred) = &steps[1].node {
-                assert!(matches!(**pred, AstNode::Boolean(true)));
-            } else {
-                panic!("Expected Predicate as second step, got {:?}", steps[1].node);
+            assert!(matches!(steps[1].node, AstNode::KeepArray));
+        } else {
+            panic!("Expected Path, got {:?}", ast);
+        }
+    }
+
+    /// `[]` and `[true]` are different operators and must not share a node.
+    ///
+    /// They did until `AstNode::KeepArray` split them, which made one of the
+    /// two wrong for every input: `foo[]` keeps the array while `foo[true]`
+    /// filters and then unwraps a lone result.
+    #[test]
+    fn test_empty_brackets_differ_from_literal_true_predicate() {
+        let mut parser = Parser::new("foo[true]".to_string()).unwrap();
+        let ast = parser.parse().unwrap();
+
+        if let AstNode::Path { steps } = ast {
+            assert_eq!(steps.len(), 2);
+            match &steps[1].node {
+                AstNode::Predicate(pred) => {
+                    assert!(matches!(**pred, AstNode::Boolean(true)))
+                }
+                other => panic!("Expected Predicate, got {:?}", other),
             }
         } else {
             panic!("Expected Path, got {:?}", ast);

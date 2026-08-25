@@ -617,6 +617,7 @@ fn substitute_labels_impl(
                                         *e, state, depth,
                                     )?)),
                                     Stage::Index(v) => Stage::Index(v),
+                                    Stage::KeepArray => Stage::KeepArray,
                                 })
                             })
                             .collect::<Result<Vec<_>, _>>()?,
@@ -1398,8 +1399,9 @@ fn transform_path_steps_impl(
                         new_stages.push(Stage::Filter(Box::new(t.node)));
                     }
                     // Index stages carry only a variable name -- nothing to
-                    // resolve/transform.
+                    // resolve/transform, and `[]` carries nothing at all.
                     Stage::Index(v) => new_stages.push(Stage::Index(v)),
+                    Stage::KeepArray => new_stages.push(Stage::KeepArray),
                 }
             }
             s.stages = new_stages;
@@ -1868,7 +1870,9 @@ mod tests {
         );
         // The `%` inside the predicate must carry Product's label.
         match &steps[2].stages[0] {
-            Stage::Index(_) => unreachable!("no index stage in this test"),
+            Stage::Index(_) | Stage::KeepArray => {
+                unreachable!("no index or keep-array stage in this test")
+            }
             Stage::Filter(expr) => match expr.as_ref() {
                 AstNode::Binary { lhs, .. } => match lhs.as_ref() {
                     AstNode::Path { steps: inner } => match &inner[0].node {
@@ -1897,7 +1901,9 @@ mod tests {
         assert!(order_label.is_some(), "Order must be tagged");
         assert_ne!(product_label, order_label);
         match &steps[2].stages[0] {
-            Stage::Index(_) => unreachable!("no index stage in this test"),
+            Stage::Index(_) | Stage::KeepArray => {
+                unreachable!("no index or keep-array stage in this test")
+            }
             Stage::Filter(expr) => match expr.as_ref() {
                 AstNode::Binary { lhs, .. } => match lhs.as_ref() {
                     AstNode::Path { steps: inner } => {
@@ -1958,7 +1964,9 @@ mod tests {
         assert_ne!(product_label, order_label);
         // first predicate: %  -> Product
         match &steps[2].stages[0] {
-            Stage::Index(_) => unreachable!("no index stage in this test"),
+            Stage::Index(_) | Stage::KeepArray => {
+                unreachable!("no index or keep-array stage in this test")
+            }
             Stage::Filter(expr) => match expr.as_ref() {
                 AstNode::Binary { lhs, .. } => match lhs.as_ref() {
                     AstNode::Path { steps: inner } => match &inner[0].node {
@@ -1972,7 +1980,9 @@ mod tests {
         }
         // second predicate: %.% -> Product (reuse), Order
         match &steps[2].stages[1] {
-            Stage::Index(_) => unreachable!("no index stage in this test"),
+            Stage::Index(_) | Stage::KeepArray => {
+                unreachable!("no index or keep-array stage in this test")
+            }
             Stage::Filter(expr) => match expr.as_ref() {
                 AstNode::Binary { lhs, .. } => match lhs.as_ref() {
                     AstNode::Path { steps: inner } => {

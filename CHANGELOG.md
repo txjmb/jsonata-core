@@ -30,6 +30,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- An explicit null now behaves as a value in object construction and in the `[]` array-keep,
+  rather than short-circuiting them: `nul{"a": $}` is `{"a": null}` (it was `null`, and
+  disagreed with the dotted `nul.{"a": $}`, which was already right), `nul[]` is `[null]`,
+  and `nul[][0]` is `[null]`. Four separate sites each carried a pre-`Undefined` `JValue::Null`
+  arm that made the operation a no-op. `emptyarr[]` is now `[]` rather than `undefined` — an
+  empty array held in a field is a value, unlike an empty result sequence such as `arr.p` over
+  `{"arr": []}`, which stays `undefined`.
+- `[]` and `[true]` are no longer the same thing. Both parsed to `Predicate(Boolean(true))`,
+  but jsonata treats them as different operators: `[]` keeps the result an array while
+  `[true]` is an ordinary filter that keeps everything and then unwraps a lone result. One of
+  the two therefore had to be wrong for every input — `num[]` and `num[true]` were both `[5]`
+  where the reference gives `[5]` and `5`. A dedicated `AstNode::KeepArray`/`Stage::KeepArray`
+  marker separates them. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - `#$i` positional binding now unwraps a one-value result, matching every other
   sequence-producing step: `num#$i` is `5` rather than `[5]`, and `deep#$i.$i` is `0` rather
   than `[0]`. The rule holds for every input kind — `arr#$i` and `arrobj#$i` only ever looked
