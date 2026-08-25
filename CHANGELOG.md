@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- Truthiness is now one rule, applied recursively, matching `$boolean`. JSONata coerces a
+  value to boolean the same way everywhere: a container is truthy only if some element is
+  truthy, checked all the way down, so `[0]`, `[[0]]` and `[0,0]` are falsy. `jsonata-core`
+  had three rules — `$boolean` (correct), a flat "is it non-empty?" used by every implicit
+  consumer, and a third half-recursive one used only by `?:`. `$not([0])` was `false` where
+  `$boolean([0])` was already `false`, so `$not` was not computing `!$boolean(x)`. This
+  changes the answer for `$not`, `? :`, `and`, `or`, filter predicates, `$filter` and any
+  lambda whose result is coerced — 54 measured cases across those seven consumers — whenever
+  the value is a container whose contents are all falsy. The `?:`-only rule is deleted rather
+  than realigned: with `is_truthy` correct the two agree exactly.
+  ([#111](https://github.com/txjmb/jsonata-core/issues/111))
 - `$formatNumber` now produces the same value as jsonata-js. Four separate defects, all in
   picture analysis and formatting:
   - **Rounding was half-away-from-zero, not half-to-even.** The reference routes this through

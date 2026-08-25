@@ -1447,7 +1447,12 @@ pub(crate) fn compiled_is_truthy(value: &JValue) -> bool {
         JValue::Bool(b) => *b,
         JValue::Number(n) => *n != 0.0,
         JValue::String(s) => !s.is_empty(),
-        JValue::Array(a) => !a.is_empty(),
+        // Recursive, matching `Evaluator::is_truthy` and `$boolean` (#111).
+        JValue::Array(a) => match a.len() {
+            0 => false,
+            1 => compiled_is_truthy(&a[0]),
+            _ => a.iter().any(compiled_is_truthy),
+        },
         JValue::Object(o) => !o.is_empty(),
         // A Python dict arrives as a lazy view, not a materialised Object.
         // Without this arm it fell through to `_ => false` and every non-empty
@@ -6361,7 +6366,10 @@ impl Evaluator {
         // Returns right side if left is falsy or a non-value (like a function)
         if op == BinaryOp::Default {
             let left = self.evaluate_internal(lhs, data)?;
-            if self.is_truthy_for_default(&left) {
+            // `?:` used to have its own truthiness rule, half-recursive where
+            // `is_truthy` was flat. Now that `is_truthy` matches `$boolean`
+            // the two agree exactly, so there is one rule again (#111).
+            if self.is_truthy(&left) {
                 return Ok(left);
             }
             return self.evaluate_internal(rhs, data);
@@ -10138,33 +10146,21 @@ impl Evaluator {
             JValue::Bool(b) => *b,
             JValue::Number(n) => *n != 0.0,
             JValue::String(s) => !s.is_empty(),
-            JValue::Array(arr) => !arr.is_empty(),
+            // JSONata has ONE truthiness rule and applies it recursively: a
+            // container is truthy only if some element is truthy, checked all
+            // the way down. `[0]`, `[[0]]` and `[0,0]` are all falsy. This arm
+            // used to ask only whether the array was non-empty, which made
+            // `$not([0])` false where `$boolean([0])` -- already correct -- is
+            // false and so `$not` must be true (#111).
+            JValue::Array(arr) => match arr.len() {
+                0 => false,
+                1 => self.is_truthy(&arr[0]),
+                _ => arr.iter().any(|v| self.is_truthy(v)),
+            },
             JValue::Object(obj) => !obj.is_empty(),
             #[cfg(feature = "python")]
             JValue::LazyPyDict(lazy) => !lazy.is_empty(),
             _ => false,
-        }
-    }
-
-    /// Check if a value is truthy for the default operator (?:)
-    /// This has special semantics:
-    /// - Lambda/function objects are not values, so they're falsy
-    /// - Arrays containing only falsy elements are falsy
-    /// - Otherwise, use standard truthiness
-    fn is_truthy_for_default(&self, value: &JValue) -> bool {
-        match value {
-            // Lambda/function values are not data values, so they're falsy
-            JValue::Lambda { .. } | JValue::Builtin { .. } => false,
-            // Arrays need special handling - check if all elements are falsy
-            JValue::Array(arr) => {
-                if arr.is_empty() {
-                    return false;
-                }
-                // Array is truthy only if it contains at least one truthy element
-                arr.iter().any(|elem| self.is_truthy(elem))
-            }
-            // For all other types, use standard truthiness
-            _ => self.is_truthy(value),
         }
     }
 
