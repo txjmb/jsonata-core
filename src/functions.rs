@@ -1950,6 +1950,46 @@ pub mod encoding {
     use base64::{engine::general_purpose, Engine as _};
 
     /// $base64encode(string) - Encode string to base64
+    /// Decode base64 the way Node's `Buffer.from(str, 'base64')` does, which
+    /// is what jsonata-js delegates to.
+    ///
+    /// Node never rejects input. It ignores every character outside the
+    /// alphabet, stops at the first padding character, accepts the URL-safe
+    /// alphabet alongside the standard one, and drops an incomplete trailing
+    /// quantum instead of erroring -- so `$base64decode("a")` is "" and
+    /// `$base64decode("YQ")` is "a". A strict decoder rejects all of those.
+    fn lenient_base64_bytes(s: &str) -> Vec<u8> {
+        let sextet = |c: char| -> Option<u8> {
+            match c {
+                'A'..='Z' => Some(c as u8 - b'A'),
+                'a'..='z' => Some(c as u8 - b'a' + 26),
+                '0'..='9' => Some(c as u8 - b'0' + 52),
+                '+' | '-' => Some(62),
+                '/' | '_' => Some(63),
+                _ => None,
+            }
+        };
+
+        let mut out = Vec::new();
+        let mut acc: u32 = 0;
+        let mut bits = 0u32;
+        for c in s.chars() {
+            if c == '=' {
+                break;
+            }
+            let Some(v) = sextet(c) else { continue };
+            acc = (acc << 6) | u32::from(v);
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push(((acc >> bits) & 0xff) as u8);
+            }
+        }
+        // Whatever is left is an incomplete byte and is discarded, which is
+        // why a lone trailing character contributes nothing.
+        out
+    }
+
     pub fn base64encode(s: &str) -> Result<JValue, FunctionError> {
         let encoded = general_purpose::STANDARD.encode(s.as_bytes());
         Ok(JValue::string(encoded))
@@ -1957,15 +1997,16 @@ pub mod encoding {
 
     /// $base64decode(string) - Decode base64 string
     pub fn base64decode(s: &str) -> Result<JValue, FunctionError> {
-        match general_purpose::STANDARD.decode(s.as_bytes()) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(decoded) => Ok(JValue::string(decoded)),
-                Err(_) => Err(FunctionError::RuntimeError(
-                    "Invalid UTF-8 in decoded base64".to_string(),
-                )),
-            },
+        let bytes = lenient_base64_bytes(s);
+        match String::from_utf8(bytes) {
+            Ok(decoded) => Ok(JValue::string(decoded)),
+            // The decoded bytes are not text. jsonata-js reads them as latin1
+            // and always produces *a* string, which round-trips ASCII but
+            // mangles everything else -- `$base64decode($base64encode("\u{1f642}"))`
+            // is "=B" there. Raising instead is a deliberate divergence; see
+            // issue #126 group 3.
             Err(_) => Err(FunctionError::RuntimeError(
-                "Invalid base64 string".to_string(),
+                "Invalid UTF-8 in decoded base64".to_string(),
             )),
         }
     }
@@ -2593,6 +2634,50 @@ mod tests {
             assert_eq!(merged.get("c"), Some(&JValue::from(4i64)));
         } else {
             panic!("Expected merged object");
+        }
+    }
+
+    /// $base64decode follows jsonata-js in what it *accepts*, not in how it
+    /// reads the bytes.
+    ///
+    /// jsonata-js decodes through Node's Buffer and calls `.toString('binary')`,
+    /// i.e. latin1, and encodes with `Buffer.from(str, 'binary')`, which
+    /// truncates each UTF-16 code unit to one byte. That round-trips ASCII and
+    /// destroys everything else -- in jsonata-js 2.2.2,
+    /// `$base64encode("\u{1f642}")` is "PUI=" and decoding it back gives "=B".
+    /// jsonata-core treats the payload as UTF-8 instead, so the round-trip
+    /// holds for any string.
+    ///
+    /// This is a deliberate divergence, not an oversight (#126 group 3), and
+    /// the reference's own suite pins only an ASCII round-trip, so nothing
+    /// upstream settles it. If it is ever revisited, this test is the thing
+    /// that has to change first.
+    #[test]
+    fn base64_round_trips_non_ascii_where_jsonata_js_does_not() {
+        for original in [
+            "a",
+            "hello:world",
+            "h\u{e9}llo",
+            "\u{65e5}\u{672c}",
+            "\u{1f642}",
+        ] {
+            let JValue::String(encoded) = encoding::base64encode(original).unwrap() else {
+                panic!("expected a string");
+            };
+            let JValue::String(decoded) = encoding::base64decode(&encoded).unwrap() else {
+                panic!("expected a string");
+            };
+            assert_eq!(&*decoded, original, "round-trip failed for {original:?}");
+        }
+
+        // The leniency half *is* matched: an incomplete trailing quantum is
+        // dropped and characters outside the alphabet are ignored, rather than
+        // rejected. See the corpus probes for the full family.
+        for (input, want) in [("a", ""), ("YQ", "a"), ("!!!!", ""), ("YQ==YQ==", "a")] {
+            let JValue::String(got) = encoding::base64decode(input).unwrap() else {
+                panic!("expected a string");
+            };
+            assert_eq!(&*got, want, "lenient decode of {input:?}");
         }
     }
 }

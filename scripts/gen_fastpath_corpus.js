@@ -500,6 +500,36 @@ const BUILTIN_PROBES = [
   // T0411 when the substituted context takes the first slot.
   '$formatInteger(1)',
   '$parseInteger("1")',
+  // Decoder/parser leniency (#126 group 3). jsonata-js decodes base64 through
+  // Node's Buffer, which ignores characters outside the alphabet, stops at
+  // the first padding character and drops an incomplete trailing quantum
+  // rather than rejecting any of it. Its $parseInteger likewise runs the
+  // picture parse without validating the input first -- its own source marks
+  // that path "TODO validate input based on the matcher regex" -- and returns
+  // null when nothing matches.
+  '$base64decode("")',
+  '$base64decode("a")',
+  '$base64decode("ab")',
+  '$base64decode("YQ")',
+  '$base64decode("YWI")',
+  '$base64decode("YQ=")',
+  '$base64decode("YQ===")',
+  '$base64decode("!!!!")',
+  '$base64decode("====")',
+  '$base64decode("YQ==YQ==")',
+  // Controls: well-formed input must keep decoding exactly as before.
+  '$base64decode("YQ==")',
+  '$base64decode("YWI=")',
+  '$base64decode("YWJj")',
+  '$base64decode("YWJjZA==")',
+  '$base64decode($base64encode("hello"))',
+  '$parseInteger("a", "0")',
+  '$parseInteger("", "0")',
+  '$parseInteger("xyz", "0")',
+  '$parseInteger("abc", "000")',
+  '$parseInteger("12a", "000")',
+  '$parseInteger("1", "0")',
+  '$parseInteger("123", "000")',
   // $fromMillis is the only one of the six with a *third* parameter, and the
   // second-argument matrix cannot reach it. Its `<n-s?s?:s>` timezone slot
   // rejects a null and trims a trailing undefined, which is what makes

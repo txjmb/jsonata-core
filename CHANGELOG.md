@@ -30,6 +30,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- `$base64decode` now accepts what jsonata-js accepts. The reference decodes through Node's
+  `Buffer`, which ignores characters outside the base64 alphabet, stops at the first padding
+  character, takes the URL-safe alphabet alongside the standard one, and drops an incomplete
+  trailing quantum — so `$base64decode("a")` is `""`, `$base64decode("YQ")` is `"a"` and
+  `$base64decode("!!!!")` is `""`, where a strict decoder rejects all three.
+- `$parseInteger` no longer raises `D3136` on a value that does not match its picture. The
+  reference runs the picture parse without validating the input — its own source marks that
+  path `TODO validate input based on the matcher regex` — so the answer is JavaScript's
+  `parseInt`: a leading run of digits, or `NaN` when there is none. `$parseInteger("12a", "000")`
+  is `12` and `$parseInteger("abc", "000")` is `NaN`. A malformed *picture* still raises
+  `D3130`, and the letters/roman/words parsers are untouched because date-time component
+  parsing shares them and needs the error. ([#126](https://github.com/txjmb/jsonata-core/issues/126))
+
+### Deliberately not changed
+- `$base64encode`/`$base64decode` keep treating their payload as UTF-8. jsonata-js reads it as
+  latin1 (`Buffer.from(str, 'binary')`), which truncates each UTF-16 code unit to one byte:
+  in jsonata-js 2.2.2 `$base64encode("🙂")` is `"PUI="` and decoding that gives `"=B"`. Matching
+  it would round-trip ASCII and corrupt everything else, and would silently change results for
+  anyone encoding non-ASCII today. The reference's own suite pins only an ASCII round-trip, so
+  nothing upstream settles it; a unit test now pins our choice so it cannot flip unnoticed.
+  ([#126](https://github.com/txjmb/jsonata-core/issues/126))
 - An explicit null now behaves as a value in object construction and in the `[]` array-keep,
   rather than short-circuiting them: `nul{"a": $}` is `{"a": null}` (it was `null`, and
   disagreed with the dotted `nul.{"a": $}`, which was already right), `nul[]` is `[null]`,
