@@ -68,7 +68,7 @@ Repository = "https://github.com/txjmb/jsonata-core"
 [tool.maturin]
 python-source = "python"
 module-name = "jsonatapy._jsonatapy"
-features = ["pyo3/extension-module", "python"]
+features = ["pyo3/extension-module", "python", "mimalloc"]
 
 [dependency-groups]
 dev = [

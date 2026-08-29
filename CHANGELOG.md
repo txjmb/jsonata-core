@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- Python→Rust data conversion — the cost that dominates `evaluate(dict)` on array-heavy
+  inputs — is faster on two fronts. `lazy::convert` now dispatches on the exact type object
+  and iterates lists via borrowed references instead of pyo3's instance-check chain
+  (subclasses still take the original chain, so semantics, error types included, are
+  unchanged; pinned by `tests/python/test_convert_fastpath.py`). And the published wheels
+  now use mimalloc as the global allocator (new opt-in `mimalloc` cargo feature, enabled in
+  `pyproject.toml`), roughly halving the per-list/per-object allocation cost that JValue's
+  Rc-per-container representation makes the conversion floor. Measured together on the
+  benchmark suite's shapes: "Nested Array Access" (`data[1][1][1][1]`, the one row where
+  jsonata-js was still ahead) drops ~35% (12.0µs → 7.8µs on the dev container), the four
+  `lazy_check.py` gate rows drop 10–17%, and string-heavy conversion roughly halves. The
+  structural fix for the nested-array row — lazy list views — remains deferred (see the
+  2026-07-12 lazy-views spec's Limitations).
 
 ### Deprecated
 

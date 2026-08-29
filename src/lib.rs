@@ -141,6 +141,14 @@ mod signature;
 pub mod value;
 mod vm;
 
+// Opt-in faster global allocator. JValue's Rc-per-Array/Object representation
+// makes small-allocation throughput the floor for Python→Rust data conversion
+// (~40ns/list on glibc malloc, roughly half that on mimalloc), which is what
+// dominates `evaluate(dict)` on array-heavy inputs.
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 // ── Benchmarking facade (only when the "bench" feature is enabled) ────────────
 //
 // Exposes the compiler/VM pipeline for Criterion benchmarks without making
