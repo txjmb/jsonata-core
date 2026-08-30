@@ -58,6 +58,32 @@ This is a curated overview of the most commonly used items. For the complete,
 auto-generated API reference (every public item, with its full rustdoc
 comments), see **[docs.rs/jsonata-core](https://docs.rs/jsonata-core)**.
 
+### `Expression`
+
+```rust
+pub fn compile(source: &str) -> Result<Expression, ParserError>
+pub fn compile_with_options(source: &str, options: EvaluatorOptions) -> Result<Expression, ParserError>
+pub fn evaluate(&self, data: &JValue) -> Result<JValue, EvaluatorError>
+pub fn ast(&self) -> &AstNode
+```
+
+The recommended compile-once entry point. Parses the expression and, on first
+evaluation, lowers it to bytecode where possible — the same bytecode-VM
+dispatch the Python and C bindings have always used, with the tree-walking
+`Evaluator` as the fallback for non-compilable expressions. Bindings and host
+functions require the tree-walker: use `Evaluator` directly (reusing
+`expr.ast()` if you already compiled) for those.
+
+```rust
+use jsonata_core::{Expression, value::JValue};
+
+let expr = Expression::compile("$sum(orders.price)")?;
+for payload in payloads {
+    let data = JValue::from_json_str(payload)?;
+    let total = expr.evaluate(&data)?;
+}
+```
+
 ### `parser::parse`
 
 ```rust
@@ -65,7 +91,8 @@ pub fn parse(expression: &str) -> Result<AstNode, ParserError>
 ```
 
 Parses a JSONata expression string into an AST. Parsing is the expensive step —
-do it once and reuse the `AstNode` across many evaluations.
+do it once and reuse the `AstNode` across many evaluations (or use
+`Expression`, which does this for you and adds the bytecode fast path).
 
 ### `Evaluator`
 

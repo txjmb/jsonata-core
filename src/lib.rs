@@ -32,15 +32,16 @@
 //!
 //! ## Compile once, evaluate many times
 //!
-//! Parsing is the expensive step, and an `AstNode` is immutable once built — so
-//! hoist it out of your hot loop and reuse it across payloads.
+//! Parsing is the expensive step. [`Expression`] parses once and reuses the
+//! result across payloads — and runs compilable expressions on the bytecode
+//! VM (the same dispatch the Python and C bindings use), falling back to the
+//! tree-walking [`Evaluator`](evaluator::Evaluator) otherwise.
 //!
 //! ```
-//! use jsonata_core::{evaluator::Evaluator, parser, value::JValue};
+//! use jsonata_core::{Expression, value::JValue};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let ast = parser::parse("orders[price > 100].product")?;
-//! let mut ev = Evaluator::new();
+//! let expr = Expression::compile("orders[price > 100].product")?;
 //!
 //! let payloads = [
 //!     r#"{"orders": [{"product": "widget", "price": 150}]}"#,
@@ -50,7 +51,7 @@
 //! let mut matched = Vec::new();
 //! for payload in payloads {
 //!     let data = JValue::from_json_str(payload)?;
-//!     if let Some(product) = ev.evaluate(&ast, &data)?.as_str() {
+//!     if let Some(product) = expr.evaluate(&data)?.as_str() {
 //!         matched.push(product.to_string());
 //!     }
 //! }
@@ -59,6 +60,10 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! Bindings and host functions need the tree-walker: keep using
+//! [`Evaluator`](evaluator::Evaluator) (with `expr.ast()` if you compiled an
+//! [`Expression`]) for those.
 //!
 //! ## Handling errors
 //!
@@ -116,7 +121,8 @@
 //! ## Architecture
 //!
 //! - [`parser`] — expression parser (JSONata source to AST)
-//! - [`evaluator`] — expression evaluator (executes an AST against data)
+//! - [`expression`] — compile-once [`Expression`] API (bytecode VM dispatch)
+//! - [`evaluator`] — tree-walking evaluator (executes an AST against data)
 //! - [`value`] — the runtime value representation, [`value::JValue`]
 //! - [`functions`] — built-in function implementations
 //! - [`ast`] — Abstract Syntax Tree definitions
@@ -130,22 +136,19 @@ pub mod ast_transform;
 mod builtins;
 #[cfg(feature = "capi")]
 pub mod capi;
-// The bytecode pipeline (compiler + vm) has no consumer in a default-feature
-// build: it is reached only through `run_eval` (python), `capi.rs` (capi) and
-// `_bench` (bench). Gated so the default build stays warning-clean and real
-// dead code remains visible.
-#[cfg(any(feature = "python", feature = "capi", feature = "bench", test))]
 mod compiler;
 mod datetime;
 pub mod evaluator;
+pub mod expression;
 pub mod functions;
 #[cfg(feature = "python")]
 pub mod lazy;
 pub mod parser;
 mod signature;
 pub mod value;
-#[cfg(any(feature = "python", feature = "capi", feature = "bench", test))]
 mod vm;
+
+pub use expression::Expression;
 
 // Opt-in faster global allocator; small-allocation throughput is the floor
 // for Python→Rust data conversion. See CHANGELOG (Unreleased → Changed).
@@ -282,37 +285,20 @@ struct JsonataExpression {
     host_fns: Vec<HostFnReg>,
 }
 
-/// Test-support toggle: bypass the bytecode VM and exercise the tree-walking
-/// evaluator on every call. Seeded once at module import from the
-/// JSONATAPY_FORCE_TREE_WALKER env var (whole-process forcing, e.g. the CI
-/// tree-walker reference-suite job), and flippable at runtime through the
-/// private `_set_force_tree_walker` pyfunction (what the Python tests use).
-///
-/// This was previously a per-call `env::var_os` read (~100-200ns), which is
-/// NOT noise next to a sub-microsecond evaluation: it showed up as a 10-30%
-/// regression on tiny expressions in v2.2.4 (issue #74). A relaxed atomic
-/// load is ~1ns and preserves the flip-mid-test capability.
-#[cfg(feature = "python")]
-static FORCE_TREE_WALKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-#[cfg(feature = "python")]
-fn force_tree_walker() -> bool {
-    FORCE_TREE_WALKER.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 /// Private test hook: force (or unforce) the tree-walking evaluator for all
-/// subsequent evaluations in this process. Not part of the public API.
+/// subsequent evaluations in this process (see `expression::FORCE_TREE_WALKER`).
+/// Not part of the public API.
 #[cfg(feature = "python")]
 #[pyfunction]
 fn _set_force_tree_walker(on: bool) {
-    FORCE_TREE_WALKER.store(on, std::sync::atomic::Ordering::Relaxed);
+    expression::set_force_tree_walker(on);
 }
 
 /// Private test hook: current state of the tree-walker toggle.
 #[cfg(feature = "python")]
 #[pyfunction]
 fn _get_force_tree_walker() -> bool {
-    force_tree_walker()
+    expression::force_tree_walker()
 }
 
 #[cfg(feature = "python")]
@@ -329,19 +315,9 @@ impl JsonataExpression {
         // Host functions, like bindings, require the tree-walker: the bytecode VM
         // has no view of the host registry. Take the fast path only when neither
         // is in play.
-        if bindings.is_none() && self.host_fns.is_empty() && !force_tree_walker() {
-            let bytecode = self.bytecode.get_or_init(|| {
-                evaluator::try_compile_expr(&self.ast)
-                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
-            });
-            if let Some(bc) = bytecode {
-                vm::Vm::with_options(bc, options.clone())
-                    .run(data, None)
-                    .map_err(evaluator_error_to_py)
-            } else {
-                let mut ev = evaluator::Evaluator::with_options(evaluator::Context::new(), options);
-                ev.evaluate(&self.ast, data).map_err(evaluator_error_to_py)
-            }
+        if bindings.is_none() && self.host_fns.is_empty() {
+            expression::run_compiled(&self.ast, &self.bytecode, data, options)
+                .map_err(evaluator_error_to_py)
         } else {
             let mut ev = create_evaluator(py, bindings, options)?;
             self.register_host_fns(py, &mut ev)?;
@@ -911,9 +887,8 @@ fn parser_error_to_py(e: parser::ParserError) -> PyErr {
 #[pymodule]
 fn _jsonatapy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Seed the tree-walker toggle from the environment once, at import time.
-    FORCE_TREE_WALKER.store(
+    expression::set_force_tree_walker(
         std::env::var_os("JSONATAPY_FORCE_TREE_WALKER").is_some_and(|v| !v.is_empty() && v != "0"),
-        std::sync::atomic::Ordering::Relaxed,
     );
     m.add_function(wrap_pyfunction!(compile, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate, m)?)?;

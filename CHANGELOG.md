@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `jsonata_core::Expression` — a compile-once API for Rust callers that runs
+  compilable expressions on the bytecode VM, exactly like the Python and C
+  bindings always have. Until now the VM was unreachable from the pure-Rust
+  surface: `Evaluator` always tree-walks, so Rust (and CLI) callers silently
+  got the slower path. `Expression::compile(src)?.evaluate(&data)` lowers to
+  bytecode lazily and falls back to the tree-walker for non-compilable
+  expressions; bindings and host functions still go through `Evaluator`. The
+  dispatch now lives in one place (`expression::run_compiled`), shared by the
+  Rust API, the Python bindings' `run_eval`, and the C ABI (which previously
+  carried a hand-copied duplicate of it), and the CLI uses it when no `--arg`
+  bindings are given. The `vm`/`compiler` modules are unconditionally compiled
+  again (the cfg gates added earlier in this cycle are gone — the default
+  build now has a real consumer).
 
 ### Changed
 - Python→Rust data conversion — the cost that dominates `evaluate(dict)` on array-heavy

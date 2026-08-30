@@ -1,8 +1,7 @@
 //! Bytecode compiler: lowers a `CompiledExpr` tree into a flat `BytecodeProgram`.
 //!
-//! NOT dead code: consumed by the Python wheel, the C ABI, and the `_bench`
-//! facade — see the header note in `vm.rs` and the cfg gate on `mod compiler`
-//! in lib.rs.
+//! Consumed via `expression::run_compiled` (the Rust `Expression` API, the
+//! Python wheel, and the C ABI) and by the `_bench` facade — see `vm.rs`.
 //!
 //! The compiler does a single recursive traversal of the `CompiledExpr` tree,
 //! emitting `Instr` values into a flat `Vec`.  After emission, a lightweight

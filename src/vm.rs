@@ -1,9 +1,9 @@
 //! Bytecode VM for JSONata compiled expressions.
 //!
-//! NOT dead code: this is the primary production evaluate path for the Python
-//! wheel (`lib.rs::run_eval`) and the C ABI (`capi.rs`), plus the `_bench`
-//! facade — none of which exist in a default-feature build, which is why the
-//! module (and `compiler.rs`) is cfg-gated on `python`/`capi`/`bench` in lib.rs.
+//! This is the primary production evaluate path: `expression::run_compiled`
+//! dispatches here for the public Rust `Expression` API, the Python wheel
+//! (`lib.rs::run_eval`), and the C ABI (`capi.rs`); the `_bench` facade
+//! drives it directly.
 //!
 //! A `BytecodeProgram` is produced by `crate::compiler::BytecodeCompiler` from a
 //! `CompiledExpr` tree.  Running a program involves the `Vm` struct which walks
