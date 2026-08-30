@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `jsonata_set_limits` on the C ABI: wall-clock timeout (D1012), max AST recursion
+  depth (D1011), and max sequence length (D2015) — the same three guardrails the
+  Python bindings expose. C embedders previously had no way to bound a runaway
+  expression at all (the cleanup review's finding); 0 = unlimited, resettable per
+  handle. Covered by the C/C++ smoke tests and a Rust-side capi test.
 - `jsonata_core::Expression` — a compile-once API for Rust callers that runs
   compilable expressions on the bytecode VM, exactly like the Python and C
   bindings always have. Until now the VM was unreachable from the pure-Rust
@@ -103,6 +108,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine itself.
 
 ### Fixed
+- Two families of tree-walker drift found by unifying the remaining field-extraction
+  loops onto `compiled_field_step` (each pinned on BOTH engines in
+  `tests/python/test_field_step_and_arraygroup.py` with jsonata-js reference outputs):
+  the single-step-Name fast path skipped null-valued fields and returned Null on empty
+  (`p` over `[{"p":null},{"p":2}]` was `2` on the tree-walker, `[null,2]` on the VM and
+  in the reference — the engines disagreed); and the `.[...]` array-group constructor
+  kept undefined elements as null (`foo.blah.[baz]` gave `[[..],[null],[null]]` instead
+  of `[[..],[],[]]`, masked downstream by that null-skip), while its empty results
+  conflated "constructed empty array over a single value" (kept: `{"a":1}.[b]` is `[]`)
+  with "mapped over an empty array" (undefined: `emptyarr.[b]`). Both tree-walker
+  Name-step loops (the fast path and the general step loop's inner loop) now delegate
+  to `compiled_field_step`, deleting ~100 lines of drifted copies; the reference
+  suite's `array-constructor/case013`/`case014` now pass by the correct route. The
+  fast path's tuple branch (a third copy, with the same null-skip drift) is deleted
+  outright — tuple streams fall through to the general step loop's single tuple
+  implementation, and `$#$i.p` over `[{"p":null},{"p":2}]` is now `[null,2]` on both
+  engines, matching the reference.
+- Errors carry their JSONata spec code at the front of the message again: the
+  `FunctionError` wrapping used to bury codes behind prose prefixes ("Runtime
+  error: D3030: Cannot convert 'x' to number"), so the C ABI, the Rust CLI, and
+  the Python CLI each grew a different classifier and disagreed on whether the
+  same error was coded. The inner message now passes through unwrapped
+  ("D3030: ..."), `EvaluatorError::code()` / `evaluator::error_code_prefix` is
+  the one definition of "coded error" (prefix-anchored), and the C ABI and both
+  CLIs classify with it — the same failure now presents identically in every
+  binary. The C ABI's mid-string code scan is retired (it existed only to see
+  through the now-removed prose prefixes).
+- Number stringification now matches jsonata-js exactly (verified against the pinned
+  reference with a 307-case randomized differential over scalars, containers,
+  prettified output, and `&` concatenation). Three divergences fixed: non-integers
+  were truncated to 14 significant digits instead of rounded to 15 (`$string(1/3)`
+  was `0.33333333333333`, now `0.333333333333333` — the old formatter counted the
+  `0` of a leading `0.` as significant); integer-valued floats above 2^53 printed
+  their exact i64 digits instead of the float's shortest round-trip decimal; and
+  numbers nested in containers went through serde with different rules again.
+  `$string` now stringifies through its own writer implementing the reference's
+  replacer (functions → `""`, non-integers → `toPrecision(15)`), and one
+  `value::js_number_to_string` defines JS number printing (plain digits in
+  [1e-6, 1e21), exponential with `+` outside, `-0` as `0`) for `$string`, concat,
+  `Display`, and `$join`. Pinned by `tests/python/test_number_stringification.py`.
 - `$var.field` over an array containing nested-array elements now recurses into
   them like jsonata-js's `lookup`: `($v := [[{"p":1}],{"p":2}]; $v.p)` is `[1,2]`
   (previously `2` — the tree-walker's two-step fast path hand-rolled its mapping

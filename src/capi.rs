@@ -43,6 +43,9 @@ pub struct JsonataExpr {
     /// subsequent `jsonata_evaluate`. Like bindings, a non-empty list forces
     /// the tree-walker (the VM has no host registry).
     host_fns: Vec<CHostFnReg>,
+    /// Evaluation guardrails set via `jsonata_set_limits`, applied on every
+    /// subsequent `jsonata_evaluate`. Defaults to unlimited.
+    options: EvaluatorOptions,
 }
 
 /// A host function callback.
@@ -155,6 +158,7 @@ pub unsafe extern "C" fn jsonata_compile(expr_utf8: *const c_char) -> *mut Jsona
                 bytecode: OnceCell::new(),
                 bindings: Vec::new(),
                 host_fns: Vec::new(),
+                options: EvaluatorOptions::default(),
             }))
         }
         Err(e) => {
@@ -348,18 +352,13 @@ pub unsafe extern "C" fn jsonata_evaluate(
         // bytecode AND no user bindings or host functions exist, tree-walker
         // otherwise (the VM takes no host registry).
         let result = if expr.bindings.is_empty() && expr.host_fns.is_empty() {
-            crate::expression::run_compiled(
-                &expr.ast,
-                &expr.bytecode,
-                &data,
-                EvaluatorOptions::default(),
-            )
+            crate::expression::run_compiled(&expr.ast, &expr.bytecode, &data, expr.options.clone())
         } else {
             let mut context = evaluator::Context::new();
             for (name, value) in &expr.bindings {
                 context.bind(name.clone(), value.clone());
             }
-            let mut ev = evaluator::Evaluator::with_options(context, EvaluatorOptions::default());
+            let mut ev = evaluator::Evaluator::with_options(context, expr.options.clone());
             for reg in &expr.host_fns {
                 let hf = CHostFn {
                     func: reg.func,
@@ -457,25 +456,44 @@ pub extern "C" fn jsonata_last_error_code() -> *mut c_char {
     })
 }
 
-/// A JSONata spec code is one uppercase ASCII letter followed by exactly
-/// four digits, terminated by ':' (e.g. "T2002: ..."). The engine sometimes
-/// stores it at the start of the message and sometimes behind a prose
-/// prefix ("Runtime error: D3030: ..."), so scan for the first
-/// token-boundary occurrence. Uncoded prose ("Parse error: something",
-/// "invalid input JSON: ...") yields None.
+/// The JSONata spec code of `msg`, using the crate-wide rule
+/// (`evaluator::error_code_prefix`): a leading `X####:` prefix. Coded
+/// engine errors always carry the code at the front — the old mid-string
+/// scan existed only because `FunctionError` wrapping used to bury codes
+/// behind prose prefixes ("Runtime error: D3030: ...").
 fn extract_error_code(msg: &str) -> Option<String> {
-    let bytes = msg.as_bytes();
-    for i in 0..bytes.len().saturating_sub(5) {
-        let at_boundary = i == 0 || bytes[i - 1] == b' ';
-        if at_boundary
-            && bytes[i].is_ascii_uppercase()
-            && bytes[i + 1..i + 5].iter().all(|b| b.is_ascii_digit())
-            && bytes[i + 5] == b':'
-        {
-            return Some(msg[i..i + 5].to_string());
-        }
+    evaluator::error_code_prefix(msg).map(str::to_string)
+}
+
+/// Set evaluation guardrails on the expression, applied to every subsequent
+/// `jsonata_evaluate` on this handle. Each limit uses 0 for "unlimited" (the
+/// default): `timeout_ms` bounds wall-clock evaluation time (D1012 on
+/// breach), `max_stack_depth` bounds AST recursion depth (D1011), and
+/// `max_sequence_length` bounds query-result sequences (D2015) — the same
+/// three guardrails the Python bindings expose. Returns 0 on success, -1 on
+/// a NULL handle (error slot set).
+///
+/// # Safety
+/// `expr` must be a live pointer from `jsonata_compile` or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn jsonata_set_limits(
+    expr: *mut JsonataExpr,
+    timeout_ms: u64,
+    max_stack_depth: u64,
+    max_sequence_length: u64,
+) -> c_int {
+    if expr.is_null() {
+        set_error("jsonata_set_limits: NULL expression handle".to_string());
+        return -1;
     }
-    None
+    let expr = &mut *expr;
+    expr.options = EvaluatorOptions {
+        timeout_ms: (timeout_ms > 0).then_some(timeout_ms),
+        max_stack_depth: (max_stack_depth > 0).then_some(max_stack_depth as usize),
+        max_sequence_length: (max_sequence_length > 0).then_some(max_sequence_length as usize),
+    };
+    clear_error();
+    0
 }
 
 #[no_mangle]
@@ -704,8 +722,16 @@ mod tests {
             Some("T2002")
         );
         assert_eq!(extract_error_code("S0214: bad %").as_deref(), Some("S0214"));
+        // Codes are no longer buried behind prose prefixes (the
+        // FunctionError wrapping that produced "Runtime error: D3030: ..."
+        // is gone), so the classifier is prefix-anchored: a mid-string code
+        // does not count.
         assert_eq!(
-            extract_error_code("Runtime error: D3030: Cannot convert").as_deref(),
+            extract_error_code("Runtime error: D3030: Cannot convert"),
+            None
+        );
+        assert_eq!(
+            extract_error_code("D3030: Cannot convert 'x' to number").as_deref(),
             Some("D3030")
         );
         assert_eq!(extract_error_code("Parse error: something"), None);
@@ -883,6 +909,27 @@ mod tests {
                 -1
             );
             assert!(last_error().unwrap().contains("NULL"));
+            jsonata_free_expr(h);
+        }
+    }
+    #[test]
+    fn set_limits_enforced_and_resettable() {
+        unsafe {
+            let ce = CString::new("$map([1..100000], function($x) { $x })").unwrap();
+            let cd = CString::new("{}").unwrap();
+            let h = jsonata_compile(ce.as_ptr());
+            assert!(!h.is_null());
+            assert_eq!(jsonata_set_limits(std::ptr::null_mut(), 0, 0, 0), -1);
+            assert_eq!(jsonata_set_limits(h, 0, 0, 10), 0);
+            let r = jsonata_evaluate(h, cd.as_ptr());
+            assert!(r.is_null(), "sequence limit must fail the evaluation");
+            let err = last_error().expect("error slot set");
+            assert!(err.contains("D2015"), "unexpected error: {err}");
+            // Lifting the limit makes the same handle succeed again.
+            assert_eq!(jsonata_set_limits(h, 0, 0, 0), 0);
+            let r2 = jsonata_evaluate(h, cd.as_ptr());
+            assert!(!r2.is_null());
+            jsonata_free_string(r2);
             jsonata_free_expr(h);
         }
     }

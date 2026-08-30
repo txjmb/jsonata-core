@@ -141,7 +141,13 @@ Rust library rebuilds with your project.)
    deliberately (e.g. a frozen `$now`, or a disabled `$eval`). `user_data`
    must outlive the handle. Registering a host function routes evaluation
    through the tree-walker, like variable bindings.
-8. **Panics:** internal engine panics are caught at the boundary and
+8. **Guardrails:** `jsonata_set_limits(expr, timeout_ms, max_stack_depth,
+   max_sequence_length)` bounds wall-clock time (D1012), AST recursion
+   depth (D1011), and query-result sequence length (D2015) for all
+   subsequent evaluations on that handle — the same three limits the
+   Python bindings expose. 0 means "unlimited" (the default); call again
+   to change or reset.
+9. **Panics:** internal engine panics are caught at the boundary and
    surface as errors prefixed `internal error:` — they will not abort
    your process.
 

@@ -2298,7 +2298,20 @@ impl From<crate::functions::FunctionError> for EvaluatorError {
         if let crate::functions::FunctionError::PyConversionError(m) = &e {
             return EvaluatorError::PyConversionError(m.clone());
         }
-        EvaluatorError::EvaluationError(e.to_string())
+        // Pass the inner message through rather than thiserror's Display,
+        // which prepends "Runtime error: "/"Argument error: "/"Type error: "
+        // — burying the JSONata spec code ("Runtime error: D3030: ...") so
+        // no prefix-anchored classifier (the CLIs, `EvaluatorError::code`)
+        // could see it, and double-stacking with EvaluatorError's own
+        // Display prefix ("Evaluation error: Runtime error: ...").
+        use crate::functions::FunctionError as FE;
+        let msg = match e {
+            FE::ArgumentError(m) | FE::TypeError(m) | FE::RuntimeError(m) => m,
+            // Handled by the early return above; kept for exhaustiveness.
+            #[cfg(feature = "python")]
+            FE::PyConversionError(m) => m,
+        };
+        EvaluatorError::EvaluationError(msg)
     }
 }
 
@@ -2324,6 +2337,30 @@ impl EvaluatorError {
             #[cfg(feature = "python")]
             EvaluatorError::PyConversionError(m) => m,
         }
+    }
+
+    /// The JSONata spec code ("T2010", "D3030", ...) this error carries, if
+    /// any: the message's leading `X####:` prefix. This is THE definition of
+    /// "is this a coded error" — the C ABI's `jsonata_last_error_code` and
+    /// the CLI's error formatting both classify with it (the Python CLI
+    /// mirrors it with an equivalent anchored regex), so the same failure
+    /// presents the same way in every binary.
+    pub fn code(&self) -> Option<&str> {
+        error_code_prefix(self.message())
+    }
+}
+
+/// The leading JSONata spec code of `msg` (`X####:` at offset 0), if any.
+pub fn error_code_prefix(msg: &str) -> Option<&str> {
+    let b = msg.as_bytes();
+    if b.len() >= 6
+        && b[0].is_ascii_uppercase()
+        && b[1..5].iter().all(u8::is_ascii_digit)
+        && b[5] == b':'
+    {
+        Some(&msg[..5])
+    } else {
+        None
     }
 }
 
@@ -4033,10 +4070,14 @@ impl Evaluator {
 
             // Array grouping: same as Array but prevents flattening in path contexts
             AstNode::ArrayGroup(elements) => {
+                // Undefined elements are dropped like in every array constructor;
+                // explicit null is a value and stays.
                 let mut result = Vec::new();
                 for element in elements {
                     let value = self.evaluate_internal(element, data)?;
-                    result.push(value);
+                    if !value.is_undefined() {
+                        result.push(value);
+                    }
                 }
                 Ok(JValue::array(result))
             }
@@ -4428,189 +4469,49 @@ impl Evaluator {
         // creation handled below.
         if steps.len() == 1 && !Self::step_creates_tuple(&steps[0]) {
             if let AstNode::Name(field_name) = &steps[0].node {
-                return match data {
-                    JValue::Object(obj) => {
-                        // Check if this is a tuple - extract '@' value
-                        if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                            match obj.get("@") {
-                                Some(JValue::Object(inner)) => {
-                                    Ok(inner.get(field_name).cloned().unwrap_or(JValue::Undefined))
-                                }
-                                #[cfg(feature = "python")]
-                                Some(JValue::LazyPyDict(lazy)) => Ok(lazy.get_field(field_name)?),
-                                _ => Ok(JValue::Undefined),
-                            }
-                        } else {
-                            Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
-                        }
-                    }
-                    #[cfg(feature = "python")]
-                    JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field_name)?),
-                    JValue::Array(arr) => {
-                        // Array mapping: extract field from each element
-                        // Optimized: use references to access fields without cloning entire objects
-                        // Check first element for tuple-ness (tuples are all-or-nothing)
-                        let has_tuples = arr.first().is_some_and(|item| {
-                            matches!(item, JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)))
-                        });
-
-                        if !has_tuples {
-                            // Fast path: no tuples, just direct field lookups
-                            let mut result = Vec::with_capacity(arr.len());
-                            for item in arr.iter() {
-                                if let JValue::Object(obj) = item {
-                                    if let Some(val) = obj.get(field_name) {
-                                        if !val.is_null() {
-                                            match val {
-                                                JValue::Array(arr_val) => {
-                                                    result.extend(arr_val.iter().cloned());
-                                                }
-                                                other => result.push(other.clone()),
-                                            }
-                                        }
-                                    }
-                                } else if let JValue::Array(inner_arr) = item {
-                                    let nested_result = self.evaluate_path(
-                                        &[PathStep::new(AstNode::Name(field_name.clone()))],
-                                        &JValue::Array(inner_arr.clone()),
-                                    )?;
-                                    match nested_result {
-                                        JValue::Array(nested) => {
-                                            result.extend(nested.iter().cloned());
-                                        }
-                                        JValue::Null => {}
-                                        other => result.push(other),
-                                    }
-                                } else {
+                // A tuple stream falls through to the general step loop below —
+                // its tuple arm is the single implementation of tuple-aware
+                // field extraction (the fast path used to carry a drifted copy
+                // that skipped nulls and returned Null on empty).
+                let is_tuple_stream = matches!(data, JValue::Array(arr) if arr.first().is_some_and(
+                    |item| matches!(item, JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)))
+                ));
+                if !is_tuple_stream {
+                    return match data {
+                        JValue::Object(obj) => {
+                            // Check if this is a tuple - extract '@' value
+                            if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                                match obj.get("@") {
+                                    Some(JValue::Object(inner)) => Ok(inner
+                                        .get(field_name)
+                                        .cloned()
+                                        .unwrap_or(JValue::Undefined)),
                                     #[cfg(feature = "python")]
-                                    if let JValue::LazyPyDict(lazy) = item {
-                                        let val = lazy.get_field(field_name)?;
-                                        if !val.is_null() && !val.is_undefined() {
-                                            match val {
-                                                JValue::Array(arr_val) => {
-                                                    result.extend(arr_val.iter().cloned());
-                                                }
-                                                other => result.push(other),
-                                            }
-                                        }
+                                    Some(JValue::LazyPyDict(lazy)) => {
+                                        Ok(lazy.get_field(field_name)?)
                                     }
+                                    _ => Ok(JValue::Undefined),
                                 }
-                            }
-
-                            if result.is_empty() {
-                                Ok(JValue::Null)
-                            } else if result.len() == 1 {
-                                Ok(result.into_iter().next().unwrap())
                             } else {
-                                check_sequence_length(result.len(), &self.options)?;
-                                Ok(JValue::array(result))
+                                Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
                             }
-                        } else {
-                            // Tuple path: per-element tuple handling
-                            let mut result = Vec::new();
-                            for item in arr.iter() {
-                                match item {
-                                    JValue::Object(obj) => {
-                                        let is_tuple =
-                                            obj.get("__tuple__") == Some(&JValue::Bool(true));
-
-                                        if is_tuple {
-                                            let field_val: Option<JValue> = match obj.get("@") {
-                                                Some(JValue::Object(inner)) => {
-                                                    inner.get(field_name).cloned()
-                                                }
-                                                #[cfg(feature = "python")]
-                                                Some(JValue::LazyPyDict(lazy)) => {
-                                                    let v = lazy.get_field(field_name)?;
-                                                    if v.is_undefined() {
-                                                        None
-                                                    } else {
-                                                        Some(v)
-                                                    }
-                                                }
-                                                _ => continue,
-                                            };
-
-                                            if let Some(val) = field_val.as_ref() {
-                                                if !val.is_null() {
-                                                    // Build tuple wrapper - only clone bindings when needed
-                                                    let wrap = |v: JValue| -> JValue {
-                                                        let mut wrapper = IndexMap::new();
-                                                        wrapper.insert("@".to_string(), v);
-                                                        wrapper.insert(
-                                                            "__tuple__".to_string(),
-                                                            JValue::Bool(true),
-                                                        );
-                                                        for (k, v) in obj.iter() {
-                                                            if k.starts_with('$') {
-                                                                wrapper
-                                                                    .insert(k.clone(), v.clone());
-                                                            }
-                                                        }
-                                                        JValue::object(wrapper)
-                                                    };
-
-                                                    match val {
-                                                        JValue::Array(arr_val) => {
-                                                            for item in arr_val.iter() {
-                                                                result.push(wrap(item.clone()));
-                                                            }
-                                                        }
-                                                        other => result.push(wrap(other.clone())),
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            // Non-tuple: access field directly by reference, only clone the field value
-                                            if let Some(val) = obj.get(field_name) {
-                                                if !val.is_null() {
-                                                    match val {
-                                                        JValue::Array(arr_val) => {
-                                                            for item in arr_val.iter() {
-                                                                result.push(item.clone());
-                                                            }
-                                                        }
-                                                        other => result.push(other.clone()),
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    JValue::Array(inner_arr) => {
-                                        // Recursively map over nested array
-                                        let nested_result = self.evaluate_path(
-                                            &[PathStep::new(AstNode::Name(field_name.clone()))],
-                                            &JValue::Array(inner_arr.clone()),
-                                        )?;
-                                        // Add nested result to our results
-                                        match nested_result {
-                                            JValue::Array(nested) => {
-                                                // Flatten nested arrays from recursive mapping
-                                                result.extend(nested.iter().cloned());
-                                            }
-                                            JValue::Null => {}
-                                            other => result.push(other),
-                                        }
-                                    }
-                                    _ => {} // Skip non-object items
-                                }
+                        }
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field_name)?),
+                        JValue::Array(_) => {
+                            // Delegate to the shared field step (skip undefined,
+                            // KEEP nulls, flatten one level, empty -> undefined)
+                            // plus the end-of-path singleton unwrap — the same
+                            // policy as the VM's get_field_cached and jsonata-js.
+                            let extracted = compiled_field_step(field_name, data, &self.options)?;
+                            match extracted {
+                                JValue::Array(arr) if arr.len() == 1 => Ok(arr[0].clone()),
+                                other => Ok(other),
                             }
-
-                            // Return array result
-                            // JSONata singleton unwrapping: if we have exactly one result,
-                            // unwrap it (even if it's an array)
-                            if result.is_empty() {
-                                Ok(JValue::Null)
-                            } else if result.len() == 1 {
-                                Ok(result.into_iter().next().unwrap())
-                            } else {
-                                check_sequence_length(result.len(), &self.options)?;
-                                Ok(JValue::array(result))
-                            }
-                        } // end else (tuple path)
-                    }
-                    _ => Ok(JValue::Undefined),
-                };
+                        }
+                        _ => Ok(JValue::Undefined),
+                    };
+                }
             }
         }
 
@@ -5226,51 +5127,16 @@ impl Evaluator {
                             });
 
                             if !has_tuples && stages.is_empty() {
-                                let mut result = Vec::with_capacity(arr.len());
-                                for item in arr.iter() {
-                                    match item {
-                                        JValue::Object(obj) => {
-                                            // `None` is an absent field (undefined -> drops out);
-                                            // `Some(Null)` is a present null, which is a value and
-                                            // stays in the sequence. Mirrors compiled_field_step.
-                                            if let Some(val) = obj.get(field_name) {
-                                                match val {
-                                                    JValue::Undefined => {}
-                                                    JValue::Array(arr_val) => {
-                                                        result.extend(arr_val.iter().cloned())
-                                                    }
-                                                    other => result.push(other.clone()),
-                                                }
-                                            }
-                                        }
-                                        JValue::Array(_) => {
-                                            let nested_result =
-                                                self.evaluate_path(&[step.clone()], item)?;
-                                            match nested_result {
-                                                JValue::Array(nested) => {
-                                                    result.extend(nested.iter().cloned())
-                                                }
-                                                JValue::Null => {}
-                                                other => result.push(other),
-                                            }
-                                        }
-                                        #[cfg(feature = "python")]
-                                        JValue::LazyPyDict(lazy) => {
-                                            let val = lazy.get_field(field_name)?;
-                                            // A present null is a value; only an absent field (Undefined) drops out.
-                                            if !val.is_undefined() {
-                                                match val {
-                                                    JValue::Array(arr_val) => {
-                                                        result.extend(arr_val.iter().cloned())
-                                                    }
-                                                    other => result.push(other),
-                                                }
-                                            }
-                                        }
-                                        _ => {}
-                                    }
+                                // Delegate to the shared field step (skip undefined,
+                                // keep nulls, flatten one level, recurse into nested
+                                // arrays). Mid-path wants the raw sequence: no
+                                // singleton unwrap, and an empty result stays an
+                                // empty array so the remaining steps map over
+                                // nothing exactly as before.
+                                match compiled_field_step(field_name, &current, &self.options)? {
+                                    JValue::Undefined => JValue::array(Vec::new()),
+                                    other => other,
                                 }
-                                JValue::array(result)
                             } else {
                                 // Full path with tuple support and stages
                                 let mut result = Vec::new();
@@ -5520,11 +5386,16 @@ impl Evaluator {
                                         // Keep the array as a single element to preserve nesting
                                         group_values.push(value);
                                     } else {
-                                        // Flatten the value into group_values
+                                        // Flatten the value into group_values. Undefined is
+                                        // dropped like in every array constructor (jsonata-js:
+                                        // `foo.blah.[baz]` over an element without `baz` is
+                                        // `[]`, not `[null]`); explicit null is a value and
+                                        // stays.
                                         match value {
                                             JValue::Array(arr) => {
                                                 group_values.extend(arr.iter().cloned())
                                             }
+                                            JValue::Undefined => {}
                                             other => group_values.push(other),
                                         }
                                     }
@@ -5538,18 +5409,29 @@ impl Evaluator {
                             // (not wrapped in an outer singleton array) — e.g.
                             // `$.[value,epochSeconds]` over a 1-element array yields
                             // `[3, 1578381600]`, not `[[3, 1578381600]]`.
-                            if is_last_step && result.len() == 1 {
+                            if result.is_empty() {
+                                // Mapping over an EMPTY array produced nothing at
+                                // all — undefined, like any step mapped over an
+                                // empty sequence (`emptyarr.[b]`), NOT a kept empty
+                                // array (that is the single-value construction
+                                // case, handled in finalize_path_result).
+                                JValue::Undefined
+                            } else if is_last_step && result.len() == 1 {
                                 result.into_iter().next().unwrap()
                             } else {
                                 JValue::array(result)
                             }
                         }
                         _ => {
-                            // For non-arrays, just evaluate the array constructor normally
+                            // For non-arrays, just evaluate the array constructor
+                            // normally; undefined elements are dropped like in every
+                            // array constructor (`{"a":1}.[b]` is `[]`).
                             let mut result = Vec::new();
                             for element in elements {
                                 let value = self.evaluate_internal(element, &current)?;
-                                result.push(value);
+                                if !value.is_undefined() {
+                                    result.push(value);
+                                }
                             }
                             JValue::array(result)
                         }
@@ -5787,8 +5669,18 @@ impl Evaluator {
             // path that found nothing never even reaches the predicate,
             // because the step loop returns undefined first, which is why
             // `nope[]` needs no special case here.
+            // ...and a trailing `.[...]` group over a SINGLE value is a
+            // constructed array, not a result sequence: `{"a":1}.[b]` is `[]`
+            // in jsonata-js, while `emptyarr.[b]` (mapped over nothing) is
+            // undefined — `did_array_mapping` is again what tells them apart.
             JValue::Array(arr)
-                if arr.is_empty() && (did_array_mapping || !has_explicit_array_keep) =>
+                if arr.is_empty()
+                    && (did_array_mapping || !has_explicit_array_keep)
+                    && (did_array_mapping
+                        || !matches!(
+                            steps.last().map(|s| &s.node),
+                            Some(AstNode::ArrayGroup(_))
+                        )) =>
             {
                 JValue::Undefined
             }
