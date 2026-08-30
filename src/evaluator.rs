@@ -2406,7 +2406,7 @@ pub struct StoredLambda {
 /// A single scope in the scope stack
 struct Scope {
     bindings: HashMap<String, JValue>,
-    lambdas: HashMap<String, StoredLambda>,
+    lambdas: HashMap<String, Rc<StoredLambda>>,
 }
 
 impl Scope {
@@ -2447,7 +2447,9 @@ impl Context {
         }
     }
 
-    /// Pop scope but preserve specified lambdas by moving them to the current top scope
+    /// Pop scope but preserve specified lambdas by moving them to the current
+    /// top scope. The side table holds `Rc<StoredLambda>`, so migration is a
+    /// refcount bump, not a deep clone of the lambda's body AST.
     fn pop_scope_preserving_lambdas(&mut self, lambda_ids: &[String]) {
         if self.scope_stack.len() > 1 {
             let popped = self.scope_stack.pop().unwrap();
@@ -2455,7 +2457,7 @@ impl Context {
                 let top = self.scope_stack.last_mut().unwrap();
                 for id in lambda_ids {
                     if let Some(stored) = popped.lambdas.get(id) {
-                        top.lambdas.insert(id.clone(), stored.clone());
+                        top.lambdas.insert(id.clone(), Rc::clone(stored));
                     }
                 }
             }
@@ -2478,6 +2480,11 @@ impl Context {
     }
 
     pub fn bind_lambda(&mut self, name: String, lambda: StoredLambda) {
+        self.bind_lambda_rc(name, Rc::new(lambda));
+    }
+
+    /// Bind an already-shared lambda (e.g. one migrating up a popped scope).
+    fn bind_lambda_rc(&mut self, name: String, lambda: Rc<StoredLambda>) {
         self.scope_stack
             .last_mut()
             .unwrap()
@@ -2503,6 +2510,13 @@ impl Context {
     }
 
     pub fn lookup_lambda(&self, name: &str) -> Option<&StoredLambda> {
+        self.lookup_lambda_rc(name).map(|rc| rc.as_ref())
+    }
+
+    /// Like `lookup_lambda`, but hands out the shared handle (an Rc clone is
+    /// a refcount bump — this is what makes by-reference invocation and
+    /// scope-pop preservation cheap).
+    fn lookup_lambda_rc(&self, name: &str) -> Option<&Rc<StoredLambda>> {
         // Walk scope stack from top to bottom
         for scope in self.scope_stack.iter().rev() {
             if let Some(lambda) = scope.lambdas.get(name) {
@@ -2985,9 +2999,9 @@ impl Evaluator {
     /// Look up a StoredLambda from a JValue that may be a lambda marker.
     /// Returns the cloned StoredLambda if the value is a JValue::Lambda variant
     /// with a valid lambda_id that references a stored lambda.
-    fn lookup_lambda_from_value(&self, value: &JValue) -> Option<StoredLambda> {
+    fn lookup_lambda_from_value(&self, value: &JValue) -> Option<Rc<StoredLambda>> {
         if let JValue::Lambda { lambda_id, .. } = value {
-            return self.context.lookup_lambda(lambda_id).cloned();
+            return self.context.lookup_lambda_rc(lambda_id).cloned();
         }
         None
     }
@@ -6800,9 +6814,10 @@ impl Evaluator {
             // Evaluate the RHS
             let value = self.evaluate_internal(rhs, data)?;
 
-            // If the value is a lambda, copy the stored lambda to the new variable name
+            // If the value is a lambda, alias the shared stored lambda under
+            // the new variable name (refcount bump, not a copy)
             if let Some(stored) = self.lookup_lambda_from_value(&value) {
-                self.context.bind_lambda(var_name.clone(), stored);
+                self.context.bind_lambda_rc(var_name.clone(), stored);
             }
 
             // Bind even if undefined (null) so inner scopes can shadow outer variables
