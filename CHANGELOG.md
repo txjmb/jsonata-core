@@ -103,6 +103,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine itself.
 
 ### Fixed
+- Number stringification now matches jsonata-js exactly (verified against the pinned
+  reference with a 307-case randomized differential over scalars, containers,
+  prettified output, and `&` concatenation). Three divergences fixed: non-integers
+  were truncated to 14 significant digits instead of rounded to 15 (`$string(1/3)`
+  was `0.33333333333333`, now `0.333333333333333` — the old formatter counted the
+  `0` of a leading `0.` as significant); integer-valued floats above 2^53 printed
+  their exact i64 digits instead of the float's shortest round-trip decimal; and
+  numbers nested in containers went through serde with different rules again.
+  `$string` now stringifies through its own writer implementing the reference's
+  replacer (functions → `""`, non-integers → `toPrecision(15)`), and one
+  `value::js_number_to_string` defines JS number printing (plain digits in
+  [1e-6, 1e21), exponential with `+` outside, `-0` as `0`) for `$string`, concat,
+  `Display`, and `$join`. Pinned by `tests/python/test_number_stringification.py`.
 - `$var.field` over an array containing nested-array elements now recurses into
   them like jsonata-js's `lookup`: `($v := [[{"p":1}],{"p":2}]; $v.p)` is `[1,2]`
   (previously `2` — the tree-walker's two-step fast path hand-rolled its mapping

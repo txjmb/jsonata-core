@@ -482,15 +482,41 @@ fn escape_json_string(s: &str) -> String {
     result
 }
 
+/// Print a finite f64 the way JavaScript's `String(number)` /
+/// `JSON.stringify(number)` does: shortest round-trip decimal, plain digits
+/// for magnitudes in [1e-6, 1e21), exponential (with an explicit `+` on
+/// positive exponents) outside that range, and `-0` printed as `0` (matching
+/// `JSON.stringify(-0)`).
+///
+/// This is the one definition of JS number printing; `$string` layers its
+/// non-integer `toPrecision(15)` rounding on top of it (see
+/// `functions::string`). Callers must handle non-finite values first.
+pub(crate) fn js_number_to_string(f: f64) -> String {
+    debug_assert!(f.is_finite());
+    if f == 0.0 {
+        return "0".to_string();
+    }
+    let abs = f.abs();
+    if (1e-6..1e21).contains(&abs) {
+        // Rust's Display is shortest-round-trip and never exponential,
+        // which matches JS exactly in this range.
+        format!("{}", f)
+    } else {
+        let exp_str = format!("{:e}", f);
+        if exp_str.contains('e') && !exp_str.contains("e-") && !exp_str.contains("e+") {
+            exp_str.replace('e', "e+")
+        } else {
+            exp_str
+        }
+    }
+}
+
 fn format_number(n: f64, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     if !n.is_finite() {
         // NaN and +/-Infinity serialize as null (matching JSON spec)
         write!(f, "null")
-    } else if n.fract() == 0.0 && n.abs() < 1e20 {
-        write!(f, "{}", n as i64)
     } else {
-        // Use serde_json's number formatting for consistency
-        write!(f, "{}", n)
+        write!(f, "{}", js_number_to_string(n))
     }
 }
 
