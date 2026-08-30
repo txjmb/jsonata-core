@@ -108,6 +108,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine itself.
 
 ### Fixed
+- Two families of tree-walker drift found by unifying the remaining field-extraction
+  loops onto `compiled_field_step` (each pinned on BOTH engines in
+  `tests/python/test_field_step_and_arraygroup.py` with jsonata-js reference outputs):
+  the single-step-Name fast path skipped null-valued fields and returned Null on empty
+  (`p` over `[{"p":null},{"p":2}]` was `2` on the tree-walker, `[null,2]` on the VM and
+  in the reference — the engines disagreed); and the `.[...]` array-group constructor
+  kept undefined elements as null (`foo.blah.[baz]` gave `[[..],[null],[null]]` instead
+  of `[[..],[],[]]`, masked downstream by that null-skip), while its empty results
+  conflated "constructed empty array over a single value" (kept: `{"a":1}.[b]` is `[]`)
+  with "mapped over an empty array" (undefined: `emptyarr.[b]`). Both tree-walker
+  Name-step loops (the fast path and the general step loop's inner loop) now delegate
+  to `compiled_field_step`, deleting ~100 lines of drifted copies; the reference
+  suite's `array-constructor/case013`/`case014` now pass by the correct route.
 - Errors carry their JSONata spec code at the front of the message again: the
   `FunctionError` wrapping used to bury codes behind prose prefixes ("Runtime
   error: D3030: Cannot convert 'x' to number"), so the C ABI, the Rust CLI, and
