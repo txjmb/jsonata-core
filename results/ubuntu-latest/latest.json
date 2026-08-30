@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-25T14:51:42.895675",
+  "timestamp": "2026-08-30T17:22:24.536547",
   "platform": "GitHub Actions (Linux, X64)",
   "python_version": "3.11.16",
   "repeat_trials": 5,
@@ -16,16 +16,16 @@
       "expression": "user.name",
       "data_size": "tiny",
       "iterations": 10000,
-      "jsonatapy_ms": 7.154184999990321,
-      "jsonatapy_json_ms": 7.794649000004483,
+      "jsonatapy_ms": 6.841506000000663,
+      "jsonatapy_json_ms": 7.796224000003349,
       "jsonatapy_dict_ms": null,
-      "js_ms": 33.6,
+      "js_ms": 36.28,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 104.391139,
-      "jsonatapy_speedup": 4.6965517386041125,
-      "jsonatapy_json_speedup": 4.310649523792627,
+      "jsonata_rs_ms": 101.49056200000001,
+      "jsonatapy_speedup": 5.302925993194552,
+      "jsonatapy_json_speedup": 4.653534839427961,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.3218663990245379,
+      "jsonata_rs_speedup": 0.35747166322716784,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -33,28 +33,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 7.154184999990321,
-          "max": 7.2058220000030815,
-          "mean": 7.173108999995748,
-          "median": 7.169787999998789
+          "min": 6.841506000000663,
+          "max": 6.902148999984092,
+          "mean": 6.874797799997623,
+          "median": 6.869878000003382
         },
         "jsonatapy_json": {
-          "min": 7.794649000004483,
-          "max": 7.826997999984542,
-          "mean": 7.8114642000059575,
-          "median": 7.809511000004932
+          "min": 7.796224000003349,
+          "max": 7.885681000004752,
+          "mean": 7.850290800007542,
+          "median": 7.853180000012117
         },
         "js": {
-          "min": 33.6,
-          "max": 38.29,
-          "mean": 35.866,
-          "median": 35.8
+          "min": 36.28,
+          "max": 39.7,
+          "mean": 38.378,
+          "median": 38.4
         },
         "jsonata_rs": {
-          "min": 104.391139,
-          "max": 105.046756,
-          "mean": 104.6896306,
-          "median": 104.59217199999999
+          "min": 101.49056200000001,
+          "max": 104.791045,
+          "mean": 102.8141992,
+          "median": 102.56541499999999
         }
       }
     },
@@ -64,16 +64,16 @@
       "expression": "a.b.c.d.e",
       "data_size": "tiny",
       "iterations": 10000,
-      "jsonatapy_ms": 11.013076999972782,
-      "jsonatapy_json_ms": 11.969276000002083,
+      "jsonatapy_ms": 10.888074999996888,
+      "jsonatapy_json_ms": 11.598687000002883,
       "jsonatapy_dict_ms": null,
-      "js_ms": 50.18,
+      "js_ms": 52.13,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 122.517218,
-      "jsonatapy_speedup": 4.55640144894329,
-      "jsonatapy_json_speedup": 4.192400609693625,
+      "jsonata_rs_ms": 118.875617,
+      "jsonatapy_speedup": 4.7878068437271875,
+      "jsonatapy_json_speedup": 4.494474245230261,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.40957508519333174,
+      "jsonata_rs_speedup": 0.43852558931408114,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -81,28 +81,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 11.013076999972782,
-          "max": 11.139796999998453,
-          "mean": 11.068786199996339,
-          "median": 11.061539000024823
+          "min": 10.888074999996888,
+          "max": 11.038518000020758,
+          "mean": 10.9570346000055,
+          "median": 10.972774000009622
         },
         "jsonatapy_json": {
-          "min": 11.969276000002083,
-          "max": 12.041614999986905,
-          "mean": 11.996084800000517,
-          "median": 11.990979000017887
+          "min": 11.598687000002883,
+          "max": 11.702481000014586,
+          "mean": 11.639338800000587,
+          "median": 11.618964999996706
         },
         "js": {
-          "min": 50.18,
-          "max": 50.82,
-          "mean": 50.434,
-          "median": 50.48
+          "min": 52.13,
+          "max": 54.41,
+          "mean": 53.104,
+          "median": 53.07
         },
         "jsonata_rs": {
-          "min": 122.517218,
-          "max": 125.32368399999999,
-          "mean": 123.7028496,
-          "median": 123.683615
+          "min": 118.875617,
+          "max": 120.818747,
+          "mean": 120.044537,
+          "median": 120.240935
         }
       }
     },
@@ -112,16 +112,16 @@
       "expression": "values[50]",
       "data_size": "100 elements",
       "iterations": 5000,
-      "jsonatapy_ms": 11.22767900000099,
-      "jsonatapy_json_ms": 28.08308499999157,
+      "jsonatapy_ms": 11.707370000010542,
+      "jsonatapy_json_ms": 29.388922000009643,
       "jsonatapy_dict_ms": null,
-      "js_ms": 26.39,
+      "js_ms": 28.32,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 164.565405,
-      "jsonatapy_speedup": 2.350441262169828,
-      "jsonatapy_json_speedup": 0.939711573710934,
+      "jsonata_rs_ms": 159.146871,
+      "jsonatapy_speedup": 2.4189890641514276,
+      "jsonatapy_json_speedup": 0.9636284039268507,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.1603617722692081,
+      "jsonata_rs_speedup": 0.17794883318818125,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -129,28 +129,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 11.22767900000099,
-          "max": 11.381610999990244,
-          "mean": 11.296170399998573,
-          "median": 11.28888199997391
+          "min": 11.707370000010542,
+          "max": 11.919828000003463,
+          "mean": 11.763000199999851,
+          "median": 11.72223799997596
         },
         "jsonatapy_json": {
-          "min": 28.08308499999157,
-          "max": 28.83525700002565,
-          "mean": 28.326196800014714,
-          "median": 28.215944999999465
+          "min": 29.388922000009643,
+          "max": 29.485933000017894,
+          "mean": 29.42580060000637,
+          "median": 29.412895999996636
         },
         "js": {
-          "min": 26.39,
-          "max": 28.88,
-          "mean": 27.234,
-          "median": 26.44
+          "min": 28.32,
+          "max": 30.69,
+          "mean": 29.484,
+          "median": 29.55
         },
         "jsonata_rs": {
-          "min": 164.565405,
-          "max": 173.39701599999998,
-          "mean": 167.3812658,
-          "median": 166.918899
+          "min": 159.146871,
+          "max": 164.708697,
+          "mean": 160.9888506,
+          "median": 160.51532600000002
         }
       }
     },
@@ -160,16 +160,16 @@
       "expression": "price * quantity",
       "data_size": "tiny",
       "iterations": 10000,
-      "jsonatapy_ms": 5.047831999945629,
-      "jsonatapy_json_ms": 6.842124000002059,
+      "jsonatapy_ms": 4.996380999983785,
+      "jsonatapy_json_ms": 7.375548999988268,
       "jsonatapy_dict_ms": null,
-      "js_ms": 44.2,
+      "js_ms": 44.0,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 97.25786599999999,
-      "jsonatapy_speedup": 8.756234359716426,
-      "jsonatapy_json_speedup": 6.459982309584962,
+      "jsonata_rs_ms": 95.952045,
+      "jsonatapy_speedup": 8.806374053568533,
+      "jsonatapy_json_speedup": 5.965657607327941,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.4544619558072558,
+      "jsonata_rs_speedup": 0.4585623995819995,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -177,28 +177,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 5.047831999945629,
-          "max": 5.090627000015502,
-          "mean": 5.067994599994563,
-          "median": 5.062404000000242
+          "min": 4.996380999983785,
+          "max": 5.124330999990434,
+          "mean": 5.054784800000789,
+          "median": 5.053408000009085
         },
         "jsonatapy_json": {
-          "min": 6.842124000002059,
-          "max": 6.9112789999508095,
-          "mean": 6.8798711999875195,
-          "median": 6.891478999989431
+          "min": 7.375548999988268,
+          "max": 7.442674000003535,
+          "mean": 7.409325999998373,
+          "median": 7.399584000012283
         },
         "js": {
-          "min": 44.2,
-          "max": 47.76,
-          "mean": 46.294,
-          "median": 46.5
+          "min": 44.0,
+          "max": 48.79,
+          "mean": 47.394,
+          "median": 48.19
         },
         "jsonata_rs": {
-          "min": 97.25786599999999,
-          "max": 100.116461,
-          "mean": 98.4145178,
-          "median": 98.25311500000001
+          "min": 95.952045,
+          "max": 97.56163099999999,
+          "mean": 96.8062976,
+          "median": 96.672375
         }
       }
     },
@@ -208,16 +208,16 @@
       "expression": "$sum(values)",
       "data_size": "100 elements",
       "iterations": 1000,
-      "jsonatapy_ms": 3.195062000031612,
-      "jsonatapy_json_ms": 6.6126289999601795,
+      "jsonatapy_ms": 3.22715699999776,
+      "jsonatapy_json_ms": 6.738004999988334,
       "jsonatapy_dict_ms": null,
-      "js_ms": 17.39,
+      "js_ms": 18.28,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 35.610631,
-      "jsonatapy_speedup": 5.442773880390409,
-      "jsonatapy_json_speedup": 2.6298163710839852,
+      "jsonata_rs_ms": 33.841385,
+      "jsonatapy_speedup": 5.664428473734835,
+      "jsonatapy_json_speedup": 2.7129691948925014,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.4883373170219871,
+      "jsonata_rs_speedup": 0.5401670173960079,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -225,28 +225,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 3.195062000031612,
-          "max": 3.273188999969534,
-          "mean": 3.2172292000041125,
-          "median": 3.2026229999928546
+          "min": 3.22715699999776,
+          "max": 3.309381000008216,
+          "mean": 3.2566079999980957,
+          "median": 3.247324999989587
         },
         "jsonatapy_json": {
-          "min": 6.6126289999601795,
-          "max": 6.654391999973086,
-          "mean": 6.634511799984466,
-          "median": 6.634522000013021
+          "min": 6.738004999988334,
+          "max": 6.779120999993893,
+          "mean": 6.759047999997847,
+          "median": 6.7587530000139395
         },
         "js": {
-          "min": 17.39,
-          "max": 18.31,
-          "mean": 17.726,
-          "median": 17.63
+          "min": 18.28,
+          "max": 19.67,
+          "mean": 19.094,
+          "median": 19.09
         },
         "jsonata_rs": {
-          "min": 35.610631,
-          "max": 36.694654,
-          "mean": 35.9779746,
-          "median": 35.768389
+          "min": 33.841385,
+          "max": 34.355126999999996,
+          "mean": 34.1485604,
+          "median": 34.220766
         }
       }
     },
@@ -256,16 +256,16 @@
       "expression": "$max(values)",
       "data_size": "100 elements",
       "iterations": 1000,
-      "jsonatapy_ms": 2.8893719999700807,
-      "jsonatapy_json_ms": 6.265466000002107,
+      "jsonatapy_ms": 3.050213999983953,
+      "jsonatapy_json_ms": 6.555362000000287,
       "jsonatapy_dict_ms": null,
-      "js_ms": 16.5,
+      "js_ms": 18.24,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 35.39702,
-      "jsonatapy_speedup": 5.710583476330101,
-      "jsonatapy_json_speedup": 2.633483287594961,
+      "jsonata_rs_ms": 34.1486,
+      "jsonatapy_speedup": 5.9799082949904365,
+      "jsonatapy_json_speedup": 2.7824550345197108,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.46614093502786397,
+      "jsonata_rs_speedup": 0.5341360992837187,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -273,28 +273,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 2.8893719999700807,
-          "max": 2.916382000023532,
-          "mean": 2.9020026000011967,
-          "median": 2.8995060000056583
+          "min": 3.050213999983953,
+          "max": 3.1035350000081507,
+          "mean": 3.069957799993972,
+          "median": 3.070613000005551
         },
         "jsonatapy_json": {
-          "min": 6.265466000002107,
-          "max": 6.287448999955814,
-          "mean": 6.2777003999826775,
-          "median": 6.279987999960213
+          "min": 6.555362000000287,
+          "max": 6.611738000003697,
+          "mean": 6.577926399995704,
+          "median": 6.569528999989416
         },
         "js": {
-          "min": 16.5,
-          "max": 17.56,
-          "mean": 16.896,
-          "median": 16.83
+          "min": 18.24,
+          "max": 19.42,
+          "mean": 18.65,
+          "median": 18.46
         },
         "jsonata_rs": {
-          "min": 35.39702,
-          "max": 39.524215,
-          "mean": 36.583026,
-          "median": 35.904364
+          "min": 34.1486,
+          "max": 36.22466,
+          "mean": 34.7427836,
+          "median": 34.310765
         }
       }
     },
@@ -304,16 +304,16 @@
       "expression": "$count(values)",
       "data_size": "100 elements",
       "iterations": 2000,
-      "jsonatapy_ms": 4.957796999974562,
-      "jsonatapy_json_ms": 11.655764000011004,
+      "jsonatapy_ms": 5.140521000015497,
+      "jsonatapy_json_ms": 12.225865999994312,
       "jsonatapy_dict_ms": null,
-      "js_ms": 22.0,
+      "js_ms": 24.2,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 67.869075,
-      "jsonatapy_speedup": 4.437454780845783,
-      "jsonatapy_json_speedup": 1.8874781610179505,
+      "jsonata_rs_ms": 65.808759,
+      "jsonatapy_speedup": 4.7076940255524775,
+      "jsonatapy_json_speedup": 1.9794098839306156,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.32415352647726525,
+      "jsonata_rs_speedup": 0.36773220415841607,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -321,28 +321,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 4.957796999974562,
-          "max": 5.023255999958565,
-          "mean": 4.976983799986101,
-          "median": 4.967200999999477
+          "min": 5.140521000015497,
+          "max": 5.362095999998928,
+          "mean": 5.219703400001663,
+          "median": 5.192017000013038
         },
         "jsonatapy_json": {
-          "min": 11.655764000011004,
-          "max": 11.711668999964786,
-          "mean": 11.692733799998223,
-          "median": 11.701271999982055
+          "min": 12.225865999994312,
+          "max": 12.30707800002051,
+          "mean": 12.264636600008316,
+          "median": 12.245703000019148
         },
         "js": {
-          "min": 22.0,
-          "max": 23.88,
-          "mean": 22.971999999999998,
-          "median": 23.4
+          "min": 24.2,
+          "max": 25.75,
+          "mean": 24.646,
+          "median": 24.4
         },
         "jsonata_rs": {
-          "min": 67.869075,
-          "max": 72.622013,
-          "mean": 69.43377539999999,
-          "median": 69.36115199999999
+          "min": 65.808759,
+          "max": 67.896991,
+          "mean": 66.45126239999999,
+          "median": 66.162511
         }
       }
     },
@@ -352,16 +352,16 @@
       "expression": "$sum(values)",
       "data_size": "1000 elements",
       "iterations": 200,
-      "jsonatapy_ms": 4.844214999991436,
-      "jsonatapy_json_ms": 11.444536999988486,
+      "jsonatapy_ms": 4.932100000019091,
+      "jsonatapy_json_ms": 11.9865579999896,
       "jsonatapy_dict_ms": null,
-      "js_ms": 7.81,
+      "js_ms": 7.88,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 51.897397999999995,
-      "jsonatapy_speedup": 1.6122323224740864,
-      "jsonatapy_json_speedup": 0.6824216654643047,
+      "jsonata_rs_ms": 49.617553,
+      "jsonatapy_speedup": 1.5976967214714826,
+      "jsonatapy_json_speedup": 0.657403067670205,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.1504892403276172,
+      "jsonata_rs_speedup": 0.15881476460558222,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -369,28 +369,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 4.844214999991436,
-          "max": 4.896483999971224,
-          "mean": 4.863370199996098,
-          "median": 4.862302999981694
+          "min": 4.932100000019091,
+          "max": 4.999886999996761,
+          "mean": 4.976701800006822,
+          "median": 4.984317999998211
         },
         "jsonatapy_json": {
-          "min": 11.444536999988486,
-          "max": 11.533190000022842,
-          "mean": 11.472993199993198,
-          "median": 11.45865699999149
+          "min": 11.9865579999896,
+          "max": 12.047101000007387,
+          "mean": 12.014085599992086,
+          "median": 12.009490999986383
         },
         "js": {
-          "min": 7.81,
-          "max": 7.96,
-          "mean": 7.88,
-          "median": 7.89
+          "min": 7.88,
+          "max": 8.34,
+          "mean": 8.112,
+          "median": 8.13
         },
         "jsonata_rs": {
-          "min": 51.897397999999995,
-          "max": 54.368880000000004,
-          "mean": 53.043682600000004,
-          "median": 53.1533
+          "min": 49.617553,
+          "max": 52.866589999999995,
+          "mean": 51.2731948,
+          "median": 50.772137
         }
       }
     },
@@ -400,16 +400,16 @@
       "expression": "$max(values)",
       "data_size": "1000 elements",
       "iterations": 200,
-      "jsonatapy_ms": 4.284963000031894,
-      "jsonatapy_json_ms": 10.880876999976863,
+      "jsonatapy_ms": 4.536439999981212,
+      "jsonatapy_json_ms": 11.589735000001156,
       "jsonatapy_dict_ms": null,
-      "js_ms": 6.89,
+      "js_ms": 6.8,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 53.612069999999996,
-      "jsonatapy_speedup": 1.6079485400337683,
-      "jsonatapy_json_speedup": 0.633221017020471,
+      "jsonata_rs_ms": 49.610039,
+      "jsonatapy_speedup": 1.4989727627893596,
+      "jsonatapy_json_speedup": 0.5867260985690632,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.12851583607945002,
+      "jsonata_rs_speedup": 0.13706903153210584,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -417,28 +417,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 4.284963000031894,
-          "max": 4.300165999950423,
-          "mean": 4.293980599993574,
-          "median": 4.2974219999791785
+          "min": 4.536439999981212,
+          "max": 4.606650999988915,
+          "mean": 4.560029800001075,
+          "median": 4.542320000012978
         },
         "jsonatapy_json": {
-          "min": 10.880876999976863,
-          "max": 10.947536999992735,
-          "mean": 10.907192199988458,
-          "median": 10.902488999988691
+          "min": 11.589735000001156,
+          "max": 11.667780999999877,
+          "mean": 11.624110799999698,
+          "median": 11.625109999982897
         },
         "js": {
-          "min": 6.89,
-          "max": 7.66,
-          "mean": 7.194,
-          "median": 7.03
+          "min": 6.8,
+          "max": 7.43,
+          "mean": 7.076,
+          "median": 7.04
         },
         "jsonata_rs": {
-          "min": 53.612069999999996,
-          "max": 54.668421,
-          "mean": 54.0757326,
-          "median": 53.872964
+          "min": 49.610039,
+          "max": 51.478950000000005,
+          "mean": 50.3087056,
+          "median": 50.200755
         }
       }
     },
@@ -448,16 +448,16 @@
       "expression": "$sum(values)",
       "data_size": "10000 elements",
       "iterations": 50,
-      "jsonatapy_ms": 11.562362999995912,
-      "jsonatapy_json_ms": 28.409443999976247,
+      "jsonatapy_ms": 12.085293000012598,
+      "jsonatapy_json_ms": 29.996240999992096,
       "jsonatapy_dict_ms": null,
-      "js_ms": 12.97,
+      "js_ms": 12.83,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 126.85189,
-      "jsonatapy_speedup": 1.1217430208690546,
-      "jsonatapy_json_speedup": 0.45653832577683834,
+      "jsonata_rs_ms": 120.434636,
+      "jsonatapy_speedup": 1.0616209304968134,
+      "jsonatapy_json_speedup": 0.4277202600153593,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.1022452247262536,
+      "jsonata_rs_speedup": 0.1065308156035777,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -465,28 +465,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 11.562362999995912,
-          "max": 11.653791000014735,
-          "mean": 11.590294999996331,
-          "median": 11.570975999973143
+          "min": 12.085293000012598,
+          "max": 12.197461999988946,
+          "mean": 12.13965059999964,
+          "median": 12.140756999997393
         },
         "jsonatapy_json": {
-          "min": 28.409443999976247,
-          "max": 28.59113800002433,
-          "mean": 28.48216819999152,
-          "median": 28.487722000022586
+          "min": 29.996240999992096,
+          "max": 30.172951999986708,
+          "mean": 30.10612040000069,
+          "median": 30.135252000007995
         },
         "js": {
-          "min": 12.97,
-          "max": 15.61,
-          "mean": 13.62,
-          "median": 13.18
+          "min": 12.83,
+          "max": 13.17,
+          "mean": 13.02,
+          "median": 13.07
         },
         "jsonata_rs": {
-          "min": 126.85189,
-          "max": 135.79159299999998,
-          "mean": 130.36944739999998,
-          "median": 128.859964
+          "min": 120.434636,
+          "max": 124.823357,
+          "mean": 122.7353798,
+          "median": 122.82770799999999
         }
       }
     },
@@ -496,16 +496,16 @@
       "expression": "products.price",
       "data_size": "100 objects",
       "iterations": 1000,
-      "jsonatapy_ms": 20.247261999998045,
-      "jsonatapy_json_ms": 74.02737600000364,
+      "jsonatapy_ms": 16.395057000011093,
+      "jsonatapy_json_ms": 54.10343699998066,
       "jsonatapy_dict_ms": null,
-      "js_ms": 31.59,
+      "js_ms": 34.43,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 362.43087499999996,
-      "jsonatapy_speedup": 1.5602109559308834,
-      "jsonatapy_json_speedup": 0.426734023369928,
+      "jsonata_rs_ms": 352.53134600000004,
+      "jsonatapy_speedup": 2.100023196014305,
+      "jsonatapy_json_speedup": 0.6363736189257682,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.08716144837274144,
+      "jsonata_rs_speedup": 0.09766507401585786,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -513,28 +513,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 20.247261999998045,
-          "max": 28.91183099995942,
-          "mean": 22.088811599996916,
-          "median": 20.455996999999115
+          "min": 16.395057000011093,
+          "max": 16.45599199997605,
+          "mean": 16.41912479998382,
+          "median": 16.41207999995231
         },
         "jsonatapy_json": {
-          "min": 74.02737600000364,
-          "max": 74.20975999997381,
-          "mean": 74.11895379998441,
-          "median": 74.10574400000769
+          "min": 54.10343699998066,
+          "max": 54.256945000020096,
+          "mean": 54.17734200000268,
+          "median": 54.20002900001464
         },
         "js": {
-          "min": 31.59,
-          "max": 37.72,
-          "mean": 34.848,
-          "median": 35.71
+          "min": 34.43,
+          "max": 36.55,
+          "mean": 35.641999999999996,
+          "median": 35.5
         },
         "jsonata_rs": {
-          "min": 362.43087499999996,
-          "max": 378.09816,
-          "mean": 367.49149,
-          "median": 366.287523
+          "min": 352.53134600000004,
+          "max": 362.622349,
+          "mean": 356.4816366,
+          "median": 354.681568
         }
       }
     },
@@ -544,16 +544,16 @@
       "expression": "$sum(products.price)",
       "data_size": "100 objects",
       "iterations": 1000,
-      "jsonatapy_ms": 19.534829999997783,
-      "jsonatapy_json_ms": 72.62921000000233,
+      "jsonatapy_ms": 15.865617999963888,
+      "jsonatapy_json_ms": 52.48830900001167,
       "jsonatapy_dict_ms": null,
-      "js_ms": 40.08,
+      "js_ms": 40.32,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 358.983182,
-      "jsonatapy_speedup": 2.0517199279443203,
-      "jsonatapy_json_speedup": 0.5518440858712178,
+      "jsonata_rs_ms": 351.180353,
+      "jsonatapy_speedup": 2.5413444342408704,
+      "jsonatapy_json_speedup": 0.7681710607211796,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.1116486844222134,
+      "jsonata_rs_speedup": 0.11481280104527943,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -561,28 +561,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 19.534829999997783,
-          "max": 19.717334999995728,
-          "mean": 19.61314580000817,
-          "median": 19.580308000001878
+          "min": 15.865617999963888,
+          "max": 16.116259000000355,
+          "mean": 15.972610799997256,
+          "median": 15.922895000016979
         },
         "jsonatapy_json": {
-          "min": 72.62921000000233,
-          "max": 73.3935009999982,
-          "mean": 72.97751660000813,
-          "median": 72.93449999997392
+          "min": 52.48830900001167,
+          "max": 52.66691499997478,
+          "mean": 52.57277579999027,
+          "median": 52.56319999995185
         },
         "js": {
-          "min": 40.08,
-          "max": 49.42,
-          "mean": 43.986,
-          "median": 42.13
+          "min": 40.32,
+          "max": 43.78,
+          "mean": 42.106,
+          "median": 42.15
         },
         "jsonata_rs": {
-          "min": 358.983182,
-          "max": 382.02911,
-          "mean": 368.3545456,
-          "median": 365.11940300000003
+          "min": 351.180353,
+          "max": 356.016139,
+          "mean": 353.370291,
+          "median": 353.693422
         }
       }
     },
@@ -592,16 +592,16 @@
       "expression": "products[price > 100]",
       "data_size": "100 objects",
       "iterations": 500,
-      "jsonatapy_ms": 13.132738999956928,
-      "jsonatapy_json_ms": 42.349351999973806,
+      "jsonatapy_ms": 11.463815000013255,
+      "jsonatapy_json_ms": 33.25501499995198,
       "jsonatapy_dict_ms": null,
-      "js_ms": 81.27,
+      "js_ms": 80.69,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 187.040731,
-      "jsonatapy_speedup": 6.188351112457694,
-      "jsonatapy_json_speedup": 1.9190376277788208,
+      "jsonata_rs_ms": 183.63790699999998,
+      "jsonatapy_speedup": 7.038669064347837,
+      "jsonatapy_json_speedup": 2.4264009503564052,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.434504289870424,
+      "jsonata_rs_speedup": 0.43939729720400267,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -609,28 +609,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 13.132738999956928,
-          "max": 14.744907000022067,
-          "mean": 13.495723800008363,
-          "median": 13.150977000009334
+          "min": 11.463815000013255,
+          "max": 11.58575300001985,
+          "mean": 11.52181100000007,
+          "median": 11.512374999995245
         },
         "jsonatapy_json": {
-          "min": 42.349351999973806,
-          "max": 44.168141000000105,
-          "mean": 43.03571359999978,
-          "median": 42.43239700002732
+          "min": 33.25501499995198,
+          "max": 33.310267999979715,
+          "mean": 33.276085799991506,
+          "median": 33.265873999994255
         },
         "js": {
-          "min": 81.27,
-          "max": 92.02,
-          "mean": 85.36,
-          "median": 84.76
+          "min": 80.69,
+          "max": 88.63,
+          "mean": 83.898,
+          "median": 83.79
         },
         "jsonata_rs": {
-          "min": 187.040731,
-          "max": 192.194793,
-          "mean": 189.1240922,
-          "median": 189.07046699999998
+          "min": 183.63790699999998,
+          "max": 185.848057,
+          "mean": 184.51832779999998,
+          "median": 184.487268
         }
       }
     },
@@ -640,16 +640,16 @@
       "expression": "{\"fullName\": first & \" \" & last, \"age\": age}",
       "data_size": "tiny",
       "iterations": 5000,
-      "jsonatapy_ms": 7.917855000016516,
-      "jsonatapy_json_ms": 7.076518000019405,
+      "jsonatapy_ms": 7.2120899999958965,
+      "jsonatapy_json_ms": 6.515044000025227,
       "jsonatapy_dict_ms": null,
-      "js_ms": 54.53,
+      "js_ms": 56.69,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 58.630332,
-      "jsonatapy_speedup": 6.886966230107302,
-      "jsonatapy_json_speedup": 7.70576715834687,
+      "jsonata_rs_ms": 57.492056,
+      "jsonatapy_speedup": 7.860412169015119,
+      "jsonatapy_json_speedup": 8.701399407245827,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.9300646634578157,
+      "jsonata_rs_speedup": 0.9860492726160289,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -657,28 +657,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 7.917855000016516,
-          "max": 7.961401000045498,
-          "mean": 7.937689000016235,
-          "median": 7.941990999995596
+          "min": 7.2120899999958965,
+          "max": 7.497333999992861,
+          "mean": 7.280026999990241,
+          "median": 7.234342000003835
         },
         "jsonatapy_json": {
-          "min": 7.076518000019405,
-          "max": 8.80082499998025,
-          "mean": 7.4811253999882865,
-          "median": 7.0957670000098005
+          "min": 6.515044000025227,
+          "max": 6.6583630000423,
+          "mean": 6.554690400014351,
+          "median": 6.5332780000062485
         },
         "js": {
-          "min": 54.53,
-          "max": 58.4,
-          "mean": 56.36,
-          "median": 55.95
+          "min": 56.69,
+          "max": 61.34,
+          "mean": 58.842,
+          "median": 59.24
         },
         "jsonata_rs": {
-          "min": 58.630332,
-          "max": 60.786841,
-          "mean": 59.766510000000004,
-          "median": 59.769849
+          "min": 57.492056,
+          "max": 58.310088,
+          "mean": 57.9536826,
+          "median": 57.981002
         }
       }
     },
@@ -688,16 +688,16 @@
       "expression": "{\"user\": {\"name\": name, \"contact\": {\"email\": email, \"phone\": phone}}}",
       "data_size": "tiny",
       "iterations": 5000,
-      "jsonatapy_ms": 11.022211000010884,
-      "jsonatapy_json_ms": 8.919223000020793,
+      "jsonatapy_ms": 10.013186000037422,
+      "jsonatapy_json_ms": 8.333210000046165,
       "jsonatapy_dict_ms": null,
-      "js_ms": 63.78,
+      "js_ms": 66.86,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 60.225605,
-      "jsonatapy_speedup": 5.78649782697292,
-      "jsonatapy_json_speedup": 7.150847108526305,
+      "jsonata_rs_ms": 59.980818,
+      "jsonatapy_speedup": 6.677195450054571,
+      "jsonatapy_json_speedup": 8.023318745072979,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 1.0590180040532593,
+      "jsonata_rs_speedup": 1.114689699630305,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -705,28 +705,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 11.022211000010884,
-          "max": 11.186457999997401,
-          "mean": 11.073067200004516,
-          "median": 11.050473000011607
+          "min": 10.013186000037422,
+          "max": 10.375054999997246,
+          "mean": 10.132426400002714,
+          "median": 10.101322000025448
         },
         "jsonatapy_json": {
-          "min": 8.919223000020793,
-          "max": 8.969408999973894,
-          "mean": 8.9461940000092,
-          "median": 8.939283000017895
+          "min": 8.333210000046165,
+          "max": 8.430252000039218,
+          "mean": 8.390591600004882,
+          "median": 8.402649999993628
         },
         "js": {
-          "min": 63.78,
-          "max": 67.17,
-          "mean": 65.472,
-          "median": 65.53
+          "min": 66.86,
+          "max": 71.08,
+          "mean": 69.026,
+          "median": 69.05
         },
         "jsonata_rs": {
-          "min": 60.225605,
-          "max": 62.391978,
-          "mean": 61.346976,
-          "median": 61.255525999999996
+          "min": 59.980818,
+          "max": 62.242134,
+          "mean": 60.78478,
+          "median": 60.552879
         }
       }
     },
@@ -736,16 +736,16 @@
       "expression": "age >= 18 ? \"adult\" : \"minor\"",
       "data_size": "tiny",
       "iterations": 5000,
-      "jsonatapy_ms": 1.9743340000104581,
-      "jsonatapy_json_ms": 2.6678980000269803,
+      "jsonatapy_ms": 2.121314000021357,
+      "jsonatapy_json_ms": 2.822857000012391,
       "jsonatapy_dict_ms": null,
-      "js_ms": 29.03,
+      "js_ms": 31.3,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 47.050001,
-      "jsonatapy_speedup": 14.7036924855907,
-      "jsonatapy_json_speedup": 10.881225593971893,
+      "jsonata_rs_ms": 45.301691,
+      "jsonatapy_speedup": 14.7550056237242,
+      "jsonatapy_json_speedup": 11.088057241249773,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.617003174983992,
+      "jsonata_rs_speedup": 0.690923435948561,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -753,28 +753,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 1.9743340000104581,
-          "max": 2.0266420000325525,
-          "mean": 1.9983877999948163,
-          "median": 2.0038579999663853
+          "min": 2.121314000021357,
+          "max": 2.32762000001685,
+          "mean": 2.17346560000351,
+          "median": 2.1257419999756166
         },
         "jsonatapy_json": {
-          "min": 2.6678980000269803,
-          "max": 2.8308440000159862,
-          "mean": 2.714386000002378,
-          "median": 2.687166999976398
+          "min": 2.822857000012391,
+          "max": 2.8516419999959908,
+          "mean": 2.8358700000012504,
+          "median": 2.8328170000122554
         },
         "js": {
-          "min": 29.03,
-          "max": 31.63,
-          "mean": 29.988,
-          "median": 29.83
+          "min": 31.3,
+          "max": 32.96,
+          "mean": 32.056000000000004,
+          "median": 32.24
         },
         "jsonata_rs": {
-          "min": 47.050001,
-          "max": 48.292823,
-          "mean": 47.756838200000004,
-          "median": 47.84573
+          "min": 45.301691,
+          "max": 46.710603000000006,
+          "mean": 46.075337600000005,
+          "median": 46.146022
         }
       }
     },
@@ -784,16 +784,16 @@
       "expression": "$length($uppercase(name))",
       "data_size": "tiny",
       "iterations": 5000,
-      "jsonatapy_ms": 5.501817000038045,
-      "jsonatapy_json_ms": 5.762359000016204,
+      "jsonatapy_ms": 5.417002000001503,
+      "jsonatapy_json_ms": 5.76115699999491,
       "jsonatapy_dict_ms": null,
-      "js_ms": 44.4,
+      "js_ms": 49.38,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 48.568158,
-      "jsonatapy_speedup": 8.070061217901827,
-      "jsonatapy_json_speedup": 7.705177688490971,
+      "jsonata_rs_ms": 47.612833,
+      "jsonatapy_speedup": 9.11574335767022,
+      "jsonatapy_json_speedup": 8.571194987403334,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.9141792035843731,
+      "jsonata_rs_speedup": 1.0371153508130886,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -801,28 +801,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 5.501817000038045,
-          "max": 7.146052999985386,
-          "mean": 5.8506641999997555,
-          "median": 5.533934999959911
+          "min": 5.417002000001503,
+          "max": 5.562214000008225,
+          "mean": 5.455892800011952,
+          "median": 5.4344540000101915
         },
         "jsonatapy_json": {
-          "min": 5.762359000016204,
-          "max": 5.8054040000001805,
-          "mean": 5.784267800015641,
-          "median": 5.787797000039063
+          "min": 5.76115699999491,
+          "max": 5.83157799997025,
+          "mean": 5.800754599988522,
+          "median": 5.816569999979038
         },
         "js": {
-          "min": 44.4,
-          "max": 50.24,
-          "mean": 46.556,
-          "median": 46.08
+          "min": 49.38,
+          "max": 52.13,
+          "mean": 50.686,
+          "median": 50.03
         },
         "jsonata_rs": {
-          "min": 48.568158,
-          "max": 49.961807,
-          "mean": 49.34378,
-          "median": 49.553742
+          "min": 47.612833,
+          "max": 48.69056,
+          "mean": 48.186591,
+          "median": 48.270243
         }
       }
     },
@@ -832,16 +832,16 @@
       "expression": "a.b.c.d.e.f.g.h.i.j.k.l",
       "data_size": "12 levels",
       "iterations": 5000,
-      "jsonatapy_ms": 13.72054399996614,
-      "jsonatapy_json_ms": 14.462152000021433,
+      "jsonatapy_ms": 11.865315000022747,
+      "jsonatapy_json_ms": 11.954602000002978,
       "jsonatapy_dict_ms": null,
-      "js_ms": 46.96,
+      "js_ms": 48.12,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 96.884948,
-      "jsonatapy_speedup": 3.422604818009832,
-      "jsonatapy_json_speedup": 3.247096282761404,
+      "jsonata_rs_ms": 94.12720800000001,
+      "jsonatapy_speedup": 4.0555181215085945,
+      "jsonatapy_json_speedup": 4.025228108805965,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.4846986138651796,
+      "jsonata_rs_speedup": 0.5112230674046976,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -849,28 +849,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 13.72054399996614,
-          "max": 13.80037500001663,
-          "mean": 13.74890920000098,
-          "median": 13.724770999999691
+          "min": 11.865315000022747,
+          "max": 12.048508000020774,
+          "mean": 11.930284400000346,
+          "median": 11.890080999990005
         },
         "jsonatapy_json": {
-          "min": 14.462152000021433,
-          "max": 14.598287000012533,
-          "mean": 14.53305040001851,
-          "median": 14.54835100003038
+          "min": 11.954602000002978,
+          "max": 12.049159000014242,
+          "mean": 11.992829600001187,
+          "median": 11.98843500003477
         },
         "js": {
-          "min": 46.96,
-          "max": 52.88,
-          "mean": 50.338,
-          "median": 51.16
+          "min": 48.12,
+          "max": 55.1,
+          "mean": 52.3,
+          "median": 52.96
         },
         "jsonata_rs": {
-          "min": 96.884948,
-          "max": 98.454041,
-          "mean": 97.8841786,
-          "median": 98.032516
+          "min": 94.12720800000001,
+          "max": 96.062501,
+          "mean": 95.1641334,
+          "median": 95.39970100000001
         }
       }
     },
@@ -880,16 +880,16 @@
       "expression": "data[1][1][1][1]",
       "data_size": "4-level nested arrays",
       "iterations": 2000,
-      "jsonatapy_ms": 23.84821800001191,
-      "jsonatapy_json_ms": 48.632845999975416,
+      "jsonatapy_ms": 18.520414999954937,
+      "jsonatapy_json_ms": 42.02569199998152,
       "jsonatapy_dict_ms": null,
-      "js_ms": 19.25,
+      "js_ms": 21.81,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 213.126651,
-      "jsonatapy_speedup": 0.8071881932641838,
-      "jsonatapy_json_speedup": 0.3958230205160054,
+      "jsonata_rs_ms": 201.05366,
+      "jsonatapy_speedup": 1.1776194000001114,
+      "jsonatapy_json_speedup": 0.518968253991144,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.09032188095518846,
+      "jsonata_rs_speedup": 0.10847850270420344,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -897,28 +897,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 23.84821800001191,
-          "max": 23.97030200000927,
-          "mean": 23.911449000001994,
-          "median": 23.908709000011186
+          "min": 18.520414999954937,
+          "max": 18.94570100000692,
+          "mean": 18.655106799997156,
+          "median": 18.583943000010095
         },
         "jsonatapy_json": {
-          "min": 48.632845999975416,
-          "max": 48.88212100001965,
-          "mean": 48.758316800012835,
-          "median": 48.76505500004669
+          "min": 42.02569199998152,
+          "max": 42.10566199998311,
+          "mean": 42.07146359998433,
+          "median": 42.07989299999326
         },
         "js": {
-          "min": 19.25,
-          "max": 21.8,
-          "mean": 20.144,
-          "median": 19.9
+          "min": 21.81,
+          "max": 23.21,
+          "mean": 22.46,
+          "median": 22.21
         },
         "jsonata_rs": {
-          "min": 213.126651,
-          "max": 216.334933,
-          "mean": 214.6550004,
-          "median": 214.11836200000002
+          "min": 201.05366,
+          "max": 211.033253,
+          "mean": 205.2099814,
+          "median": 204.480446
         }
       }
     },
@@ -928,16 +928,16 @@
       "expression": "$uppercase(name)",
       "data_size": "tiny",
       "iterations": 10000,
-      "jsonatapy_ms": 8.042091999982404,
-      "jsonatapy_json_ms": 8.362052999984826,
+      "jsonatapy_ms": 8.324625000000196,
+      "jsonatapy_json_ms": 8.910482000032971,
       "jsonatapy_dict_ms": null,
-      "js_ms": 51.26,
+      "js_ms": 50.87,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 91.23429399999999,
-      "jsonatapy_speedup": 6.373963391628964,
-      "jsonatapy_json_speedup": 6.130073559697961,
+      "jsonata_rs_ms": 90.007916,
+      "jsonatapy_speedup": 6.110785771130687,
+      "jsonatapy_json_speedup": 5.709006538570166,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.561850130609878,
+      "jsonata_rs_speedup": 0.5651725121599305,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -945,28 +945,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 8.042091999982404,
-          "max": 8.150084000021707,
-          "mean": 8.099870799992459,
-          "median": 8.116773999972793
+          "min": 8.324625000000196,
+          "max": 11.042785000029198,
+          "mean": 9.755352199999834,
+          "median": 10.0150199999689
         },
         "jsonatapy_json": {
-          "min": 8.362052999984826,
-          "max": 8.492730000000392,
-          "mean": 8.419181599992953,
-          "median": 8.408693999967909
+          "min": 8.910482000032971,
+          "max": 9.593571000038992,
+          "mean": 9.058786000014152,
+          "median": 8.91779599999154
         },
         "js": {
-          "min": 51.26,
-          "max": 54.1,
-          "mean": 52.366,
-          "median": 52.47
+          "min": 50.87,
+          "max": 57.64,
+          "mean": 54.402,
+          "median": 54.31
         },
         "jsonata_rs": {
-          "min": 91.23429399999999,
-          "max": 93.878927,
-          "mean": 91.921427,
-          "median": 91.373474
+          "min": 90.007916,
+          "max": 91.14571600000001,
+          "mean": 90.547448,
+          "median": 90.452648
         }
       }
     },
@@ -976,16 +976,16 @@
       "expression": "$lowercase(name)",
       "data_size": "tiny",
       "iterations": 10000,
-      "jsonatapy_ms": 8.009673000003659,
-      "jsonatapy_json_ms": 8.356364999997368,
+      "jsonatapy_ms": 8.069256999988283,
+      "jsonatapy_json_ms": 8.742256999994424,
       "jsonatapy_dict_ms": null,
-      "js_ms": 50.33,
+      "js_ms": 54.5,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 91.32873599999999,
-      "jsonatapy_speedup": 6.283652278935358,
-      "jsonatapy_json_speedup": 6.022953760398912,
+      "jsonata_rs_ms": 89.840222,
+      "jsonatapy_speedup": 6.754029522182666,
+      "jsonatapy_json_speedup": 6.234088062160008,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.5510861335034791,
+      "jsonata_rs_speedup": 0.606632517003353,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -993,28 +993,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 8.009673000003659,
-          "max": 8.165838000024905,
-          "mean": 8.09206300000369,
-          "median": 8.083473999988655
+          "min": 8.069256999988283,
+          "max": 8.256126999981461,
+          "mean": 8.137062399987371,
+          "median": 8.123068000031708
         },
         "jsonatapy_json": {
-          "min": 8.356364999997368,
-          "max": 8.413241000027938,
-          "mean": 8.382382600007077,
-          "median": 8.3779280000158
+          "min": 8.742256999994424,
+          "max": 8.99057199995923,
+          "mean": 8.86663660000977,
+          "median": 8.878373000015927
         },
         "js": {
-          "min": 50.33,
-          "max": 53.18,
-          "mean": 51.588,
-          "median": 51.03
+          "min": 54.5,
+          "max": 59.44,
+          "mean": 56.455999999999996,
+          "median": 56.5
         },
         "jsonata_rs": {
-          "min": 91.32873599999999,
-          "max": 93.07090099999999,
-          "mean": 92.00510299999999,
-          "median": 91.664442
+          "min": 89.840222,
+          "max": 91.99832199999999,
+          "mean": 91.3161152,
+          "median": 91.46650700000001
         }
       }
     },
@@ -1024,16 +1024,16 @@
       "expression": "$length(name)",
       "data_size": "tiny",
       "iterations": 10000,
-      "jsonatapy_ms": 7.767628000010518,
-      "jsonatapy_json_ms": 8.362534000013966,
+      "jsonatapy_ms": 7.861439000009796,
+      "jsonatapy_json_ms": 8.655405000013161,
       "jsonatapy_dict_ms": null,
-      "js_ms": 52.41,
+      "js_ms": 54.82,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 92.470065,
-      "jsonatapy_speedup": 6.747233518382836,
-      "jsonatapy_json_speedup": 6.2672390928290955,
+      "jsonata_rs_ms": 90.850433,
+      "jsonatapy_speedup": 6.9732780474327525,
+      "jsonatapy_json_speedup": 6.333614660425092,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.5667780162153017,
+      "jsonata_rs_speedup": 0.6034093420336258,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1041,28 +1041,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 7.767628000010518,
-          "max": 7.848330000001624,
-          "mean": 7.8120333999891045,
-          "median": 7.804994999958126
+          "min": 7.861439000009796,
+          "max": 8.071411999992506,
+          "mean": 7.928307599991058,
+          "median": 7.898337000028732
         },
         "jsonatapy_json": {
-          "min": 8.362534000013966,
-          "max": 8.459571000003052,
-          "mean": 8.415530399997806,
-          "median": 8.428905000016584
+          "min": 8.655405000013161,
+          "max": 8.870607999995173,
+          "mean": 8.758111199983887,
+          "median": 8.730716000002303
         },
         "js": {
-          "min": 52.41,
-          "max": 53.61,
-          "mean": 53.012,
-          "median": 52.83
+          "min": 54.82,
+          "max": 65.08,
+          "mean": 57.93,
+          "median": 56.81
         },
         "jsonata_rs": {
-          "min": 92.470065,
-          "max": 93.80078,
-          "mean": 93.4348644,
-          "median": 93.730604
+          "min": 90.850433,
+          "max": 102.817989,
+          "mean": 93.64155699999999,
+          "median": 91.47363
         }
       }
     },
@@ -1072,16 +1072,16 @@
       "expression": "$join([first, last], \" \")",
       "data_size": "tiny",
       "iterations": 5000,
-      "jsonatapy_ms": 6.834782999987965,
-      "jsonatapy_json_ms": 6.539099000008264,
+      "jsonatapy_ms": 6.339529000001676,
+      "jsonatapy_json_ms": 6.321745000036572,
       "jsonatapy_dict_ms": null,
-      "js_ms": 59.69,
+      "js_ms": 65.84,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 51.992284,
-      "jsonatapy_speedup": 8.73326922012083,
-      "jsonatapy_json_speedup": 9.128168880747113,
+      "jsonata_rs_ms": 50.608564,
+      "jsonatapy_speedup": 10.385629594877253,
+      "jsonatapy_json_speedup": 10.414845900873749,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 1.1480549690796427,
+      "jsonata_rs_speedup": 1.300965583611501,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1089,28 +1089,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 6.834782999987965,
-          "max": 6.907562999970196,
-          "mean": 6.866563199992015,
-          "median": 6.858850000014627
+          "min": 6.339529000001676,
+          "max": 7.407096999997975,
+          "mean": 6.632679799997732,
+          "median": 6.437742999992224
         },
         "jsonatapy_json": {
-          "min": 6.539099000008264,
-          "max": 6.608822999965014,
-          "mean": 6.569009399981951,
-          "median": 6.563013999993927
+          "min": 6.321745000036572,
+          "max": 6.690495999976065,
+          "mean": 6.4092071999994005,
+          "median": 6.3360720000105175
         },
         "js": {
-          "min": 59.69,
-          "max": 65.06,
-          "mean": 61.135999999999996,
-          "median": 60.33
+          "min": 65.84,
+          "max": 70.7,
+          "mean": 67.354,
+          "median": 66.92
         },
         "jsonata_rs": {
-          "min": 51.992284,
-          "max": 52.6535,
-          "mean": 52.3581928,
-          "median": 52.336752
+          "min": 50.608564,
+          "max": 51.375372000000006,
+          "mean": 51.006019200000004,
+          "median": 50.956326000000004
         }
       }
     },
@@ -1120,16 +1120,16 @@
       "expression": "$substring(text, 0, 10)",
       "data_size": "tiny",
       "iterations": 5000,
-      "jsonatapy_ms": 6.49382000000287,
-      "jsonatapy_json_ms": 7.143388999963918,
+      "jsonatapy_ms": 5.835952999973415,
+      "jsonatapy_json_ms": 6.383687999971244,
       "jsonatapy_dict_ms": null,
-      "js_ms": 41.93,
+      "js_ms": 46.54,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 49.514983,
-      "jsonatapy_speedup": 6.456908260466331,
-      "jsonatapy_json_speedup": 5.869762937481326,
+      "jsonata_rs_ms": 48.464835,
+      "jsonatapy_speedup": 7.974704388505529,
+      "jsonatapy_json_speedup": 7.290456551167545,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.8468143874754032,
+      "jsonata_rs_speedup": 0.9602838841811799,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1137,28 +1137,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 6.49382000000287,
-          "max": 6.585718999986057,
-          "mean": 6.5421850000120685,
-          "median": 6.540751000045475
+          "min": 5.835952999973415,
+          "max": 6.008194999992611,
+          "mean": 5.898940600002334,
+          "median": 5.883131000018693
         },
         "jsonatapy_json": {
-          "min": 7.143388999963918,
-          "max": 7.1599830000081965,
-          "mean": 7.155190200001016,
-          "median": 7.158461000017269
+          "min": 6.383687999971244,
+          "max": 6.579896000005192,
+          "mean": 6.5206507999960195,
+          "median": 6.55015000000958
         },
         "js": {
-          "min": 41.93,
-          "max": 42.72,
-          "mean": 42.432,
-          "median": 42.64
+          "min": 46.54,
+          "max": 48.84,
+          "mean": 47.474000000000004,
+          "median": 47.06
         },
         "jsonata_rs": {
-          "min": 49.514983,
-          "max": 51.528916,
-          "mean": 50.3179984,
-          "median": 49.879321999999995
+          "min": 48.464835,
+          "max": 48.896023,
+          "mean": 48.6133122,
+          "median": 48.573458
         }
       }
     },
@@ -1168,16 +1168,16 @@
       "expression": "$contains(text, \"JSONata\")",
       "data_size": "tiny",
       "iterations": 5000,
-      "jsonatapy_ms": 4.623113000036483,
-      "jsonatapy_json_ms": 5.06226400000287,
+      "jsonatapy_ms": 4.687730999989981,
+      "jsonatapy_json_ms": 5.268870000008974,
       "jsonatapy_dict_ms": null,
-      "js_ms": 36.95,
+      "js_ms": 39.25,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 48.956471,
-      "jsonatapy_speedup": 7.992450108770522,
-      "jsonatapy_json_speedup": 7.299105696577471,
+      "jsonata_rs_ms": 48.140687,
+      "jsonatapy_speedup": 8.372920715818355,
+      "jsonatapy_json_speedup": 7.449415149725302,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.7547521143834082,
+      "jsonata_rs_speedup": 0.8153186513520257,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1185,28 +1185,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 4.623113000036483,
-          "max": 4.648250000002463,
-          "mean": 4.63074819999747,
-          "median": 4.628590999971038
+          "min": 4.687730999989981,
+          "max": 4.823124999973061,
+          "mean": 4.727493799998683,
+          "median": 4.7035410000262345
         },
         "jsonatapy_json": {
-          "min": 5.06226400000287,
-          "max": 5.166101000043,
-          "mean": 5.108177200008868,
-          "median": 5.113331000018206
+          "min": 5.268870000008974,
+          "max": 5.340473999979167,
+          "mean": 5.297431199994662,
+          "median": 5.291241000008995
         },
         "js": {
-          "min": 36.95,
-          "max": 39.69,
-          "mean": 37.858,
-          "median": 36.97
+          "min": 39.25,
+          "max": 44.12,
+          "mean": 41.344,
+          "median": 41.08
         },
         "jsonata_rs": {
-          "min": 48.956471,
-          "max": 49.622845,
-          "mean": 49.2422496,
-          "median": 49.231906
+          "min": 48.140687,
+          "max": 49.178591,
+          "mean": 48.5848052,
+          "median": 48.610287
         }
       }
     },
@@ -1216,16 +1216,16 @@
       "expression": "$map(numbers, function($v) { $v * 2 })",
       "data_size": "100 elements",
       "iterations": 200,
-      "jsonatapy_ms": 3.214931999991677,
-      "jsonatapy_json_ms": 3.855587000032301,
+      "jsonatapy_ms": 3.362037999977474,
+      "jsonatapy_json_ms": 4.034726999975646,
       "jsonatapy_dict_ms": null,
-      "js_ms": 41.86,
+      "js_ms": 42.27,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 13.018837,
-      "jsonatapy_speedup": 13.020493123994028,
-      "jsonatapy_json_speedup": 10.856971973307646,
+      "jsonata_rs_ms": 11.964462000000001,
+      "jsonatapy_speedup": 12.572731182777593,
+      "jsonatapy_json_speedup": 10.476545253310855,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 3.2153409709331178,
+      "jsonata_rs_speedup": 3.532962869538137,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1233,28 +1233,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 3.214931999991677,
-          "max": 3.28199300003007,
-          "mean": 3.2401396000068416,
-          "median": 3.2347210000125415
+          "min": 3.362037999977474,
+          "max": 3.442297999981747,
+          "mean": 3.3990732000006574,
+          "median": 3.395120000050156
         },
         "jsonatapy_json": {
-          "min": 3.855587000032301,
-          "max": 3.8988310000149795,
-          "mean": 3.871432600010394,
-          "median": 3.8665540000124565
+          "min": 4.034726999975646,
+          "max": 4.0670779999913975,
+          "mean": 4.05547419998129,
+          "median": 4.060455999990609
         },
         "js": {
-          "min": 41.86,
-          "max": 43.64,
-          "mean": 42.838,
-          "median": 42.74
+          "min": 42.27,
+          "max": 47.64,
+          "mean": 44.686,
+          "median": 44.36
         },
         "jsonata_rs": {
-          "min": 13.018837,
-          "max": 13.291507,
-          "mean": 13.1592144,
-          "median": 13.205128
+          "min": 11.964462000000001,
+          "max": 12.577601000000001,
+          "mean": 12.270573800000001,
+          "median": 12.263144
         }
       }
     },
@@ -1264,16 +1264,16 @@
       "expression": "$filter(numbers, function($v) { $v > 50 })",
       "data_size": "100 elements",
       "iterations": 200,
-      "jsonatapy_ms": 3.1572949999940647,
-      "jsonatapy_json_ms": 3.771730000039497,
+      "jsonatapy_ms": 3.253103000020019,
+      "jsonatapy_json_ms": 3.9453699999967284,
       "jsonatapy_dict_ms": null,
-      "js_ms": 40.6,
+      "js_ms": 39.75,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 12.222627999999998,
-      "jsonatapy_speedup": 12.859108825775332,
-      "jsonatapy_json_speedup": 10.764291187220412,
+      "jsonata_rs_ms": 11.422746,
+      "jsonatapy_speedup": 12.219102807305944,
+      "jsonatapy_json_speedup": 10.075100687649817,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 3.3217079011158654,
+      "jsonata_rs_speedup": 3.4798987914114523,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1281,28 +1281,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 3.1572949999940647,
-          "max": 3.2011109999530163,
-          "mean": 3.1758251999917775,
-          "median": 3.1651869999791415
+          "min": 3.253103000020019,
+          "max": 3.3654340000452976,
+          "mean": 3.3034478000104173,
+          "median": 3.3004819999860047
         },
         "jsonatapy_json": {
-          "min": 3.771730000039497,
-          "max": 3.8030370000115,
-          "mean": 3.790741000000253,
-          "median": 3.7945450000052006
+          "min": 3.9453699999967284,
+          "max": 3.9926679999666703,
+          "mean": 3.9717575999929977,
+          "median": 3.976539000007051
         },
         "js": {
-          "min": 40.6,
-          "max": 43.33,
-          "mean": 41.942,
-          "median": 42.22
+          "min": 39.75,
+          "max": 46.58,
+          "mean": 43.668,
+          "median": 44.6
         },
         "jsonata_rs": {
-          "min": 12.222627999999998,
-          "max": 12.944725,
-          "mean": 12.471821,
-          "median": 12.304922
+          "min": 11.422746,
+          "max": 11.822576,
+          "mean": 11.5943482,
+          "median": 11.516353
         }
       }
     },
@@ -1312,16 +1312,16 @@
       "expression": "$reduce(numbers, function($acc, $v) { $acc + $v }, 0)",
       "data_size": "100 elements",
       "iterations": 200,
-      "jsonatapy_ms": 3.81634800004349,
-      "jsonatapy_json_ms": 4.682482000021082,
+      "jsonatapy_ms": 4.022515000031035,
+      "jsonatapy_json_ms": 4.74859500002367,
       "jsonatapy_dict_ms": null,
-      "js_ms": 38.54,
+      "js_ms": 39.86,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 13.588335,
-      "jsonatapy_speedup": 10.098659765713402,
-      "jsonatapy_json_speedup": 8.230677661937937,
+      "jsonata_rs_ms": 12.867032,
+      "jsonatapy_speedup": 9.909223458381751,
+      "jsonatapy_json_speedup": 8.394061822455129,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 2.8362562447864286,
+      "jsonata_rs_speedup": 3.0978395017592244,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1329,28 +1329,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 3.81634800004349,
-          "max": 3.862566999998762,
-          "mean": 3.838386999996146,
-          "median": 3.8382909999654657
+          "min": 4.022515000031035,
+          "max": 4.071186000032867,
+          "mean": 4.045868400021391,
+          "median": 4.041440000037255
         },
         "jsonatapy_json": {
-          "min": 4.682482000021082,
-          "max": 4.735682999978508,
-          "mean": 4.710394400001405,
-          "median": 4.712858000004871
+          "min": 4.74859500002367,
+          "max": 4.775244999962069,
+          "mean": 4.759551600011491,
+          "median": 4.754687000001923
         },
         "js": {
-          "min": 38.54,
-          "max": 52.65,
-          "mean": 43.08,
-          "median": 41.24
+          "min": 39.86,
+          "max": 53.49,
+          "mean": 45.594,
+          "median": 44.8
         },
         "jsonata_rs": {
-          "min": 13.588335,
-          "max": 14.005604,
-          "mean": 13.7936648,
-          "median": 13.795938000000001
+          "min": 12.867032,
+          "max": 13.184858,
+          "mean": 13.0675122,
+          "median": 13.124375
         }
       }
     },
@@ -1360,16 +1360,16 @@
       "expression": "products[category = \"Electronics\"]",
       "data_size": "100 products",
       "iterations": 500,
-      "jsonatapy_ms": 23.03080699999782,
-      "jsonatapy_json_ms": 106.98101700000962,
+      "jsonatapy_ms": 16.431459999978415,
+      "jsonatapy_json_ms": 79.32289799998671,
       "jsonatapy_dict_ms": null,
-      "js_ms": 81.93,
+      "js_ms": 84.9,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 531.9399689999999,
-      "jsonatapy_speedup": 3.5574089956990114,
-      "jsonatapy_json_speedup": 0.7658368026169787,
+      "jsonata_rs_ms": 528.103436,
+      "jsonatapy_speedup": 5.166917608058659,
+      "jsonatapy_json_speedup": 1.0703088533151452,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.1540211391785828,
+      "jsonata_rs_speedup": 0.16076396064198303,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1377,28 +1377,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 23.03080699999782,
-          "max": 23.146139999994375,
-          "mean": 23.069405199998982,
-          "median": 23.055844999987585
+          "min": 16.431459999978415,
+          "max": 16.6355520000252,
+          "mean": 16.515691200004312,
+          "median": 16.503164000027937
         },
         "jsonatapy_json": {
-          "min": 106.98101700000962,
-          "max": 107.27945599995792,
-          "mean": 107.10325879998663,
-          "median": 107.07098299997142
+          "min": 79.32289799998671,
+          "max": 81.5959159999693,
+          "mean": 79.84627859998454,
+          "median": 79.45029699999395
         },
         "js": {
-          "min": 81.93,
-          "max": 88.86,
-          "mean": 84.872,
-          "median": 84.18
+          "min": 84.9,
+          "max": 90.98,
+          "mean": 86.796,
+          "median": 85.78
         },
         "jsonata_rs": {
-          "min": 531.9399689999999,
-          "max": 537.500103,
-          "mean": 533.7465916,
-          "median": 533.011032
+          "min": 528.103436,
+          "max": 537.551585,
+          "mean": 532.6021089999999,
+          "median": 530.935541
         }
       }
     },
@@ -1408,16 +1408,16 @@
       "expression": "$sum(products[inStock].price)",
       "data_size": "100 products",
       "iterations": 500,
-      "jsonatapy_ms": 15.483220000021447,
-      "jsonatapy_json_ms": 104.04302199998483,
+      "jsonatapy_ms": 12.45532100000446,
+      "jsonatapy_json_ms": 78.58458500004417,
       "jsonatapy_dict_ms": null,
-      "js_ms": 60.39,
+      "js_ms": 65.46,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 534.020457,
-      "jsonatapy_speedup": 3.900351477271288,
-      "jsonatapy_json_speedup": 0.5804329674315766,
+      "jsonata_rs_ms": 531.636171,
+      "jsonatapy_speedup": 5.255585143086762,
+      "jsonatapy_json_speedup": 0.8329877927072237,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.11308555544717644,
+      "jsonata_rs_speedup": 0.12312931958122916,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1425,28 +1425,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 15.483220000021447,
-          "max": 15.61274499999854,
-          "mean": 15.552842600004624,
-          "median": 15.550390999976571
+          "min": 12.45532100000446,
+          "max": 12.659394000024804,
+          "mean": 12.562774600019111,
+          "median": 12.55176200004371
         },
         "jsonatapy_json": {
-          "min": 104.04302199998483,
-          "max": 104.72522899999603,
-          "mean": 104.55720819999215,
-          "median": 104.67702699997972
+          "min": 78.58458500004417,
+          "max": 79.01363900003844,
+          "mean": 78.7634574000208,
+          "median": 78.73508500000526
         },
         "js": {
-          "min": 60.39,
-          "max": 64.79,
-          "mean": 61.904,
-          "median": 61.63
+          "min": 65.46,
+          "max": 74.76,
+          "mean": 69.148,
+          "median": 68.08
         },
         "jsonata_rs": {
-          "min": 534.020457,
-          "max": 570.356308,
-          "mean": 542.8197264,
-          "median": 536.5731969999999
+          "min": 531.636171,
+          "max": 548.109869,
+          "mean": 541.8817208,
+          "median": 542.3867489999999
         }
       }
     },
@@ -1456,16 +1456,16 @@
       "expression": "products[price > 50 and inStock].{\"name\": name, \"price\": price, \"vendor\": vendor.name}",
       "data_size": "100 products",
       "iterations": 200,
-      "jsonatapy_ms": 32.48470599999109,
-      "jsonatapy_json_ms": 56.14485099999911,
+      "jsonatapy_ms": 24.769757999990816,
+      "jsonatapy_json_ms": 44.54851799999915,
       "jsonatapy_dict_ms": null,
-      "js_ms": 144.35,
+      "js_ms": 148.88,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 232.78477999999998,
-      "jsonatapy_speedup": 4.443629565249554,
-      "jsonatapy_json_speedup": 2.571028285389916,
+      "jsonata_rs_ms": 229.862754,
+      "jsonatapy_speedup": 6.010555290853273,
+      "jsonatapy_json_speedup": 3.3419742492893443,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.6201006784034592,
+      "jsonata_rs_speedup": 0.6476908390299717,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1473,28 +1473,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 32.48470599999109,
-          "max": 32.76323500000444,
-          "mean": 32.572768400007135,
-          "median": 32.55293799998071
+          "min": 24.769757999990816,
+          "max": 25.060503000020162,
+          "mean": 24.888095800008614,
+          "median": 24.86541700000089
         },
         "jsonatapy_json": {
-          "min": 56.14485099999911,
-          "max": 60.30661799997006,
-          "mean": 57.093691399995805,
-          "median": 56.35282299999744
+          "min": 44.54851799999915,
+          "max": 44.70784599999433,
+          "mean": 44.617324399996505,
+          "median": 44.61958000001687
         },
         "js": {
-          "min": 144.35,
-          "max": 151.04,
-          "mean": 147.956,
-          "median": 147.31
+          "min": 148.88,
+          "max": 157.74,
+          "mean": 153.68200000000002,
+          "median": 153.37
         },
         "jsonata_rs": {
-          "min": 232.78477999999998,
-          "max": 235.874243,
-          "mean": 234.6489958,
-          "median": 235.084564
+          "min": 229.862754,
+          "max": 233.14796800000002,
+          "mean": 231.14939660000002,
+          "median": 230.889749
         }
       }
     },
@@ -1504,16 +1504,16 @@
       "expression": "\n            {\n                \"Electronics\": $sum(products[category = \"Electronics\"].price),\n                \"Clothing\": $sum(products[category = \"Clothing\"].price),\n                \"Books\": $sum(products[category = \"Books\"].price),\n                \"Home\": $sum(products[category = \"Home\"].price)\n            }\n        ",
       "data_size": "100 products",
       "iterations": 200,
-      "jsonatapy_ms": 22.256750999986252,
-      "jsonatapy_json_ms": 55.24961300000086,
+      "jsonatapy_ms": 18.395878999967863,
+      "jsonatapy_json_ms": 43.79812199999833,
       "jsonatapy_dict_ms": null,
-      "js_ms": 146.63,
+      "js_ms": 152.57,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 230.340398,
-      "jsonatapy_speedup": 6.588113422309059,
-      "jsonatapy_json_speedup": 2.653955241279205,
+      "jsonata_rs_ms": 233.55167600000001,
+      "jsonatapy_speedup": 8.293705345651954,
+      "jsonatapy_json_speedup": 3.4834826936188223,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.6365796068477749,
+      "jsonata_rs_speedup": 0.6532601375979848,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1521,28 +1521,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 22.256750999986252,
-          "max": 22.425684999973328,
-          "mean": 22.361081999997623,
-          "median": 22.3732860000041
+          "min": 18.395878999967863,
+          "max": 18.574793999960093,
+          "mean": 18.480776000001242,
+          "median": 18.466301000046315
         },
         "jsonatapy_json": {
-          "min": 55.24961300000086,
-          "max": 55.61334999998735,
-          "mean": 55.45777379999208,
-          "median": 55.4572750000375
+          "min": 43.79812199999833,
+          "max": 44.050443999992694,
+          "mean": 43.95273359999692,
+          "median": 43.98474199996372
         },
         "js": {
-          "min": 146.63,
-          "max": 159.74,
-          "mean": 154.836,
-          "median": 156.52
+          "min": 152.57,
+          "max": 166.3,
+          "mean": 157.67600000000002,
+          "median": 156.46
         },
         "jsonata_rs": {
-          "min": 230.340398,
-          "max": 242.47880999999998,
-          "mean": 233.0687054,
-          "median": 230.782645
+          "min": 233.55167600000001,
+          "max": 236.995233,
+          "mean": 234.78544200000002,
+          "median": 234.67956800000002
         }
       }
     },
@@ -1552,16 +1552,16 @@
       "expression": "$sort(products[rating >= 4], function($l, $r) { $r.rating - $l.rating })",
       "data_size": "100 products",
       "iterations": 100,
-      "jsonatapy_ms": 5.653725000001941,
-      "jsonatapy_json_ms": 24.634853000009116,
+      "jsonatapy_ms": 4.701782000040566,
+      "jsonatapy_json_ms": 19.03369299998303,
       "jsonatapy_dict_ms": null,
-      "js_ms": 65.01,
+      "js_ms": 76.73,
       "jsonata_python_ms": null,
-      "jsonata_rs_ms": 116.23352100000001,
-      "jsonatapy_speedup": 11.49861374580081,
-      "jsonatapy_json_speedup": 2.63894410086295,
+      "jsonata_rs_ms": 115.493257,
+      "jsonatapy_speedup": 16.31934445266454,
+      "jsonatapy_json_speedup": 4.031272333754065,
       "jsonata_python_speedup": null,
-      "jsonata_rs_speedup": 0.5593050906545282,
+      "jsonata_rs_speedup": 0.6643677907533597,
       "jsonatapy_memory_mb": null,
       "js_memory_mb": null,
       "jsonata_python_memory_mb": null,
@@ -1569,28 +1569,28 @@
       "error": null,
       "stats_by_impl": {
         "jsonatapy": {
-          "min": 5.653725000001941,
-          "max": 5.699303999961103,
-          "mean": 5.678957199995693,
-          "median": 5.6843620000108785
+          "min": 4.701782000040566,
+          "max": 4.797822000000451,
+          "mean": 4.7412820000090505,
+          "median": 4.736406999995779
         },
         "jsonatapy_json": {
-          "min": 24.634853000009116,
-          "max": 24.78872399996135,
-          "mean": 24.679013399997984,
-          "median": 24.654352000027302
+          "min": 19.03369299998303,
+          "max": 19.16331600000376,
+          "mean": 19.086444200002006,
+          "median": 19.07660400001987
         },
         "js": {
-          "min": 65.01,
-          "max": 74.15,
-          "mean": 71.022,
-          "median": 71.72
+          "min": 76.73,
+          "max": 81.54,
+          "mean": 78.202,
+          "median": 77.13
         },
         "jsonata_rs": {
-          "min": 116.23352100000001,
-          "max": 120.94820100000001,
-          "mean": 117.54350360000001,
-          "median": 116.761706
+          "min": 115.493257,
+          "max": 119.319721,
+          "mean": 117.228175,
+          "median": 117.11437199999999
         }
       }
     },
@@ -1600,13 +1600,13 @@
       "expression": "products[category = \"Electronics\"]",
       "data_size": "100 products",
       "iterations": 500,
-      "jsonatapy_ms": 19.323392999979205,
+      "jsonatapy_ms": 19.510585999967134,
       "jsonatapy_json_ms": null,
-      "jsonatapy_dict_ms": 23.19959099997959,
-      "js_ms": 81.93,
+      "jsonatapy_dict_ms": 16.812003999973513,
+      "js_ms": 84.9,
       "jsonata_python_ms": null,
       "jsonata_rs_ms": null,
-      "jsonatapy_speedup": 4.239938607059752,
+      "jsonatapy_speedup": 4.351483856002225,
       "jsonatapy_json_speedup": null,
       "jsonata_python_speedup": null,
       "jsonata_rs_speedup": null,
@@ -1623,13 +1623,13 @@
       "expression": "products[category = \"Electronics\"]",
       "data_size": "100 products",
       "iterations": 500,
-      "jsonatapy_ms": 9.311073999981545,
+      "jsonatapy_ms": 9.640697999998338,
       "jsonatapy_json_ms": null,
-      "jsonatapy_dict_ms": 23.19959099997959,
-      "js_ms": 81.93,
+      "jsonatapy_dict_ms": 16.812003999973513,
+      "js_ms": 84.9,
       "jsonata_python_ms": null,
       "jsonata_rs_ms": null,
-      "jsonatapy_speedup": 8.799199748617871,
+      "jsonatapy_speedup": 8.806416298904358,
       "jsonatapy_json_speedup": null,
       "jsonata_python_speedup": null,
       "jsonata_rs_speedup": null,
@@ -1646,13 +1646,13 @@
       "expression": "products[price > 50 and inStock].{\"name\": name, \"price\": price, \"vendor\": vendor.name}",
       "data_size": "100 products",
       "iterations": 500,
-      "jsonatapy_ms": 52.51650599996083,
+      "jsonatapy_ms": 47.166331000028094,
       "jsonatapy_json_ms": null,
-      "jsonatapy_dict_ms": 78.40375399996447,
-      "js_ms": 360.875,
+      "jsonatapy_dict_ms": 62.35662900002126,
+      "js_ms": 372.2,
       "jsonata_python_ms": null,
       "jsonata_rs_ms": null,
-      "jsonatapy_speedup": 6.871649077344734,
+      "jsonatapy_speedup": 7.891222236467328,
       "jsonatapy_json_speedup": null,
       "jsonata_python_speedup": null,
       "jsonata_rs_speedup": null,
@@ -1669,13 +1669,13 @@
       "expression": "products[price > 50 and inStock].{\"name\": name, \"price\": price, \"vendor\": vendor.name}",
       "data_size": "100 products",
       "iterations": 500,
-      "jsonatapy_ms": 45.53805599999805,
+      "jsonatapy_ms": 40.371170000014445,
       "jsonatapy_json_ms": null,
-      "jsonatapy_dict_ms": 78.40375399996447,
-      "js_ms": 360.875,
+      "jsonatapy_dict_ms": 62.35662900002126,
+      "js_ms": 372.2,
       "jsonata_python_ms": null,
       "jsonata_rs_ms": null,
-      "jsonatapy_speedup": 7.924690505014431,
+      "jsonatapy_speedup": 9.219450414735734,
       "jsonatapy_json_speedup": null,
       "jsonata_python_speedup": null,
       "jsonata_rs_speedup": null,
@@ -1692,13 +1692,13 @@
       "expression": "$sum(products[inStock].price)",
       "data_size": "100 products",
       "iterations": 500,
-      "jsonatapy_ms": 9.792048000008435,
+      "jsonatapy_ms": 9.148035999999138,
       "jsonatapy_json_ms": null,
-      "jsonatapy_dict_ms": 15.461767000033433,
-      "js_ms": 60.39,
+      "jsonatapy_dict_ms": 12.629033000052914,
+      "js_ms": 65.46,
       "jsonata_python_ms": null,
       "jsonata_rs_ms": null,
-      "jsonatapy_speedup": 6.167249180145765,
+      "jsonatapy_speedup": 7.155634280407965,
       "jsonatapy_json_speedup": null,
       "jsonata_python_speedup": null,
       "jsonata_rs_speedup": null,
@@ -1715,13 +1715,13 @@
       "expression": "$sum(products[inStock].price)",
       "data_size": "100 products",
       "iterations": 500,
-      "jsonatapy_ms": 9.642992999999933,
+      "jsonatapy_ms": 9.144259000038346,
       "jsonatapy_json_ms": null,
-      "jsonatapy_dict_ms": 15.461767000033433,
-      "js_ms": 60.39,
+      "jsonatapy_dict_ms": 12.629033000052914,
+      "js_ms": 65.46,
       "jsonata_python_ms": null,
       "jsonata_rs_ms": null,
-      "jsonatapy_speedup": 6.262578433894997,
+      "jsonatapy_speedup": 7.158589886804987,
       "jsonatapy_json_speedup": null,
       "jsonata_python_speedup": null,
       "jsonata_rs_speedup": null,
