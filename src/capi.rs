@@ -29,7 +29,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::evaluator::{self, EvaluatorOptions};
 use crate::value::JValue;
-use crate::{compiler, parser, vm};
+use crate::{parser, vm};
 
 pub struct JsonataExpr {
     ast: crate::ast::AstNode,
@@ -343,24 +343,17 @@ pub unsafe extern "C" fn jsonata_evaluate(
                 return std::ptr::null_mut();
             }
         };
-        // Same dispatch as JsonataExpression::run_eval in lib.rs: VM when the
-        // expression compiles to bytecode AND no user bindings or host
-        // functions exist, tree-walker otherwise (the VM takes no host
-        // registry).
+        // Same dispatch as JsonataExpression::run_eval in lib.rs, via the
+        // shared expression::run_compiled: VM when the expression compiles to
+        // bytecode AND no user bindings or host functions exist, tree-walker
+        // otherwise (the VM takes no host registry).
         let result = if expr.bindings.is_empty() && expr.host_fns.is_empty() {
-            let bytecode = expr.bytecode.get_or_init(|| {
-                evaluator::try_compile_expr(&expr.ast)
-                    .map(|ce| compiler::BytecodeCompiler::compile(&ce))
-            });
-            if let Some(bc) = bytecode {
-                vm::Vm::with_options(bc, EvaluatorOptions::default()).run(&data, None)
-            } else {
-                let mut ev = evaluator::Evaluator::with_options(
-                    evaluator::Context::new(),
-                    EvaluatorOptions::default(),
-                );
-                ev.evaluate(&expr.ast, &data)
-            }
+            crate::expression::run_compiled(
+                &expr.ast,
+                &expr.bytecode,
+                &data,
+                EvaluatorOptions::default(),
+            )
         } else {
             let mut context = evaluator::Context::new();
             for (name, value) in &expr.bindings {

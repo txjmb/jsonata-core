@@ -45,13 +45,6 @@ fn coded(code: &'static str, message: impl Into<String>) -> DateTimeError {
     }
 }
 
-/// Parse an ISO 8601 datetime string (full format)
-#[allow(dead_code)]
-pub fn parse_iso8601(s: &str) -> Result<DateTime<Utc>, DateTimeError> {
-    s.parse::<DateTime<Utc>>()
-        .map_err(|e| DateTimeError::ParseError(e.to_string()))
-}
-
 /// Parse a potentially partial ISO 8601 timestamp
 /// Supports: YYYY, YYYY-MM, YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, etc.
 pub fn parse_iso8601_partial(s: &str) -> Result<i64, DateTimeError> {
@@ -1379,17 +1372,6 @@ struct MatcherPart {
     parse_kind: Option<ParseKind>,
 }
 
-fn escape_regex(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if ".*+?^${}()|[]\\".contains(c) {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
-}
-
 fn integer_format_regex(fmt: &IntegerFormat) -> Result<String, DateTimeError> {
     Ok(match fmt.primary {
         PrimaryFormat::Letters => {
@@ -1554,7 +1536,7 @@ fn build_matcher_parts(spec: &[PictureItem]) -> Result<Vec<MatcherPart>, DateTim
     for item in spec {
         match item {
             PictureItem::Literal(lit) => parts.push(MatcherPart {
-                regex: escape_regex(lit),
+                regex: regex::escape(lit),
                 component: None,
                 parse_kind: None,
             }),
@@ -1572,7 +1554,7 @@ fn build_matcher_parts(spec: &[PictureItem]) -> Result<Vec<MatcherPart>, DateTim
                     }
                     regex.push_str("[-+][0-9]+");
                     if let Some(sep) = separator {
-                        regex.push_str(&format!("{}[0-9]+", escape_regex(&sep.to_string())));
+                        regex.push_str(&format!("{}[0-9]+", regex::escape(&sep.to_string())));
                     }
                     parts.push(MatcherPart {
                         regex,

@@ -1,5 +1,10 @@
 //! Bytecode VM for JSONata compiled expressions.
 //!
+//! This is the primary production evaluate path: `expression::run_compiled`
+//! dispatches here for the public Rust `Expression` API, the Python wheel
+//! (`lib.rs::run_eval`), and the C ABI (`capi.rs`); the `_bench` facade
+//! drives it directly.
+//!
 //! A `BytecodeProgram` is produced by `crate::compiler::BytecodeCompiler` from a
 //! `CompiledExpr` tree.  Running a program involves the `Vm` struct which walks
 //! the flat `instrs` vector sequentially, using a small operand stack.
@@ -30,8 +35,7 @@ pub(crate) enum Instr {
     // ── Constants ────────────────────────────────────────────────────────
     /// Push `const_pool[idx]` onto the stack.
     PushConst(u16),
-    /// Push the explicit-null sentinel (triggers T2010/T2002 in comparisons).
-    PushExplicitNull,
+
     /// Push `JValue::Undefined`.
     PushUndefined,
 
@@ -53,22 +57,19 @@ pub(crate) enum Instr {
     },
 
     // ── Arithmetic ───────────────────────────────────────────────────────
-    /// `lhs_en` / `rhs_en` — whether the operand was a compile-time explicit `null`
-    /// literal, used to generate T2002 errors matching the tree-walker.
-    Add(bool, bool),
-    Sub(bool, bool),
-    Mul(bool, bool),
-    Div(bool, bool),
-    Mod(bool, bool),
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
 
     // ── Comparison ───────────────────────────────────────────────────────
     CmpEq,
     CmpNe,
-    /// `lhs_en` / `rhs_en` — explicit-null flags for T2010 error generation.
-    CmpLt(bool, bool),
-    CmpLe(bool, bool),
-    CmpGt(bool, bool),
-    CmpGe(bool, bool),
+    CmpLt,
+    CmpLe,
+    CmpGt,
+    CmpGe,
 
     // ── Logical / string ─────────────────────────────────────────────────
     /// Binary And — kept for potential future use, but the compiler emits
@@ -249,11 +250,6 @@ fn run_inner(
                 stack.push(const_pool[*idx as usize].clone());
                 ip += 1;
             }
-            Instr::PushExplicitNull => {
-                // Use Null — explicit-null semantics handled at compare/arithmetic sites
-                stack.push(JValue::Null);
-                ip += 1;
-            }
             Instr::PushUndefined => {
                 stack.push(JValue::Undefined);
                 ip += 1;
@@ -296,64 +292,34 @@ fn run_inner(
             }
 
             // ── Arithmetic ───────────────────────────────────────────
-            Instr::Add(lhs_en, rhs_en) => {
+            Instr::Add => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(
-                    CompiledArithOp::Add,
-                    &lhs,
-                    &rhs,
-                    *lhs_en,
-                    *rhs_en,
-                )?);
+                stack.push(compiled_arithmetic(CompiledArithOp::Add, &lhs, &rhs)?);
                 ip += 1;
             }
-            Instr::Sub(lhs_en, rhs_en) => {
+            Instr::Sub => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(
-                    CompiledArithOp::Sub,
-                    &lhs,
-                    &rhs,
-                    *lhs_en,
-                    *rhs_en,
-                )?);
+                stack.push(compiled_arithmetic(CompiledArithOp::Sub, &lhs, &rhs)?);
                 ip += 1;
             }
-            Instr::Mul(lhs_en, rhs_en) => {
+            Instr::Mul => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(
-                    CompiledArithOp::Mul,
-                    &lhs,
-                    &rhs,
-                    *lhs_en,
-                    *rhs_en,
-                )?);
+                stack.push(compiled_arithmetic(CompiledArithOp::Mul, &lhs, &rhs)?);
                 ip += 1;
             }
-            Instr::Div(lhs_en, rhs_en) => {
+            Instr::Div => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(
-                    CompiledArithOp::Div,
-                    &lhs,
-                    &rhs,
-                    *lhs_en,
-                    *rhs_en,
-                )?);
+                stack.push(compiled_arithmetic(CompiledArithOp::Div, &lhs, &rhs)?);
                 ip += 1;
             }
-            Instr::Mod(lhs_en, rhs_en) => {
+            Instr::Mod => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(compiled_arithmetic(
-                    CompiledArithOp::Mod,
-                    &lhs,
-                    &rhs,
-                    *lhs_en,
-                    *rhs_en,
-                )?);
+                stack.push(compiled_arithmetic(CompiledArithOp::Mod, &lhs, &rhs)?);
                 ip += 1;
             }
 
@@ -370,53 +336,49 @@ fn run_inner(
                 stack.push(compiled_not_equal(&lhs, &rhs)?);
                 ip += 1;
             }
-            Instr::CmpLt(lhs_en, rhs_en) => {
+            Instr::CmpLt => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
                 stack.push(compiled_ordered_cmp(
                     &lhs,
                     &rhs,
-                    *lhs_en,
-                    *rhs_en,
+                    "<",
                     |a, b| a < b,
                     |a, b| a < b,
                 )?);
                 ip += 1;
             }
-            Instr::CmpLe(lhs_en, rhs_en) => {
+            Instr::CmpLe => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
                 stack.push(compiled_ordered_cmp(
                     &lhs,
                     &rhs,
-                    *lhs_en,
-                    *rhs_en,
+                    "<=",
                     |a, b| a <= b,
                     |a, b| a <= b,
                 )?);
                 ip += 1;
             }
-            Instr::CmpGt(lhs_en, rhs_en) => {
+            Instr::CmpGt => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
                 stack.push(compiled_ordered_cmp(
                     &lhs,
                     &rhs,
-                    *lhs_en,
-                    *rhs_en,
+                    ">",
                     |a, b| a > b,
                     |a, b| a > b,
                 )?);
                 ip += 1;
             }
-            Instr::CmpGe(lhs_en, rhs_en) => {
+            Instr::CmpGe => {
                 let rhs = stack.pop().unwrap_or(JValue::Undefined);
                 let lhs = stack.pop().unwrap_or(JValue::Undefined);
                 stack.push(compiled_ordered_cmp(
                     &lhs,
                     &rhs,
-                    *lhs_en,
-                    *rhs_en,
+                    ">=",
                     |a, b| a >= b,
                     |a, b| a >= b,
                 )?);

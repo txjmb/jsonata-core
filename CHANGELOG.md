@@ -8,14 +8,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `jsonata_core::Expression` — a compile-once API for Rust callers that runs
+  compilable expressions on the bytecode VM, exactly like the Python and C
+  bindings always have. Until now the VM was unreachable from the pure-Rust
+  surface: `Evaluator` always tree-walks, so Rust (and CLI) callers silently
+  got the slower path. `Expression::compile(src)?.evaluate(&data)` lowers to
+  bytecode lazily and falls back to the tree-walker for non-compilable
+  expressions; bindings and host functions still go through `Evaluator`. The
+  dispatch now lives in one place (`expression::run_compiled`), shared by the
+  Rust API, the Python bindings' `run_eval`, and the C ABI (which previously
+  carried a hand-copied duplicate of it), and the CLI uses it when no `--arg`
+  bindings are given. The `vm`/`compiler` modules are unconditionally compiled
+  again (the cfg gates added earlier in this cycle are gone — the default
+  build now has a real consumer).
 
 ### Changed
+- Python→Rust data conversion — the cost that dominates `evaluate(dict)` on array-heavy
+  inputs — is faster on two fronts. `lazy::convert` now dispatches on the exact type object
+  and iterates lists via borrowed references instead of pyo3's instance-check chain
+  (subclasses still take the original chain, so semantics, error types included, are
+  unchanged; pinned by `tests/python/test_convert_fastpath.py`). And the published wheels
+  now use mimalloc as the global allocator (new opt-in `mimalloc` cargo feature, enabled in
+  `pyproject.toml`), roughly halving the per-list/per-object allocation cost that JValue's
+  Rc-per-container representation makes the conversion floor. Measured together on the
+  benchmark suite's shapes: "Nested Array Access" (`data[1][1][1][1]`, the one row where
+  jsonata-js was still ahead) drops ~35% (12.0µs → 7.8µs on the dev container), the four
+  `lazy_check.py` gate rows drop 10–17%, and string-heavy conversion roughly halves. The
+  structural fix for the nested-array row — lazy list views — remains deferred (see the
+  2026-07-12 lazy-views spec's Limitations).
+- The `vm` and `compiler` modules (the bytecode pipeline) are now cfg-gated on the features
+  that actually consume them (`python`, `capi`, `bench`) — they were compiled but unreachable
+  in a default-feature build, producing 12 permanent dead-code warnings that CI's
+  `--all-features` clippy never saw. A default `cargo build` is now warning-clean, and both
+  modules carry a header note naming their consumers. List and dict *subclasses* now take the
+  boundary converter's fast path too (`PyList_Check`/`PyDict_Check`; iteration was already
+  C-level for them, so behavior is unchanged), which let the duplicate slow-path container
+  loops be deleted.
+
+### Changed (evaluator internals)
+- The vestigial `*_is_explicit_null` plumbing is gone: since the null/undefined split
+  (#32) a runtime `JValue::Null` is always an explicit null, yet the flags were still
+  computed and threaded through ~20 signatures — nine arithmetic/comparison wrapper
+  methods, the `CompiledExpr::ExplicitNull` variant (now `Literal(Null)`), a
+  `PushExplicitNull` instruction, and per-instruction bool pairs on the VM's
+  arithmetic/comparison opcodes — with both terminal consumers ignoring them (~200
+  lines removed). Arithmetic and ordered comparison now have exactly one
+  implementation each, shared by the tree-walker, the compiled path, and the VM; as
+  part of that, the compiled/VM paths' T2010/T2009 error texts now match the
+  tree-walker's richer messages ("Cannot compare X and Y", operator symbol in T2009)
+  instead of the generic "Type mismatch in comparison" — same codes, better text, and
+  the two engines no longer disagree. `Evaluator::is_truthy` likewise now delegates to
+  the shared `compiled_is_truthy` instead of maintaining a twin (#111 had to be fixed
+  in both).
+- More single-definition consolidation: the two verbatim 45-line signature-error
+  translation blocks (direct vs TCO lambda invocation) are one `coerce_lambda_args`
+  helper; the five copies of jsonata-js's `hofFuncArgs` argument shaping are two
+  helpers (`hof_array_call_args` for $map/$filter/$single, `hof_object_call_args` for
+  $sift/$each); the six copy-pasted encoding builtin arms share `unary_string_encoding`.
+  `signature.rs` dropped its dead `return_type` field and test-only constructors, and
+  a builtin signature that fails to parse now panics at cache build instead of leaving
+  that builtin silently unvalidated. `ast_transform.rs`'s 157-line module header — a
+  stale task journal whose ~20 line references were all wrong — is a 30-line statement
+  of the actual recursion/drop invariants, and `push_ast_node_children`'s leaf arm
+  lists every variant explicitly instead of `_ => {}`, so a future `AstNode` variant
+  cannot silently opt out of the stack-overflow-on-drop guard.
+- Five hand-maintained parallel lists of builtin names (the pure set, the arity table,
+  the compilable set, the signature table, and a test's own literal copy) are one
+  sorted `builtins::BUILTINS` spec table; `is_pure_builtin`, `is_compilable_builtin`,
+  `builtin_arity`, and `signature::builtin_signature` all derive from it, and the
+  jsonata-js fixture drift tests still police the data. Adding a builtin is now one
+  row plus its dispatch arm. Membership and values are unchanged (the table was
+  generated mechanically from the lists it replaces).
+- The bare-`AstNode::Name` arm of `evaluate_internal_impl` — a private field-access
+  copy that had drifted (kept nulls, never flattened, no tuple or lazy-dict handling)
+  and that instrumentation shows no expression in any suite reaches — now delegates
+  to `compiled_field_step`, the semantics owner for a single field step.
 
 ### Deprecated
 
 ### Removed
+- Repository hygiene: the checked-in `rustup-init.exe` (12.9 MB Windows installer that
+  dominated clone size and permanently tripped the file-size lint), the orphaned root
+  `node_modules/jsonata/` copy (~830 KB; nothing referenced it — the benchmark harness
+  installs its own under `benchmarks/javascript/`, and the reference implementation is the
+  `tests/jsonata-js` submodule), and the stale `src/parser/README.md` (every structural
+  claim in it — line counts, ranges, even the crate name in its example — was wrong).
+- Dead code that survived the 2.2.8 builtins consolidation: `functions::numeric::{max,
+  min, average}` and `functions::object::{keys, lookup}` had no callers and encoded
+  pre-#109 semantics the engine no longer has (`Null` instead of `Undefined` on empty
+  input, no nested-array recursion) — a trap for anyone fixing a `$max`/`$lookup` bug in
+  the wrong place. Their tests, which pinned the wrong behavior, went with them. Also
+  removed the unused `datetime::parse_iso8601`. Technically these were `pub` items of the
+  crate, so strict semver would call this a breaking change; they were never used by the
+  engine itself.
 
 ### Fixed
+- `$var.field` over an array containing nested-array elements now recurses into
+  them like jsonata-js's `lookup`: `($v := [[{"p":1}],{"p":2}]; $v.p)` is `[1,2]`
+  (previously `2` — the tree-walker's two-step fast path hand-rolled its mapping
+  loop and silently skipped non-object elements; it now delegates to the shared
+  field step). Found while consolidating the seven divergent field-extraction
+  loops the cleanup review flagged; pinned by `tests/python/test_var_field_nested.py`.
+- Regex literals now honor the `m` (multiline) flag in `$match` and the `~>`
+  chain-pipe, matching `$split`/`$replace` and jsonata-js — the two paths
+  previously translated only `i` (see `tests/python/test_regex_flags.py`).
 
 ### Security
 

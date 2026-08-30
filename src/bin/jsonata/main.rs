@@ -2,6 +2,7 @@ use clap::Parser;
 use jsonata_core::evaluator::{Context, Evaluator};
 use jsonata_core::parser;
 use jsonata_core::value::JValue;
+use jsonata_core::Expression;
 use std::io::Read;
 use std::process::ExitCode;
 
@@ -112,12 +113,19 @@ fn run(cli: Cli) -> ExitCode {
         }
     };
 
-    let mut context = Context::new();
-    for (name, value) in var_bindings {
-        context.bind(name, value);
-    }
-    let mut evaluator = Evaluator::with_context(context);
-    let result = match evaluator.evaluate(&ast, &data) {
+    // Same dispatch policy as the Python/C bindings: bytecode VM when there
+    // are no bindings, tree-walker (which owns the binding context) otherwise.
+    let eval_result = if var_bindings.is_empty() {
+        Expression::from_ast(ast).evaluate(&data)
+    } else {
+        let mut context = Context::new();
+        for (name, value) in var_bindings {
+            context.bind(name, value);
+        }
+        let mut evaluator = Evaluator::with_context(context);
+        evaluator.evaluate(&ast, &data)
+    };
+    let result = match eval_result {
         Ok(v) => v,
         Err(e) => {
             eprintln!("{}", error_format::format_evaluator_error(&e));

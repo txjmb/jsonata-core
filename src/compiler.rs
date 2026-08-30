@@ -1,5 +1,8 @@
 //! Bytecode compiler: lowers a `CompiledExpr` tree into a flat `BytecodeProgram`.
 //!
+//! Consumed via `expression::run_compiled` (the Rust `Expression` API, the
+//! Python wheel, and the C ABI) and by the `_bench` facade — see `vm.rs`.
+//!
 //! The compiler does a single recursive traversal of the `CompiledExpr` tree,
 //! emitting `Instr` values into a flat `Vec`.  After emission, a lightweight
 //! peephole pass simplifies common instruction sequences.
@@ -112,9 +115,6 @@ impl BytecodeCompiler {
                 let idx = self.intern_const(v.clone());
                 self.emit(Instr::PushConst(idx));
             }
-            CompiledExpr::ExplicitNull => {
-                self.emit(Instr::PushExplicitNull);
-            }
             CompiledExpr::VariableLookup(name) => {
                 if name.is_empty() {
                     // `$` = current context
@@ -180,34 +180,29 @@ impl BytecodeCompiler {
 
             // ── Arithmetic ───────────────────────────────────────────
             CompiledExpr::Arithmetic { op, lhs, rhs } => {
-                let lhs_en = matches!(**lhs, CompiledExpr::ExplicitNull);
-                let rhs_en = matches!(**rhs, CompiledExpr::ExplicitNull);
                 self.compile_expr(lhs);
                 self.compile_expr(rhs);
                 let instr = match op {
-                    CompiledArithOp::Add => Instr::Add(lhs_en, rhs_en),
-                    CompiledArithOp::Sub => Instr::Sub(lhs_en, rhs_en),
-                    CompiledArithOp::Mul => Instr::Mul(lhs_en, rhs_en),
-                    CompiledArithOp::Div => Instr::Div(lhs_en, rhs_en),
-                    CompiledArithOp::Mod => Instr::Mod(lhs_en, rhs_en),
+                    CompiledArithOp::Add => Instr::Add,
+                    CompiledArithOp::Sub => Instr::Sub,
+                    CompiledArithOp::Mul => Instr::Mul,
+                    CompiledArithOp::Div => Instr::Div,
+                    CompiledArithOp::Mod => Instr::Mod,
                 };
                 self.emit(instr);
             }
 
             // ── Comparison ───────────────────────────────────────────
             CompiledExpr::Compare { op, lhs, rhs } => {
-                let lhs_en = matches!(**lhs, CompiledExpr::ExplicitNull);
-                let rhs_en = matches!(**rhs, CompiledExpr::ExplicitNull);
                 self.compile_expr(lhs);
                 self.compile_expr(rhs);
                 let instr = match op {
                     CompiledCmp::Eq => Instr::CmpEq,
                     CompiledCmp::Ne => Instr::CmpNe,
-                    // Ordered comparisons need explicit-null flags for T2010 errors
-                    CompiledCmp::Lt => Instr::CmpLt(lhs_en, rhs_en),
-                    CompiledCmp::Le => Instr::CmpLe(lhs_en, rhs_en),
-                    CompiledCmp::Gt => Instr::CmpGt(lhs_en, rhs_en),
-                    CompiledCmp::Ge => Instr::CmpGe(lhs_en, rhs_en),
+                    CompiledCmp::Lt => Instr::CmpLt,
+                    CompiledCmp::Le => Instr::CmpLe,
+                    CompiledCmp::Gt => Instr::CmpGt,
+                    CompiledCmp::Ge => Instr::CmpGe,
                 };
                 self.emit(instr);
             }
