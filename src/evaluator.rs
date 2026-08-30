@@ -3437,33 +3437,16 @@ impl Evaluator {
             AstNode::String(s) => Ok(JValue::string(s.clone())),
             AstNode::KeepArray => Ok(Self::keep_array(data)),
 
-            // Name nodes represent field access on the current data
-            AstNode::Name(field_name) => {
-                match data {
-                    JValue::Object(obj) => {
-                        Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
-                    }
-                    JValue::Array(arr) => {
-                        // Map over array
-                        let mut result = Vec::new();
-                        for item in arr.iter() {
-                            if let JValue::Object(obj) = item {
-                                if let Some(val) = obj.get(field_name) {
-                                    result.push(val.clone());
-                                }
-                            }
-                        }
-                        if result.is_empty() {
-                            Ok(JValue::Undefined)
-                        } else if result.len() == 1 {
-                            Ok(result.into_iter().next().unwrap())
-                        } else {
-                            Ok(JValue::array(result))
-                        }
-                    }
-                    _ => Ok(JValue::Undefined),
-                }
-            }
+            // Bare Name outside a Path: field access on the current data.
+            // `evaluate_leaf` already intercepts the Object/LazyPyDict cases,
+            // so only array and scalar data reach here — and no expression in
+            // the reference suite, the differential corpus, or the Python
+            // suite does even that (verified by instrumentation). Delegate to
+            // `compiled_field_step`, the semantics owner for a single field
+            // step, instead of keeping a private copy that had drifted (it
+            // kept nulls, never flattened nested arrays, and knew nothing of
+            // tuples or lazy dicts).
+            AstNode::Name(field_name) => compiled_field_step(field_name, data, &self.options),
 
             AstNode::Number(n) => {
                 // Preserve integer-ness: if the number is a whole number, create an integer JValue

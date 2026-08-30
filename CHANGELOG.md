@@ -72,6 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the actual recursion/drop invariants, and `push_ast_node_children`'s leaf arm
   lists every variant explicitly instead of `_ => {}`, so a future `AstNode` variant
   cannot silently opt out of the stack-overflow-on-drop guard.
+- Five hand-maintained parallel lists of builtin names (the pure set, the arity table,
+  the compilable set, the signature table, and a test's own literal copy) are one
+  sorted `builtins::BUILTINS` spec table; `is_pure_builtin`, `is_compilable_builtin`,
+  `builtin_arity`, and `signature::builtin_signature` all derive from it, and the
+  jsonata-js fixture drift tests still police the data. Adding a builtin is now one
+  row plus its dispatch arm. Membership and values are unchanged (the table was
+  generated mechanically from the lists it replaces).
+- The bare-`AstNode::Name` arm of `evaluate_internal_impl` — a private field-access
+  copy that had drifted (kept nulls, never flattened, no tuple or lazy-dict handling)
+  and that instrumentation shows no expression in any suite reaches — now delegates
+  to `compiled_field_step`, the semantics owner for a single field step.
 
 ### Deprecated
 
