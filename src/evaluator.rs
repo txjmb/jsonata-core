@@ -1706,7 +1706,9 @@ pub(crate) fn compiled_not_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, E
     }
 }
 
-/// String concatenation for the bytecode VM.
+/// String concatenation for the bytecode VM (its only caller is `vm.rs`,
+/// hence the gate matching `mod vm`'s in lib.rs).
+#[cfg(any(feature = "python", feature = "capi", feature = "bench", test))]
 #[inline]
 pub(crate) fn compiled_concat(lhs: JValue, rhs: JValue) -> Result<JValue, EvaluatorError> {
     let l = compiled_to_concat_string(&lhs)?;

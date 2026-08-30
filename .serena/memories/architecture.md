@@ -45,9 +45,12 @@ site (grep `unwrap_or(JValue::Null)` / `JValue::Null =>` near field-access code)
 ### Compilation pipeline (bytecode fast path)
 `evaluator::try_compile_expr(ast)` → `CompiledExpr` (IR) → `compiler::BytecodeCompiler::compile`
 → `BytecodeProgram` (flat `Vec<Instr>`) → `peephole()` folds (`PushData+GetField` →
-`GetDataField`, `GetVar+GetField` → `GetVarField`, elides `Not+Not`) → `vm::Vm::new(bc).run(...)`.
-`JsonataExpression` (lib.rs) caches `bytecode: OnceCell<Option<BytecodeProgram>>`; all 4 evaluate
-entrypoints try the VM first and fall back to the tree-walker.
+`GetDataField`, `GetVar+GetField` → `GetVarField`, elides `Not+Not`) →
+`vm::Vm::with_options(bc, options).run(...)`.
+`JsonataExpression` (lib.rs) caches `bytecode: OnceCell<Option<BytecodeProgram>>`; all 5 evaluate
+entrypoints funnel through `run_eval`, which tries the VM first and falls back to the tree-walker.
+The `vm`/`compiler` modules exist only under the `python`, `capi`, or `bench` features (cfg-gated
+in lib.rs) — a default-feature build, including the Rust CLI, always uses the tree-walker.
 
 Key correctness rules baked into the compiler/VM (violate these and specific test-suite groups
 regress):

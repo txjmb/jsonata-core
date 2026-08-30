@@ -242,6 +242,17 @@ fn boundary_collapse(
     }
 }
 
+/// Render a value the way jsonata-js interpolates one into an error message:
+/// a number as JavaScript would print it, an absent value as the literal
+/// "undefined".
+fn describe_operand(v: &JValue) -> String {
+    match v {
+        JValue::Undefined => "undefined".to_string(),
+        // JValue's Display renders a number the way JavaScript prints one.
+        other => format!("{}", other),
+    }
+}
+
 /// Dispatch a builtin that needs nothing but its arguments.
 ///
 /// `context` is the JSONata context value (`$`) at the call site. It is used
@@ -259,17 +270,6 @@ fn boundary_collapse(
 /// `apply_function` call site supplies at least one real argument, so an
 /// `Option<&JValue>` context would never actually be `None` and carries no
 /// extra information.
-/// Render a value the way jsonata-js interpolates one into an error message:
-/// a number as JavaScript would print it, an absent value as the literal
-/// "undefined".
-fn describe_operand(v: &JValue) -> String {
-    match v {
-        JValue::Undefined => "undefined".to_string(),
-        // JValue's Display renders a number the way JavaScript prints one.
-        other => format!("{}", other),
-    }
-}
-
 pub(crate) fn dispatch_pure(
     name: &str,
     args: &[JValue],

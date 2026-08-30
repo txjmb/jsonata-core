@@ -45,13 +45,6 @@ fn coded(code: &'static str, message: impl Into<String>) -> DateTimeError {
     }
 }
 
-/// Parse an ISO 8601 datetime string (full format)
-#[allow(dead_code)]
-pub fn parse_iso8601(s: &str) -> Result<DateTime<Utc>, DateTimeError> {
-    s.parse::<DateTime<Utc>>()
-        .map_err(|e| DateTimeError::ParseError(e.to_string()))
-}
-
 /// Parse a potentially partial ISO 8601 timestamp
 /// Supports: YYYY, YYYY-MM, YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, etc.
 pub fn parse_iso8601_partial(s: &str) -> Result<i64, DateTimeError> {

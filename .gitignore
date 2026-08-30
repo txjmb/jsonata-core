@@ -71,3 +71,4 @@ benchmarks/javascript/package-lock.json
 # Temporary files
 *.tmp
 *.bak
+*.exe

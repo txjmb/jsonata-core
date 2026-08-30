@@ -29,7 +29,6 @@ exclude = [
     "CLAUDE.MD",
     "pyproject.toml",
     "uv.lock",
-    "rustup-init.exe",
 ]
 
 [lib]

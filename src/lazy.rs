@@ -13,7 +13,7 @@
 use crate::value::JValue;
 use indexmap::IndexMap;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use pyo3::types::{PyDict, PyFloat, PyInt, PyString};
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -178,27 +178,19 @@ pub fn convert(obj: &Bound<'_, PyAny>, lazy: bool) -> PyResult<JValue> {
     unsafe { convert_ptr(obj.py(), obj.as_ptr(), lazy) }
 }
 
-/// Exact-type fast-path conversion over a *borrowed* object pointer.
-///
-/// The pointer-compare dispatch on `Py_TYPE` replaces pyo3's
-/// `is_instance_of` chain (each a tp_flags/subtype check through the Bound
-/// layer) with one comparison per built-in type, and the list loop reads
-/// elements as borrowed references (`PyList_GET_ITEM`) with no per-item
-/// refcount traffic. This is the hot path for every `evaluate(dict)` call;
-/// it cut the per-int cost roughly in half and the per-nested-list cost by
-/// more, which is what the "Nested Array Access" benchmark row is made of.
-///
-/// Exact types only — subclasses (bool is NOT a subclass case here: it has
-/// its own type object, checked explicitly) fall through to `convert_slow`,
-/// which preserves the original pyo3 extract-based semantics, error types
-/// included.
+/// Type-dispatch conversion over a *borrowed* object pointer: one `Py_TYPE`
+/// pointer compare per built-in scalar (exact types only — subclasses fall
+/// through to `convert_slow`), a tp_flags check for list/dict (subclasses
+/// included: pyo3's own iteration is C-level for these too, so semantics
+/// don't change), and borrowed-reference list reads with no per-item
+/// refcount traffic. This is the hot path for every `evaluate(dict)` call.
 ///
 /// SAFETY: caller must guarantee `ptr` is a valid, non-null object pointer
 /// that stays alive for the duration of the call, and that the GIL is held
 /// (witnessed by `py`). No Python user code runs inside the fast paths, so
 /// borrowed list elements cannot be invalidated mid-loop; the slow-path
 /// fallback re-binds (increfs) before doing anything that could execute
-/// arbitrary code.
+/// arbitrary code (`__index__`/`__float__`/...).
 unsafe fn convert_ptr(
     py: Python<'_>,
     ptr: *mut pyo3::ffi::PyObject,
@@ -220,18 +212,16 @@ unsafe fn convert_ptr(
         return Ok(JValue::Number(ffi::PyFloat_AS_DOUBLE(ptr)));
     }
     if tp == addr_of_mut!(ffi::PyUnicode_Type) {
-        let mut size: ffi::Py_ssize_t = 0;
-        let data = ffi::PyUnicode_AsUTF8AndSize(ptr, &mut size);
-        if data.is_null() {
-            return Err(PyErr::fetch(py));
-        }
-        let s = std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-            data as *const u8,
-            size as usize,
-        ));
-        return Ok(JValue::String(Rc::from(s)));
+        let obj = Borrowed::from_ptr(py, ptr);
+        return Ok(JValue::string(obj.cast_unchecked::<PyString>().to_str()?));
     }
-    if tp == addr_of_mut!(ffi::PyList_Type) {
+    if ptr == ffi::Py_None() {
+        return Ok(JValue::Null);
+    }
+    if tp == addr_of_mut!(ffi::PyBool_Type) {
+        return Ok(JValue::Bool(ptr == ffi::Py_True()));
+    }
+    if ffi::PyList_Check(ptr) != 0 {
         let len = ffi::PyList_GET_SIZE(ptr);
         let mut result = Vec::with_capacity(len as usize);
         for i in 0..len {
@@ -242,51 +232,41 @@ unsafe fn convert_ptr(
         }
         return Ok(JValue::array(result));
     }
-    if tp == addr_of_mut!(ffi::PyDict_Type) {
-        // Bind (incref) once; dict handling below iterates via pyo3.
-        let obj = Bound::from_borrowed_ptr(py, ptr);
-        let dict = obj.cast_exact::<PyDict>().expect("exact type checked");
-        return convert_dict(dict, lazy);
-    }
-    if ptr == ffi::Py_None() {
-        return Ok(JValue::Null);
-    }
-    if tp == addr_of_mut!(ffi::PyBool_Type) {
-        return Ok(JValue::Bool(ptr == ffi::Py_True()));
+    if ffi::PyDict_Check(ptr) != 0 {
+        let dict = Borrowed::from_ptr(py, ptr).cast_unchecked::<PyDict>();
+        if lazy {
+            // One incref (`to_owned`), into the owned handle the wrapper keeps.
+            return Ok(JValue::LazyPyDict(Rc::new(LazyPyDict::new(
+                dict.to_owned().unbind(),
+            ))));
+        }
+        return convert_dict_eager(&dict);
     }
 
-    // Subclasses and everything else: re-bind (incref) and take the original
-    // pyo3-based chain, which may run user code (__index__/__float__/...).
+    // Scalar subclasses and everything else: re-bind (incref) and take the
+    // extract-based chain, which may run user code — the strong reference
+    // keeps `ptr` alive even if that code drops its owner (e.g. a list slot).
     let obj = Bound::from_borrowed_ptr(py, ptr);
-    convert_slow(&obj, lazy)
+    convert_slow(&obj)
 }
 
-/// Convert an exact-type `dict` (lazy wrap, or eager IndexMap build).
-fn convert_dict(dict: &Bound<'_, PyDict>, lazy: bool) -> PyResult<JValue> {
-    if lazy {
-        return Ok(JValue::LazyPyDict(Rc::new(LazyPyDict::new(
-            dict.clone().unbind(),
-        ))));
-    }
+/// Eagerly convert a dict (and everything under it) to a `JValue::Object`.
+fn convert_dict_eager(dict: &Bound<'_, PyDict>) -> PyResult<JValue> {
     let mut result = IndexMap::with_capacity(dict.len());
     for (key, value) in dict.iter() {
         let key_str = key.extract::<String>()?;
-        result.insert(key_str, convert(&value, lazy)?);
+        result.insert(key_str, convert(&value, false)?);
     }
     Ok(JValue::object(result))
 }
 
-/// Original instance-check conversion chain, kept for subclasses of the
-/// built-in types (and numpy scalars etc. via the extract fallbacks).
-fn convert_slow(obj: &Bound<'_, PyAny>, lazy: bool) -> PyResult<JValue> {
+/// Fallback for what `convert_ptr` doesn't dispatch: subclasses of the
+/// scalar types, and duck-typed objects (numpy scalars etc.) via the
+/// extract chain. `None`, `bool`, `list`, and `dict` (subclasses included)
+/// never reach here.
+fn convert_slow(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
     use pyo3::exceptions::PyTypeError;
 
-    if obj.is_none() {
-        return Ok(JValue::Null);
-    }
-    if obj.is_instance_of::<PyBool>() {
-        return Ok(JValue::Bool(obj.extract::<bool>()?));
-    }
     if obj.is_instance_of::<PyInt>() {
         return Ok(JValue::Number(obj.extract::<i64>()? as f64));
     }
@@ -296,18 +276,10 @@ fn convert_slow(obj: &Bound<'_, PyAny>, lazy: bool) -> PyResult<JValue> {
     if obj.is_instance_of::<PyString>() {
         return Ok(JValue::string(obj.extract::<String>()?));
     }
-    if let Ok(list) = obj.cast::<PyList>() {
-        let mut result = Vec::with_capacity(list.len());
-        for item in list.iter() {
-            result.push(convert(&item, lazy)?);
-        }
-        return Ok(JValue::array(result));
-    }
-    if let Ok(dict) = obj.cast::<PyDict>() {
-        return convert_dict(dict, lazy);
-    }
 
-    // Fallback for subclasses, numpy types, etc.
+    // Duck-typed fallback: numpy scalars etc. via __bool__/__index__/__float__.
+    // (No String attempt — extract::<String> requires a str subclass, which
+    // the is_instance_of branch above already caught.)
     if let Ok(b) = obj.extract::<bool>() {
         return Ok(JValue::Bool(b));
     }
@@ -316,9 +288,6 @@ fn convert_slow(obj: &Bound<'_, PyAny>, lazy: bool) -> PyResult<JValue> {
     }
     if let Ok(f) = obj.extract::<f64>() {
         return Ok(JValue::Number(f));
-    }
-    if let Ok(s) = obj.extract::<String>() {
-        return Ok(JValue::string(s));
     }
 
     Err(PyTypeError::new_err(format!(

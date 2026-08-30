@@ -1,5 +1,10 @@
 //! Bytecode VM for JSONata compiled expressions.
 //!
+//! NOT dead code: this is the primary production evaluate path for the Python
+//! wheel (`lib.rs::run_eval`) and the C ABI (`capi.rs`), plus the `_bench`
+//! facade — none of which exist in a default-feature build, which is why the
+//! module (and `compiler.rs`) is cfg-gated on `python`/`capi`/`bench` in lib.rs.
+//!
 //! A `BytecodeProgram` is produced by `crate::compiler::BytecodeCompiler` from a
 //! `CompiledExpr` tree.  Running a program involves the `Vm` struct which walks
 //! the flat `instrs` vector sequentially, using a small operand stack.

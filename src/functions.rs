@@ -890,69 +890,6 @@ pub mod numeric {
         Ok(JValue::Number(total))
     }
 
-    /// $max(array) - Maximum value
-    pub fn max(arr: &[JValue]) -> Result<JValue, FunctionError> {
-        if arr.is_empty() {
-            return Ok(JValue::Null);
-        }
-
-        let mut max_val = f64::NEG_INFINITY;
-        for value in arr {
-            match value {
-                JValue::Number(n) => {
-                    if *n > max_val {
-                        max_val = *n;
-                    }
-                }
-                _ => {
-                    return Err(FunctionError::TypeError(
-                        "max() requires all array elements to be numbers".to_string(),
-                    ))
-                }
-            }
-        }
-        Ok(JValue::Number(max_val))
-    }
-
-    /// $min(array) - Minimum value
-    pub fn min(arr: &[JValue]) -> Result<JValue, FunctionError> {
-        if arr.is_empty() {
-            return Ok(JValue::Null);
-        }
-
-        let mut min_val = f64::INFINITY;
-        for value in arr {
-            match value {
-                JValue::Number(n) => {
-                    if *n < min_val {
-                        min_val = *n;
-                    }
-                }
-                _ => {
-                    return Err(FunctionError::TypeError(
-                        "min() requires all array elements to be numbers".to_string(),
-                    ))
-                }
-            }
-        }
-        Ok(JValue::Number(min_val))
-    }
-
-    /// $average(array) - Average value
-    pub fn average(arr: &[JValue]) -> Result<JValue, FunctionError> {
-        if arr.is_empty() {
-            return Ok(JValue::Null);
-        }
-
-        let sum_result = sum(arr)?;
-        if let JValue::Number(n) = sum_result {
-            let avg = n / arr.len() as f64;
-            Ok(JValue::Number(avg))
-        } else {
-            Err(FunctionError::RuntimeError("Sum failed".to_string()))
-        }
-    }
-
     /// $abs(number) - Absolute value
     pub fn abs(n: f64) -> Result<JValue, FunctionError> {
         Ok(JValue::Number(n.abs()))
@@ -1897,17 +1834,6 @@ pub mod array {
 pub mod object {
     use super::*;
 
-    /// $keys(object) - Get object keys
-    pub fn keys(obj: &IndexMap<String, JValue>) -> Result<JValue, FunctionError> {
-        let keys: Vec<JValue> = obj.keys().map(|k| JValue::string(k.as_str())).collect();
-        Ok(JValue::array(keys))
-    }
-
-    /// $lookup(object, key) - Lookup value by key
-    pub fn lookup(obj: &IndexMap<String, JValue>, key: &str) -> Result<JValue, FunctionError> {
-        Ok(obj.get(key).cloned().unwrap_or(JValue::Null))
-    }
-
     /// $spread(object) - Spread object into array of key-value pairs
     pub fn spread(obj: &IndexMap<String, JValue>) -> Result<JValue, FunctionError> {
         // Each key-value pair becomes a single-key object: {"key": value}
@@ -2365,37 +2291,6 @@ mod tests {
     }
 
     #[test]
-    fn test_max_min() {
-        let arr = vec![
-            JValue::from(3i64),
-            JValue::from(1i64),
-            JValue::from(4i64),
-            JValue::from(2i64),
-        ];
-
-        assert_eq!(numeric::max(&arr).unwrap(), JValue::Number(4.0));
-        assert_eq!(numeric::min(&arr).unwrap(), JValue::Number(1.0));
-
-        // Empty array
-        assert_eq!(numeric::max(&[]).unwrap(), JValue::Null);
-        assert_eq!(numeric::min(&[]).unwrap(), JValue::Null);
-    }
-
-    #[test]
-    fn test_average() {
-        let arr = vec![
-            JValue::from(1i64),
-            JValue::from(2i64),
-            JValue::from(3i64),
-            JValue::from(4i64),
-        ];
-        assert_eq!(numeric::average(&arr).unwrap(), JValue::Number(2.5));
-
-        // Empty array
-        assert_eq!(numeric::average(&[]).unwrap(), JValue::Null);
-    }
-
-    #[test]
     fn test_math_functions() {
         // abs
         assert_eq!(numeric::abs(-5.5).unwrap(), JValue::Number(5.5));
@@ -2568,36 +2463,6 @@ mod tests {
     }
 
     // ===== Object Functions Tests =====
-
-    #[test]
-    fn test_keys() {
-        let mut obj = IndexMap::new();
-        obj.insert("name".to_string(), JValue::string("Alice"));
-        obj.insert("age".to_string(), JValue::Number(30.0));
-
-        let result = object::keys(&obj).unwrap();
-        if let JValue::Array(keys) = result {
-            assert_eq!(keys.len(), 2);
-            assert!(keys.contains(&JValue::string("name")));
-            assert!(keys.contains(&JValue::string("age")));
-        } else {
-            panic!("Expected array of keys");
-        }
-    }
-
-    #[test]
-    fn test_lookup() {
-        let mut obj = IndexMap::new();
-        obj.insert("name".to_string(), JValue::string("Alice"));
-        obj.insert("age".to_string(), JValue::Number(30.0));
-
-        assert_eq!(
-            object::lookup(&obj, "name").unwrap(),
-            JValue::string("Alice")
-        );
-        assert_eq!(object::lookup(&obj, "age").unwrap(), JValue::Number(30.0));
-        assert_eq!(object::lookup(&obj, "missing").unwrap(), JValue::Null);
-    }
 
     #[test]
     fn test_spread() {

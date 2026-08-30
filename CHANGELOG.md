@@ -23,10 +23,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lazy_check.py` gate rows drop 10–17%, and string-heavy conversion roughly halves. The
   structural fix for the nested-array row — lazy list views — remains deferred (see the
   2026-07-12 lazy-views spec's Limitations).
+- The `vm` and `compiler` modules (the bytecode pipeline) are now cfg-gated on the features
+  that actually consume them (`python`, `capi`, `bench`) — they were compiled but unreachable
+  in a default-feature build, producing 12 permanent dead-code warnings that CI's
+  `--all-features` clippy never saw. A default `cargo build` is now warning-clean, and both
+  modules carry a header note naming their consumers. List and dict *subclasses* now take the
+  boundary converter's fast path too (`PyList_Check`/`PyDict_Check`; iteration was already
+  C-level for them, so behavior is unchanged), which let the duplicate slow-path container
+  loops be deleted.
 
 ### Deprecated
 
 ### Removed
+- Repository hygiene: the checked-in `rustup-init.exe` (12.9 MB Windows installer that
+  dominated clone size and permanently tripped the file-size lint), the orphaned root
+  `node_modules/jsonata/` copy (~830 KB; nothing referenced it — the benchmark harness
+  installs its own under `benchmarks/javascript/`, and the reference implementation is the
+  `tests/jsonata-js` submodule), and the stale `src/parser/README.md` (every structural
+  claim in it — line counts, ranges, even the crate name in its example — was wrong).
+- Dead code that survived the 2.2.8 builtins consolidation: `functions::numeric::{max,
+  min, average}` and `functions::object::{keys, lookup}` had no callers and encoded
+  pre-#109 semantics the engine no longer has (`Null` instead of `Undefined` on empty
+  input, no nested-array recursion) — a trap for anyone fixing a `$max`/`$lookup` bug in
+  the wrong place. Their tests, which pinned the wrong behavior, went with them. Also
+  removed the unused `datetime::parse_iso8601`. Technically these were `pub` items of the
+  crate, so strict semver would call this a breaking change; they were never used by the
+  engine itself.
 
 ### Fixed
 

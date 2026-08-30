@@ -1,5 +1,9 @@
 //! Bytecode compiler: lowers a `CompiledExpr` tree into a flat `BytecodeProgram`.
 //!
+//! NOT dead code: consumed by the Python wheel, the C ABI, and the `_bench`
+//! facade — see the header note in `vm.rs` and the cfg gate on `mod compiler`
+//! in lib.rs.
+//!
 //! The compiler does a single recursive traversal of the `CompiledExpr` tree,
 //! emitting `Instr` values into a flat `Vec`.  After emission, a lightweight
 //! peephole pass simplifies common instruction sequences.

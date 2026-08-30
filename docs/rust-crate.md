@@ -163,9 +163,10 @@ Resolution and shadowing rules:
 - `register_fn` **rejects a name that collides with a built-in**. To replace a
   built-in deliberately — e.g. a frozen `$now`/seeded `$random` for reproducible
   tests, or a disabled `$eval` for sandboxing — use `register_fn_override`.
-- `register_fn_override` refuses to override a *compilable* built-in (those on
-  the bytecode fast path); the impure built-ins that motivate overriding
-  (`$now`, `$millis`, `$random`, `$eval`) are all overridable.
+- `register_fn_override` refuses to override a *compilable* built-in (those the
+  compiled-expression fast path inlines, per `COMPILABLE_BUILTINS`); the impure
+  built-ins that motivate overriding (`$now`, `$millis`, `$random`, `$eval`)
+  are all overridable.
 - Arguments arrive already evaluated. A host function that does I/O blocks;
   parallelise across threads (one `Evaluator` per thread).
 

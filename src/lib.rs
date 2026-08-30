@@ -130,6 +130,11 @@ pub mod ast_transform;
 mod builtins;
 #[cfg(feature = "capi")]
 pub mod capi;
+// The bytecode pipeline (compiler + vm) has no consumer in a default-feature
+// build: it is reached only through `run_eval` (python), `capi.rs` (capi) and
+// `_bench` (bench). Gated so the default build stays warning-clean and real
+// dead code remains visible.
+#[cfg(any(feature = "python", feature = "capi", feature = "bench", test))]
 mod compiler;
 mod datetime;
 pub mod evaluator;
@@ -139,12 +144,11 @@ pub mod lazy;
 pub mod parser;
 mod signature;
 pub mod value;
+#[cfg(any(feature = "python", feature = "capi", feature = "bench", test))]
 mod vm;
 
-// Opt-in faster global allocator. JValue's Rc-per-Array/Object representation
-// makes small-allocation throughput the floor for Python→Rust data conversion
-// (~40ns/list on glibc malloc, roughly half that on mimalloc), which is what
-// dominates `evaluate(dict)` on array-heavy inputs.
+// Opt-in faster global allocator; small-allocation throughput is the floor
+// for Python→Rust data conversion. See CHANGELOG (Unreleased → Changed).
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -187,6 +191,7 @@ pub mod _bench {
 // ── Python bindings (only when the "python" feature is enabled) ───────────────
 
 /// The JSONata reference implementation version this library targets.
+#[cfg(feature = "python")]
 const JSONATA_REFERENCE_VERSION: &str = "2.1.0";
 
 #[cfg(feature = "python")]
@@ -344,6 +349,22 @@ impl JsonataExpression {
         }
     }
 
+    /// Merge per-call guardrail kwargs over the expression's compile-time
+    /// defaults. Every `evaluate*` pymethod goes through this — add new
+    /// guardrails here, not in each method.
+    fn merged_options(
+        &self,
+        timeout: Option<u64>,
+        max_stack_depth: Option<usize>,
+        max_sequence_length: Option<usize>,
+    ) -> evaluator::EvaluatorOptions {
+        evaluator::EvaluatorOptions {
+            timeout_ms: timeout.or(self.default_options.timeout_ms),
+            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
+            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
+        }
+    }
+
     /// Register the stored Python callables onto a freshly built evaluator.
     /// The collision/override rules were already validated at `register()` time,
     /// so these calls are not expected to fail; any error is still surfaced.
@@ -380,11 +401,7 @@ impl JsonataExpression {
         max_sequence_length: Option<usize>,
     ) -> PyResult<Py<PyAny>> {
         let json_data = lazy::convert(data.bind(py), true)?;
-        let options = evaluator::EvaluatorOptions {
-            timeout_ms: timeout.or(self.default_options.timeout_ms),
-            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
-            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
-        };
+        let options = self.merged_options(timeout, max_stack_depth, max_sequence_length);
         json_to_python(py, &self.run_eval(py, &json_data, bindings, options)?)
     }
 
@@ -470,11 +487,7 @@ impl JsonataExpression {
         max_stack_depth: Option<usize>,
         max_sequence_length: Option<usize>,
     ) -> PyResult<Py<PyAny>> {
-        let options = evaluator::EvaluatorOptions {
-            timeout_ms: timeout.or(self.default_options.timeout_ms),
-            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
-            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
-        };
+        let options = self.merged_options(timeout, max_stack_depth, max_sequence_length);
         json_to_python(py, &self.run_eval(py, &data.data, bindings, options)?)
     }
 
@@ -499,11 +512,7 @@ impl JsonataExpression {
         max_stack_depth: Option<usize>,
         max_sequence_length: Option<usize>,
     ) -> PyResult<String> {
-        let options = evaluator::EvaluatorOptions {
-            timeout_ms: timeout.or(self.default_options.timeout_ms),
-            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
-            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
-        };
+        let options = self.merged_options(timeout, max_stack_depth, max_sequence_length);
         self.run_eval(py, &data.data, bindings, options)?
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
@@ -539,11 +548,7 @@ impl JsonataExpression {
     ) -> PyResult<String> {
         let json_data = JValue::from_json_str(json_str)
             .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?;
-        let options = evaluator::EvaluatorOptions {
-            timeout_ms: timeout.or(self.default_options.timeout_ms),
-            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
-            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
-        };
+        let options = self.merged_options(timeout, max_stack_depth, max_sequence_length);
         self.run_eval(py, &json_data, bindings, options)?
             .to_json_string()
             .map_err(|e| PyValueError::new_err(format!("Failed to serialize result: {}", e)))
@@ -581,11 +586,7 @@ impl JsonataExpression {
                 .map_err(|e| PyValueError::new_err(format!("Invalid JSON: {}", e)))?,
             None => JValue::Undefined,
         };
-        let options = evaluator::EvaluatorOptions {
-            timeout_ms: timeout.or(self.default_options.timeout_ms),
-            max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
-            max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
-        };
+        let options = self.merged_options(timeout, max_stack_depth, max_sequence_length);
         let result = self.run_eval(py, &json_data, bindings, options)?;
         if result.is_undefined() {
             return Ok(None);
@@ -692,24 +693,11 @@ fn evaluate(
 
 /// Convert a Python object to a JValue.
 ///
-/// Handles conversion of Python types:
-/// - None -> Null
-/// - bool -> Bool (checked before int since bool is a subclass of int)
-/// - int, float -> Number
-/// - str -> String
-/// - list -> Array
-/// - dict -> Object
+/// Eager, fully-materialized Python→JValue conversion — `lazy::convert` with
+/// `lazy=false` (see `src/lazy.rs` for the type-dispatch details and the lazy path).
 #[cfg(feature = "python")]
 fn python_to_json(py: Python, obj: &Py<PyAny>) -> PyResult<JValue> {
-    python_to_json_bound(obj.bind(py))
-}
-
-/// Inner conversion using the Bound API. Delegates to `lazy::convert` with
-/// `lazy=false` for today's eager, fully-materialized conversion (see
-/// `src/lazy.rs` for the zero-overhead type-check details and the lazy path).
-#[cfg(feature = "python")]
-fn python_to_json_bound(obj: &Bound<'_, PyAny>) -> PyResult<JValue> {
-    lazy::convert(obj, false)
+    lazy::convert(obj.bind(py), false)
 }
 
 /// Convert a JValue to a Python object.
@@ -877,7 +865,7 @@ impl evaluator::HostFn for PyHostFn {
                 ));
             }
 
-            python_to_json_bound(&result).map_err(pyerr_to_evaluator_error)
+            lazy::convert(&result, false).map_err(pyerr_to_evaluator_error)
         })
     }
 }
