@@ -93,7 +93,10 @@ fn late_bound_name_resolves_at_call_time() {
 
 #[test]
 fn closure_escapes_block() {
-    assert_eval("( $g := ( $f := function($x){ $x + 1 }; $f ); $g(41) )", "42");
+    assert_eval(
+        "( $g := ( $f := function($x){ $x + 1 }; $f ); $g(41) )",
+        "42",
+    );
 }
 
 #[test]
@@ -213,7 +216,10 @@ fn stored_lambda_by_name_as_hof_callback() {
 #[test]
 fn signature_enforced_on_stored_lambda() {
     assert_eval("( $f := function($x)<n:n>{ $x * 2 }; $f(21) )", "42");
-    assert_error_contains("( $f := function($x)<n:n>{ $x * 2 }; $f(\"nope\") )", "T0410");
+    assert_error_contains(
+        "( $f := function($x)<n:n>{ $x * 2 }; $f(\"nope\") )",
+        "T0410",
+    );
 }
 
 // ── Partial application ──────────────────────────────────────────────────────
@@ -251,7 +257,10 @@ fn composition_of_lambdas() {
 
 #[test]
 fn composition_with_self() {
-    assert_eval("( $sq := function($x){$x*$x}; $sq2 := $sq ~> $sq; $sq2(3) )", "81");
+    assert_eval(
+        "( $sq := function($x){$x*$x}; $sq2 := $sq ~> $sq; $sq2(3) )",
+        "81",
+    );
 }
 
 #[test]
@@ -318,7 +327,10 @@ fn string_of_lambda_is_empty_string() {
 fn lambdas_never_compare_equal() {
     assert_eval("( $f := function($x){$x}; $f = $f )", "false");
     assert_eval("( $f := function($x){$x}; $g := $f; $f = $g )", "false");
-    assert_eval("( $f := function($x){$x}; $g := function($x){$x}; $f = $g )", "false");
+    assert_eval(
+        "( $f := function($x){$x}; $g := function($x){$x}; $f = $g )",
+        "false",
+    );
 }
 
 #[test]
@@ -327,41 +339,99 @@ fn exists_on_function_values() {
     assert_eval("$exists($undefined_thing)", "false");
 }
 
+// ── Fixed by the value-carried closure redesign (#157) ───────────────────────
+//
+// Before the redesign these were dangling-tag / id-collision artifacts of the
+// lambda side table (the pre-redesign pins are in this suite's git history).
+// They now match jsonata-js, verified directly against the reference with node.
+
+mod fixed_by_redesign {
+    use super::*;
+
+    #[test]
+    fn alias_survives_lambda_rebinding() {
+        // $g copied the closure value; rebinding $f doesn't affect it.
+        // (Previously ["new","new"]: the alias's tag resolved by NAME "f"
+        // through the side table, picking up the rebound lambda.)
+        assert_eval(
+            "( $f := function(){ \"old\" }; $g := $f; $f := function(){ \"new\" }; [$g(), $f()] )",
+            "[\"old\",\"new\"]",
+        );
+    }
+
+    #[test]
+    fn calling_name_rebound_to_non_function_is_an_error() {
+        // $f is 42; calling it is T1006. (Previously the stale side-table
+        // entry under "f" survived the rebinding and the OLD lambda was
+        // silently called, returning 1.)
+        assert_error_contains("( $f := function(){ 1 }; $f := 42; $f() )", "T1006");
+    }
+
+    #[test]
+    fn escaped_partial_application() {
+        // The partial captures the closure it applies, so it survives the
+        // defining scope. (Previously it re-resolved "$add" by name at
+        // invocation time: T1006.)
+        assert_eval(
+            "( $p := ( $add := function($a,$b){$a+$b}; $add(10, ?) ); $p(32) )",
+            "42",
+        );
+    }
+
+    #[test]
+    fn transform_bound_to_variable_then_called() {
+        // A transform is an ordinary function value. (Previously evaluating a
+        // bare transform yielded the string "<lambda>" plus a side-table entry
+        // the string didn't reference: T1006.)
+        assert_eval(
+            "( $t := |$|{\"b\":2}|; $t({\"a\":1}) )",
+            "{\"a\":1,\"b\":2}",
+        );
+    }
+
+    #[test]
+    fn transform_bound_to_variable_via_chain_pipe() {
+        assert_eval(
+            "( $t := |$|{\"b\":2}|; {\"a\":1} ~> $t )",
+            "{\"a\":1,\"b\":2}",
+        );
+    }
+
+    #[test]
+    fn closure_captured_in_other_closures_environment() {
+        // The escaping anonymous closure carries its captured $sq inside the
+        // value. (Previously the escape-analysis walk lost $sq across the
+        // double scope pop — block exit + lambda return — and the inner call
+        // dangled: T1006. That bug class is now unrepresentable.)
+        assert_eval(
+            "( $mk := function(){ ( $sq := function($x){ $x * $x }; function($y){ $sq($y) + 1 } ) }; \
+               $mk()(4) )",
+            "17",
+        );
+    }
+}
+
 // ── Divergences from jsonata-js (verified against the reference with node) ───
 //
-// Each test here pins what THIS engine currently does. The reference behavior
-// is stated in the comment. Some of these are id-collision/dangling-tag
-// artifacts of the side-table design and are expected to change with the
-// value-carried closure redesign; update them deliberately when that lands.
+// jsonata-js closures hold their defining environment frame BY REFERENCE, so a
+// later `:=` rebinding in that frame is visible through previously-defined
+// closures. This engine captures free variables by VALUE SNAPSHOT at
+// definition time (and always has, for plain values — see
+// plain_value_capture_is_a_snapshot above). The redesign makes that snapshot
+// rule uniform for lambda-valued variables too, where the old side table
+// sometimes resolved them live by accident. Live-frame semantics would require
+// closures to hold their defining frame (`Rc` cycles and per-cycle leaks —
+// rejected in #157 for the long-lived Python interpreter case).
 
 mod divergent_from_reference {
     use super::*;
 
     #[test]
-    fn alias_then_lambda_rebinding() {
-        // Reference: ["old","new"] — $g copied the closure value; rebinding $f
-        // doesn't affect it. Current engine: the alias's tag resolves by NAME
-        // "f" through the side table, so $g() picks up the REBOUND lambda.
-        assert_eval(
-            "( $f := function(){ \"old\" }; $g := $f; $f := function(){ \"new\" }; [$g(), $f()] )",
-            "[\"new\",\"new\"]",
-        );
-    }
-
-    #[test]
-    fn calling_name_rebound_to_non_function() {
-        // Reference: T1006 (attempted to invoke a non-function; $f is 42).
-        // Current engine: the stale side-table entry under "f" survives the
-        // rebinding, so the OLD lambda is silently called.
-        assert_eval("( $f := function(){ 1 }; $f := 42; $f() )", "1");
-    }
-
-    #[test]
     fn escaped_mutual_recursion() {
-        // Reference: "mutual-esc" — the escaped closure's frame keeps $g
-        // alive. Current engine: $g was not captured at $f's definition (it
-        // didn't exist yet) and the block scope holding it has popped, so the
-        // call dangles: T1006.
+        // Reference: "mutual-esc" — the escaped closure's live frame keeps $g
+        // reachable. Snapshot capture: $g did not exist when $f was defined,
+        // so nothing captured it; after the defining scope pops the call
+        // dangles: T1006. (Same behavior as before the redesign.)
         assert_error_contains(
             "( $esc := ( $f := function(){ $g() }; $g := function(){ \"mutual-esc\" }; $f ); $esc() )",
             "T1006",
@@ -369,50 +439,21 @@ mod divergent_from_reference {
     }
 
     #[test]
-    fn escaped_partial_application() {
-        // Reference: 42 — the partial holds the function it applies. Current
-        // engine: the partial re-resolves "$add" BY NAME at invocation time,
-        // and the defining scope has popped: T1006.
-        assert_error_contains(
-            "( $p := ( $add := function($a,$b){$a+$b}; $add(10, ?) ); $p(32) )",
-            "T1006",
-        );
-    }
-
-    #[test]
-    fn transform_bound_to_variable_then_called() {
-        // Reference: {"a":1,"b":2} — a transform is an ordinary function
-        // value. Current engine: evaluating a bare transform yields the string
-        // "<lambda>" plus a side-table entry the string doesn't reference, so
-        // the call fails: T1006.
-        assert_error_contains("( $t := |$|{\"b\":2}|; $t({\"a\":1}) )", "T1006");
-    }
-
-    #[test]
-    fn transform_bound_to_variable_via_chain_pipe() {
-        // Reference: {"a":1,"b":2}. Current engine: same "<lambda>" string
-        // problem as above: T1006.
-        assert_error_contains("( $t := |$|{\"b\":2}|; {\"a\":1} ~> $t )", "T1006");
-    }
-
-    #[test]
-    fn captured_lambda_name_rebound_to_lambda_resolves_live() {
-        // Reference: "B" (live frame). Current engine: also "B", but only
-        // because the captured tag resolves by NAME through the side table —
-        // the same accident that breaks alias_then_lambda_rebinding above.
-        // A pure snapshot-capture design would return "A" here; if the
-        // redesign changes this, this is the place to document it.
+    fn captured_lambda_name_rebound_to_lambda() {
+        // Reference: "B" (live frame sees the rebinding). Snapshot capture:
+        // $g captured $f's value at definition — "A". (Before the redesign
+        // this returned "B", but only via the same name-tag accident that
+        // broke alias_survives_lambda_rebinding.)
         assert_eval(
             "( $f := function(){ \"A\" }; $g := function(){ $f() }; $f := function(){ \"B\" }; $g() )",
-            "\"B\"",
+            "\"A\"",
         );
     }
 
     #[test]
     fn captured_lambda_name_rebound_to_non_lambda() {
-        // Reference: an error (the reference tries to call 42). Current
-        // engine: the stale side-table entry under "f" makes $g() call the
-        // ORIGINAL lambda: "A".
+        // Reference: an error (the live frame's $f is 42; calling it fails).
+        // Snapshot capture: $g captured the original closure — "A".
         assert_eval(
             "( $f := function(){ \"A\" }; $g := function(){ $f() }; $f := 42; $g() )",
             "\"A\"",
@@ -420,30 +461,49 @@ mod divergent_from_reference {
     }
 
     #[test]
-    fn closure_captured_in_other_closures_environment() {
-        // Reference: 17 — the escaping anonymous closure keeps its captured
-        // $sq alive. Current engine: the escape-analysis walk loses $sq
-        // across the double scope pop (block exit + lambda return), so the
-        // inner call dangles: T1006. This is the latent bug class issue #157
-        // describes; the value-carried redesign makes it unrepresentable.
-        assert_error_contains(
-            "( $mk := function(){ ( $sq := function($x){ $x * $x }; function($y){ $sq($y) + 1 } ) }; \
-               $mk()(4) )",
-            "T1006",
-        );
-    }
-
-    #[test]
     fn recursive_closure_called_through_alias_after_rebinding() {
-        // Reference: "replaced" (the body's $f resolves through the live
-        // frame, finding the rebound lambda). Current engine: same result,
-        // via the name-tag accident. A snapshot + self-reference design
-        // yields "done" (the recursive self-call always reaches the original
-        // closure); if the redesign changes this, update deliberately.
+        // Reference: "replaced" (the body's recursive $f resolves through the
+        // live frame, finding the rebound lambda). Snapshot + late-bound
+        // self-reference: a recursive function always calls ITSELF — "done".
         assert_eval(
             "( $f := function($x){ $x = 0 ? \"done\" : $f($x - 1) }; \
                $f2 := $f; $f := function($x){ \"replaced\" }; $f2(2) )",
-            "\"replaced\"",
+            "\"done\"",
         );
     }
+}
+
+// ── Memory: no closure leaks ─────────────────────────────────────────────────
+
+#[test]
+fn repeated_evaluation_does_not_leak_closures() {
+    use jsonata_core::evaluator::live_lambda_count;
+
+    // Shapes that exercised the old escape-analysis GC hardest: escaping
+    // closures, closures capturing closures, self-recursion, aliasing,
+    // partial application. Snapshot capture cannot form Rc cycles (a closure
+    // only captures values that existed before it did; self-reference is
+    // late-bound at invocation, never stored), so every closure must be freed
+    // once the evaluation's result is dropped.
+    let exprs = [
+        "( $f := function($x){ $x <= 1 ? 1 : $x * $f($x-1) }; $f(10) )",
+        "( $mk := function(){ ( $sq := function($x){ $x * $x }; function($y){ $sq($y) + 1 } ) }; $mk()(4) )",
+        "( $g := ( $x := 3; $f := function($n){ $n = 0 ? 0 : $x + $f($n - 1) }; $f ); $g(4) )",
+        "( $p := ( $add := function($a,$b){$a+$b}; $add(10, ?) ); $p(32) )",
+        "( $f := function(){ \"old\" }; $g := $f; $f := function(){ \"new\" }; [$g(), $f()] )",
+        "( $y := function($f){ (function($x){ $x($x) })(function($x){ $f(function($y){ ($x($x))($y) }) }) }; \
+           $fac := $y(function($self){ function($n){ $n <= 1 ? 1 : $n * $self($n-1) } }); $fac(6) )",
+    ];
+
+    let baseline = live_lambda_count();
+    for _ in 0..100 {
+        for expr in &exprs {
+            let _ = eval(expr).unwrap();
+        }
+    }
+    assert_eq!(
+        live_lambda_count(),
+        baseline,
+        "closures leaked across repeated evaluations"
+    );
 }
