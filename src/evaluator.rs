@@ -798,38 +798,7 @@ fn try_compile_hof_expr(
 /// Returns true if the named builtin is pure (no side effects, no context dependency)
 /// and can be safely compiled into a BuiltinCall.
 fn is_compilable_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "string"
-            | "length"
-            | "substring"
-            | "substringBefore"
-            | "substringAfter"
-            | "uppercase"
-            | "lowercase"
-            | "trim"
-            | "contains"
-            | "split"
-            | "join"
-            | "number"
-            | "floor"
-            | "ceil"
-            | "round"
-            | "abs"
-            | "sqrt"
-            | "sum"
-            | "max"
-            | "min"
-            | "average"
-            | "count"
-            | "boolean"
-            | "not"
-            | "keys"
-            | "append"
-            | "reverse"
-            | "distinct"
-            | "merge"
-    )
+    crate::builtins::is_compilable_builtin(name)
 }
 
 /// Maximum number of explicit arguments accepted by each compilable builtin.

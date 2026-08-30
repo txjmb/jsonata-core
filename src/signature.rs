@@ -756,14 +756,16 @@ mod tests {
     }
 }
 
-// ── Builtin signature table ─────────────────────────────────────────────────
+// ── Builtin signature lookup ────────────────────────────────────────────────
 
-/// jsonata-js's signature for every built-in function, lifted verbatim from its
-/// `staticFrame.bind("name", defineFunction(fn.name, "<sig>"))` declarations.
+/// Look up a builtin's parsed signature, or `None` if it has no declared one.
 ///
-/// These drive the same validation and coercion the reference performs, which is
-/// where a lot of our null/undefined and singleton-coercion behaviour is
-/// specified rather than in the function bodies:
+/// The signature strings live in `builtins::BUILTINS`, lifted verbatim from
+/// jsonata-js's `staticFrame.bind("name", defineFunction(fn.name, "<sig>"))`
+/// declarations. They drive the same validation and coercion the reference
+/// performs, which is where a lot of our null/undefined and
+/// singleton-coercion behaviour is specified rather than in the function
+/// bodies:
 ///
 /// - `a` "normally treats any value as a singleton array" (the reference's own
 ///   comment), so `$reverse(1)` is `[1]` and `$count(null)` is 1.
@@ -771,73 +773,8 @@ mod tests {
 ///   the `n` check with T0410, while `$abs(missing.x)` passes as `m` and the
 ///   function returns undefined.
 ///
-/// `random` and `shuffle` are here for completeness even though their results
-/// cannot be compared against the reference.
-pub(crate) const BUILTIN_SIGNATURES: &[(&str, &str)] = &[
-    ("sum", "<a<n>:n>"),
-    ("count", "<a:n>"),
-    ("max", "<a<n>:n>"),
-    ("min", "<a<n>:n>"),
-    ("average", "<a<n>:n>"),
-    ("string", "<x-b?:s>"),
-    ("substring", "<s-nn?:s>"),
-    ("substringBefore", "<s-s:s>"),
-    ("substringAfter", "<s-s:s>"),
-    ("lowercase", "<s-:s>"),
-    ("uppercase", "<s-:s>"),
-    ("length", "<s-:n>"),
-    ("trim", "<s-:s>"),
-    ("pad", "<s-ns?:s>"),
-    ("match", "<s-f<s:o>n?:a<o>>"),
-    ("contains", "<s-(sf):b>"),
-    ("replace", "<s-(sf)(sf)n?:s>"),
-    ("split", "<s-(sf)n?:a<s>>"),
-    ("join", "<a<s>s?:s>"),
-    ("formatNumber", "<n-so?:s>"),
-    ("formatBase", "<n-n?:s>"),
-    ("formatInteger", "<n-s:s>"),
-    ("parseInteger", "<s-s:n>"),
-    ("number", "<(nsb)-:n>"),
-    ("floor", "<n-:n>"),
-    ("ceil", "<n-:n>"),
-    ("round", "<n-n?:n>"),
-    ("abs", "<n-:n>"),
-    ("sqrt", "<n-:n>"),
-    ("power", "<n-n:n>"),
-    ("random", "<:n>"),
-    ("boolean", "<x-:b>"),
-    ("not", "<x-:b>"),
-    ("map", "<af>"),
-    ("zip", "<a+>"),
-    ("filter", "<af>"),
-    ("single", "<af?>"),
-    ("reduce", "<afj?:j>"),
-    ("sift", "<o-f?:o>"),
-    ("keys", "<x-:a<s>>"),
-    ("lookup", "<x-s:x>"),
-    ("append", "<xx:a>"),
-    ("exists", "<x:b>"),
-    ("spread", "<x-:a<o>>"),
-    ("merge", "<a<o>:o>"),
-    ("reverse", "<a:a>"),
-    ("each", "<o-f:a>"),
-    ("error", "<s?:x>"),
-    ("assert", "<bs?:x>"),
-    ("type", "<x:s>"),
-    ("sort", "<af?:a>"),
-    ("shuffle", "<a:a>"),
-    ("distinct", "<x:x>"),
-    ("encodeUrlComponent", "<s-:s>"),
-    ("encodeUrl", "<s-:s>"),
-    ("decodeUrlComponent", "<s-:s>"),
-    ("decodeUrl", "<s-:s>"),
-    ("base64encode", "<s-:s>"),
-    ("base64decode", "<s-:s>"),
-    ("toMillis", "<s-s?:n>"),
-    ("fromMillis", "<n-s?s?:s>"),
-];
-
-/// Look up a builtin's parsed signature, or `None` if it has no declared one.
+/// (`random` and `shuffle` carry signatures for completeness even though
+/// their results cannot be compared against the reference.)
 ///
 /// Signatures are parsed once on first use: parsing builds a regex, which is far
 /// too expensive to repeat per call.
@@ -846,12 +783,13 @@ pub(crate) fn builtin_signature(name: &str) -> Option<&'static Signature> {
         std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
-            BUILTIN_SIGNATURES
+            crate::builtins::BUILTINS
                 .iter()
+                .filter_map(|s| s.signature.map(|sig| (s.name, sig)))
                 .map(|(name, sig)| {
                     let parsed = Signature::parse(sig)
                         .unwrap_or_else(|e| panic!("builtin signature {name} {sig}: {e}"));
-                    (*name, parsed)
+                    (name, parsed)
                 })
                 .collect()
         })
@@ -864,13 +802,17 @@ mod builtin_signature_table_tests {
 
     #[test]
     fn every_reference_signature_parses() {
-        // A signature that fails to parse would silently drop out of the lookup
-        // cache and leave that builtin unvalidated, so assert on the table.
-        let bad: Vec<String> = BUILTIN_SIGNATURES
+        // A signature that fails to parse would panic the lookup-cache build
+        // at runtime, so assert on the table here with a readable report.
+        let declared: Vec<(&str, &str)> = crate::builtins::BUILTINS
             .iter()
-            // Explicit format arguments rather than inline `{name}` captures:
-            // CodeQL's Rust analysis does not see implicit captures and reports
-            // the binding as unused.
+            .filter_map(|s| s.signature.map(|sig| (s.name, sig)))
+            .collect();
+        // Explicit format arguments rather than inline `{name}` captures:
+        // CodeQL's Rust analysis does not see implicit captures and reports
+        // the binding as unused.
+        let bad: Vec<String> = declared
+            .iter()
             .filter_map(|(name, sig)| {
                 Signature::parse(sig)
                     .err()
@@ -881,14 +823,15 @@ mod builtin_signature_table_tests {
             bad.is_empty(),
             "{} of {} failed:\n{}",
             bad.len(),
-            BUILTIN_SIGNATURES.len(),
+            declared.len(),
             bad.join("\n")
         );
-        assert_eq!(BUILTIN_SIGNATURES.len(), 61);
+        assert_eq!(declared.len(), 61);
     }
 
-    /// `BUILTIN_SIGNATURES` must match the pinned jsonata-js exactly, both in
-    /// which names it covers and in what each maps to.
+    /// The signatures declared in `builtins::BUILTINS` must match the pinned
+    /// jsonata-js exactly, both in which names they cover and in what each
+    /// maps to.
     ///
     /// This table had silently drifted to a strict *subset* -- 55 of the
     /// reference's 63, every one byte-identical, with eight simply absent
@@ -924,8 +867,10 @@ mod builtin_signature_table_tests {
         let reference: std::collections::BTreeMap<String, String> =
             serde_json::from_str(&fixture_text).expect("fixture should be valid JSON");
 
-        let ours: std::collections::BTreeMap<&str, &str> =
-            BUILTIN_SIGNATURES.iter().copied().collect();
+        let ours: std::collections::BTreeMap<&str, &str> = crate::builtins::BUILTINS
+            .iter()
+            .filter_map(|s| s.signature.map(|sig| (s.name, sig)))
+            .collect();
 
         let mut wrong = Vec::new();
         let mut missing = Vec::new();
