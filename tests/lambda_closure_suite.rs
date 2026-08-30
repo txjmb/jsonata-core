@@ -233,6 +233,83 @@ fn partial_application_of_lambda() {
 }
 
 #[test]
+fn partial_application_arguments_evaluate_at_creation() {
+    // The bound argument is a value snapshot: rebinding $x later must not
+    // change what the partial applies.
+    assert_eval(
+        "( $x := 1; $add := function($a,$b){$a+$b}; $p := $add($x, ?); $x := 100; $p(1) )",
+        "2",
+    );
+}
+
+#[test]
+fn partial_application_multiple_placeholders() {
+    assert_eval("( $p := $substring(?, 1); $p(\"hello\") )", "\"ello\"");
+    assert_eval("( $p := $substring(?, 1, ?); $p(\"hello\", 3) )", "\"ell\"");
+}
+
+#[test]
+fn partial_of_partial() {
+    assert_eval(
+        "( $add := function($a,$b){$a+$b}; $p1 := $add(10, ?); $p2 := $p1(?); $p2(5) )",
+        "15",
+    );
+}
+
+#[test]
+fn partial_of_lambda_captures_target_at_creation() {
+    // The partial holds the closure it applies, so rebinding $add afterwards
+    // does not change it. Matches jsonata-js (partialApplyProcedure evaluates
+    // the target to a function value when the partial is built).
+    assert_eval(
+        "( $add := function($a,$b){$a+$b}; $p := $add(1, ?); $add := function($a,$b){0}; $p(2) )",
+        "3",
+    );
+}
+
+#[test]
+fn partial_of_builtin_sees_later_shadowing() {
+    // A builtin-named partial resolves its target BY NAME at invocation time,
+    // so a user binding that shadows the builtin afterwards wins. (Matches
+    // jsonata-js, where the partial's generated thunk resolves through the
+    // environment chain.)
+    assert_eval(
+        "( $up := $uppercase(?); $uppercase := function($x){ \"shadowed\" }; $up(\"a\") )",
+        "\"shadowed\"",
+    );
+}
+
+#[test]
+fn partial_of_builtin_reference_binding() {
+    // $f := $sum stores a builtin reference; partially applying through it
+    // resolves the builtin at invocation.
+    assert_eval("( $f := $sum; $p := $f(?); $p([1,2,3]) )", "6");
+}
+
+#[test]
+fn partial_of_unknown_name_fails_at_invocation() {
+    // Creating the partial succeeds (the sigil form defers resolution);
+    // invoking it reports the missing function.
+    assert_error_contains("( $p := $notreal(?); $p(1) )", "T1006");
+}
+
+#[test]
+fn partial_as_hof_callback() {
+    assert_eval(
+        "( $add := function($a,$b){$a+$b}; $inc := $add(1, ?); $map([1,2,3], $inc) )",
+        "[2,3,4]",
+    );
+}
+
+#[test]
+fn partial_composed_with_chain_pipe() {
+    assert_eval(
+        "( $sub := $substringBefore(?, \" \"); $sub2 := $sub ~> $uppercase; $sub2(\"Hello World\") )",
+        "\"HELLO\"",
+    );
+}
+
+#[test]
 fn partial_application_of_builtin() {
     assert_eval(
         "( $first := $substringBefore(?, \" \"); $first(\"Hello World\") )",

@@ -2465,6 +2465,37 @@ impl Drop for LiveLambdaToken {
     }
 }
 
+/// How a partial application (`$f(1, ?)`) reaches the function it applies.
+#[derive(Clone, Debug)]
+pub(crate) enum PartialTarget {
+    /// A user-defined function, captured as a closure value at creation time —
+    /// this is what lets the partial outlive the scope that defined its target.
+    Lambda(Rc<StoredLambda>),
+    /// A builtin or host function, resolved BY NAME at each invocation.
+    /// These are global and cannot dangle, and name resolution preserves
+    /// call-time shadowing (`$up := $uppercase(?); $uppercase := ...` — the
+    /// later user binding wins, matching jsonata-js's environment chain).
+    Named { name: String, is_builtin: bool },
+}
+
+/// A partial application, carried inside a `StoredLambda` in place of a body.
+///
+/// `$add(10, ?)` becomes params `["__p0"]` plus this struct: at invocation the
+/// full argument list is rebuilt — bound values in their original positions,
+/// call arguments filling the placeholder positions in order — and the target
+/// is applied to it.
+#[derive(Clone, Debug)]
+pub(crate) struct PartialApplication {
+    pub target: PartialTarget,
+    /// `(position, value)` for arguments fixed at creation time (values, not
+    /// expressions: `$add($x, ?)` snapshots `$x` when the partial is built).
+    pub bound_args: Vec<(usize, JValue)>,
+    /// Positions of the `?` placeholders, filled from call arguments in order.
+    pub placeholder_positions: Vec<usize>,
+    /// Argument count of the underlying call (bound + placeholders).
+    pub total_args: usize,
+}
+
 /// Lambda storage
 /// Stores the AST of a lambda function along with its parameters, optional signature,
 /// and captured environment for closures.
@@ -2493,6 +2524,11 @@ pub struct StoredLambda {
     /// invocation, so recursion works after the defining scope has popped
     /// (classic letrec, late-bound instead of stored — no `Rc` cycle).
     pub self_name: Option<String>,
+    /// `Some` iff this lambda is a partial application: invocation applies the
+    /// carried target instead of evaluating `body` (which is inert).
+    /// `Rc` so invocation can detach a handle from the borrowed closure with a
+    /// refcount bump.
+    pub(crate) partial: Option<Rc<PartialApplication>>,
     /// Keeps `live_lambda_count` accurate; see that function.
     pub live_token: LiveLambdaToken,
 }
@@ -2510,6 +2546,7 @@ impl StoredLambda {
             captured_data: None,
             thunk: false,
             self_name: None,
+            partial: None,
             live_token: LiveLambdaToken::new(),
         }
     }
@@ -3014,6 +3051,13 @@ impl Evaluator {
         args: &[JValue],
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        // A partial application carries its own invocation recipe; no scope,
+        // signature, or body evaluation of its own.
+        if let Some(partial) = &stored.partial {
+            let partial = Rc::clone(partial);
+            return self.invoke_partial(&partial, args, data);
+        }
+
         // Compiled fast path: skip scope push/pop and tree-walking for simple lambdas.
         // Conditions: has compiled body, no signature (can't skip validation), no thunk,
         // and no captured lambda/builtin values (those require Context for runtime lookup).
@@ -4013,6 +4057,7 @@ impl Evaluator {
                     captured_data: Some(data.clone()),
                     thunk: *thunk,
                     self_name: None,
+                    partial: None,
                     live_token: LiveLambdaToken::new(),
                 };
                 Ok(JValue::Lambda(Rc::new(stored_lambda)))
@@ -4118,6 +4163,7 @@ impl Evaluator {
                         captured_data: None, // Transform takes $ as parameter
                         thunk: false,
                         self_name: None,
+                        partial: None,
                         live_token: LiveLambdaToken::new(),
                     };
                     Ok(JValue::Lambda(Rc::new(transform_lambda)))
@@ -6620,6 +6666,7 @@ impl Evaluator {
                     // body's recursive `$f(...)` resolves to THIS closure at
                     // every invocation, wherever the value has traveled.
                     self_name: Some(var_name.clone()),
+                    partial: None,
                     live_token: LiveLambdaToken::new(),
                 };
                 let lambda_value = JValue::Lambda(Rc::new(stored_lambda));
@@ -6693,6 +6740,7 @@ impl Evaluator {
                         captured_data: Some(data.clone()),
                         thunk: false,
                         self_name: Some(var_name.clone()),
+                        partial: None,
                         live_token: LiveLambdaToken::new(),
                     };
                     let lambda_value = JValue::Lambda(Rc::new(stored_lambda));
@@ -8429,6 +8477,7 @@ impl Evaluator {
                     captured_data: captured_data.cloned(),
                     thunk,
                     self_name: None,
+                    partial: None,
                     live_token: LiveLambdaToken::new(),
                 }),
             };
@@ -8476,92 +8525,6 @@ impl Evaluator {
             for (i, param) in params.iter().enumerate() {
                 let value = values.get(i).cloned().unwrap_or(JValue::Undefined);
                 self.context.bind(param.clone(), value);
-            }
-        }
-
-        // Check if this is a partial application (body is a special marker string)
-        if let AstNode::String(body_str) = body {
-            if body_str.starts_with("__partial_call:") {
-                // Parse the partial call info
-                let parts: Vec<&str> = body_str.split(':').collect();
-                if parts.len() >= 4 {
-                    let func_name = parts[1];
-                    let is_builtin = parts[2] == "true";
-                    let total_args: usize = parts[3].parse().unwrap_or(0);
-
-                    // Get placeholder positions from captured env
-                    let placeholder_positions: Vec<usize> = if let Some(env) = captured_env {
-                        if let Some(JValue::Array(positions)) = env.get("__placeholder_positions") {
-                            positions
-                                .iter()
-                                .filter_map(|v| v.as_f64().map(|n| n as usize))
-                                .collect()
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    };
-
-                    // Reconstruct the full argument list
-                    let mut full_args: Vec<JValue> = vec![JValue::Null; total_args];
-
-                    // Fill in bound arguments from captured environment
-                    if let Some(env) = captured_env {
-                        for (key, value) in env {
-                            if key.starts_with("__bound_arg_") {
-                                if let Ok(pos) = key[12..].parse::<usize>() {
-                                    if pos < total_args {
-                                        full_args[pos] = value.clone();
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Fill in placeholder positions with provided values
-                    for (i, &pos) in placeholder_positions.iter().enumerate() {
-                        if pos < total_args {
-                            let value = values.get(i).cloned().unwrap_or(JValue::Null);
-                            full_args[pos] = value;
-                        }
-                    }
-
-                    // If the partial captured its target as a closure value
-                    // (a user-defined function), invoke it directly — this is
-                    // what lets a partial application escape the scope that
-                    // defined the function it applies. Builtins/host fns fall
-                    // through to the name-based call below (they are global
-                    // and cannot dangle).
-                    if let Some(JValue::Lambda(target)) =
-                        captured_env.and_then(|env| env.get("__partial_target"))
-                    {
-                        let target = Rc::clone(target);
-                        self.context.pop_scope();
-                        return self.invoke_stored_lambda(&target, &full_args, data);
-                    }
-
-                    // Pop lambda scope, then push a new scope for temp args
-                    self.context.pop_scope();
-                    self.context.push_scope();
-
-                    // Build AST nodes for the function call arguments
-                    let mut temp_args: Vec<AstNode> = Vec::new();
-                    for (i, value) in full_args.iter().enumerate() {
-                        let temp_name = format!("__temp_arg_{}", i);
-                        self.context.bind(temp_name.clone(), value.clone());
-                        temp_args.push(AstNode::Variable(temp_name));
-                    }
-
-                    // Call the original function
-                    let result =
-                        self.evaluate_function_call(func_name, &temp_args, is_builtin, data);
-
-                    // Pop temp scope
-                    self.context.pop_scope();
-
-                    return result;
-                }
             }
         }
 
@@ -8769,6 +8732,7 @@ impl Evaluator {
                         captured_data: Some(data.clone()),
                         thunk: *thunk,
                         self_name: Some(var_name.clone()),
+                        partial: None,
                         live_token: LiveLambdaToken::new(),
                     };
                     let lambda_value = JValue::Lambda(Rc::new(stored_lambda));
@@ -10172,57 +10136,83 @@ impl Evaluator {
             .map(|(i, _)| format!("__p{}", i))
             .collect();
 
-        // Create a stored lambda that represents this partial application.
-        // The body is a marker that invoke_lambda_with_env interprets specially.
+        // A user-defined target is captured as a closure value so the partial
+        // still works after the target's defining scope pops; builtins and
+        // host fns stay name-resolved (they are global and cannot dangle, and
+        // by-name resolution preserves call-time shadowing).
+        let target = match self.context.lookup_lambda_value(name) {
+            Some(rc) => PartialTarget::Lambda(Rc::clone(rc)),
+            None => PartialTarget::Named {
+                name: name.to_string(),
+                is_builtin,
+            },
+        };
+
         let stored_lambda = StoredLambda {
             params: param_names,
-            body: AstNode::String(format!(
-                "__partial_call:{}:{}:{}",
-                name,
-                is_builtin,
-                args.len()
-            )),
-            compiled_body: None, // Partial application uses a special body marker
+            body: AstNode::Null, // Inert: invocation dispatches on `partial`
+            compiled_body: None,
             signature: None,
-            captured_env: {
-                let mut env = self.capture_current_environment();
-                // Store the bound arguments in the captured environment
-                for (pos, value) in &bound_args {
-                    env.insert(format!("__bound_arg_{}", pos), value.clone());
-                }
-                // Store placeholder positions
-                env.insert(
-                    "__placeholder_positions".to_string(),
-                    JValue::array(
-                        placeholder_positions
-                            .iter()
-                            .map(|p| JValue::Number(*p as f64))
-                            .collect::<Vec<_>>(),
-                    ),
-                );
-                // Store total argument count
-                env.insert(
-                    "__total_args".to_string(),
-                    JValue::Number(args.len() as f64),
-                );
-                // A user-defined target is captured as a value so the partial
-                // still works after the target's defining scope pops; builtins
-                // and host fns stay name-resolved (they are global).
-                if let Some(target) = self.context.lookup_lambda_value(name) {
-                    env.insert(
-                        "__partial_target".to_string(),
-                        JValue::Lambda(Rc::clone(target)),
-                    );
-                }
-                env
-            },
-            captured_data: Some(data.clone()),
+            captured_env: HashMap::new(),
+            captured_data: None, // Targets evaluate against the call-site data
             thunk: false,
             self_name: None,
+            partial: Some(Rc::new(PartialApplication {
+                target,
+                bound_args,
+                placeholder_positions,
+                total_args: args.len(),
+            })),
             live_token: LiveLambdaToken::new(),
         };
 
         Ok(JValue::Lambda(Rc::new(stored_lambda)))
+    }
+
+    /// Invoke a partial application: rebuild the full argument list (bound
+    /// values in their creation-time positions, call arguments filling the
+    /// placeholder positions in order, anything else Null) and apply the
+    /// target.
+    fn invoke_partial(
+        &mut self,
+        partial: &PartialApplication,
+        values: &[JValue],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
+        let mut full_args: Vec<JValue> = vec![JValue::Null; partial.total_args];
+        for (pos, value) in &partial.bound_args {
+            if *pos < partial.total_args {
+                full_args[*pos] = value.clone();
+            }
+        }
+        for (i, &pos) in partial.placeholder_positions.iter().enumerate() {
+            if pos < partial.total_args {
+                full_args[pos] = values.get(i).cloned().unwrap_or(JValue::Null);
+            }
+        }
+
+        match &partial.target {
+            PartialTarget::Lambda(stored) => {
+                let stored = Rc::clone(stored);
+                self.invoke_stored_lambda(&stored, &full_args, data)
+            }
+            PartialTarget::Named { name, is_builtin } => {
+                // Route through evaluate_function_call so builtins, host fns,
+                // late shadowing bindings and per-function special cases all
+                // behave exactly as a direct call would. It takes AST
+                // arguments, so pass the values via temporary bindings.
+                self.context.push_scope();
+                let mut temp_args: Vec<AstNode> = Vec::with_capacity(full_args.len());
+                for (i, value) in full_args.iter().enumerate() {
+                    let temp_name = format!("__temp_arg_{}", i);
+                    self.context.bind(temp_name.clone(), value.clone());
+                    temp_args.push(AstNode::Variable(temp_name));
+                }
+                let result = self.evaluate_function_call(name, &temp_args, *is_builtin, data);
+                self.context.pop_scope();
+                result
+            }
+        }
     }
 }
 

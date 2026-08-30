@@ -29,6 +29,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dangles. Function equality is now closure identity rather than id-string
   equality. Remaining known divergences from jsonata-js's live-frame capture
   are documented in the same suite's `divergent_from_reference` module.
+- Partial application is a typed representation instead of a stringly-typed
+  protocol: `StoredLambda` carries an optional `PartialApplication { target,
+  bound_args, placeholder_positions, total_args }`, replacing the
+  `"__partial_call:name:bool:n"` marker-string body that was parsed at every
+  invocation and the `__bound_arg_N` / `__placeholder_positions` /
+  `__total_args` / `__partial_target` values smuggled through `captured_env`.
+  A user-defined target is a captured closure (`PartialTarget::Lambda`);
+  builtins/host functions stay name-resolved at call time
+  (`PartialTarget::Named`), preserving call-time shadowing. Partials no longer
+  snapshot the entire environment at creation (the old
+  `capture_current_environment()` call was only ever a smuggling container),
+  and one behavior corner now matches jsonata-js: rebinding a user function
+  after partially applying it no longer changes what the partial calls
+  (pinned in `tests/lambda_closure_suite.rs` with eight other partial pins).
 
 ### Added
 - `jsonata_set_limits` on the C ABI: wall-clock timeout (D1012), max AST recursion
