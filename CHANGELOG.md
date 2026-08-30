@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `jsonata_set_limits` on the C ABI: wall-clock timeout (D1012), max AST recursion
+  depth (D1011), and max sequence length (D2015) — the same three guardrails the
+  Python bindings expose. C embedders previously had no way to bound a runaway
+  expression at all (the cleanup review's finding); 0 = unlimited, resettable per
+  handle. Covered by the C/C++ smoke tests and a Rust-side capi test.
 - `jsonata_core::Expression` — a compile-once API for Rust callers that runs
   compilable expressions on the bytecode VM, exactly like the Python and C
   bindings always have. Until now the VM was unreachable from the pure-Rust

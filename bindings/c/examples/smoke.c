@@ -112,6 +112,27 @@ int main(void) {
         jsonata_free_expr(e);
     }
 
+    /* evaluation guardrails */
+    {
+        JsonataExpr *e = jsonata_compile("$map([1..100000], function($x) { $x })");
+        CHECK(jsonata_set_limits(NULL, 0, 0, 0) == -1, "set_limits NULL handle -> -1");
+        CHECK(jsonata_set_limits(e, 0, 0, 10) == 0, "set_limits succeeds");
+        char *r = jsonata_evaluate(e, "{}");
+        char *err = take_error();
+        char *code = jsonata_last_error_code();
+        CHECK(r == NULL && err != NULL, "sequence limit -> NULL + message");
+        CHECK(code != NULL && strcmp(code, "D2015") == 0,
+              "sequence limit -> spec code D2015");
+        jsonata_free_string(err);
+        jsonata_free_string(code);
+        /* lifting the limit makes the same handle work again */
+        CHECK(jsonata_set_limits(e, 0, 0, 0) == 0, "set_limits reset succeeds");
+        char *r2 = jsonata_evaluate(e, "{}");
+        CHECK(r2 != NULL, "evaluate succeeds after limit reset");
+        jsonata_free_string(r2);
+        jsonata_free_expr(e);
+    }
+
     /* variable binding */
     {
         JsonataExpr *e = jsonata_compile("$sum($xs) + n");

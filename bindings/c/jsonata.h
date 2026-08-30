@@ -110,6 +110,19 @@ int jsonata_register_fn(JsonataExpr *expr, const char *name,
 int jsonata_register_fn_override(JsonataExpr *expr, const char *name,
                                  jsonata_host_fn fn, void *user_data);
 
+/*
+ * Set evaluation guardrails, applied to every subsequent jsonata_evaluate()
+ * on this handle. Each limit uses 0 for "unlimited" (the default):
+ *   - timeout_ms          bounds wall-clock evaluation time (D1012 on breach)
+ *   - max_stack_depth     bounds AST recursion depth (D1011)
+ *   - max_sequence_length bounds query-result sequences (D2015)
+ * These are the same three guardrails the Python bindings expose.
+ * Returns 0 on success, -1 on a NULL handle (error slot set).
+ */
+int jsonata_set_limits(JsonataExpr *expr, unsigned long long timeout_ms,
+                       unsigned long long max_stack_depth,
+                       unsigned long long max_sequence_length);
+
 /* Free a handle returned by jsonata_compile(). NULL is a no-op. */
 void jsonata_free_expr(JsonataExpr *expr);
 
