@@ -4469,153 +4469,49 @@ impl Evaluator {
         // creation handled below.
         if steps.len() == 1 && !Self::step_creates_tuple(&steps[0]) {
             if let AstNode::Name(field_name) = &steps[0].node {
-                return match data {
-                    JValue::Object(obj) => {
-                        // Check if this is a tuple - extract '@' value
-                        if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
-                            match obj.get("@") {
-                                Some(JValue::Object(inner)) => {
-                                    Ok(inner.get(field_name).cloned().unwrap_or(JValue::Undefined))
+                // A tuple stream falls through to the general step loop below —
+                // its tuple arm is the single implementation of tuple-aware
+                // field extraction (the fast path used to carry a drifted copy
+                // that skipped nulls and returned Null on empty).
+                let is_tuple_stream = matches!(data, JValue::Array(arr) if arr.first().is_some_and(
+                    |item| matches!(item, JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)))
+                ));
+                if !is_tuple_stream {
+                    return match data {
+                        JValue::Object(obj) => {
+                            // Check if this is a tuple - extract '@' value
+                            if obj.get("__tuple__") == Some(&JValue::Bool(true)) {
+                                match obj.get("@") {
+                                    Some(JValue::Object(inner)) => Ok(inner
+                                        .get(field_name)
+                                        .cloned()
+                                        .unwrap_or(JValue::Undefined)),
+                                    #[cfg(feature = "python")]
+                                    Some(JValue::LazyPyDict(lazy)) => {
+                                        Ok(lazy.get_field(field_name)?)
+                                    }
+                                    _ => Ok(JValue::Undefined),
                                 }
-                                #[cfg(feature = "python")]
-                                Some(JValue::LazyPyDict(lazy)) => Ok(lazy.get_field(field_name)?),
-                                _ => Ok(JValue::Undefined),
+                            } else {
+                                Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
                             }
-                        } else {
-                            Ok(obj.get(field_name).cloned().unwrap_or(JValue::Undefined))
                         }
-                    }
-                    #[cfg(feature = "python")]
-                    JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field_name)?),
-                    JValue::Array(arr) => {
-                        // Array mapping: extract field from each element
-                        // Optimized: use references to access fields without cloning entire objects
-                        // Check first element for tuple-ness (tuples are all-or-nothing)
-                        let has_tuples = arr.first().is_some_and(|item| {
-                            matches!(item, JValue::Object(obj) if obj.get("__tuple__") == Some(&JValue::Bool(true)))
-                        });
-
-                        if !has_tuples {
-                            // No tuples: delegate to the shared field step
-                            // (skip undefined, KEEP nulls, flatten one level,
-                            // empty -> undefined) plus the end-of-path
-                            // singleton unwrap — the same policy as the VM's
-                            // get_field_cached and jsonata-js. The hand-rolled
-                            // loop this replaces skipped nulls and returned
-                            // Null when empty, so `p` over [{"p":null},{"p":2}]
-                            // was 2 on the tree-walker but [null,2] on the VM
-                            // and in the reference.
+                        #[cfg(feature = "python")]
+                        JValue::LazyPyDict(lazy) => Ok(lazy.get_field(field_name)?),
+                        JValue::Array(_) => {
+                            // Delegate to the shared field step (skip undefined,
+                            // KEEP nulls, flatten one level, empty -> undefined)
+                            // plus the end-of-path singleton unwrap — the same
+                            // policy as the VM's get_field_cached and jsonata-js.
                             let extracted = compiled_field_step(field_name, data, &self.options)?;
                             match extracted {
                                 JValue::Array(arr) if arr.len() == 1 => Ok(arr[0].clone()),
                                 other => Ok(other),
                             }
-                        } else {
-                            // Tuple path: per-element tuple handling
-                            let mut result = Vec::new();
-                            for item in arr.iter() {
-                                match item {
-                                    JValue::Object(obj) => {
-                                        let is_tuple =
-                                            obj.get("__tuple__") == Some(&JValue::Bool(true));
-
-                                        if is_tuple {
-                                            let field_val: Option<JValue> = match obj.get("@") {
-                                                Some(JValue::Object(inner)) => {
-                                                    inner.get(field_name).cloned()
-                                                }
-                                                #[cfg(feature = "python")]
-                                                Some(JValue::LazyPyDict(lazy)) => {
-                                                    let v = lazy.get_field(field_name)?;
-                                                    if v.is_undefined() {
-                                                        None
-                                                    } else {
-                                                        Some(v)
-                                                    }
-                                                }
-                                                _ => continue,
-                                            };
-
-                                            if let Some(val) = field_val.as_ref() {
-                                                if !val.is_null() {
-                                                    // Build tuple wrapper - only clone bindings when needed
-                                                    let wrap = |v: JValue| -> JValue {
-                                                        let mut wrapper = IndexMap::new();
-                                                        wrapper.insert("@".to_string(), v);
-                                                        wrapper.insert(
-                                                            "__tuple__".to_string(),
-                                                            JValue::Bool(true),
-                                                        );
-                                                        for (k, v) in obj.iter() {
-                                                            if k.starts_with('$') {
-                                                                wrapper
-                                                                    .insert(k.clone(), v.clone());
-                                                            }
-                                                        }
-                                                        JValue::object(wrapper)
-                                                    };
-
-                                                    match val {
-                                                        JValue::Array(arr_val) => {
-                                                            for item in arr_val.iter() {
-                                                                result.push(wrap(item.clone()));
-                                                            }
-                                                        }
-                                                        other => result.push(wrap(other.clone())),
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            // Non-tuple: access field directly by reference, only clone the field value
-                                            if let Some(val) = obj.get(field_name) {
-                                                if !val.is_null() {
-                                                    match val {
-                                                        JValue::Array(arr_val) => {
-                                                            for item in arr_val.iter() {
-                                                                result.push(item.clone());
-                                                            }
-                                                        }
-                                                        other => result.push(other.clone()),
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    JValue::Array(inner_arr) => {
-                                        // Recursively map over nested array
-                                        let nested_result = self.evaluate_path(
-                                            &[PathStep::new(AstNode::Name(field_name.clone()))],
-                                            &JValue::Array(inner_arr.clone()),
-                                        )?;
-                                        // Add nested result to our results
-                                        match nested_result {
-                                            JValue::Array(nested) => {
-                                                // Flatten nested arrays from recursive mapping
-                                                result.extend(nested.iter().cloned());
-                                            }
-                                            JValue::Null => {}
-                                            other => result.push(other),
-                                        }
-                                    }
-                                    _ => {} // Skip non-object items
-                                }
-                            }
-
-                            // Return array result
-                            // JSONata singleton unwrapping: if we have exactly one result,
-                            // unwrap it (even if it's an array)
-                            if result.is_empty() {
-                                Ok(JValue::Null)
-                            } else if result.len() == 1 {
-                                Ok(result.into_iter().next().unwrap())
-                            } else {
-                                check_sequence_length(result.len(), &self.options)?;
-                                Ok(JValue::array(result))
-                            }
-                        } // end else (tuple path)
-                    }
-                    _ => Ok(JValue::Undefined),
-                };
+                        }
+                        _ => Ok(JValue::Undefined),
+                    };
+                }
             }
         }
 

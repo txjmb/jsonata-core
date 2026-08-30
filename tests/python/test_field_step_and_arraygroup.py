@@ -76,3 +76,13 @@ def test_array_group_singleton_mapping_keeps_group(engine):
     assert ev("$.[value, eps]", [{"value": 3, "eps": 9}]) == [3, 9]
     assert ev("blah.[baz]", {"blah": [{"baz": 1}]}) == [1]
     assert ev("blah.[baz]", {"blah": [{"baz": 1}, {"baz": 2}]}) == [[1], [2]]
+
+
+def test_tuple_stream_field_extraction_keeps_nulls(engine):
+    # The fast path's tuple branch used to skip nulls and return Null on
+    # empty; tuple streams now go through the general loop's single tuple
+    # implementation. Reference outputs from jsonata-js.
+    assert ev("$#$i.p", [{"p": None}, {"p": 2}]) == [None, 2]
+    assert ev("$#$i.p", [{"q": 1}]) is None
+    assert ev("arr#$i.p", {"arr": [{"p": 1}, {"p": [2, 3]}]}) == [1, 2, 3]
+    assert ev("($#$i.p)[$i=0]", [{"p": None}, {"p": 2}]) is None

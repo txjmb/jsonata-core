@@ -120,7 +120,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with "mapped over an empty array" (undefined: `emptyarr.[b]`). Both tree-walker
   Name-step loops (the fast path and the general step loop's inner loop) now delegate
   to `compiled_field_step`, deleting ~100 lines of drifted copies; the reference
-  suite's `array-constructor/case013`/`case014` now pass by the correct route.
+  suite's `array-constructor/case013`/`case014` now pass by the correct route. The
+  fast path's tuple branch (a third copy, with the same null-skip drift) is deleted
+  outright — tuple streams fall through to the general step loop's single tuple
+  implementation, and `$#$i.p` over `[{"p":null},{"p":2}]` is now `[null,2]` on both
+  engines, matching the reference.
 - Errors carry their JSONata spec code at the front of the message again: the
   `FunctionError` wrapping used to bury codes behind prose prefixes ("Runtime
   error: D3030: Cannot convert 'x' to number"), so the C ABI, the Rust CLI, and
