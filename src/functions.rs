@@ -72,24 +72,26 @@ pub mod string {
 
     /// Helper to build a Regex from pattern and flags
     pub fn build_regex(pattern: &str, flags: &str) -> Result<Regex, FunctionError> {
-        // Convert JSONata flags to Rust regex flags
-        let mut regex_pattern = String::new();
-
-        // Add inline flags
-        if !flags.is_empty() {
-            regex_pattern.push_str("(?");
-            if flags.contains('i') {
-                regex_pattern.push('i'); // case-insensitive
-            }
-            if flags.contains('m') {
-                regex_pattern.push('m'); // multi-line
-            }
-            if flags.contains('s') {
-                regex_pattern.push('s'); // dot matches newline
-            }
-            regex_pattern.push(')');
+        // Convert JSONata flags to Rust inline regex flags. Only emit the
+        // group for flags Rust regex knows; a bare "(?)" (e.g. from the
+        // internal-only `g` flag alone) is a syntax error.
+        let mut inline = String::new();
+        if flags.contains('i') {
+            inline.push('i'); // case-insensitive
+        }
+        if flags.contains('m') {
+            inline.push('m'); // multi-line
+        }
+        if flags.contains('s') {
+            inline.push('s'); // dot matches newline
         }
 
+        let mut regex_pattern = String::new();
+        if !inline.is_empty() {
+            regex_pattern.push_str("(?");
+            regex_pattern.push_str(&inline);
+            regex_pattern.push(')');
+        }
         regex_pattern.push_str(pattern);
 
         Regex::new(&regex_pattern)

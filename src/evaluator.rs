@@ -6404,14 +6404,12 @@ impl Evaluator {
                 // Do regex match inline
                 return match lhs_value {
                     JValue::String(s) => {
-                        // Build the regex
-                        let case_insensitive = flags.contains('i');
-                        let regex_pattern = if case_insensitive {
-                            format!("(?i){}", pattern)
-                        } else {
-                            pattern.clone()
-                        };
-                        match regex::Regex::new(&regex_pattern) {
+                        // Build the regex via the shared flag translation
+                        // ($split/$replace use the same helper, so i/m/s
+                        // behave identically on every entry point).
+                        match crate::functions::string::build_regex(pattern, flags)
+                            .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))
+                        {
                             Ok(re) => {
                                 if let Some(m) = re.find(&s) {
                                     // Return match object
@@ -7544,17 +7542,11 @@ impl Evaluator {
                     None => (".*".to_string(), "".to_string()),
                 };
 
-                // Build regex
+                // Build regex via the shared flag translation ($split/$replace
+                // use the same helper, so i/m/s behave identically everywhere)
                 let is_global = flags.contains('g');
-                let regex_pattern = if flags.contains('i') {
-                    format!("(?i){}", pattern)
-                } else {
-                    pattern.clone()
-                };
-
-                let re = regex::Regex::new(&regex_pattern).map_err(|e| {
-                    EvaluatorError::EvaluationError(format!("Invalid regex pattern: {}", e))
-                })?;
+                let re = crate::functions::string::build_regex(&pattern, &flags)
+                    .map_err(|e| EvaluatorError::EvaluationError(e.to_string()))?;
 
                 let mut results = Vec::new();
                 let mut count = 0;
