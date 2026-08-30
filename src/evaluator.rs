@@ -5674,6 +5674,22 @@ impl Evaluator {
             };
         }
 
+        self.finalize_path_result(steps, current, did_array_mapping)
+    }
+
+    /// End-of-path result policy, applied once after the step loop: project a
+    /// tuple stream down to its visible `@` values (unless a consumer asked to
+    /// keep the wrappers), decide singleton unwrapping vs `[]` keep-array,
+    /// collapse an empty result sequence to undefined, and enforce D2015.
+    ///
+    /// Extracted from `evaluate_path` verbatim so the policy has a name; the
+    /// inline comments below are the rule.
+    fn finalize_path_result(
+        &mut self,
+        steps: &[PathStep],
+        mut current: JValue,
+        did_array_mapping: bool,
+    ) -> Result<JValue, EvaluatorError> {
         // End-of-path tuple projection, mirroring jsonata-js evaluatePath
         // (jsonata.js ~L202-212): once the path is a tuple stream, its VISIBLE
         // result is each tuple's `@` value; the `{@, $var, !label, __tuple__}`
