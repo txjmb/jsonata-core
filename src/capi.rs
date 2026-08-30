@@ -456,25 +456,13 @@ pub extern "C" fn jsonata_last_error_code() -> *mut c_char {
     })
 }
 
-/// A JSONata spec code is one uppercase ASCII letter followed by exactly
-/// four digits, terminated by ':' (e.g. "T2002: ..."). The engine sometimes
-/// stores it at the start of the message and sometimes behind a prose
-/// prefix ("Runtime error: D3030: ..."), so scan for the first
-/// token-boundary occurrence. Uncoded prose ("Parse error: something",
-/// "invalid input JSON: ...") yields None.
+/// The JSONata spec code of `msg`, using the crate-wide rule
+/// (`evaluator::error_code_prefix`): a leading `X####:` prefix. Coded
+/// engine errors always carry the code at the front — the old mid-string
+/// scan existed only because `FunctionError` wrapping used to bury codes
+/// behind prose prefixes ("Runtime error: D3030: ...").
 fn extract_error_code(msg: &str) -> Option<String> {
-    let bytes = msg.as_bytes();
-    for i in 0..bytes.len().saturating_sub(5) {
-        let at_boundary = i == 0 || bytes[i - 1] == b' ';
-        if at_boundary
-            && bytes[i].is_ascii_uppercase()
-            && bytes[i + 1..i + 5].iter().all(|b| b.is_ascii_digit())
-            && bytes[i + 5] == b':'
-        {
-            return Some(msg[i..i + 5].to_string());
-        }
-    }
-    None
+    evaluator::error_code_prefix(msg).map(str::to_string)
 }
 
 /// Set evaluation guardrails on the expression, applied to every subsequent
@@ -734,8 +722,16 @@ mod tests {
             Some("T2002")
         );
         assert_eq!(extract_error_code("S0214: bad %").as_deref(), Some("S0214"));
+        // Codes are no longer buried behind prose prefixes (the
+        // FunctionError wrapping that produced "Runtime error: D3030: ..."
+        // is gone), so the classifier is prefix-anchored: a mid-string code
+        // does not count.
         assert_eq!(
-            extract_error_code("Runtime error: D3030: Cannot convert").as_deref(),
+            extract_error_code("Runtime error: D3030: Cannot convert"),
+            None
+        );
+        assert_eq!(
+            extract_error_code("D3030: Cannot convert 'x' to number").as_deref(),
             Some("D3030")
         );
         assert_eq!(extract_error_code("Parse error: something"), None);

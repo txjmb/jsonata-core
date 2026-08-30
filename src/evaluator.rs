@@ -2298,7 +2298,20 @@ impl From<crate::functions::FunctionError> for EvaluatorError {
         if let crate::functions::FunctionError::PyConversionError(m) = &e {
             return EvaluatorError::PyConversionError(m.clone());
         }
-        EvaluatorError::EvaluationError(e.to_string())
+        // Pass the inner message through rather than thiserror's Display,
+        // which prepends "Runtime error: "/"Argument error: "/"Type error: "
+        // — burying the JSONata spec code ("Runtime error: D3030: ...") so
+        // no prefix-anchored classifier (the CLIs, `EvaluatorError::code`)
+        // could see it, and double-stacking with EvaluatorError's own
+        // Display prefix ("Evaluation error: Runtime error: ...").
+        use crate::functions::FunctionError as FE;
+        let msg = match e {
+            FE::ArgumentError(m) | FE::TypeError(m) | FE::RuntimeError(m) => m,
+            // Handled by the early return above; kept for exhaustiveness.
+            #[cfg(feature = "python")]
+            FE::PyConversionError(m) => m,
+        };
+        EvaluatorError::EvaluationError(msg)
     }
 }
 
@@ -2324,6 +2337,30 @@ impl EvaluatorError {
             #[cfg(feature = "python")]
             EvaluatorError::PyConversionError(m) => m,
         }
+    }
+
+    /// The JSONata spec code ("T2010", "D3030", ...) this error carries, if
+    /// any: the message's leading `X####:` prefix. This is THE definition of
+    /// "is this a coded error" — the C ABI's `jsonata_last_error_code` and
+    /// the CLI's error formatting both classify with it (the Python CLI
+    /// mirrors it with an equivalent anchored regex), so the same failure
+    /// presents the same way in every binary.
+    pub fn code(&self) -> Option<&str> {
+        error_code_prefix(self.message())
+    }
+}
+
+/// The leading JSONata spec code of `msg` (`X####:` at offset 0), if any.
+pub fn error_code_prefix(msg: &str) -> Option<&str> {
+    let b = msg.as_bytes();
+    if b.len() >= 6
+        && b[0].is_ascii_uppercase()
+        && b[1..5].iter().all(u8::is_ascii_digit)
+        && b[5] == b':'
+    {
+        Some(&msg[..5])
+    } else {
+        None
     }
 }
 

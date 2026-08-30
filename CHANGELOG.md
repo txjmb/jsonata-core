@@ -108,6 +108,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine itself.
 
 ### Fixed
+- Errors carry their JSONata spec code at the front of the message again: the
+  `FunctionError` wrapping used to bury codes behind prose prefixes ("Runtime
+  error: D3030: Cannot convert 'x' to number"), so the C ABI, the Rust CLI, and
+  the Python CLI each grew a different classifier and disagreed on whether the
+  same error was coded. The inner message now passes through unwrapped
+  ("D3030: ..."), `EvaluatorError::code()` / `evaluator::error_code_prefix` is
+  the one definition of "coded error" (prefix-anchored), and the C ABI and both
+  CLIs classify with it — the same failure now presents identically in every
+  binary. The C ABI's mid-string code scan is retired (it existed only to see
+  through the now-removed prose prefixes).
 - Number stringification now matches jsonata-js exactly (verified against the pinned
   reference with a 307-case randomized differential over scalars, containers,
   prettified output, and `&` concatenation). Three divergences fixed: non-integers

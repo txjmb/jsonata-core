@@ -9,19 +9,11 @@ use jsonata_core::evaluator::EvaluatorError;
 /// callers use it directly.
 pub fn format_evaluator_error(e: &EvaluatorError) -> String {
     let msg = e.message();
-    if is_coded_error(msg) {
+    if e.code().is_some() {
         msg.to_string()
     } else {
         format!("error: {}", msg)
     }
-}
-
-fn is_coded_error(message: &str) -> bool {
-    let bytes = message.as_bytes();
-    bytes.len() >= 6
-        && matches!(bytes[0], b'T' | b'D' | b'U' | b'S')
-        && bytes[1..5].iter().all(u8::is_ascii_digit)
-        && bytes[5] == b':'
 }
 
 #[cfg(test)]
