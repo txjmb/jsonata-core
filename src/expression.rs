@@ -37,6 +37,7 @@ pub(crate) fn force_tree_walker() -> bool {
     FORCE_TREE_WALKER.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+#[cfg(feature = "python")] // only the Python test hooks flip it today
 pub(crate) fn set_force_tree_walker(on: bool) {
     FORCE_TREE_WALKER.store(on, std::sync::atomic::Ordering::Relaxed);
 }

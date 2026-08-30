@@ -45,6 +45,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C-level for them, so behavior is unchanged), which let the duplicate slow-path container
   loops be deleted.
 
+### Changed (evaluator internals)
+- The vestigial `*_is_explicit_null` plumbing is gone: since the null/undefined split
+  (#32) a runtime `JValue::Null` is always an explicit null, yet the flags were still
+  computed and threaded through ~20 signatures — nine arithmetic/comparison wrapper
+  methods, the `CompiledExpr::ExplicitNull` variant (now `Literal(Null)`), a
+  `PushExplicitNull` instruction, and per-instruction bool pairs on the VM's
+  arithmetic/comparison opcodes — with both terminal consumers ignoring them (~200
+  lines removed). Arithmetic and ordered comparison now have exactly one
+  implementation each, shared by the tree-walker, the compiled path, and the VM; as
+  part of that, the compiled/VM paths' T2010/T2009 error texts now match the
+  tree-walker's richer messages ("Cannot compare X and Y", operator symbol in T2009)
+  instead of the generic "Type mismatch in comparison" — same codes, better text, and
+  the two engines no longer disagree. `Evaluator::is_truthy` likewise now delegates to
+  the shared `compiled_is_truthy` instead of maintaining a twin (#111 had to be fixed
+  in both).
+
 ### Deprecated
 
 ### Removed

@@ -192,10 +192,6 @@ pub(crate) enum CompiledExpr {
     // ── Leaves ──────────────────────────────────────────────────────────
     /// A literal value known at compile time.
     Literal(JValue),
-    /// Explicit `null` literal from `AstNode::Null`.
-    /// Distinct from field-lookup-produced null: triggers T2010/T2002 errors
-    /// in comparisons/arithmetic, matching the tree-walker's `explicit_null` semantics.
-    ExplicitNull,
     /// Single-level field lookup on the current object: `obj.get("field")`.
     FieldLookup(String),
     /// Two-level nested field lookup: `obj.get("a")?.get("b")`.
@@ -390,7 +386,6 @@ fn compiled_expr_node_count_exceeds(expr: &CompiledExpr, limit: usize) -> bool {
         match expr {
             // ── Leaves: no children ──────────────────────────────────
             CompiledExpr::Literal(_)
-            | CompiledExpr::ExplicitNull
             | CompiledExpr::FieldLookup(_)
             | CompiledExpr::NestedFieldLookup(_, _)
             | CompiledExpr::VariableLookup(_)
@@ -468,7 +463,7 @@ fn try_compile_expr_inner(node: &AstNode, allowed_vars: Option<&[&str]>) -> Opti
         AstNode::String(s) => Some(CompiledExpr::Literal(JValue::string(s.clone()))),
         AstNode::Number(n) => Some(CompiledExpr::Literal(JValue::Number(*n))),
         AstNode::Boolean(b) => Some(CompiledExpr::Literal(JValue::Bool(*b))),
-        AstNode::Null => Some(CompiledExpr::ExplicitNull),
+        AstNode::Null => Some(CompiledExpr::Literal(JValue::Null)),
 
         // ── Field access ────────────────────────────────────────────────
         AstNode::Name(field) => Some(CompiledExpr::FieldLookup(field.clone())),
@@ -960,10 +955,6 @@ fn eval_compiled_inner(
         // ── Leaves ──────────────────────────────────────────────────────
         CompiledExpr::Literal(v) => Ok(v.clone()),
 
-        // ExplicitNull evaluates to Null, but is flagged at compile-time for
-        // comparison/arithmetic arms to trigger the correct T2010/T2002 errors.
-        CompiledExpr::ExplicitNull => Ok(JValue::Null),
-
         CompiledExpr::FieldLookup(field) => match data {
             JValue::Object(obj) => {
                 // Shape-accelerated: use positional index if available
@@ -1037,8 +1028,6 @@ fn eval_compiled_inner(
 
         // ── Comparison ──────────────────────────────────────────────────
         CompiledExpr::Compare { op, lhs, rhs } => {
-            let lhs_explicit_null = is_compiled_explicit_null(lhs);
-            let rhs_explicit_null = is_compiled_explicit_null(rhs);
             let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
             let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
             match op {
@@ -1047,48 +1036,26 @@ fn eval_compiled_inner(
                 // silently comparing unequal.
                 CompiledCmp::Eq => compiled_equal(&left, &right),
                 CompiledCmp::Ne => compiled_not_equal(&left, &right),
-                CompiledCmp::Lt => compiled_ordered_cmp(
-                    &left,
-                    &right,
-                    lhs_explicit_null,
-                    rhs_explicit_null,
-                    |a, b| a < b,
-                    |a, b| a < b,
-                ),
-                CompiledCmp::Le => compiled_ordered_cmp(
-                    &left,
-                    &right,
-                    lhs_explicit_null,
-                    rhs_explicit_null,
-                    |a, b| a <= b,
-                    |a, b| a <= b,
-                ),
-                CompiledCmp::Gt => compiled_ordered_cmp(
-                    &left,
-                    &right,
-                    lhs_explicit_null,
-                    rhs_explicit_null,
-                    |a, b| a > b,
-                    |a, b| a > b,
-                ),
-                CompiledCmp::Ge => compiled_ordered_cmp(
-                    &left,
-                    &right,
-                    lhs_explicit_null,
-                    rhs_explicit_null,
-                    |a, b| a >= b,
-                    |a, b| a >= b,
-                ),
+                CompiledCmp::Lt => {
+                    compiled_ordered_cmp(&left, &right, "<", |a, b| a < b, |a, b| a < b)
+                }
+                CompiledCmp::Le => {
+                    compiled_ordered_cmp(&left, &right, "<=", |a, b| a <= b, |a, b| a <= b)
+                }
+                CompiledCmp::Gt => {
+                    compiled_ordered_cmp(&left, &right, ">", |a, b| a > b, |a, b| a > b)
+                }
+                CompiledCmp::Ge => {
+                    compiled_ordered_cmp(&left, &right, ">=", |a, b| a >= b, |a, b| a >= b)
+                }
             }
         }
 
         // ── Arithmetic ──────────────────────────────────────────────────
         CompiledExpr::Arithmetic { op, lhs, rhs } => {
-            let lhs_explicit_null = is_compiled_explicit_null(lhs);
-            let rhs_explicit_null = is_compiled_explicit_null(rhs);
             let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
             let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
-            compiled_arithmetic(*op, &left, &right, lhs_explicit_null, rhs_explicit_null)
+            compiled_arithmetic(*op, &left, &right)
         }
 
         // ── String concat ───────────────────────────────────────────────
@@ -1513,44 +1480,34 @@ pub(crate) fn predicate_index_match(pred: &JValue, index: usize, len: usize) -> 
     }
 }
 
-/// Returns true if the compiled expression is a literal `null` (from `AstNode::Null`).
-/// Used to replicate the tree-walker's `explicit_null` flag in comparisons/arithmetic.
-#[inline]
-fn is_compiled_explicit_null(expr: &CompiledExpr) -> bool {
-    matches!(expr, CompiledExpr::ExplicitNull)
-}
-
-/// Ordered comparison for compiled expressions.
-/// Mirrors the tree-walker's `ordered_compare` including explicit-null semantics.
+/// Ordered comparison shared by the tree-walker, the compiled path, and the
+/// bytecode VM, so all three report identical errors.
+///
+/// jsonata-js's rule: only numbers, strings and *undefined* are comparable,
+/// so anything else -- null, boolean, object, array -- raises T2010; an
+/// undefined operand then makes the result undefined; and only after that
+/// does a differing type raise T2009 (with `op_symbol` in the message).
 #[inline]
 pub(crate) fn compiled_ordered_cmp(
     left: &JValue,
     right: &JValue,
-    _left_is_explicit_null: bool,
-    _right_is_explicit_null: bool,
+    op_symbol: &str,
     cmp_num: fn(f64, f64) -> bool,
     cmp_str: fn(&str, &str) -> bool,
 ) -> Result<JValue, EvaluatorError> {
-    // Compiled twin of `Evaluator::ordered_compare`; keep the two in step.
-    // jsonata-js's rule: only numbers, strings and *undefined* are comparable,
-    // so anything else -- null, boolean, object, array -- raises T2010; an
-    // undefined operand then makes the result undefined; and only after that
-    // does a differing type raise T2009.
-    //
-    // The `*_is_explicit_null` flags are vestigial. They told a literal `null`
-    // from a missing value back when both were `JValue::Null`; since the
-    // null/undefined split (#32) the variant carries that itself, and every
-    // `JValue::Null` reaching here is an explicit null and uncomparable.
     fn comparable(v: &JValue) -> bool {
         matches!(v, JValue::Number(_) | JValue::String(_) | JValue::Undefined)
     }
 
     if !comparable(left) || !comparable(right) {
-        return Err(EvaluatorError::EvaluationError(
-            "T2010: Type mismatch in comparison".to_string(),
-        ));
+        return Err(EvaluatorError::EvaluationError(format!(
+            "T2010: Cannot compare {} and {}",
+            Evaluator::type_name(left),
+            Evaluator::type_name(right)
+        )));
     }
 
+    // An undefined operand makes the comparison undefined, not an error.
     if matches!(left, JValue::Undefined) || matches!(right, JValue::Undefined) {
         return Ok(JValue::Undefined);
     }
@@ -1558,10 +1515,10 @@ pub(crate) fn compiled_ordered_cmp(
     match (left, right) {
         (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Bool(cmp_num(*a, *b))),
         (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(cmp_str(a, b))),
-        _ => Err(EvaluatorError::EvaluationError(
-            "T2009: The expressions on either side of operator must be of the same data type"
-                .to_string(),
-        )),
+        _ => Err(EvaluatorError::EvaluationError(format!(
+            "T2009: The expressions on either side of operator \"{}\" must be of the same data type",
+            op_symbol
+        ))),
     }
 }
 
@@ -1572,8 +1529,6 @@ pub(crate) fn compiled_arithmetic(
     op: CompiledArithOp,
     left: &JValue,
     right: &JValue,
-    _left_is_explicit_null: bool,
-    _right_is_explicit_null: bool,
 ) -> Result<JValue, EvaluatorError> {
     let op_sym = match op {
         CompiledArithOp::Add => "+",
@@ -1615,10 +1570,8 @@ pub(crate) fn compiled_arithmetic(
         //
         // Only undefined propagates. An explicit null -- like any other
         // non-number -- is a type error, whether written as a literal or
-        // arriving at runtime from data or a lambda parameter. The
-        // `*_is_explicit_null` flags are vestigial: they told a literal `null`
-        // from a missing value back when both were `JValue::Null`, and since
-        // the null/undefined split (#32) the variant carries that itself.
+        // arriving at runtime from data or a lambda parameter (the
+        // null/undefined split, #32, made runtime nulls unambiguous).
         _ if !matches!(left, JValue::Number(n) if !n.is_nan())
             && !matches!(left, JValue::Undefined) =>
         {
@@ -6878,28 +6831,18 @@ impl Evaluator {
             return Ok(JValue::Bool(self.is_truthy(&right)));
         }
 
-        // Check if operands are explicit null literals (vs undefined from variables)
-        let left_is_explicit_null = matches!(lhs, AstNode::Null);
-        let right_is_explicit_null = matches!(rhs, AstNode::Null);
-
-        // Standard evaluation: evaluate both operands
+        // Standard evaluation: evaluate both operands, then dispatch to the
+        // shared arithmetic/comparison implementations (one definition for the
+        // tree-walker, the compiled path, and the VM).
         let left = self.evaluate_internal(lhs, data)?;
         let right = self.evaluate_internal(rhs, data)?;
 
         match op {
-            BinaryOp::Add => self.add(&left, &right, left_is_explicit_null, right_is_explicit_null),
-            BinaryOp::Subtract => {
-                self.subtract(&left, &right, left_is_explicit_null, right_is_explicit_null)
-            }
-            BinaryOp::Multiply => {
-                self.multiply(&left, &right, left_is_explicit_null, right_is_explicit_null)
-            }
-            BinaryOp::Divide => {
-                self.divide(&left, &right, left_is_explicit_null, right_is_explicit_null)
-            }
-            BinaryOp::Modulo => {
-                self.modulo(&left, &right, left_is_explicit_null, right_is_explicit_null)
-            }
+            BinaryOp::Add => compiled_arithmetic(CompiledArithOp::Add, &left, &right),
+            BinaryOp::Subtract => compiled_arithmetic(CompiledArithOp::Sub, &left, &right),
+            BinaryOp::Multiply => compiled_arithmetic(CompiledArithOp::Mul, &left, &right),
+            BinaryOp::Divide => compiled_arithmetic(CompiledArithOp::Div, &left, &right),
+            BinaryOp::Modulo => compiled_arithmetic(CompiledArithOp::Mod, &left, &right),
 
             // compiled_equal normalizes lazy operands (guarded, zero-cost when neither
             // side is lazy) so conversion failures raise instead of silently comparing
@@ -6907,23 +6850,17 @@ impl Evaluator {
             BinaryOp::Equal => compiled_equal(&left, &right),
             BinaryOp::NotEqual => compiled_not_equal(&left, &right),
             BinaryOp::LessThan => {
-                self.less_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
+                compiled_ordered_cmp(&left, &right, "<", |a, b| a < b, |a, b| a < b)
             }
-            BinaryOp::LessThanOrEqual => self.less_than_or_equal(
-                &left,
-                &right,
-                left_is_explicit_null,
-                right_is_explicit_null,
-            ),
+            BinaryOp::LessThanOrEqual => {
+                compiled_ordered_cmp(&left, &right, "<=", |a, b| a <= b, |a, b| a <= b)
+            }
             BinaryOp::GreaterThan => {
-                self.greater_than(&left, &right, left_is_explicit_null, right_is_explicit_null)
+                compiled_ordered_cmp(&left, &right, ">", |a, b| a > b, |a, b| a > b)
             }
-            BinaryOp::GreaterThanOrEqual => self.greater_than_or_equal(
-                &left,
-                &right,
-                left_is_explicit_null,
-                right_is_explicit_null,
-            ),
+            BinaryOp::GreaterThanOrEqual => {
+                compiled_ordered_cmp(&left, &right, ">=", |a, b| a >= b, |a, b| a >= b)
+            }
 
             // And/Or handled above with short-circuit evaluation
             BinaryOp::And | BinaryOp::Or => unreachable!(),
@@ -10200,27 +10137,9 @@ impl Evaluator {
 
     /// Check if a value is truthy (JSONata semantics).
     fn is_truthy(&self, value: &JValue) -> bool {
-        match value {
-            JValue::Null | JValue::Undefined => false,
-            JValue::Bool(b) => *b,
-            JValue::Number(n) => *n != 0.0,
-            JValue::String(s) => !s.is_empty(),
-            // JSONata has ONE truthiness rule and applies it recursively: a
-            // container is truthy only if some element is truthy, checked all
-            // the way down. `[0]`, `[[0]]` and `[0,0]` are all falsy. This arm
-            // used to ask only whether the array was non-empty, which made
-            // `$not([0])` false where `$boolean([0])` -- already correct -- is
-            // false and so `$not` must be true (#111).
-            JValue::Array(arr) => match arr.len() {
-                0 => false,
-                1 => self.is_truthy(&arr[0]),
-                _ => arr.iter().any(|v| self.is_truthy(v)),
-            },
-            JValue::Object(obj) => !obj.is_empty(),
-            #[cfg(feature = "python")]
-            JValue::LazyPyDict(lazy) => !lazy.is_empty(),
-            _ => false,
-        }
+        // One definition of truthiness for both engines (see
+        // `compiled_is_truthy` for the recursive-container rule, #111).
+        compiled_is_truthy(value)
     }
 
     /// Unwrap singleton arrays to scalar values
@@ -10288,110 +10207,6 @@ impl Evaluator {
     }
 
     /// Addition
-    /// Add — delegates to the shared `compiled_arithmetic` so the
-    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
-    /// used to carry its own copy of the null/undefined handling, which is how
-    /// a runtime null came to be treated as "missing" here (#98).
-    fn add(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        compiled_arithmetic(
-            CompiledArithOp::Add,
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-        )
-    }
-
-    /// Subtraction
-    /// Subtract — delegates to the shared `compiled_arithmetic` so the
-    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
-    /// used to carry its own copy of the null/undefined handling, which is how
-    /// a runtime null came to be treated as "missing" here (#98).
-    fn subtract(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        compiled_arithmetic(
-            CompiledArithOp::Sub,
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-        )
-    }
-
-    /// Multiplication
-    /// Multiply — delegates to the shared `compiled_arithmetic` so the
-    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
-    /// used to carry its own copy of the null/undefined handling, which is how
-    /// a runtime null came to be treated as "missing" here (#98).
-    fn multiply(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        compiled_arithmetic(
-            CompiledArithOp::Mul,
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-        )
-    }
-
-    /// Division
-    /// Divide — delegates to the shared `compiled_arithmetic` so the
-    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
-    /// used to carry its own copy of the null/undefined handling, which is how
-    /// a runtime null came to be treated as "missing" here (#98).
-    fn divide(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        compiled_arithmetic(
-            CompiledArithOp::Div,
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-        )
-    }
-
-    /// Modulo
-    /// Modulo — delegates to the shared `compiled_arithmetic` so the
-    /// tree-walker and the compiled/VM paths cannot drift apart. Each operator
-    /// used to carry its own copy of the null/undefined handling, which is how
-    /// a runtime null came to be treated as "missing" here (#98).
-    fn modulo(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        compiled_arithmetic(
-            CompiledArithOp::Mod,
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-        )
-    }
-
     /// Get human-readable type name for error messages
     fn type_name(value: &JValue) -> &'static str {
         match value {
@@ -10405,137 +10220,6 @@ impl Evaluator {
             JValue::LazyPyDict(_) => "object",
             _ => "unknown",
         }
-    }
-
-    /// Ordered comparison shared across <, <=, >, >=.
-    ///
-    /// Follows jsonata-js's `evaluateComparisonExpression`:
-    /// 1. Only numbers, strings and *undefined* are comparable. Anything else
-    ///    -- null, boolean, object, array -- raises T2010.
-    /// 2. If either side is undefined the result is undefined.
-    /// 3. Otherwise both are comparable and present, so differing types raise
-    ///    T2009.
-    ///
-    /// The `*_is_explicit_null` flags are vestigial. They existed to tell a
-    /// literal `null` in the source apart from a "missing" value back when both
-    /// were `JValue::Null`. Since the null/undefined split (#32) a missing value
-    /// is `JValue::Undefined`, so every `JValue::Null` reaching here is an
-    /// explicit null and is uncomparable either way.
-    ///
-    /// `compare_nums` receives (left_f64, right_f64) for numeric operands.
-    /// `compare_strs` receives (left_str, right_str) for string operands.
-    /// `op_symbol` is used in the T2009 error message (e.g. "<", ">=").
-    fn ordered_compare(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        _left_is_explicit_null: bool,
-        _right_is_explicit_null: bool,
-        op_symbol: &str,
-        compare_nums: fn(f64, f64) -> bool,
-        compare_strs: fn(&str, &str) -> bool,
-    ) -> Result<JValue, EvaluatorError> {
-        fn comparable(v: &JValue) -> bool {
-            matches!(v, JValue::Number(_) | JValue::String(_) | JValue::Undefined)
-        }
-
-        if !comparable(left) || !comparable(right) {
-            return Err(EvaluatorError::EvaluationError(format!(
-                "T2010: Cannot compare {} and {}",
-                Self::type_name(left),
-                Self::type_name(right)
-            )));
-        }
-
-        // An undefined operand makes the comparison undefined, not an error.
-        if matches!(left, JValue::Undefined) || matches!(right, JValue::Undefined) {
-            return Ok(JValue::Undefined);
-        }
-
-        match (left, right) {
-            (JValue::Number(a), JValue::Number(b)) => Ok(JValue::Bool(compare_nums(*a, *b))),
-            (JValue::String(a), JValue::String(b)) => Ok(JValue::Bool(compare_strs(a, b))),
-            _ => Err(EvaluatorError::EvaluationError(format!(
-                "T2009: The expressions on either side of operator \"{}\" must be of the same data type",
-                op_symbol
-            ))),
-        }
-    }
-
-    /// Less than comparison
-    fn less_than(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        self.ordered_compare(
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-            "<",
-            |a, b| a < b,
-            |a, b| a < b,
-        )
-    }
-
-    /// Less than or equal comparison
-    fn less_than_or_equal(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        self.ordered_compare(
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-            "<=",
-            |a, b| a <= b,
-            |a, b| a <= b,
-        )
-    }
-
-    /// Greater than comparison
-    fn greater_than(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        self.ordered_compare(
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-            ">",
-            |a, b| a > b,
-            |a, b| a > b,
-        )
-    }
-
-    /// Greater than or equal comparison
-    fn greater_than_or_equal(
-        &self,
-        left: &JValue,
-        right: &JValue,
-        left_is_explicit_null: bool,
-        right_is_explicit_null: bool,
-    ) -> Result<JValue, EvaluatorError> {
-        self.ordered_compare(
-            left,
-            right,
-            left_is_explicit_null,
-            right_is_explicit_null,
-            ">=",
-            |a, b| a >= b,
-            |a, b| a >= b,
-        )
     }
 
     /// Convert a value to a string for concatenation
