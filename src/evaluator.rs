@@ -4622,44 +4622,21 @@ impl Evaluator {
                             JValue::LazyPyDict(lazy) => {
                                 return lazy.get_field(field_name).map_err(Into::into);
                             }
-                            JValue::Array(arr) => {
-                                // Map field extraction over array (same as single-step Name on Array)
-                                let mut result = Vec::with_capacity(arr.len());
-                                for item in arr.iter() {
-                                    if let JValue::Object(obj) = item {
-                                        if let Some(val) = obj.get(field_name) {
-                                            if !val.is_undefined() {
-                                                match val {
-                                                    JValue::Array(inner) => {
-                                                        result.extend(inner.iter().cloned());
-                                                    }
-                                                    other => result.push(other.clone()),
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        #[cfg(feature = "python")]
-                                        if let JValue::LazyPyDict(lazy) = item {
-                                            let val = lazy.get_field(field_name)?;
-                                            if !val.is_undefined() {
-                                                match val {
-                                                    JValue::Array(inner) => {
-                                                        result.extend(inner.iter().cloned());
-                                                    }
-                                                    other => result.push(other),
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                return match result.len() {
-                                    0 => Ok(JValue::Undefined),
-                                    1 => Ok(result.pop().unwrap()),
-                                    _ => {
-                                        check_sequence_length(result.len(), &self.options)?;
-                                        Ok(JValue::array(result))
-                                    }
-                                };
+                            JValue::Array(_) => {
+                                // Delegate to the shared field step. Its loop
+                                // recurses into nested-array elements the way
+                                // jsonata-js's `lookup` does — the hand-rolled
+                                // loop this replaces skipped them, so
+                                // `($v := [[{"p":1}],{"p":2}]; $v.p)` returned
+                                // 2 where the reference returns [1,2] — then
+                                // apply the end-of-path singleton unwrap the
+                                // general walker performs after array mapping.
+                                let extracted =
+                                    compiled_field_step(field_name, value, &self.options)?;
+                                return Ok(match extracted {
+                                    JValue::Array(arr) if arr.len() == 1 => arr[0].clone(),
+                                    other => other,
+                                });
                             }
                             _ => {} // Fall through to general path evaluation
                         }

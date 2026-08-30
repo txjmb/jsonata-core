@@ -103,6 +103,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine itself.
 
 ### Fixed
+- `$var.field` over an array containing nested-array elements now recurses into
+  them like jsonata-js's `lookup`: `($v := [[{"p":1}],{"p":2}]; $v.p)` is `[1,2]`
+  (previously `2` — the tree-walker's two-step fast path hand-rolled its mapping
+  loop and silently skipped non-object elements; it now delegates to the shared
+  field step). Found while consolidating the seven divergent field-extraction
+  loops the cleanup review flagged; pinned by `tests/python/test_var_field_nested.py`.
+- Regex literals now honor the `m` (multiline) flag in `$match` and the `~>`
+  chain-pipe, matching `$split`/`$replace` and jsonata-js — the two paths
+  previously translated only `i` (see `tests/python/test_regex_flags.py`).
 
 ### Security
 
