@@ -1659,6 +1659,77 @@ pub(crate) fn compiled_not_equal(lhs: &JValue, rhs: &JValue) -> Result<JValue, E
     }
 }
 
+/// jsonata-js's `hofFuncArgs` argument shaping, shared by the array HOFs
+/// ($map/$filter/$single): the element is always passed regardless of the
+/// callback's declared arity (a 0-arity callback still gets 1 argument, not
+/// 0, matching JS); the index is added at arity 2, and the whole array at
+/// arity >= 3 (the caller pre-builds `arr_value` exactly when needed).
+fn hof_array_call_args(
+    item: &JValue,
+    index: usize,
+    arr_value: Option<&JValue>,
+    param_count: usize,
+) -> Vec<JValue> {
+    match param_count {
+        0 | 1 => vec![item.clone()],
+        2 => vec![item.clone(), JValue::Number(index as f64)],
+        _ => vec![
+            item.clone(),
+            JValue::Number(index as f64),
+            arr_value
+                .expect("caller builds arr_value when param_count >= 3")
+                .clone(),
+        ],
+    }
+}
+
+/// `hofFuncArgs` shaping for the object HOFs ($sift/$each): the value always,
+/// the key at arity 2, and the whole object at arity >= 3.
+fn hof_object_call_args(
+    value: &JValue,
+    key: &str,
+    obj_value: Option<&JValue>,
+    param_count: usize,
+) -> Vec<JValue> {
+    match param_count {
+        0 | 1 => vec![value.clone()],
+        2 => vec![value.clone(), JValue::string(key)],
+        _ => vec![
+            value.clone(),
+            JValue::string(key),
+            obj_value
+                .expect("caller builds obj_value when param_count >= 3")
+                .clone(),
+        ],
+    }
+}
+
+/// Parse a lambda's declared signature and validate/coerce `values` against
+/// it, translating `SignatureError` into the reference's T0410/T0411/T0412
+/// error codes. Shared by the direct (`invoke_lambda_with_env`) and TCO
+/// (`invoke_lambda_body_for_tco`) invocation paths so the two cannot drift.
+fn coerce_lambda_args(
+    sig_str: &str,
+    values: &[JValue],
+    data: &JValue,
+) -> Result<Vec<JValue>, EvaluatorError> {
+    use crate::signature::SignatureError;
+    let sig = crate::signature::Signature::parse(sig_str)
+        .map_err(|e| EvaluatorError::EvaluationError(format!("Invalid signature: {}", e)))?;
+    sig.validate_and_coerce(values, data).map_err(|e| match e {
+        SignatureError::ArgumentTypeMismatch { index, expected } => EvaluatorError::TypeError(
+            format!("T0410: Argument {} of function does not match function signature (expected {})", index, expected),
+        ),
+        SignatureError::ArrayTypeMismatch { index, expected } => EvaluatorError::TypeError(
+            format!("T0412: Argument {} of function must be an array of {}", index, expected),
+        ),
+        SignatureError::ContextTypeMismatch { index, expected } => EvaluatorError::TypeError(
+            format!("T0411: Context value at argument {} does not match function signature (expected {})", index, expected),
+        ),
+        other => EvaluatorError::TypeError(format!("Signature validation failed: {}", other)),
+    })
+}
+
 /// String concatenation for the bytecode VM (its only caller is `vm.rs`).
 #[inline]
 pub(crate) fn compiled_concat(lhs: JValue, rhs: JValue) -> Result<JValue, EvaluatorError> {
@@ -7569,21 +7640,9 @@ impl Evaluator {
 
                     let mut result = IndexMap::new();
                     for (key, value) in obj.iter() {
-                        // Build argument list based on what callback expects.
-                        // Mirrors jsonata-js's hofFuncArgs: the value is
-                        // always passed regardless of declared arity (JS
-                        // ignores extra parameters a function didn't
-                        // declare) -- a 0-arity callback still gets 1 here,
-                        // not 0.
-                        let call_args = match param_count {
-                            0 | 1 => vec![value.clone()],
-                            2 => vec![value.clone(), JValue::string(key.clone())],
-                            _ => vec![
-                                value.clone(),
-                                JValue::string(key.clone()),
-                                obj_value.as_ref().unwrap().clone(),
-                            ],
-                        };
+                        // hofFuncArgs shaping (see hof_object_call_args)
+                        let call_args =
+                            hof_object_call_args(value, key, obj_value.as_ref(), param_count);
 
                         let pred_result =
                             evaluator.apply_function(func_node, &call_args, context_data)?;
@@ -7794,20 +7853,9 @@ impl Evaluator {
 
                         let mut result = Vec::with_capacity(arr.len());
                         for (index, item) in arr.iter().enumerate() {
-                            // Build argument list based on what callback expects.
-                            // Mirrors jsonata-js's hofFuncArgs: the value is
-                            // always passed regardless of declared arity -- a
-                            // 0-arity callback still gets 1 argument here,
-                            // not 0.
-                            let call_args = match param_count {
-                                0 | 1 => vec![item.clone()],
-                                2 => vec![item.clone(), JValue::Number(index as f64)],
-                                _ => vec![
-                                    item.clone(),
-                                    JValue::Number(index as f64),
-                                    arr_value.as_ref().unwrap().clone(),
-                                ],
-                            };
+                            // hofFuncArgs shaping (see hof_array_call_args)
+                            let call_args =
+                                hof_array_call_args(item, index, arr_value.as_ref(), param_count);
 
                             let mapped = self.apply_function(&args[1], &call_args, data)?;
                             // Filter out undefined results but keep explicit null (JSONata map semantics)
@@ -7953,19 +8001,9 @@ impl Evaluator {
                 let mut result = Vec::with_capacity(items.len() / 2);
 
                 for (index, item) in items.iter().enumerate() {
-                    // Build argument list based on what callback expects.
-                    // Mirrors jsonata-js's hofFuncArgs: the value is always
-                    // passed regardless of declared arity -- a 0-arity
-                    // callback still gets 1 argument here, not 0.
-                    let call_args = match param_count {
-                        0 | 1 => vec![item.clone()],
-                        2 => vec![item.clone(), JValue::Number(index as f64)],
-                        _ => vec![
-                            item.clone(),
-                            JValue::Number(index as f64),
-                            arr_value.as_ref().unwrap().clone(),
-                        ],
-                    };
+                    // hofFuncArgs shaping (see hof_array_call_args)
+                    let call_args =
+                        hof_array_call_args(item, index, arr_value.as_ref(), param_count);
 
                     let predicate_result = self.apply_function(&args[1], &call_args, data)?;
                     if self.is_truthy(&predicate_result) {
@@ -8198,19 +8236,9 @@ impl Evaluator {
                     };
                     let mut matches = Vec::new();
                     for (index, item) in arr.into_iter().enumerate() {
-                        // Build argument list based on what callback expects.
-                        // Mirrors jsonata-js's hofFuncArgs: the value is
-                        // always passed regardless of declared arity -- a
-                        // 0-arity callback still gets 1 argument here, not 0.
-                        let call_args = match param_count {
-                            0 | 1 => vec![item.clone()],
-                            2 => vec![item.clone(), JValue::Number(index as f64)],
-                            _ => vec![
-                                item.clone(),
-                                JValue::Number(index as f64),
-                                arr_value.as_ref().unwrap().clone(),
-                            ],
-                        };
+                        // hofFuncArgs shaping (see hof_array_call_args)
+                        let call_args =
+                            hof_array_call_args(&item, index, arr_value.as_ref(), param_count);
                         let predicate_result = self.apply_function(&args[1], &call_args, data)?;
                         if self.is_truthy(&predicate_result) {
                             matches.push(item);
@@ -8258,21 +8286,10 @@ impl Evaluator {
                     JValue::Object(obj) => {
                         let mut result = Vec::new();
                         for (key, value) in obj.iter() {
-                            // Build argument list based on what callback expects.
-                            // Mirrors jsonata-js's hofFuncArgs: the value is
-                            // always passed regardless of declared arity (a
-                            // 0-arity callback still gets 1 argument, not 0);
-                            // the key is added only at arity >= 2, and the
-                            // whole object only at arity >= 3.
-                            let call_args = match param_count {
-                                0 | 1 => vec![value.clone()],
-                                2 => vec![value.clone(), JValue::string(key.clone())],
-                                _ => vec![
-                                    value.clone(),
-                                    JValue::string(key.clone()),
-                                    JValue::Object(obj.clone()),
-                                ],
-                            };
+                            // hofFuncArgs shaping (see hof_object_call_args)
+                            let obj_whole = (param_count >= 3).then(|| JValue::Object(obj.clone()));
+                            let call_args =
+                                hof_object_call_args(value, key, obj_whole.as_ref(), param_count);
 
                             let fn_result = self.apply_function(func_arg, &call_args, data)?;
                             // Skip undefined results only. jsonata-js guards
@@ -8606,53 +8623,11 @@ impl Evaluator {
 
         if let Some(sig_str) = signature {
             // Validate and coerce arguments with signature
-            let coerced_values = match crate::signature::Signature::parse(sig_str) {
-                Ok(sig) => match sig.validate_and_coerce(values, data) {
-                    Ok(coerced) => coerced,
-                    Err(e) => {
-                        self.context.pop_scope();
-                        match e {
-                            crate::signature::SignatureError::ArgumentTypeMismatch {
-                                index,
-                                expected,
-                            } => {
-                                return Err(EvaluatorError::TypeError(
-                                        format!("T0410: Argument {} of function does not match function signature (expected {})", index, expected)
-                                    ));
-                            }
-                            crate::signature::SignatureError::ArrayTypeMismatch {
-                                index,
-                                expected,
-                            } => {
-                                return Err(EvaluatorError::TypeError(format!(
-                                    "T0412: Argument {} of function must be an array of {}",
-                                    index, expected
-                                )));
-                            }
-                            crate::signature::SignatureError::ContextTypeMismatch {
-                                index,
-                                expected,
-                            } => {
-                                return Err(EvaluatorError::TypeError(format!(
-                                    "T0411: Context value at argument {} does not match function signature (expected {})",
-                                    index, expected
-                                )));
-                            }
-                            _ => {
-                                return Err(EvaluatorError::TypeError(format!(
-                                    "Signature validation failed: {}",
-                                    e
-                                )));
-                            }
-                        }
-                    }
-                },
+            let coerced_values = match coerce_lambda_args(sig_str, values, data) {
+                Ok(v) => v,
                 Err(e) => {
                     self.context.pop_scope();
-                    return Err(EvaluatorError::EvaluationError(format!(
-                        "Invalid signature: {}",
-                        e
-                    )));
+                    return Err(e);
                 }
             };
             // Bind coerced values to params
@@ -8847,48 +8822,7 @@ impl Evaluator {
     ) -> Result<LambdaResult, EvaluatorError> {
         // Validate signature if present
         let coerced_values = if let Some(sig_str) = &lambda.signature {
-            match crate::signature::Signature::parse(sig_str) {
-                Ok(sig) => match sig.validate_and_coerce(values, data) {
-                    Ok(coerced) => coerced,
-                    Err(e) => match e {
-                        crate::signature::SignatureError::ArgumentTypeMismatch {
-                            index,
-                            expected,
-                        } => {
-                            return Err(EvaluatorError::TypeError(
-                                        format!("T0410: Argument {} of function does not match function signature (expected {})", index, expected)
-                                    ));
-                        }
-                        crate::signature::SignatureError::ArrayTypeMismatch { index, expected } => {
-                            return Err(EvaluatorError::TypeError(format!(
-                                "T0412: Argument {} of function must be an array of {}",
-                                index, expected
-                            )));
-                        }
-                        crate::signature::SignatureError::ContextTypeMismatch {
-                            index,
-                            expected,
-                        } => {
-                            return Err(EvaluatorError::TypeError(format!(
-                                "T0411: Context value at argument {} does not match function signature (expected {})",
-                                index, expected
-                            )));
-                        }
-                        _ => {
-                            return Err(EvaluatorError::TypeError(format!(
-                                "Signature validation failed: {}",
-                                e
-                            )));
-                        }
-                    },
-                },
-                Err(e) => {
-                    return Err(EvaluatorError::EvaluationError(format!(
-                        "Invalid signature: {}",
-                        e
-                    )));
-                }
-            }
+            coerce_lambda_args(sig_str, values, data)?
         } else {
             values.to_vec()
         };

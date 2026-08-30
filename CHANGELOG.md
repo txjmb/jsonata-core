@@ -60,6 +60,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the two engines no longer disagree. `Evaluator::is_truthy` likewise now delegates to
   the shared `compiled_is_truthy` instead of maintaining a twin (#111 had to be fixed
   in both).
+- More single-definition consolidation: the two verbatim 45-line signature-error
+  translation blocks (direct vs TCO lambda invocation) are one `coerce_lambda_args`
+  helper; the five copies of jsonata-js's `hofFuncArgs` argument shaping are two
+  helpers (`hof_array_call_args` for $map/$filter/$single, `hof_object_call_args` for
+  $sift/$each); the six copy-pasted encoding builtin arms share `unary_string_encoding`.
+  `signature.rs` dropped its dead `return_type` field and test-only constructors, and
+  a builtin signature that fails to parse now panics at cache build instead of leaving
+  that builtin silently unvalidated. `ast_transform.rs`'s 157-line module header — a
+  stale task journal whose ~20 line references were all wrong — is a 30-line statement
+  of the actual recursion/drop invariants, and `push_ast_node_children`'s leaf arm
+  lists every variant explicitly instead of `_ => {}`, so a future `AstNode` variant
+  cannot silently opt out of the stack-overflow-on-drop guard.
 
 ### Deprecated
 

@@ -242,6 +242,32 @@ fn boundary_collapse(
     }
 }
 
+/// Shared body for the unary string→string encoding builtins
+/// ($base64encode/$base64decode/$encodeUrl*/$decodeUrl*): arity check, null
+/// and undefined passthrough, then `f` on the string, type error otherwise.
+/// (For the base64 pair, signature validation `<s-:s>` has already rejected
+/// wrong arity/null/non-string, so those arms here are unreachable belt and
+/// braces; the URL four have no declared signature and rely on this.)
+fn unary_string_encoding(
+    name: &str,
+    args: &[JValue],
+    f: fn(&str) -> Result<JValue, crate::functions::FunctionError>,
+) -> Result<JValue, EvaluatorError> {
+    if args.len() != 1 {
+        return Err(EvaluatorError::EvaluationError(format!(
+            "{name}() requires exactly 1 argument"
+        )));
+    }
+    match &args[0] {
+        JValue::Null => Ok(JValue::Null),
+        JValue::Undefined => Ok(JValue::Undefined),
+        JValue::String(v) => Ok(f(v)?),
+        _ => Err(EvaluatorError::TypeError(format!(
+            "{name}() requires a string argument"
+        ))),
+    }
+}
+
 /// Render a value the way jsonata-js interpolates one into an error message:
 /// a number as JavaScript would print it, an absent value as the literal
 /// "undefined".
@@ -1268,104 +1294,16 @@ pub(crate) fn dispatch_pure(
         }
 
         // ── Encoding functions ──────────────────────────────────────────
-        "base64encode" => {
-            // `<s-:s>`: validation rejects a wrong arity, a null and a
-            // non-string before the arm runs, and the undefined guard has
-            // already returned, so only a string reaches the match below.
-            match &args[0] {
-                JValue::String(s) => Ok(functions::encoding::base64encode(s)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "base64encode() requires a string argument".to_string(),
-                )),
-            }
-        }
-        "base64decode" => {
-            // `<s-:s>`: validation rejects a wrong arity, a null and a
-            // non-string before the arm runs, and the undefined guard has
-            // already returned, so only a string reaches the match below.
-            match &args[0] {
-                JValue::String(s) => Ok(functions::encoding::base64decode(s)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "base64decode() requires a string argument".to_string(),
-                )),
-            }
-        }
+        "base64encode" => unary_string_encoding(name, args, functions::encoding::base64encode),
+        "base64decode" => unary_string_encoding(name, args, functions::encoding::base64decode),
         "encodeUrlComponent" => {
-            if args.len() != 1 {
-                return Err(EvaluatorError::EvaluationError(
-                    "encodeUrlComponent() requires exactly 1 argument".to_string(),
-                ));
-            }
-            if args[0].is_null() {
-                return Ok(JValue::Null);
-            }
-            if args[0].is_undefined() {
-                return Ok(JValue::Undefined);
-            }
-            match &args[0] {
-                JValue::String(s) => Ok(functions::encoding::encode_url_component(s)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "encodeUrlComponent() requires a string argument".to_string(),
-                )),
-            }
+            unary_string_encoding(name, args, functions::encoding::encode_url_component)
         }
         "decodeUrlComponent" => {
-            if args.len() != 1 {
-                return Err(EvaluatorError::EvaluationError(
-                    "decodeUrlComponent() requires exactly 1 argument".to_string(),
-                ));
-            }
-            if args[0].is_null() {
-                return Ok(JValue::Null);
-            }
-            if args[0].is_undefined() {
-                return Ok(JValue::Undefined);
-            }
-            match &args[0] {
-                JValue::String(s) => Ok(functions::encoding::decode_url_component(s)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "decodeUrlComponent() requires a string argument".to_string(),
-                )),
-            }
+            unary_string_encoding(name, args, functions::encoding::decode_url_component)
         }
-        "encodeUrl" => {
-            if args.len() != 1 {
-                return Err(EvaluatorError::EvaluationError(
-                    "encodeUrl() requires exactly 1 argument".to_string(),
-                ));
-            }
-            if args[0].is_null() {
-                return Ok(JValue::Null);
-            }
-            if args[0].is_undefined() {
-                return Ok(JValue::Undefined);
-            }
-            match &args[0] {
-                JValue::String(s) => Ok(functions::encoding::encode_url(s)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "encodeUrl() requires a string argument".to_string(),
-                )),
-            }
-        }
-        "decodeUrl" => {
-            if args.len() != 1 {
-                return Err(EvaluatorError::EvaluationError(
-                    "decodeUrl() requires exactly 1 argument".to_string(),
-                ));
-            }
-            if args[0].is_null() {
-                return Ok(JValue::Null);
-            }
-            if args[0].is_undefined() {
-                return Ok(JValue::Undefined);
-            }
-            match &args[0] {
-                JValue::String(s) => Ok(functions::encoding::decode_url(s)?),
-                _ => Err(EvaluatorError::TypeError(
-                    "decodeUrl() requires a string argument".to_string(),
-                )),
-            }
-        }
+        "encodeUrl" => unary_string_encoding(name, args, functions::encoding::encode_url),
+        "decodeUrl" => unary_string_encoding(name, args, functions::encoding::decode_url),
 
         // ── Error / assertion functions ─────────────────────────────────
         "error" => {

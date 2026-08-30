@@ -156,25 +156,6 @@ pub struct Parameter {
 }
 
 impl Parameter {
-    /// Construct a Parameter directly (not via signature-string parsing).
-    /// Used by tests and by Signature::new. Produces a non-repeatable,
-    /// non-context parameter with the standard base regex for its type.
-    #[allow(dead_code)]
-    pub fn new(param_type: ParamType, optional: bool) -> Self {
-        let mut regex = Self::base_regex(&param_type);
-        if optional {
-            regex.push('?');
-        }
-        Parameter {
-            param_type,
-            optional,
-            regex,
-            repeatable: false,
-            context: false,
-            context_regex: None,
-        }
-    }
-
     /// The base (unquantified) regex character class for a parameter type,
     /// mirroring signature.js's per-symbol regex assignment.
     fn base_regex(param_type: &ParamType) -> String {
@@ -201,25 +182,12 @@ impl Parameter {
 #[derive(Debug, Clone)]
 pub struct Signature {
     pub params: Vec<Parameter>,
-    #[allow(dead_code)]
-    pub return_type: Option<ParamType>,
     /// The compiled regex matching this signature's full parameter list
     /// against a "supplied signature" type-symbol string, e.g. "^([nm]+)([nm])$".
     full_regex: Regex,
 }
 
 impl Signature {
-    /// Create a new signature
-    #[allow(dead_code)]
-    pub fn new(params: Vec<Parameter>, return_type: Option<ParamType>) -> Self {
-        let full_regex = Self::compile_full_regex(&params);
-        Signature {
-            params,
-            return_type,
-            full_regex,
-        }
-    }
-
     /// Build the anchored whole-signature regex from each parameter's fragment.
     fn compile_full_regex(params: &[Parameter]) -> Regex {
         let pattern: String = std::iter::once("^".to_string())
@@ -253,11 +221,11 @@ impl Signature {
             (inner, None)
         };
 
-        let return_type = if let Some(rt_str) = return_type_str {
-            Some(Self::parse_type(rt_str)?)
-        } else {
-            None
-        };
+        // The return type is validated but not stored: nothing reads it
+        // (JSONata performs no return-type checking), it only has to parse.
+        if let Some(rt_str) = return_type_str {
+            Self::parse_type(rt_str)?;
+        }
 
         // Parse parameters (separated by -)
         let params = if param_str.is_empty() {
@@ -268,11 +236,7 @@ impl Signature {
 
         let full_regex = Self::compile_full_regex(&params);
 
-        Ok(Signature {
-            params,
-            return_type,
-            full_regex,
-        })
+        Ok(Signature { params, full_regex })
     }
 
     /// Find the separator colon that divides params from return type,
@@ -640,13 +604,9 @@ mod tests {
 
     #[test]
     fn test_signature_validation() {
-        let sig = Signature::new(
-            vec![
-                Parameter::new(ParamType::String, false),
-                Parameter::new(ParamType::Number, true),
-            ],
-            Some(ParamType::String),
-        );
+        // one required string, one optional number (same shape Signature::new
+        // used to build directly)
+        let sig = Signature::parse("<sn?:s>").expect("valid signature");
 
         // Valid: 1 required arg provided
         assert!(sig.validate_arg_count(1).is_ok());
@@ -888,7 +848,11 @@ pub(crate) fn builtin_signature(name: &str) -> Option<&'static Signature> {
         .get_or_init(|| {
             BUILTIN_SIGNATURES
                 .iter()
-                .filter_map(|(name, sig)| Signature::parse(sig).ok().map(|s| (*name, s)))
+                .map(|(name, sig)| {
+                    let parsed = Signature::parse(sig)
+                        .unwrap_or_else(|e| panic!("builtin signature {name} {sig}: {e}"));
+                    (*name, parsed)
+                })
                 .collect()
         })
         .get(name)
