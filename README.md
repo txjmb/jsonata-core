@@ -17,6 +17,25 @@
 [![JSONata conformance](https://img.shields.io/badge/JSONata%20conformance-1686%2F1686-brightgreen.svg)](https://github.com/jsonata-js/jsonata/tree/master/test/test-suite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+<!-- BEGIN generated performance chart -->
+<!-- Regenerated from the latest benchmark run by
+     benchmarks/python/generate_readme_chart.py. Do not hand-edit this block
+     or the SVGs it points at; edit the generator instead. -->
+<a href="https://txjmb.github.io/jsonata-core/stable/performance/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="https://raw.githubusercontent.com/txjmb/jsonata-core/main/docs/assets/realistic-workload-dark.svg">
+    <img width="880"
+         alt="Realistic-workload benchmark on a 100-product dataset, lower is better: jsonatapy is 7.5x faster than the jsonata-js reference on the geometric mean of 5 e-commerce queries, and the pure-Rust jsonata-core engine is faster still."
+         src="https://raw.githubusercontent.com/txjmb/jsonata-core/main/docs/assets/realistic-workload-light.svg">
+  </picture>
+</a>
+
+*Click the chart for the full category-by-category tables, including jsonata-python
+and jsonata-rs, which are left off the chart because at 68 ms–9 s they would
+flatten everything else into a sliver.*
+<!-- END generated performance chart -->
+
 > ### ⚠️ Upgrading to 2.2.8 "Conform-ata"+ — please test before you deploy
 >
 > 2.2.8 is primarily a **conformance** release: it corrects a number of places where this
@@ -176,24 +195,7 @@ See [official JSONata docs](https://docs.jsonata.org/) for the full language ref
 
 ## Performance
 
-<!-- BEGIN generated performance chart -->
-<!-- Regenerated from the latest benchmark run by
-     benchmarks/python/generate_readme_chart.py. Do not hand-edit this block
-     or the SVGs it points at; edit the generator instead. -->
-<a href="https://txjmb.github.io/jsonata-core/stable/performance/">
-  <picture>
-    <source media="(prefers-color-scheme: dark)"
-            srcset="https://raw.githubusercontent.com/txjmb/jsonata-core/main/docs/assets/realistic-workload-dark.svg">
-    <img width="880"
-         alt="Realistic-workload benchmark on a 100-product dataset, lower is better: jsonatapy is 7.5x faster than the jsonata-js reference on the geometric mean of 5 e-commerce queries, and the pure-Rust jsonata-core engine is faster still."
-         src="https://raw.githubusercontent.com/txjmb/jsonata-core/main/docs/assets/realistic-workload-light.svg">
-  </picture>
-</a>
 
-*Click the chart for the full category-by-category tables, including jsonata-python
-and jsonata-rs, which are left off the chart because at 68 ms–9 s they would
-flatten everything else into a sliver.*
-<!-- END generated performance chart -->
 
 `jsonata-core` passes **1682/1682** JSONata reference tests and is the fastest JSONata
 implementation available in either Rust or Python:
