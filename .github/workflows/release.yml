@@ -7,6 +7,11 @@ on:
         description: 'Version to release (semver format, e.g., 2.1.0 for JSONata 2.1.0)'
         required: true
         type: string
+      release_name:
+        description: 'Optional release name (e.g. Conform-ata); appears in the release title and the changelog heading'
+        required: false
+        type: string
+        default: ''
       dry_run:
         description: 'Dry run (skip publishing)'
         required: false
@@ -157,7 +162,7 @@ jobs:
           if grep -q "^## \[$VERSION\]" CHANGELOG.md; then
             echo "CHANGELOG.md already has a [$VERSION] entry - skipping (re-run case)"
           else
-            ./scripts/bump-changelog.sh "$VERSION"
+            RELEASE_NAME="${{ github.event.inputs.release_name }}" ./scripts/bump-changelog.sh "$VERSION"
           fi
 
           echo "Updated CHANGELOG.md:"
@@ -667,7 +672,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.validate-version.outputs.version }}
-          name: Release v${{ needs.validate-version.outputs.version }}
+          name: ${{ github.event.inputs.release_name != '' && format('Release v{0} - "{1}"', needs.validate-version.outputs.version, github.event.inputs.release_name) || format('Release v{0}', needs.validate-version.outputs.version) }}
           body_path: changelog.md
           draft: false
           prerelease: false

@@ -35,8 +35,15 @@ if ! echo "$UNRELEASED_BODY" | grep -q '^- '; then
     exit 1
 fi
 
+# Optional release name (e.g. RELEASE_NAME='Conform-ata' produced
+# '## [2.2.8] "Conform-ata" - 2026-08-25'). Empty keeps the plain heading.
+NAME_SEGMENT=""
+if [ -n "${RELEASE_NAME:-}" ]; then
+    NAME_SEGMENT=" \"$RELEASE_NAME\""
+fi
+
 TMP="$(mktemp)"
-awk -v version="$VERSION" -v date="$DATE" '
+awk -v version="$VERSION" -v name_segment="$NAME_SEGMENT" -v date="$DATE" '
     /^## \[Unreleased\]$/ {
         print "## [Unreleased]"
         print ""
@@ -52,11 +59,11 @@ awk -v version="$VERSION" -v date="$DATE" '
         print ""
         print "### Security"
         print ""
-        print "## [" version "] - " date
+        print "## [" version "]" name_segment " - " date
         next
     }
     { print }
 ' "$CHANGELOG" > "$TMP"
 
 mv "$TMP" "$CHANGELOG"
-echo "Bumped $CHANGELOG: [Unreleased] -> [$VERSION] - $DATE (fresh [Unreleased] template inserted above it)"
+echo "Bumped $CHANGELOG: [Unreleased] -> [$VERSION]$NAME_SEGMENT - $DATE (fresh [Unreleased] template inserted above it)"
