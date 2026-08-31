@@ -1101,10 +1101,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#clarification-rust-only-in-the-python-benchmark-suite" class="md-nav__link">
+  <a href="#clarification-the-jsonatapy-json-io-column" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Clarification: "rust-only" in the Python benchmark suite
+        Clarification: the "jsonatapy (json I/O)" column
       
     </span>
   </a>
@@ -1828,10 +1828,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#clarification-rust-only-in-the-python-benchmark-suite" class="md-nav__link">
+  <a href="#clarification-the-jsonatapy-json-io-column" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Clarification: "rust-only" in the Python benchmark suite
+        Clarification: the "jsonatapy (json I/O)" column
       
     </span>
   </a>
@@ -1904,12 +1904,13 @@
 <p>Latest benchmark results (2026-02-21) compare:</p>
 <ol>
 <li><strong>jsonatapy</strong> - Rust-based Python extension (this project), <code>evaluate(dict)</code> path</li>
-<li><strong>jsonatapy (rust-only)</strong> - Same library, <code>evaluate_json(str)</code> path (bypasses Python object conversion)</li>
+<li><strong>jsonatapy (JSON string I/O)</strong> - Same library, <code>evaluate_json(str)</code> path (data crosses the boundary as JSON strings instead of Python dicts)</li>
+<li><strong>jsonata-core (pure Rust)</strong> - This project's engine measured as a Rust library with no Python boundary at all: data pre-parsed to a <code>JValue</code>, expression pre-compiled, in-process timed loop (the criterion methodology, reported per benchmark row)</li>
 <li><strong>jsonata-js</strong> - Official JavaScript reference implementation (Node.js v24.13.1)</li>
-<li><strong>jsonata-python</strong> - Pure Python implementation</li>
-<li><strong>jsonata-rs</strong> - Pure Rust CLI implementation (optional, requires building the binary)</li>
+<li><strong>jsonata-python</strong> - Python wrapper embedding a JS engine (Duktape)</li>
+<li><strong>jsonata-rs</strong> - Third-party pure-Rust implementation (Stedi's crate — not this project; optional, requires building the binary)</li>
 </ol>
-<p>To include jsonata-rs in benchmarks:
+<p>To include the jsonata-core and jsonata-rs columns in benchmarks:
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">cd</span><span class="w"> </span>benchmarks/rust
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>cargo<span class="w"> </span>build<span class="w"> </span>--release
 </span></code></pre></div></p>
@@ -2030,10 +2031,10 @@ implementation. Based on its published benchmarks, <code>jsonata-core</code> is 
 <p>The gap comes from <code>jsonata-core</code>'s JValue type (O(1) <code>Rc</code> clones, no heap allocation
 for common operations) and a compile-once expression cache that eliminates repeated
 predicate recompilation.</p>
-<h3 id="clarification-rust-only-in-the-python-benchmark-suite">Clarification: "rust-only" in the Python benchmark suite<a class="headerlink" href="#clarification-rust-only-in-the-python-benchmark-suite" title="Permanent link">&para;</a></h3>
-<p>The Python benchmark suite labels the <code>evaluate_json(json_string)</code> path as
-"rust-only". This is <strong>not</strong> the same as the Criterion benchmarks above. Both paths
-use the Rust evaluator; the difference is how data enters and exits:</p>
+<h3 id="clarification-the-jsonatapy-json-io-column">Clarification: the "jsonatapy (json I/O)" column<a class="headerlink" href="#clarification-the-jsonatapy-json-io-column" title="Permanent link">&para;</a></h3>
+<p>The <code>evaluate_json(json_string)</code> path (previously mislabeled "rust-only") is <strong>not</strong>
+a pure-Rust measurement. Both jsonatapy columns use the Rust evaluator; the
+difference is how data enters and exits:</p>
 <ul>
 <li><strong><code>evaluate(dict)</code></strong> — PyO3 walks the Python dict tree → JValue → evaluate → JValue → Python object</li>
 <li><strong><code>evaluate_json(str)</code></strong> — serde_json parses the JSON string → JValue → evaluate → JValue → serde_json serializes</li>
@@ -2041,8 +2042,11 @@ use the Rust evaluator; the difference is how data enters and exits:</p>
 <p>For small payloads, serde_json parse+serialize overhead can exceed the PyO3 traversal
 cost, so <code>evaluate_json</code> is sometimes <em>slower</em> than <code>evaluate(dict)</code> on tiny inputs.
 Neither path eliminates the Python boundary; they just cross it differently.</p>
-<p>The Criterion benchmarks are the only measurements that eliminate the Python boundary
-entirely.</p>
+<p>The measurements that eliminate the Python boundary entirely are the Criterion
+benchmarks above and the <strong>jsonata-core (pure Rust)</strong> column in the
+<a href="../performance/">performance tables</a>, which applies the same criterion methodology
+per benchmark row. The gap between that column and the jsonatapy columns is the
+Python boundary cost itself — the engine is identical.</p>
 <h2 id="key-findings">Key Findings<a class="headerlink" href="#key-findings" title="Permanent link">&para;</a></h2>
 <p>jsonatapy is the fastest Python JSONata implementation available, and faster than the JavaScript reference for pure expression workloads. The performance ceiling for array-heavy workloads is set by Python's object model: converting Python dicts to Rust values costs roughly 1µs per field, which dominates evaluation time for large datasets. The <code>JsonataData</code> API and <code>evaluate_json</code> path avoid this cost.</p>
 <h2 id="custom-benchmarks">Custom Benchmarks<a class="headerlink" href="#custom-benchmarks" title="Permanent link">&para;</a></h2>
