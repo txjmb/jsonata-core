@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="476" viewBox="0 0 880 476" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" role="img" aria-label="JSONata realistic-workload benchmark: jsonatapy is 7.5 times faster than jsonata-js on average, lower is better">
+<rect width="880" height="476" fill="#fcfcfb"/>
+<text x="24" y="30" font-size="15" font-weight="600" fill="#0b0b0b">Realistic workloads — 100-product dataset, lower is better</text>
+<text x="24" y="72" font-size="34" font-weight="700" fill="#0b0b0b">7.5× faster</text>
+<text x="24" y="92" font-size="11.5" fill="#52514e">than the jsonata-js reference — geometric mean across the 5 workloads below</text>
+<rect x="24" y="106" width="9" height="9" rx="2" fill="#2a78d6"/>
+<text x="38" y="114" font-size="11.5" fill="#52514e">jsonatapy (Python)</text>
+<rect x="168.0" y="106" width="9" height="9" rx="2" fill="#eb6834"/>
+<text x="182.0" y="114" font-size="11.5" fill="#52514e">jsonata-core (pure Rust)</text>
+<rect x="348.0" y="106" width="9" height="9" rx="2" fill="#8a8880"/>
+<text x="362.0" y="114" font-size="11.5" fill="#52514e">jsonata-js (reference)</text>
+<text x="223.39999999999998" y="159.0" font-size="12" text-anchor="end" fill="#0b0b0b">Filter by category</text>
+<path d="M235.39999999999998 132 H286.2 a4.0 4.0 0 0 1 4.0 4.0 V142.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#2a78d6"/>
+<text x="297.2" y="142.5" font-size="10.5" fill="#52514e">8.7 ms</text>
+<path d="M235.39999999999998 148 H248.4 a4.0 4.0 0 0 1 4.0 4.0 V158.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#eb6834"/>
+<text x="259.4" y="158.5" font-size="10.5" fill="#52514e">2.7 ms</text>
+<path d="M235.39999999999998 164 H557.2 a4.0 4.0 0 0 1 4.0 4.0 V174.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#8a8880"/>
+<text x="568.2" y="174.5" font-size="10.5" fill="#52514e">51.5 ms</text>
+<text x="223.39999999999998" y="225.0" font-size="12" text-anchor="end" fill="#0b0b0b">Calculate total value</text>
+<path d="M235.39999999999998 198 H276.9 a4.0 4.0 0 0 1 4.0 4.0 V208.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#2a78d6"/>
+<text x="287.9" y="208.5" font-size="10.5" fill="#52514e">7.2 ms</text>
+<path d="M235.39999999999998 214 H267.0 a4.0 4.0 0 0 1 4.0 4.0 V224.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#eb6834"/>
+<text x="278.0" y="224.5" font-size="10.5" fill="#52514e">5.6 ms</text>
+<path d="M235.39999999999998 230 H466.9 a4.0 4.0 0 0 1 4.0 4.0 V240.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#8a8880"/>
+<text x="477.9" y="240.5" font-size="10.5" fill="#52514e">37.3 ms</text>
+<text x="223.39999999999998" y="291.0" font-size="12" text-anchor="end" fill="#0b0b0b">Complex transformation</text>
+<path d="M235.39999999999998 264 H323.5 a4.0 4.0 0 0 1 4.0 4.0 V274.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#2a78d6"/>
+<text x="334.5" y="274.5" font-size="10.5" fill="#52514e">14.6 ms</text>
+<path d="M235.39999999999998 280 H293.1 a4.0 4.0 0 0 1 4.0 4.0 V290.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#eb6834"/>
+<text x="304.1" y="290.5" font-size="10.5" fill="#52514e">9.8 ms</text>
+<path d="M235.39999999999998 296 H794.0 a4.0 4.0 0 0 1 4.0 4.0 V306.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#8a8880"/>
+<text x="805.0" y="306.5" font-size="10.5" fill="#52514e">89.0 ms</text>
+<text x="223.39999999999998" y="357.0" font-size="12" text-anchor="end" fill="#0b0b0b">Group by category (aggregate)</text>
+<path d="M235.39999999999998 330 H297.5 a4.0 4.0 0 0 1 4.0 4.0 V340.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#2a78d6"/>
+<text x="308.5" y="340.5" font-size="10.5" fill="#52514e">10.5 ms</text>
+<path d="M235.39999999999998 346 H282.5 a4.0 4.0 0 0 1 4.0 4.0 V356.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#eb6834"/>
+<text x="293.5" y="356.5" font-size="10.5" fill="#52514e">8.1 ms</text>
+<path d="M235.39999999999998 362 H790.3 a4.0 4.0 0 0 1 4.0 4.0 V372.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#8a8880"/>
+<text x="801.3" y="372.5" font-size="10.5" fill="#52514e">88.5 ms</text>
+<text x="223.39999999999998" y="423.0" font-size="12" text-anchor="end" fill="#0b0b0b">Top rated products</text>
+<path d="M235.39999999999998 396 H247.3 a4.0 4.0 0 0 1 4.0 4.0 V406.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#2a78d6"/>
+<text x="258.3" y="406.5" font-size="10.5" fill="#52514e">2.5 ms</text>
+<path d="M235.39999999999998 412 H244.3 a4.0 4.0 0 0 1 4.0 4.0 V422.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#eb6834"/>
+<text x="255.3" y="422.5" font-size="10.5" fill="#52514e">2.0 ms</text>
+<path d="M235.39999999999998 428 H466.2 a4.0 4.0 0 0 1 4.0 4.0 V438.0 a4.0 4.0 0 0 1 -4.0 4.0 H235.39999999999998 Z" fill="#8a8880"/>
+<text x="477.2" y="438.5" font-size="10.5" fill="#52514e">37.2 ms</text>
+<text x="24" y="464" font-size="10" fill="#52514e">jsonatapy v2.2.9 · min of 5 trials on dedicated Apple Silicon · 2026-08-31 · jsonata-python and jsonata-rs omitted for scale — full results in the docs</text>
+</svg>

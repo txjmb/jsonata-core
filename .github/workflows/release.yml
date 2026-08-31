@@ -854,13 +854,15 @@ jobs:
           echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
           echo "Benchmark results saved to: $RESULTS_FILE"
 
-      - name: Update docs/performance.md
+      - name: Update docs/performance.md and the README chart
         run: |
           python benchmarks/python/generate_performance_doc.py \
             "benchmarks/${{ steps.run_benchmark.outputs.results_file }}" \
             docs/performance.md
+          python benchmarks/python/generate_readme_chart.py \
+            "benchmarks/${{ steps.run_benchmark.outputs.results_file }}"
 
-      - name: Commit updated docs/performance.md
+      - name: Commit updated performance docs
         run: |
           # This job runs on the self-hosted Mac Mini specifically because
           # its measurements are far more consistent than a shared cloud
@@ -893,12 +895,22 @@ jobs:
 
           cp docs/performance.md /tmp/performance-doc-commit/docs/performance.md
 
+          # The README performance chart is generated straight INTO the
+          # worktree rather than copied from this checkout: this job's own
+          # checkout is a detached HEAD at the release tag, so copying its
+          # whole README to main would revert anything that landed on main
+          # after the tag was cut. The generator only rewrites the marked
+          # block, leaving the rest of main's README alone.
+          python "$(pwd)/benchmarks/python/generate_readme_chart.py" \
+            "$(pwd)/benchmarks/${{ steps.run_benchmark.outputs.results_file }}" \
+            /tmp/performance-doc-commit
+
           cd /tmp/performance-doc-commit
-          if git diff --quiet -- docs/performance.md; then
-            echo "docs/performance.md unchanged - skipping commit"
+          if git diff --quiet -- docs/performance.md README.md docs/assets; then
+            echo "performance docs unchanged - skipping commit"
           else
-            git add docs/performance.md
-            git commit -m "docs(benchmarks): update performance.md for v${{ needs.validate-version.outputs.version }}"
+            git add docs/performance.md README.md docs/assets
+            git commit -m "docs(benchmarks): update performance.md and README chart for v${{ needs.validate-version.outputs.version }}"
             git push origin HEAD:main
           fi
 
