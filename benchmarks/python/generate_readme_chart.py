@@ -307,6 +307,9 @@ def resolve_version():
 
         return f"v{jsonatapy.__version__}"
     except ImportError:
+        # Not installed - a local run against a checked-out results file.
+        # Fall through to the manifest below rather than failing: the
+        # version is a footer stamp, not something worth aborting over.
         pass
     manifest = Path(__file__).resolve().parents[2] / "Cargo.toml"
     try:
@@ -315,6 +318,9 @@ def resolve_version():
             if m:
                 return f"v{m.group(1)}"
     except OSError:
+        # No readable Cargo.toml either (the script was copied out of the
+        # tree, or the checkout is partial). "dev" below is the honest
+        # answer at that point.
         pass
     return "dev"
 
