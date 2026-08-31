@@ -2,174 +2,174 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/api/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/benchmarks/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/changelog/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/cli/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/compatibility/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/credits/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/error-handling/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/examples/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/installation/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/jsonata-language/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/license/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/migration-from-js/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/migration-from-jsonata-python/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/optimization-tips/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/performance/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/rust-crate/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/usage/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/development/architecture/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/development/building/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/development/contributing/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/development/parser/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/development/releasing/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/development/testing/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-04-jsonata-2.2.1-phase1-signatures/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-05-benchmark-comparison-infra/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-05-versioned-docs-mike/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-06-parent-and-focus-binding-operators/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-07-jsonata-2.2.1-phase2-guardrails-plan/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-07-parser-depth-and-u16-truncation-fixes-plan/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-09-rust-cli-phase1/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-10-python-cli-mcp-phase2/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-07-12-lazy-python-views/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/plans/2026-08-23-shared-builtin-dispatch-stage1/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-04-jsonata-2.2.1-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-05-benchmark-comparison-infra-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-05-versioned-docs-mike-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-09-multi-language-and-agentic-study-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-12-lazy-python-views-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-07-19-host-callable-functions-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
     <url>
          <loc>https://txjmb.github.io/jsonata-core/2.2/superpowers/specs/2026-08-23-shared-builtin-dispatch-design/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-31</lastmod>
     </url>
 </urlset>
