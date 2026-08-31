@@ -1023,8 +1023,15 @@ jobs:
   deploy-release-docs:
     name: Deploy Release Documentation
     runs-on: ubuntu-latest
-    needs: [validate-version, create-github-release]
-    if: needs.create-github-release.result == 'success' && github.event.inputs.dry_run != 'true'
+    # Waits for benchmark-and-record: that job regenerates
+    # docs/performance.md with THIS release's numbers and commits it to
+    # main, which necessarily happens after the tag exists. Running the two
+    # in parallel (as before) meant the docs deploy could only ever see the
+    # pre-benchmark tag content. `!cancelled()` keeps a failed or skipped
+    # benchmark from blocking the docs publish - docs still go out, just
+    # with whatever performance page main currently has.
+    needs: [validate-version, create-github-release, benchmark-and-record]
+    if: ${{ !cancelled() && needs.create-github-release.result == 'success' && github.event.inputs.dry_run != 'true' }}
     timeout-minutes: 10
 
     permissions:
@@ -1036,6 +1043,22 @@ jobs:
         with:
           ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           fetch-depth: 0
+
+      # The tag can never contain this release's own performance numbers:
+      # benchmark-and-record generates them from the tagged build and
+      # commits docs/performance.md to main afterwards. Deploying the tag
+      # verbatim therefore published the PREVIOUS release's performance
+      # page under the new version, permanently. Take just that one file
+      # from main; every other page stays at the exact tagged content.
+      - name: Take the regenerated performance page from main
+        run: |
+          git fetch origin main
+          if git checkout FETCH_HEAD -- docs/performance.md; then
+            echo "docs/performance.md taken from main:"
+            git --no-pager diff --stat HEAD -- docs/performance.md || true
+          else
+            echo "::warning::could not take docs/performance.md from main - deploying the tagged copy"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v7
