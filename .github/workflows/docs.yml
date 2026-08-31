@@ -4,6 +4,22 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Docs version to deploy (dev, or a released line like 2.2 to refresh it from main)'
+        required: false
+        type: string
+        default: 'dev'
+      alias:
+        description: 'Alias to (re)point at that version, e.g. stable. Leave empty for none.'
+        required: false
+        type: string
+        default: ''
+      set_default:
+        description: 'Also make that alias the site default (needs an alias)'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: docs-deploy
@@ -37,5 +53,41 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Deploy dev docs
-        run: mike deploy dev --push
+      - name: Deploy docs
+        run: |
+          # A push to main publishes the `dev` version ONLY. The released
+          # line (2.x, aliased `stable`, which is the site default and so
+          # the page nearly every reader lands on) is otherwise written
+          # exclusively by release.yml, from the release tag -- so anything
+          # that lands on main after a tag (a doc fix, or a regenerated
+          # docs/performance.md from a benchmark run) stayed invisible on
+          # the default docs URL until the NEXT release cut. That is how
+          # `stable` ended up serving a 2.2.8-era performance page while
+          # main, and `dev`, had the current one.
+          #
+          # The dispatch inputs make refreshing a released line a one-click
+          # operation instead of requiring a release or a hand-run
+          # `mike deploy` against gh-pages.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            ALIAS="${{ github.event.inputs.alias }}"
+          else
+            VERSION="dev"
+            ALIAS=""
+          fi
+          VERSION="${VERSION:-dev}"
+
+          echo "Deploying docs version '$VERSION'${ALIAS:+ with alias '$ALIAS'}"
+          if [ -n "$ALIAS" ]; then
+            mike deploy "$VERSION" "$ALIAS" --update-aliases --push
+          else
+            mike deploy "$VERSION" --push
+          fi
+
+          if [ "${{ github.event.inputs.set_default }}" = "true" ]; then
+            if [ -z "$ALIAS" ]; then
+              echo "::error::set_default was requested without an alias - nothing to set as default"
+              exit 1
+            fi
+            mike set-default "$ALIAS" --push
+          fi
