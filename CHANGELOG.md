@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.9] "Perform-ata" - 2026-08-31
+
 ### Changed
 - Lambda values now carry their closure directly — `JValue::Lambda(Rc<StoredLambda>)`
   instead of a `lambda_id` name tag resolved through a per-scope side table (#157).
