@@ -1993,13 +1993,19 @@
 <td><strong>jsonatapy</strong></td>
 <td>Rust + Python</td>
 <td>2.2.9</td>
-<td>This project (compiled Rust extension via PyO3)</td>
+<td>This project (compiled Rust extension via PyO3); data crosses the boundary as Python dicts</td>
 </tr>
 <tr>
 <td><strong>jsonatapy</strong> (JSON string I/O)</td>
 <td>Rust + Python</td>
 <td>2.2.9</td>
 <td>Same library via <code>evaluate_json</code>: data crosses as JSON strings, parsed/serialized by serde per call</td>
+</tr>
+<tr>
+<td><strong>jsonata-core</strong> (pure Rust)</td>
+<td>Rust</td>
+<td>2.2.9</td>
+<td>This project's engine measured as a Rust library — no Python at all, data pre-parsed, expression pre-compiled (criterion methodology, per table row)</td>
 </tr>
 <tr>
 <td><strong>jsonata-js</strong></td>
@@ -2011,7 +2017,7 @@
 <td><strong>jsonata-python</strong></td>
 <td>Python</td>
 <td>unknown</td>
-<td>Pure Python implementation</td>
+<td>Python wrapper embedding a JS engine (Duktape)</td>
 </tr>
 <tr>
 <td><strong>jsonata-rs</strong></td>
@@ -2025,6 +2031,7 @@
 <p>Every implementation below is measured the way a real caller who evaluates the same expression repeatedly would use it, not its slowest possible one-off call:</p>
 <ul>
 <li><strong>jsonatapy</strong> — <code>jsonatapy.compile(expr)</code> once, then <code>.evaluate(data)</code> in the timed loop. No further reuse is available; the compiled bytecode is already cached on the expression object.</li>
+<li><strong>jsonata-core (pure Rust)</strong> — <code>Expression::compile(expr)</code> once, input parsed to a <code>JValue</code> once, then <code>Expression::evaluate(&amp;data)</code> in an in-process timed loop with warmup — the same methodology as the criterion suite (<code>benches/</code>), reported per table row. The gap between this column and the jsonatapy columns <em>is</em> the Python boundary cost; the engine is identical.</li>
 <li>
 <p><strong>jsonata-js</strong> — <code>jsonata(expr)</code> once, then <code>.evaluate(data)</code> in the timed loop. Same story: this is already the library's fastest repeated-call path.</p>
 </li>
@@ -2032,7 +2039,7 @@
 <p><strong>jsonata-python</strong> — uses its documented <code>Context</code> object (<code>ctx = jsonata.Context()</code>, then <code>ctx(expr, data)</code> in the loop) rather than the one-off <code>transform()</code> convenience function. <code>transform()</code> re-bootstraps an embedded Duktape engine — reloading the <code>jsonata.js</code> library into it — on every single call; reusing a <code>Context</code> keeps that engine warm and is the library's own documented path for repeated evaluation. It is <em>not</em> a true compile-once equivalent, since <code>Context.__call__</code> still re-parses the expression string on every call, so some of the remaining gap to jsonatapy/jsonata-js is real parsing cost this library doesn't let a caller amortize away.</p>
 </li>
 </ul>
-<p>Benchmarks run on 2026-08-30.</p>
+<p>Benchmarks run on 2026-08-31.</p>
 <h2 id="summary-by-category">Summary by Category<a class="headerlink" href="#summary-by-category" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2056,7 +2063,7 @@
 </tr>
 <tr>
 <td>Deep Nesting</td>
-<td><strong>2.8x faster</strong></td>
+<td><strong>2.9x faster</strong></td>
 </tr>
 <tr>
 <td>String Operations</td>
@@ -2068,7 +2075,7 @@
 </tr>
 <tr>
 <td>Realistic Workload</td>
-<td><strong>8.3x faster</strong></td>
+<td><strong>8.1x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2081,6 +2088,7 @@
 <th>Data Size</th>
 <th>jsonatapy</th>
 <th>jsonatapy (json I/O)</th>
+<th>jsonata-core (pure Rust)</th>
 <th>jsonata-js</th>
 <th>jsonata-python</th>
 <th>jsonata-rs</th>
@@ -2092,40 +2100,44 @@
 <td>Simple Path</td>
 <td>tiny</td>
 <td>3.705</td>
-<td>4.786</td>
-<td>17.050</td>
-<td>1834.458</td>
-<td>62.221</td>
-<td><strong>4.6x faster</strong></td>
+<td>4.877</td>
+<td>0.768</td>
+<td>16.820</td>
+<td>1824.042</td>
+<td>61.484</td>
+<td><strong>4.5x faster</strong></td>
 </tr>
 <tr>
 <td>Deep Path (5 levels)</td>
 <td>tiny</td>
-<td>5.457</td>
-<td>6.891</td>
-<td>25.540</td>
-<td>3017.851</td>
-<td>72.612</td>
-<td><strong>4.7x faster</strong></td>
+<td>5.479</td>
+<td>6.812</td>
+<td>1.232</td>
+<td>25.360</td>
+<td>3005.573</td>
+<td>72.071</td>
+<td><strong>4.6x faster</strong></td>
 </tr>
 <tr>
 <td>Array Index Access</td>
 <td>100 elements</td>
-<td>4.345</td>
-<td>8.419</td>
-<td>11.180</td>
-<td>939.902</td>
-<td>86.993</td>
+<td>4.320</td>
+<td>8.413</td>
+<td>0.465</td>
+<td>11.190</td>
+<td>933.850</td>
+<td>97.630</td>
 <td><strong>2.6x faster</strong></td>
 </tr>
 <tr>
 <td>Arithmetic Expression</td>
 <td>tiny</td>
-<td>2.842</td>
-<td>4.039</td>
-<td>22.480</td>
-<td>2609.409</td>
-<td>57.034</td>
+<td>2.841</td>
+<td>4.032</td>
+<td>0.857</td>
+<td>22.380</td>
+<td>2603.586</td>
+<td>56.913</td>
 <td><strong>7.9x faster</strong></td>
 </tr>
 </tbody>
@@ -2138,6 +2150,7 @@
 <th>Data Size</th>
 <th>jsonatapy</th>
 <th>jsonatapy (json I/O)</th>
+<th>jsonata-core (pure Rust)</th>
 <th>jsonata-js</th>
 <th>jsonata-python</th>
 <th>jsonata-rs</th>
@@ -2148,92 +2161,101 @@
 <tr>
 <td>Array Sum (100 elements)</td>
 <td>100 elements</td>
-<td>1.502</td>
-<td>2.313</td>
-<td>6.880</td>
-<td>304.604</td>
-<td>18.076</td>
+<td>1.499</td>
+<td>2.319</td>
+<td>0.781</td>
+<td>6.890</td>
+<td>304.144</td>
+<td>20.184</td>
 <td><strong>4.6x faster</strong></td>
 </tr>
 <tr>
 <td>Array Max (100 elements)</td>
 <td>100 elements</td>
-<td>1.247</td>
-<td>2.060</td>
-<td>6.440</td>
-<td>297.723</td>
-<td>18.031</td>
+<td>1.243</td>
+<td>2.064</td>
+<td>0.534</td>
+<td>6.410</td>
+<td>297.163</td>
+<td>20.172</td>
 <td><strong>5.2x faster</strong></td>
 </tr>
 <tr>
 <td>Array Count (100 elements)</td>
 <td>100 elements</td>
-<td>1.960</td>
-<td>3.611</td>
-<td>8.670</td>
-<td>529.518</td>
-<td>35.176</td>
-<td><strong>4.4x faster</strong></td>
+<td>1.946</td>
+<td>3.596</td>
+<td>0.545</td>
+<td>8.700</td>
+<td>527.289</td>
+<td>39.419</td>
+<td><strong>4.5x faster</strong></td>
 </tr>
 <tr>
 <td>Array Sum (1000 elements)</td>
 <td>1000 elements</td>
-<td>2.285</td>
-<td>3.836</td>
-<td>4.680</td>
-<td>178.638</td>
-<td>24.276</td>
+<td>2.290</td>
+<td>3.849</td>
+<td>1.057</td>
+<td>4.660</td>
+<td>178.617</td>
+<td>28.586</td>
 <td><strong>2.0x faster</strong></td>
 </tr>
 <tr>
 <td>Array Max (1000 elements)</td>
 <td>1000 elements</td>
 <td>1.787</td>
-<td>3.337</td>
-<td>3.850</td>
-<td>167.090</td>
-<td>24.276</td>
-<td><strong>2.2x faster</strong></td>
+<td>3.336</td>
+<td>0.558</td>
+<td>3.840</td>
+<td>166.545</td>
+<td>28.630</td>
+<td><strong>2.1x faster</strong></td>
 </tr>
 <tr>
 <td>Array Sum (10000 elements)</td>
 <td>10000 elements</td>
-<td>5.587</td>
-<td>9.983</td>
-<td>8.850</td>
-<td>355.078</td>
-<td>59.618</td>
+<td>5.586</td>
+<td>9.973</td>
+<td>2.519</td>
+<td>8.810</td>
+<td>354.240</td>
+<td>70.519</td>
 <td><strong>1.6x faster</strong></td>
 </tr>
 <tr>
 <td>Array Mapping (extract field)</td>
 <td>100 objects</td>
-<td>8.912</td>
-<td>25.835</td>
-<td>21.600</td>
-<td>2682.224</td>
-<td>207.355</td>
+<td>8.833</td>
+<td>25.838</td>
+<td>1.306</td>
+<td>21.620</td>
+<td>2676.758</td>
+<td>208.870</td>
 <td><strong>2.4x faster</strong></td>
 </tr>
 <tr>
 <td>Array Mapping + Sum</td>
 <td>100 objects</td>
-<td>8.698</td>
-<td>25.157</td>
-<td>24.730</td>
-<td>2986.538</td>
-<td>208.144</td>
+<td>8.805</td>
+<td>25.215</td>
+<td>2.047</td>
+<td>24.760</td>
+<td>2982.977</td>
+<td>209.306</td>
 <td><strong>2.8x faster</strong></td>
 </tr>
 <tr>
 <td>Array Filtering (predicate)</td>
 <td>100 objects</td>
-<td>6.236</td>
-<td>16.734</td>
-<td>50.510</td>
-<td>6762.662</td>
-<td>107.826</td>
-<td><strong>8.1x faster</strong></td>
+<td>6.241</td>
+<td>16.739</td>
+<td>2.698</td>
+<td>50.870</td>
+<td>6738.023</td>
+<td>112.088</td>
+<td><strong>8.2x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2245,6 +2267,7 @@
 <th>Data Size</th>
 <th>jsonatapy</th>
 <th>jsonatapy (json I/O)</th>
+<th>jsonata-core (pure Rust)</th>
 <th>jsonata-js</th>
 <th>jsonata-python</th>
 <th>jsonata-rs</th>
@@ -2255,41 +2278,45 @@
 <tr>
 <td>Object Construction (simple)</td>
 <td>tiny</td>
-<td>3.961</td>
-<td>3.693</td>
-<td>27.110</td>
-<td>2540.786</td>
-<td>34.202</td>
-<td><strong>6.8x faster</strong></td>
+<td>4.101</td>
+<td>3.817</td>
+<td>2.959</td>
+<td>27.590</td>
+<td>2531.848</td>
+<td>34.017</td>
+<td><strong>6.7x faster</strong></td>
 </tr>
 <tr>
 <td>Object Construction (nested)</td>
 <td>tiny</td>
-<td>5.484</td>
-<td>4.564</td>
-<td>33.440</td>
-<td>2906.557</td>
-<td>37.007</td>
+<td>5.491</td>
+<td>4.545</td>
+<td>4.045</td>
+<td>33.400</td>
+<td>2898.268</td>
+<td>36.853</td>
 <td><strong>6.1x faster</strong></td>
 </tr>
 <tr>
 <td>Conditional Expression</td>
 <td>tiny</td>
-<td>1.280</td>
-<td>1.769</td>
-<td>13.660</td>
-<td>1352.130</td>
-<td>26.479</td>
-<td><strong>10.7x faster</strong></td>
+<td>1.275</td>
+<td>1.765</td>
+<td>0.452</td>
+<td>13.550</td>
+<td>1350.644</td>
+<td>26.355</td>
+<td><strong>10.6x faster</strong></td>
 </tr>
 <tr>
 <td>Multiple Nested Functions</td>
 <td>tiny</td>
-<td>2.755</td>
-<td>2.942</td>
-<td>19.080</td>
-<td>1778.242</td>
-<td>27.971</td>
+<td>2.769</td>
+<td>2.973</td>
+<td>2.931</td>
+<td>19.210</td>
+<td>1775.537</td>
+<td>27.779</td>
 <td><strong>6.9x faster</strong></td>
 </tr>
 </tbody>
@@ -2302,6 +2329,7 @@
 <th>Data Size</th>
 <th>jsonatapy</th>
 <th>jsonatapy (json I/O)</th>
+<th>jsonata-core (pure Rust)</th>
 <th>jsonata-js</th>
 <th>jsonata-python</th>
 <th>jsonata-rs</th>
@@ -2312,21 +2340,23 @@
 <tr>
 <td>Deep Path (12 levels)</td>
 <td>12 levels</td>
-<td>5.738</td>
-<td>6.683</td>
-<td>25.760</td>
-<td>2920.553</td>
-<td>55.548</td>
-<td><strong>4.5x faster</strong></td>
+<td>5.686</td>
+<td>6.678</td>
+<td>1.232</td>
+<td>25.920</td>
+<td>2910.910</td>
+<td>55.381</td>
+<td><strong>4.6x faster</strong></td>
 </tr>
 <tr>
 <td>Nested Array Access</td>
 <td>4-level nested arrays</td>
-<td>6.891</td>
-<td>12.844</td>
-<td>7.890</td>
-<td>611.757</td>
-<td>108.345</td>
+<td>6.884</td>
+<td>12.924</td>
+<td>0.314</td>
+<td>7.900</td>
+<td>609.672</td>
+<td>107.454</td>
 <td><strong>1.1x faster</strong></td>
 </tr>
 </tbody>
@@ -2339,6 +2369,7 @@
 <th>Data Size</th>
 <th>jsonatapy</th>
 <th>jsonatapy (json I/O)</th>
+<th>jsonata-core (pure Rust)</th>
 <th>jsonata-js</th>
 <th>jsonata-python</th>
 <th>jsonata-rs</th>
@@ -2349,61 +2380,67 @@
 <tr>
 <td>String Uppercase</td>
 <td>tiny</td>
-<td>4.059</td>
-<td>4.670</td>
-<td>22.480</td>
-<td>2400.899</td>
-<td>53.552</td>
-<td><strong>5.5x faster</strong></td>
+<td>4.046</td>
+<td>4.679</td>
+<td>3.451</td>
+<td>22.680</td>
+<td>2395.514</td>
+<td>53.345</td>
+<td><strong>5.6x faster</strong></td>
 </tr>
 <tr>
 <td>String Lowercase</td>
 <td>tiny</td>
-<td>4.055</td>
-<td>4.704</td>
-<td>22.270</td>
-<td>2401.560</td>
-<td>53.764</td>
+<td>4.062</td>
+<td>4.675</td>
+<td>3.359</td>
+<td>22.230</td>
+<td>2395.335</td>
+<td>53.213</td>
 <td><strong>5.5x faster</strong></td>
 </tr>
 <tr>
 <td>String Length</td>
 <td>tiny</td>
-<td>3.742</td>
-<td>4.556</td>
-<td>24.400</td>
-<td>2604.379</td>
-<td>55.135</td>
-<td><strong>6.5x faster</strong></td>
+<td>3.735</td>
+<td>4.583</td>
+<td>2.886</td>
+<td>24.550</td>
+<td>2596.091</td>
+<td>55.030</td>
+<td><strong>6.6x faster</strong></td>
 </tr>
 <tr>
 <td>String Concatenation</td>
 <td>tiny</td>
-<td>3.314</td>
-<td>3.226</td>
-<td>26.160</td>
-<td>1927.662</td>
-<td>30.321</td>
+<td>3.311</td>
+<td>3.232</td>
+<td>3.048</td>
+<td>26.150</td>
+<td>1921.544</td>
+<td>30.205</td>
 <td><strong>7.9x faster</strong></td>
 </tr>
 <tr>
 <td>String Substring</td>
 <td>tiny</td>
-<td>2.949</td>
-<td>3.220</td>
-<td>19.460</td>
-<td>1688.168</td>
-<td>28.631</td>
+<td>2.940</td>
+<td>3.238</td>
+<td>3.023</td>
+<td>19.500</td>
+<td>1682.958</td>
+<td>28.586</td>
 <td><strong>6.6x faster</strong></td>
 </tr>
 <tr>
 <td>String Contains</td>
 <td>tiny</td>
-<td>2.287</td>
-<td>2.664</td>
-<td>16.040</td>
-<td>1417.707</td>
-<td>28.421</td>
+<td>2.294</td>
+<td>2.676</td>
+<td>1.755</td>
+<td>16.160</td>
+<td>1412.139</td>
+<td>28.356</td>
 <td><strong>7.0x faster</strong></td>
 </tr>
 </tbody>
@@ -2416,6 +2453,7 @@
 <th>Data Size</th>
 <th>jsonatapy</th>
 <th>jsonatapy (json I/O)</th>
+<th>jsonata-core (pure Rust)</th>
 <th>jsonata-js</th>
 <th>jsonata-python</th>
 <th>jsonata-rs</th>
@@ -2426,32 +2464,35 @@
 <tr>
 <td>$map with lambda</td>
 <td>100 elements</td>
-<td>1.693</td>
-<td>1.846</td>
-<td>23.390</td>
-<td>2689.302</td>
-<td>7.222</td>
-<td><strong>13.8x faster</strong></td>
+<td>1.730</td>
+<td>1.879</td>
+<td>1.293</td>
+<td>23.760</td>
+<td>2679.104</td>
+<td>7.651</td>
+<td><strong>13.7x faster</strong></td>
 </tr>
 <tr>
 <td>$filter with lambda</td>
 <td>100 elements</td>
-<td>1.714</td>
-<td>1.858</td>
-<td>23.570</td>
-<td>2693.158</td>
-<td>7.125</td>
-<td><strong>13.8x faster</strong></td>
+<td>1.720</td>
+<td>1.845</td>
+<td>1.498</td>
+<td>23.600</td>
+<td>2684.242</td>
+<td>7.539</td>
+<td><strong>13.7x faster</strong></td>
 </tr>
 <tr>
 <td>$reduce with lambda</td>
 <td>100 elements</td>
-<td>2.763</td>
-<td>2.927</td>
-<td>22.640</td>
-<td>2704.402</td>
-<td>7.805</td>
-<td><strong>8.2x faster</strong></td>
+<td>2.765</td>
+<td>2.929</td>
+<td>2.776</td>
+<td>22.940</td>
+<td>2696.682</td>
+<td>8.227</td>
+<td><strong>8.3x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2463,6 +2504,7 @@
 <th>Data Size</th>
 <th>jsonatapy</th>
 <th>jsonatapy (json I/O)</th>
+<th>jsonata-core (pure Rust)</th>
 <th>jsonata-js</th>
 <th>jsonata-python</th>
 <th>jsonata-rs</th>
@@ -2474,51 +2516,56 @@
 <td>Filter by category</td>
 <td>100 products</td>
 <td>8.673</td>
-<td>41.451</td>
-<td>51.750</td>
-<td>7466.338</td>
-<td>316.613</td>
-<td><strong>6.0x faster</strong></td>
+<td>41.494</td>
+<td>2.685</td>
+<td>51.550</td>
+<td>7441.033</td>
+<td>316.541</td>
+<td><strong>5.9x faster</strong></td>
 </tr>
 <tr>
 <td>Calculate total value</td>
 <td>100 products</td>
-<td>7.953</td>
-<td>40.473</td>
-<td>37.500</td>
-<td>5172.275</td>
-<td>315.575</td>
-<td><strong>4.7x faster</strong></td>
+<td>7.203</td>
+<td>40.611</td>
+<td>5.632</td>
+<td>37.260</td>
+<td>5153.651</td>
+<td>315.792</td>
+<td><strong>5.2x faster</strong></td>
 </tr>
 <tr>
 <td>Complex transformation</td>
 <td>100 products</td>
-<td>14.243</td>
-<td>23.842</td>
-<td>86.030</td>
-<td>9327.921</td>
-<td>136.365</td>
-<td><strong>6.0x faster</strong></td>
+<td>14.573</td>
+<td>24.130</td>
+<td>9.758</td>
+<td>89.030</td>
+<td>9305.808</td>
+<td>136.543</td>
+<td><strong>6.1x faster</strong></td>
 </tr>
 <tr>
 <td>Group by category (aggregate)</td>
 <td>100 products</td>
-<td>8.938</td>
-<td>22.008</td>
-<td>88.460</td>
+<td>10.464</td>
+<td>22.070</td>
+<td>8.079</td>
+<td>88.450</td>
 <td>N/A</td>
-<td>134.507</td>
-<td><strong>9.9x faster</strong></td>
+<td>134.061</td>
+<td><strong>8.5x faster</strong></td>
 </tr>
 <tr>
 <td>Top rated products</td>
 <td>100 products</td>
 <td>2.512</td>
-<td>10.184</td>
-<td>37.430</td>
-<td>4538.419</td>
-<td>67.470</td>
-<td><strong>14.9x faster</strong></td>
+<td>9.976</td>
+<td>2.047</td>
+<td>37.160</td>
+<td>4520.874</td>
+<td>67.508</td>
+<td><strong>14.8x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2534,32 +2581,32 @@
 <tbody>
 <tr>
 <td>Filter by category (data handle)</td>
-<td>12.299</td>
+<td>12.343</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Filter by category (data→json)</td>
-<td>5.904</td>
+<td>5.934</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Complex transformation (data handle)</td>
-<td>28.120</td>
+<td>28.303</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Complex transformation (data→json)</td>
-<td>23.661</td>
+<td>23.938</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Aggregate (data handle)</td>
-<td>5.208</td>
+<td>5.381</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Aggregate (data→json)</td>
-<td>5.291</td>
+<td>5.316</td>
 <td>500</td>
 </tr>
 </tbody>
@@ -2570,10 +2617,10 @@
 <li>Simple Paths (<strong>4.9x faster</strong>)</li>
 <li>Array Operations (<strong>3.7x faster</strong>)</li>
 <li>Complex Transformations (<strong>7.6x faster</strong>)</li>
-<li>Deep Nesting (<strong>2.8x faster</strong>)</li>
+<li>Deep Nesting (<strong>2.9x faster</strong>)</li>
 <li>String Operations (<strong>6.5x faster</strong>)</li>
 <li>Higher-Order Functions (<strong>11.9x faster</strong>)</li>
-<li>Realistic Workload (<strong>8.3x faster</strong>)</li>
+<li>Realistic Workload (<strong>8.1x faster</strong>)</li>
 </ul>
 <p><strong>Comparable to JavaScript:</strong></p>
 <ul>
@@ -2594,7 +2641,7 @@
 </span></code></pre></div>
 <h2 id="methodology">Methodology<a class="headerlink" href="#methodology" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Date:</strong> 2026-08-30</li>
+<li><strong>Date:</strong> 2026-08-31</li>
 <li><strong>Platform:</strong> GitHub Actions (self-hosted Michaels-Mini, physical/dedicated hardware, macOS ARM64)</li>
 <li><strong>Python:</strong> 3.14.6</li>
 <li><strong>Node.js:</strong> v20.20.2</li>
