@@ -17,7 +17,7 @@
 [![JSONata conformance](https://img.shields.io/badge/JSONata%20conformance-1686%2F1686-brightgreen.svg)](https://github.com/jsonata-js/jsonata/tree/master/test/test-suite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> ### ⚠️ Upgrading to 2.2.8 "Conform-ata" — please test before you deploy
+> ### ⚠️ Upgrading to 2.2.8 "Conform-ata"+ — please test before you deploy
 >
 > 2.2.8 is primarily a **conformance** release: it corrects a number of places where this
 > library disagreed with the jsonata-js reference. These issues were found during routine quality checks and documentation improvements.  The test harness was inadvertently missing some edge cases.  Many of those corrections **change the
@@ -48,7 +48,7 @@ JSONata implementation in Python, so the goal was to port JSONata to Rust (with 
 for Python) and see how fast it could go. The answer: faster than V8 for most expression
 workloads, and faster than the next pure-Rust implementation.  The rust versions are published on crates.io, and the python wheels on pypi.  There is also a command-line binary and Python command-line available (works great with uvx) for use in scripting.  The Python library is also usable in a command-line fashion, and a C-compatible library is available for those who want to easily use jsonata in C/C++.
 
-Many, many thanks to the incredible work of all the maintainers of the [JSONata](https://github.com/jsonata-js/jsonata) reference library.  JSONata is a very powerful, well-designed, and useful language that has made an impact on many projects.  This project leverages their outstanding work to extend that capability to Python and Rust and would not be possible without that project.  The implementation in Rust was strongly influenced by their implementation.  The 1600+ (1686/1686 passing for last build of this project) tests they created provided the scaffolding and validation for all of this project.  This project will continue to follow and be a derivative of the reference project as the JSONata reference library evolves.
+Many, many thanks to the incredible work of all the maintainers of the [JSONata](https://github.com/jsonata-js/jsonata) reference library.  JSONata is a very powerful, well-designed, expressive and useful language that has made an impact on many projects.  This project leverages their outstanding work to extend that capability to Python and Rust and would not be possible without that project.  The implementation in Rust was strongly influenced by their implementation.  The 1600+ (1686/1686 passing for last build of this project) tests they created provided the scaffolding and validation for all of this project.  This project will continue to follow and be a derivative of the reference project as the JSONata reference library evolves.
 
 Release versions will follow the reference jsonata-js project major and minor release numbers, but not necessarily patches.  This will make it easier for adopters of this library to understand each release's JSONata API compatibility.  As an example, 2.2.8 should be compliant with 2.2.x jsonata-js tests, but may have fixes specific to this library.  If a patch release for jsonata-js is relevant for this project, it will be included in a patch release that may or may not follow the patch numbers of the upstream project.  "Major" versions of this library that don't include any updates to follow jsonata-js conformance will be "named" in release notes/changelog.
 
