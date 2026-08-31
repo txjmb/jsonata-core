@@ -23,12 +23,13 @@ uv run python benchmarks/update_docs.py
 Latest benchmark results (2026-02-21) compare:
 
 1. **jsonatapy** - Rust-based Python extension (this project), `evaluate(dict)` path
-2. **jsonatapy (rust-only)** - Same library, `evaluate_json(str)` path (bypasses Python object conversion)
-3. **jsonata-js** - Official JavaScript reference implementation (Node.js v24.13.1)
-4. **jsonata-python** - Pure Python implementation
-5. **jsonata-rs** - Pure Rust CLI implementation (optional, requires building the binary)
+2. **jsonatapy (JSON string I/O)** - Same library, `evaluate_json(str)` path (data crosses the boundary as JSON strings instead of Python dicts)
+3. **jsonata-core (pure Rust)** - This project's engine measured as a Rust library with no Python boundary at all: data pre-parsed to a `JValue`, expression pre-compiled, in-process timed loop (the criterion methodology, reported per benchmark row)
+4. **jsonata-js** - Official JavaScript reference implementation (Node.js v24.13.1)
+5. **jsonata-python** - Python wrapper embedding a JS engine (Duktape)
+6. **jsonata-rs** - Third-party pure-Rust implementation (Stedi's crate — not this project; optional, requires building the binary)
 
-To include jsonata-rs in benchmarks:
+To include the jsonata-core and jsonata-rs columns in benchmarks:
 ```bash
 cd benchmarks/rust
 cargo build --release
@@ -107,11 +108,11 @@ The gap comes from `jsonata-core`'s JValue type (O(1) `Rc` clones, no heap alloc
 for common operations) and a compile-once expression cache that eliminates repeated
 predicate recompilation.
 
-### Clarification: "rust-only" in the Python benchmark suite
+### Clarification: the "jsonatapy (json I/O)" column
 
-The Python benchmark suite labels the `evaluate_json(json_string)` path as
-"rust-only". This is **not** the same as the Criterion benchmarks above. Both paths
-use the Rust evaluator; the difference is how data enters and exits:
+The `evaluate_json(json_string)` path (previously mislabeled "rust-only") is **not**
+a pure-Rust measurement. Both jsonatapy columns use the Rust evaluator; the
+difference is how data enters and exits:
 
 - **`evaluate(dict)`** — PyO3 walks the Python dict tree → JValue → evaluate → JValue → Python object
 - **`evaluate_json(str)`** — serde_json parses the JSON string → JValue → evaluate → JValue → serde_json serializes
@@ -120,8 +121,11 @@ For small payloads, serde_json parse+serialize overhead can exceed the PyO3 trav
 cost, so `evaluate_json` is sometimes *slower* than `evaluate(dict)` on tiny inputs.
 Neither path eliminates the Python boundary; they just cross it differently.
 
-The Criterion benchmarks are the only measurements that eliminate the Python boundary
-entirely.
+The measurements that eliminate the Python boundary entirely are the Criterion
+benchmarks above and the **jsonata-core (pure Rust)** column in the
+[performance tables](performance.md), which applies the same criterion methodology
+per benchmark row. The gap between that column and the jsonatapy columns is the
+Python boundary cost itself — the engine is identical.
 
 ## Key Findings
 

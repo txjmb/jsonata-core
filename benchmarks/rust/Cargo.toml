@@ -5,9 +5,14 @@ edition = "2021"
 
 [dependencies]
 jsonata-rs = "0.3"
+jsonata-core = { path = "../.." }
 serde_json = "1.0"
 bumpalo = "3.9"
 
 [[bin]]
 name = "jsonata-rs-bench"
 path = "jsonata_rs_bench.rs"
+
+[[bin]]
+name = "jsonata-core-bench"
+path = "jsonata_core_bench.rs"
