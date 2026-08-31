@@ -131,12 +131,7 @@ pub enum JValue {
     Array(Rc<Vec<JValue>>),       // Rc-wrapped for O(1) clone
     Object(Rc<IndexMap<String, JValue>>),  // Rc-wrapped
     Undefined,                    // JSONata undefined value
-    Lambda {                      // First-class lambda function
-        lambda_id: usize,
-        params: Vec<String>,
-        name: Option<String>,
-        signature: Option<String>,
-    },
+    Lambda(Rc<StoredLambda>),     // First-class function carrying its closure
     Builtin {                     // First-class built-in function
         name: String,
     },
@@ -169,7 +164,7 @@ Instead of wrapping in JSON objects:
 
 ```rust
 // First-class variant (fast)
-JValue::Lambda { lambda_id: 1, params: vec![], name: None, signature: None }
+JValue::Lambda(Rc::new(stored_lambda))
 
 // Tagged JSON object (slow)
 JValue::Object(map! {
@@ -178,7 +173,9 @@ JValue::Object(map! {
 })
 ```
 
-**Impact:** Enum discriminant check vs hash map lookup.
+**Impact:** Enum discriminant check vs hash map lookup — and the lambda value
+IS the closure (body, params, signature, captured environment), so invoking a
+function value never needs a lookup at all.
 
 **3. Undefined as Distinct Type**
 
@@ -271,9 +268,8 @@ fn evaluate_path(ctx: &mut Context, path: &PathNode) -> Result<JValue> {
 
 ```rust
 pub struct Context {
-    scopes: Vec<Scope>,          // Stack of scopes
-    lambdas: HashMap<usize, StoredLambda>,  // Lambda storage
-    next_lambda_id: usize,
+    scope_stack: Vec<Scope>,     // Stack of scopes
+    parent_data: Option<JValue>,
 }
 
 pub struct Scope {
@@ -282,8 +278,13 @@ pub struct Scope {
 
 pub struct StoredLambda {
     params: Vec<String>,
-    body: Rc<AstNode>,
-    captured_env: HashMap<String, JValue>,  // Captured variables
+    body: AstNode,
+    signature: Option<String>,
+    captured_env: HashMap<String, JValue>,  // Free variables, snapshot at definition
+    captured_data: Option<JValue>,          // Data context at definition
+    thunk: bool,                            // Body has optimizable tail calls
+    self_name: Option<String>,              // Set for `$f := function ...` (letrec)
+    // ...
 }
 ```
 
@@ -304,33 +305,40 @@ let result = evaluate_expression(ctx, expr)?;
 
 ### Lambda Storage
 
-Lambdas stored separately from values:
+A lambda value carries its closure (issue #157): `JValue::Lambda(Rc<StoredLambda>)`.
+The `Rc` provides the lifetime — a closure escaping its defining scope (returned
+from a block, nested in an array/object, captured by another closure) stays alive
+for as long as any value references it. There is no side table and no escape
+analysis; dangling lambda references are unrepresentable.
 
 ```rust
-// Create lambda
-let lambda_id = ctx.next_lambda_id();
-let stored = StoredLambda {
+// Create lambda: the value IS the closure
+let lambda_value = JValue::Lambda(Rc::new(StoredLambda {
     params: vec!["x".into()],
-    body: Rc::new(body_ast),
+    body: body_ast,
     captured_env: capture_free_vars(ctx, &body_ast),
-};
-ctx.lambdas.insert(lambda_id, stored);
+    // ...
+}));
 
-// Lambda value
-let lambda_value = JValue::Lambda {
-    lambda_id,
-    params: vec!["x".into()],
-    name: None,
-    signature: None,
-};
-
-// Call lambda
-let stored = ctx.lambdas.get(&lambda_id).unwrap();
-ctx.push_scope_with_bindings(stored.captured_env.clone());
-ctx.bind("x", argument);
-let result = evaluate(ctx, &stored.body)?;
-ctx.pop_scope();
+// Call lambda: no lookup — the value carries everything
+if let JValue::Lambda(stored) = &callable {
+    ctx.push_scope();
+    // bind captured_env, then self_name (if any), then params
+    let result = evaluate(ctx, &stored.body)?;
+    ctx.pop_scope();
+}
 ```
+
+### Recursion: Late-Bound Letrec
+
+`$f := function($n){ $n = 0 ? 0 : $f($n - 1) }` must call itself even after
+`$f` has escaped its defining scope. The closure does not store a reference to
+itself (that would be an `Rc` cycle, i.e. a leak); instead it records its own
+`self_name` at definition, and each invocation binds that name to the closure
+being invoked. Free-variable capture is a by-value snapshot at definition time
+(not jsonata-js's live frames); `self_name` binds after `captured_env`, so a
+rebinding `$f := function(){ ...$f()... }` recurses into itself rather than
+the captured previous `$f`.
 
 ### Selective Capture
 

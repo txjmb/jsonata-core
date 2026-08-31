@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Lambda values now carry their closure directly — `JValue::Lambda(Rc<StoredLambda>)`
+  instead of a `lambda_id` name tag resolved through a per-scope side table (#157).
+  The `Rc` provides the closure's lifetime, so the side table (`Scope.lambdas`),
+  the escape-analysis GC (`extract_lambda_ids`/`collect_lambda_ids` walking every
+  block/lambda result, `pop_scope_preserving_lambdas`) and the dual-map handling in
+  `unbind`/`clear_current_scope` are gone, along with the O(result size) walk on
+  every scope pop. Recursion is late-bound letrec: a closure defined as
+  `$f := function ...` records its own name and binds it to itself at each
+  invocation, so no `Rc` cycles exist and closures cannot leak (guarded by a
+  live-count test). Free-variable capture remains a by-value snapshot at
+  definition time, now applied uniformly to lambda-valued variables too.
+  Behavioral fixes (all matching jsonata-js, pinned in
+  `tests/lambda_closure_suite.rs`): a transform bound to a variable is callable
+  and pipeable (`$t := |...|...|; $t(x)`, `x ~> $t`); a partial application
+  escaping the scope that defined its target function works; an alias
+  (`$g := $f`) survives `$f` being rebound; calling a name rebound to a
+  non-function raises T1006 instead of silently invoking the stale lambda; a
+  closure captured inside another escaping closure's environment no longer
+  dangles. Function equality is now closure identity rather than id-string
+  equality. Remaining known divergences from jsonata-js's live-frame capture
+  are documented in the same suite's `divergent_from_reference` module.
+- Partial application is a typed representation instead of a stringly-typed
+  protocol: `StoredLambda` carries an optional `PartialApplication { target,
+  bound_args, placeholder_positions, total_args }`, replacing the
+  `"__partial_call:name:bool:n"` marker-string body that was parsed at every
+  invocation and the `__bound_arg_N` / `__placeholder_positions` /
+  `__total_args` / `__partial_target` values smuggled through `captured_env`.
+  A user-defined target is a captured closure (`PartialTarget::Lambda`);
+  builtins/host functions stay name-resolved at call time
+  (`PartialTarget::Named`), preserving call-time shadowing. Partials no longer
+  snapshot the entire environment at creation (the old
+  `capture_current_environment()` call was only ever a smuggling container),
+  and one behavior corner now matches jsonata-js: rebinding a user function
+  after partially applying it no longer changes what the partial calls
+  (pinned in `tests/lambda_closure_suite.rs` with eight other partial pins).
+
 ### Added
 - `jsonata_set_limits` on the C ABI: wall-clock timeout (D1012), max AST recursion
   depth (D1011), and max sequence length (D2015) — the same three guardrails the

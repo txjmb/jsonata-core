@@ -2412,8 +2412,8 @@ enum LambdaResult {
     JValue(JValue),
     /// Tail call - need to continue with another lambda invocation
     TailCall {
-        /// The lambda to call (boxed to reduce enum size)
-        lambda: Box<StoredLambda>,
+        /// The lambda to call (shared handle; cloning is a refcount bump)
+        lambda: Rc<StoredLambda>,
         /// Arguments for the call
         args: Vec<JValue>,
         /// Data context for the call
@@ -2421,9 +2421,88 @@ enum LambdaResult {
     },
 }
 
+thread_local! {
+    static LIVE_LAMBDAS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Number of `StoredLambda` instances currently alive on this thread.
+///
+/// The snapshot-capture closure design cannot form `Rc` cycles (a closure can
+/// only capture values that existed before it did, and self-reference is
+/// late-bound at invocation rather than stored), so this count must return to
+/// its prior level once evaluation results are dropped. Exposed so tests can
+/// assert that repeated evaluation does not leak closures.
+pub fn live_lambda_count() -> usize {
+    LIVE_LAMBDAS.with(|c| c.get())
+}
+
+/// Marker owned by every `StoredLambda`, maintaining `live_lambda_count`.
+#[derive(Debug)]
+pub struct LiveLambdaToken(());
+
+impl LiveLambdaToken {
+    fn new() -> Self {
+        LIVE_LAMBDAS.with(|c| c.set(c.get() + 1));
+        LiveLambdaToken(())
+    }
+}
+
+impl Default for LiveLambdaToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Clone for LiveLambdaToken {
+    fn clone(&self) -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for LiveLambdaToken {
+    fn drop(&mut self) {
+        LIVE_LAMBDAS.with(|c| c.set(c.get() - 1));
+    }
+}
+
+/// How a partial application (`$f(1, ?)`) reaches the function it applies.
+#[derive(Clone, Debug)]
+pub(crate) enum PartialTarget {
+    /// A user-defined function, captured as a closure value at creation time —
+    /// this is what lets the partial outlive the scope that defined its target.
+    Lambda(Rc<StoredLambda>),
+    /// A builtin or host function, resolved BY NAME at each invocation.
+    /// These are global and cannot dangle, and name resolution preserves
+    /// call-time shadowing (`$up := $uppercase(?); $uppercase := ...` — the
+    /// later user binding wins, matching jsonata-js's environment chain).
+    Named { name: String, is_builtin: bool },
+}
+
+/// A partial application, carried inside a `StoredLambda` in place of a body.
+///
+/// `$add(10, ?)` becomes params `["__p0"]` plus this struct: at invocation the
+/// full argument list is rebuilt — bound values in their original positions,
+/// call arguments filling the placeholder positions in order — and the target
+/// is applied to it.
+#[derive(Clone, Debug)]
+pub(crate) struct PartialApplication {
+    pub target: PartialTarget,
+    /// `(position, value)` for arguments fixed at creation time (values, not
+    /// expressions: `$add($x, ?)` snapshots `$x` when the partial is built).
+    pub bound_args: Vec<(usize, JValue)>,
+    /// Positions of the `?` placeholders, filled from call arguments in order.
+    pub placeholder_positions: Vec<usize>,
+    /// Argument count of the underlying call (bound + placeholders).
+    pub total_args: usize,
+}
+
 /// Lambda storage
 /// Stores the AST of a lambda function along with its parameters, optional signature,
-/// and captured environment for closures
+/// and captured environment for closures.
+///
+/// Carried directly inside `JValue::Lambda(Rc<StoredLambda>)` (issue #157):
+/// the value IS the closure, so its lifetime is the `Rc`'s and no side table,
+/// escape analysis, or scope-pop migration is needed.
 #[derive(Clone, Debug)]
 pub struct StoredLambda {
     pub params: Vec<String>,
@@ -2432,25 +2511,56 @@ pub struct StoredLambda {
     /// `None` if the body is not compilable (transform, partial-app, thunk, etc.).
     pub(crate) compiled_body: Option<CompiledExpr>,
     pub signature: Option<String>,
-    /// Captured environment bindings for closures
+    /// Captured environment bindings for closures: a by-value snapshot of the
+    /// free variables at definition time (this engine's long-standing capture
+    /// semantics — NOT jsonata-js's live frames).
     pub captured_env: HashMap<String, JValue>,
     /// Captured data context for lexical scoping of bare field names
     pub captured_data: Option<JValue>,
     /// Whether this lambda's body contains tail calls that can be optimized
     pub thunk: bool,
+    /// The variable name this lambda was bound to at definition time
+    /// (`$f := function ...`). Bound to the closure itself at every
+    /// invocation, so recursion works after the defining scope has popped
+    /// (classic letrec, late-bound instead of stored — no `Rc` cycle).
+    pub self_name: Option<String>,
+    /// `Some` iff this lambda is a partial application: invocation applies the
+    /// carried target instead of evaluating `body` (which is inert).
+    /// `Rc` so invocation can detach a handle from the borrowed closure with a
+    /// refcount bump.
+    pub(crate) partial: Option<Rc<PartialApplication>>,
+    /// Keeps `live_lambda_count` accurate; see that function.
+    pub live_token: LiveLambdaToken,
+}
+
+impl StoredLambda {
+    /// Minimal instance for tests that need a lambda-shaped `JValue`.
+    #[cfg(test)]
+    pub(crate) fn test_stub() -> Self {
+        StoredLambda {
+            params: Vec::new(),
+            body: AstNode::Null,
+            compiled_body: None,
+            signature: None,
+            captured_env: HashMap::new(),
+            captured_data: None,
+            thunk: false,
+            self_name: None,
+            partial: None,
+            live_token: LiveLambdaToken::new(),
+        }
+    }
 }
 
 /// A single scope in the scope stack
 struct Scope {
     bindings: HashMap<String, JValue>,
-    lambdas: HashMap<String, Rc<StoredLambda>>,
 }
 
 impl Scope {
     fn new() -> Self {
         Scope {
             bindings: HashMap::new(),
-            lambdas: HashMap::new(),
         }
     }
 }
@@ -2484,28 +2594,10 @@ impl Context {
         }
     }
 
-    /// Pop scope but preserve specified lambdas by moving them to the current
-    /// top scope. The side table holds `Rc<StoredLambda>`, so migration is a
-    /// refcount bump, not a deep clone of the lambda's body AST.
-    fn pop_scope_preserving_lambdas(&mut self, lambda_ids: &[String]) {
-        if self.scope_stack.len() > 1 {
-            let popped = self.scope_stack.pop().unwrap();
-            if !lambda_ids.is_empty() {
-                let top = self.scope_stack.last_mut().unwrap();
-                for id in lambda_ids {
-                    if let Some(stored) = popped.lambdas.get(id) {
-                        top.lambdas.insert(id.clone(), Rc::clone(stored));
-                    }
-                }
-            }
-        }
-    }
-
-    /// Clear all bindings and lambdas in the top scope without deallocating
+    /// Clear all bindings in the top scope without deallocating
     fn clear_current_scope(&mut self) {
         let top = self.scope_stack.last_mut().unwrap();
         top.bindings.clear();
-        top.lambdas.clear();
     }
 
     pub fn bind(&mut self, name: String, value: JValue) {
@@ -2516,24 +2608,10 @@ impl Context {
             .insert(name, value);
     }
 
-    pub fn bind_lambda(&mut self, name: String, lambda: StoredLambda) {
-        self.bind_lambda_rc(name, Rc::new(lambda));
-    }
-
-    /// Bind an already-shared lambda (e.g. one migrating up a popped scope).
-    fn bind_lambda_rc(&mut self, name: String, lambda: Rc<StoredLambda>) {
-        self.scope_stack
-            .last_mut()
-            .unwrap()
-            .lambdas
-            .insert(name, lambda);
-    }
-
     pub fn unbind(&mut self, name: &str) {
         // Remove from top scope only
         let top = self.scope_stack.last_mut().unwrap();
         top.bindings.remove(name);
-        top.lambdas.remove(name);
     }
 
     pub fn lookup(&self, name: &str) -> Option<&JValue> {
@@ -2546,21 +2624,13 @@ impl Context {
         None
     }
 
-    pub fn lookup_lambda(&self, name: &str) -> Option<&StoredLambda> {
-        self.lookup_lambda_rc(name).map(|rc| rc.as_ref())
-    }
-
-    /// Like `lookup_lambda`, but hands out the shared handle (an Rc clone is
-    /// a refcount bump — this is what makes by-reference invocation and
-    /// scope-pop preservation cheap).
-    fn lookup_lambda_rc(&self, name: &str) -> Option<&Rc<StoredLambda>> {
-        // Walk scope stack from top to bottom
-        for scope in self.scope_stack.iter().rev() {
-            if let Some(lambda) = scope.lambdas.get(name) {
-                return Some(lambda);
-            }
+    /// Look up `name` and, if it is bound to a lambda value, hand out the
+    /// shared closure handle (an Rc clone is a refcount bump).
+    fn lookup_lambda_value(&self, name: &str) -> Option<&Rc<StoredLambda>> {
+        match self.lookup(name) {
+            Some(JValue::Lambda(rc)) => Some(rc),
+            _ => None,
         }
-        None
     }
 
     pub fn set_parent(&mut self, data: JValue) {
@@ -2826,12 +2896,6 @@ pub struct Evaluator {
     context: Context,
     recursion_depth: usize,
     max_recursion_depth: usize,
-    /// Monotonic counter for generating unique lambda IDs. Each evaluation of a
-    /// Lambda AST node creates a new closure *instance* and must get a fresh ID -
-    /// using the AST node's pointer address (as before) collided whenever the same
-    /// lambda expression was evaluated more than once (e.g. each level of Y-combinator
-    /// or other repeated recursion), aliasing unrelated closures that shared an id.
-    next_lambda_id: u64,
     /// Set whenever `create_tuple_stream` builds a `{"@":.., "__tuple__":true}`
     /// wrapper during this top-level `evaluate()` call. Reset at the start of
     /// `evaluate()` and checked at the end to decide whether the (recursive,
@@ -2866,7 +2930,6 @@ impl Evaluator {
             // Limit recursion depth to prevent stack overflow
             // True TCO would allow deeper recursion but requires parser-level thunk marking
             max_recursion_depth: 302,
-            next_lambda_id: 0,
             tuple_stream_created: false,
             keep_tuple_stream: false,
             options: EvaluatorOptions::default(),
@@ -2880,7 +2943,6 @@ impl Evaluator {
             context,
             recursion_depth: 0,
             max_recursion_depth: 302,
-            next_lambda_id: 0,
             tuple_stream_created: false,
             keep_tuple_stream: false,
             options: EvaluatorOptions::default(),
@@ -2896,7 +2958,6 @@ impl Evaluator {
             context,
             recursion_depth: 0,
             max_recursion_depth: 302,
-            next_lambda_id: 0,
             tuple_stream_created: false,
             keep_tuple_stream: false,
             options,
@@ -2976,22 +3037,27 @@ impl Evaluator {
         Ok(())
     }
 
-    /// Allocate a fresh, process-unique-per-Evaluator id for a new lambda instance.
-    fn fresh_lambda_id(&mut self) -> u64 {
-        let id = self.next_lambda_id;
-        self.next_lambda_id += 1;
-        id
-    }
-
     /// Invoke a stored lambda with its captured environment and data.
     /// This is the standard way to call a StoredLambda, handling the
     /// captured_env and captured_data extraction boilerplate.
+    ///
+    /// Takes the shared handle so the closure's `self_name` (if any) can be
+    /// bound to the closure itself for the duration of the call — that is
+    /// what makes `$f := function(){ ...$f()... }` work after `$f` has
+    /// escaped its defining scope (late-bound letrec, no stored self-`Rc`).
     fn invoke_stored_lambda(
         &mut self,
-        stored: &StoredLambda,
+        stored: &Rc<StoredLambda>,
         args: &[JValue],
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        // A partial application carries its own invocation recipe; no scope,
+        // signature, or body evaluation of its own.
+        if let Some(partial) = &stored.partial {
+            let partial = Rc::clone(partial);
+            return self.invoke_partial(&partial, args, data);
+        }
+
         // Compiled fast path: skip scope push/pop and tree-walking for simple lambdas.
         // Conditions: has compiled body, no signature (can't skip validation), no thunk,
         // and no captured lambda/builtin values (those require Context for runtime lookup).
@@ -3030,15 +3096,14 @@ impl Evaluator {
             captured_env,
             captured_data,
             stored.thunk,
+            Some(stored),
         )
     }
 
-    /// Look up a StoredLambda from a JValue that may be a lambda marker.
-    /// Returns the cloned StoredLambda if the value is a JValue::Lambda variant
-    /// with a valid lambda_id that references a stored lambda.
+    /// Extract the shared closure handle from a JValue, if it is a lambda.
     fn lookup_lambda_from_value(&self, value: &JValue) -> Option<Rc<StoredLambda>> {
-        if let JValue::Lambda { lambda_id, .. } = value {
-            return self.context.lookup_lambda_rc(lambda_id).cloned();
+        if let JValue::Lambda(rc) = value {
+            return Some(Rc::clone(rc));
         }
         None
     }
@@ -3050,13 +3115,10 @@ impl Evaluator {
         match func_node {
             AstNode::Lambda { params, .. } => params.len(),
             AstNode::Variable(var_name) => {
-                // Check if this variable holds a stored lambda
-                if let Some(stored_lambda) = self.context.lookup_lambda(var_name) {
-                    return stored_lambda.params.len();
-                }
-                // Also check if it's a lambda value in bindings (e.g., from partial application)
+                // Check if this variable holds a lambda value (user-defined
+                // function, closure, or partial application)
                 if let Some(value) = self.context.lookup(var_name) {
-                    if let Some(stored_lambda) = self.lookup_lambda_from_value(value) {
+                    if let JValue::Lambda(stored_lambda) = value {
                         return stored_lambda.params.len();
                     }
                     // `$f := $uppercase` stores a `JValue::Builtin`, so the
@@ -3562,20 +3624,6 @@ impl Evaluator {
                     }
                 }
 
-                // Then check if this is a stored lambda (user-defined functions)
-                if let Some(stored_lambda) = self.context.lookup_lambda(name) {
-                    // Return a lambda representation that can be passed to higher-order functions
-                    // Include _lambda_id pointing to the stored lambda so it can be found
-                    // when captured in closures
-                    let lambda_repr = JValue::lambda(
-                        name.as_str(),
-                        stored_lambda.params.clone(),
-                        Some(name.to_string()),
-                        stored_lambda.signature.clone(),
-                    );
-                    return Ok(lambda_repr);
-                }
-
                 // Check if this is a built-in function reference (only if not shadowed)
                 if self.is_builtin_function(name) {
                     // Return a marker for built-in functions
@@ -3980,10 +4028,9 @@ impl Evaluator {
                     result = self.evaluate_internal(expr, data)?;
                 }
 
-                // Before popping, preserve any lambdas referenced by the result
-                // This is essential for closures returned from blocks (IIFE pattern)
-                let lambdas_to_keep = self.extract_lambda_ids(&result);
-                self.context.pop_scope_preserving_lambdas(&lambdas_to_keep);
+                // Closures escaping the block (IIFE pattern) carry their own
+                // storage inside the value, so popping is unconditional.
+                self.context.pop_scope();
 
                 Ok(result)
             }
@@ -3995,8 +4042,6 @@ impl Evaluator {
                 signature,
                 thunk,
             } => {
-                let lambda_id = format!("__lambda_{}_{}", params.len(), self.fresh_lambda_id());
-
                 let compiled_body = if !thunk {
                     let var_refs: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
                     try_compile_expr_with_allowed_vars(body, &var_refs)
@@ -4011,17 +4056,11 @@ impl Evaluator {
                     captured_env: self.capture_environment_for(body, params),
                     captured_data: Some(data.clone()),
                     thunk: *thunk,
+                    self_name: None,
+                    partial: None,
+                    live_token: LiveLambdaToken::new(),
                 };
-                self.context.bind_lambda(lambda_id.clone(), stored_lambda);
-
-                let lambda_obj = JValue::lambda(
-                    lambda_id.as_str(),
-                    params.clone(),
-                    None::<String>,
-                    signature.clone(),
-                );
-
-                Ok(lambda_obj)
+                Ok(JValue::Lambda(Rc::new(stored_lambda)))
             }
 
             // Wildcard: collect all values from current object
@@ -4107,8 +4146,10 @@ impl Evaluator {
                     // Execute the transformation
                     self.execute_transform(location, update, delete.as_deref(), data)
                 } else {
-                    // Return a lambda representation
-                    // The transform will be executed when the lambda is invoked
+                    // Return a function value; the transform executes when the
+                    // lambda is invoked (with $ bound to its argument). Being an
+                    // ordinary value, it can be bound to a variable, passed
+                    // around, and applied via `~>` like in jsonata-js.
                     let transform_lambda = StoredLambda {
                         params: vec!["$".to_string()],
                         body: AstNode::Transform {
@@ -4121,14 +4162,11 @@ impl Evaluator {
                         captured_env: HashMap::new(),
                         captured_data: None, // Transform takes $ as parameter
                         thunk: false,
+                        self_name: None,
+                        partial: None,
+                        live_token: LiveLambdaToken::new(),
                     };
-
-                    // Store with a generated unique name
-                    let lambda_name = format!("__transform_{}", self.fresh_lambda_id());
-                    self.context.bind_lambda(lambda_name, transform_lambda);
-
-                    // Return lambda marker
-                    Ok(JValue::string("<lambda>"))
+                    Ok(JValue::Lambda(Rc::new(transform_lambda)))
                 }
             }
 
@@ -6624,19 +6662,16 @@ impl Evaluator {
                     captured_env,
                     captured_data: Some(data.clone()),
                     thunk: *thunk,
+                    // Named definition: the closure knows its own name so the
+                    // body's recursive `$f(...)` resolves to THIS closure at
+                    // every invocation, wherever the value has traveled.
+                    self_name: Some(var_name.clone()),
+                    partial: None,
+                    live_token: LiveLambdaToken::new(),
                 };
-                let lambda_params = stored_lambda.params.clone();
-                let lambda_sig = stored_lambda.signature.clone();
-                self.context.bind_lambda(var_name.clone(), stored_lambda);
-
-                // Return a lambda marker value (include _lambda_id so it can be found later)
-                let lambda_repr = JValue::lambda(
-                    var_name.as_str(),
-                    lambda_params,
-                    Some(var_name.clone()),
-                    lambda_sig,
-                );
-                return Ok(lambda_repr);
+                let lambda_value = JValue::Lambda(Rc::new(stored_lambda));
+                self.context.bind(var_name, lambda_value.clone());
+                return Ok(lambda_value);
             }
 
             // Check if RHS is a pure function composition (ChainPipe between function references)
@@ -6656,7 +6691,7 @@ impl Evaluator {
                     // LHS is a function reference like $trim or $sum
                     AstNode::Variable(name)
                         if self.is_builtin_function(name)
-                            || self.context.lookup_lambda(name).is_some() =>
+                            || self.context.lookup_lambda_value(name).is_some() =>
                     {
                         true
                     }
@@ -6704,29 +6739,20 @@ impl Evaluator {
                         captured_env: self.capture_current_environment(),
                         captured_data: Some(data.clone()),
                         thunk: false,
+                        self_name: Some(var_name.clone()),
+                        partial: None,
+                        live_token: LiveLambdaToken::new(),
                     };
-                    self.context.bind_lambda(var_name.clone(), stored_lambda);
-
-                    // Return a lambda marker value (include _lambda_id for later lookup)
-                    let lambda_repr = JValue::lambda(
-                        var_name.as_str(),
-                        vec!["$".to_string()],
-                        Some(var_name.clone()),
-                        None::<String>,
-                    );
-                    return Ok(lambda_repr);
+                    let lambda_value = JValue::Lambda(Rc::new(stored_lambda));
+                    self.context.bind(var_name, lambda_value.clone());
+                    return Ok(lambda_value);
                 }
                 // If not function composition, fall through to normal evaluation below
             }
 
-            // Evaluate the RHS
+            // Evaluate the RHS. A lambda value carries its own closure, so
+            // aliasing (`$g := $f`) is just binding the value.
             let value = self.evaluate_internal(rhs, data)?;
-
-            // If the value is a lambda, alias the shared stored lambda under
-            // the new variable name (refcount bump, not a copy)
-            if let Some(stored) = self.lookup_lambda_from_value(&value) {
-                self.context.bind_lambda_rc(var_name.clone(), stored);
-            }
 
             // Bind even if undefined (null) so inner scopes can shadow outer variables
             self.context.bind(var_name, value.clone());
@@ -6982,19 +7008,18 @@ impl Evaluator {
             return self.create_partial_application(name, args, is_builtin, data);
         }
 
-        // FIRST check if this variable holds a function value (lambda or builtin reference)
-        // This is critical for:
-        // 1. Allowing function parameters to shadow stored lambdas
-        //    (e.g., Y-combinator pattern: function($g){$g($g)} where parameter $g shadows outer $g)
-        // 2. Calling built-in functions passed as parameters
-        //    (e.g., λ($f){$f(5)}($sum) where $f is bound to $sum reference)
+        // FIRST check if this variable holds a function value (lambda or builtin
+        // reference). User-defined functions, closures, partial applications and
+        // parameters holding function values are all ordinary bindings now, so
+        // one lookup covers them — and parameter shadowing (Y-combinator's
+        // function($g){$g($g)}) falls out of plain scope order.
         if let Some(value) = self.context.lookup(name).cloned() {
-            if let Some(stored_lambda) = self.lookup_lambda_from_value(&value) {
+            if let JValue::Lambda(stored_lambda) = &value {
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for arg in args {
                     evaluated_args.push(self.evaluate_internal(arg, data)?);
                 }
-                return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
+                return self.invoke_stored_lambda(stored_lambda, &evaluated_args, data);
             }
             if let JValue::Builtin { name: builtin_name } = &value {
                 // This is a built-in function reference (e.g., $f bound to $sum),
@@ -7007,16 +7032,6 @@ impl Evaluator {
                 }
                 return self.call_builtin_with_values(builtin_name, &evaluated_args, data, false);
             }
-        }
-
-        // THEN check if this is a stored lambda (user-defined function by name)
-        // This only applies if not shadowed by a binding above
-        if let Some(stored_lambda) = self.context.lookup_lambda(name).cloned() {
-            let mut evaluated_args = Vec::with_capacity(args.len());
-            for arg in args {
-                evaluated_args.push(self.evaluate_internal(arg, data)?);
-            }
-            return self.invoke_stored_lambda(&stored_lambda, &evaluated_args, data);
         }
 
         // THEN a host-registered custom function (register_fn / register_fn_override).
@@ -7071,12 +7086,8 @@ impl Evaluator {
                     return Ok(JValue::Bool(true)); // Built-in function exists
                 }
 
-                // Check if it's a stored lambda
-                if self.context.lookup_lambda(var_name).is_some() {
-                    return Ok(JValue::Bool(true)); // Lambda exists
-                }
-
-                // Check if the variable is defined
+                // Check if the variable is defined (lambda values are ordinary
+                // bindings, so this covers user-defined functions too)
                 if let Some(val) = self.context.lookup(var_name) {
                     // A variable bound to the undefined marker doesn't "exist"
                     if val.is_undefined() {
@@ -7657,7 +7668,7 @@ impl Evaluator {
                             }
                             // Stored lambda variable fast path: $var with pre-compiled body
                             if let AstNode::Variable(var_name) = &args[1] {
-                                if let Some(stored) = self.context.lookup_lambda(var_name) {
+                                if let Some(stored) = self.context.lookup_lambda_value(var_name) {
                                     if let Some(ref ce) = stored.compiled_body.clone() {
                                         let param_name = stored.params[0].clone();
                                         let captured_data = stored.captured_data.clone();
@@ -7801,7 +7812,7 @@ impl Evaluator {
                     }
                     // Stored lambda variable fast path: $var with pre-compiled body
                     if let AstNode::Variable(var_name) = &args[1] {
-                        if let Some(stored) = self.context.lookup_lambda(var_name) {
+                        if let Some(stored) = self.context.lookup_lambda_value(var_name) {
                             if let Some(ref ce) = stored.compiled_body.clone() {
                                 let param_name = stored.params[0].clone();
                                 let captured_data = stored.captured_data.clone();
@@ -7962,7 +7973,7 @@ impl Evaluator {
                     }
                     // Stored lambda variable fast path: $var with pre-compiled body
                     if let AstNode::Variable(var_name) = &args[1] {
-                        if let Some(stored) = self.context.lookup_lambda(var_name) {
+                        if let Some(stored) = self.context.lookup_lambda_value(var_name) {
                             if stored.params.len() == 2 {
                                 if let Some(ref ce) = stored.compiled_body.clone() {
                                     let acc_param = stored.params[0].clone();
@@ -8234,14 +8245,11 @@ impl Evaluator {
                 }
             }
             AstNode::Variable(var_name) => {
-                // Check if this variable holds a stored lambda
-                if let Some(stored_lambda) = self.context.lookup_lambda(var_name).cloned() {
-                    self.invoke_stored_lambda(&stored_lambda, values, data)
-                } else if let Some(value) = self.context.lookup(var_name).cloned() {
-                    // Check if this variable holds a lambda value
-                    // This handles lambdas passed as bound arguments in partial applications
-                    if let Some(stored) = self.lookup_lambda_from_value(&value) {
-                        return self.invoke_stored_lambda(&stored, values, data);
+                if let Some(value) = self.context.lookup(var_name).cloned() {
+                    // A lambda value covers user-defined functions, closures and
+                    // partial applications alike
+                    if let JValue::Lambda(stored) = &value {
+                        return self.invoke_stored_lambda(stored, values, data);
                     }
                     // `$f := $uppercase` binds a `JValue::Builtin`, which is
                     // not a lambda and so fell through to "evaluate as a plain
@@ -8433,10 +8441,17 @@ impl Evaluator {
         data: &JValue,
         thunk: bool,
     ) -> Result<JValue, EvaluatorError> {
-        self.invoke_lambda_with_env(params, body, signature, values, data, None, None, thunk)
+        self.invoke_lambda_with_env(
+            params, body, signature, values, data, None, None, thunk, None,
+        )
     }
 
-    /// Invoke a lambda with optional captured environment (for closures)
+    /// Invoke a lambda with optional captured environment (for closures).
+    ///
+    /// `self_rc` is the shared closure handle when the caller is invoking a
+    /// `StoredLambda` value; if that closure has a `self_name`, the name is
+    /// bound to the closure itself for the call (late-bound letrec).
+    #[allow(clippy::too_many_arguments)]
     fn invoke_lambda_with_env(
         &mut self,
         params: &[String],
@@ -8447,17 +8462,24 @@ impl Evaluator {
         captured_env: Option<&HashMap<String, JValue>>,
         captured_data: Option<&JValue>,
         thunk: bool,
+        self_rc: Option<&Rc<StoredLambda>>,
     ) -> Result<JValue, EvaluatorError> {
         // If this is a thunk (has tail calls), use TCO trampoline
         if thunk {
-            let stored = StoredLambda {
-                params: params.to_vec(),
-                body: body.clone(),
-                compiled_body: None, // Thunks use TCO, not the compiled fast path
-                signature: signature.cloned(),
-                captured_env: captured_env.cloned().unwrap_or_default(),
-                captured_data: captured_data.cloned(),
-                thunk,
+            let stored = match self_rc {
+                Some(rc) => Rc::clone(rc),
+                None => Rc::new(StoredLambda {
+                    params: params.to_vec(),
+                    body: body.clone(),
+                    compiled_body: None, // Thunks use TCO, not the compiled fast path
+                    signature: signature.cloned(),
+                    captured_env: captured_env.cloned().unwrap_or_default(),
+                    captured_data: captured_data.cloned(),
+                    thunk,
+                    self_name: None,
+                    partial: None,
+                    live_token: LiveLambdaToken::new(),
+                }),
             };
             return self.invoke_lambda_with_tco(&stored, values, data);
         }
@@ -8470,6 +8492,17 @@ impl Evaluator {
         if let Some(env) = captured_env {
             for (name, value) in env {
                 self.context.bind(name.clone(), value.clone());
+            }
+        }
+
+        // Late-bound self-reference: shadows any captured binding of the same
+        // name (a rebinding `$f := function(){ ...$f()... }` must recurse into
+        // itself, not the captured previous $f); parameters bind after this
+        // and shadow it in turn.
+        if let Some(rc) = self_rc {
+            if let Some(self_name) = &rc.self_name {
+                self.context
+                    .bind(self_name.clone(), JValue::Lambda(Rc::clone(rc)));
             }
         }
 
@@ -8495,101 +8528,13 @@ impl Evaluator {
             }
         }
 
-        // Check if this is a partial application (body is a special marker string)
-        if let AstNode::String(body_str) = body {
-            if body_str.starts_with("__partial_call:") {
-                // Parse the partial call info
-                let parts: Vec<&str> = body_str.split(':').collect();
-                if parts.len() >= 4 {
-                    let func_name = parts[1];
-                    let is_builtin = parts[2] == "true";
-                    let total_args: usize = parts[3].parse().unwrap_or(0);
-
-                    // Get placeholder positions from captured env
-                    let placeholder_positions: Vec<usize> = if let Some(env) = captured_env {
-                        if let Some(JValue::Array(positions)) = env.get("__placeholder_positions") {
-                            positions
-                                .iter()
-                                .filter_map(|v| v.as_f64().map(|n| n as usize))
-                                .collect()
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    };
-
-                    // Reconstruct the full argument list
-                    let mut full_args: Vec<JValue> = vec![JValue::Null; total_args];
-
-                    // Fill in bound arguments from captured environment
-                    if let Some(env) = captured_env {
-                        for (key, value) in env {
-                            if key.starts_with("__bound_arg_") {
-                                if let Ok(pos) = key[12..].parse::<usize>() {
-                                    if pos < total_args {
-                                        full_args[pos] = value.clone();
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Fill in placeholder positions with provided values
-                    for (i, &pos) in placeholder_positions.iter().enumerate() {
-                        if pos < total_args {
-                            let value = values.get(i).cloned().unwrap_or(JValue::Null);
-                            full_args[pos] = value;
-                        }
-                    }
-
-                    // Pop lambda scope, then push a new scope for temp args
-                    self.context.pop_scope();
-                    self.context.push_scope();
-
-                    // Build AST nodes for the function call arguments
-                    let mut temp_args: Vec<AstNode> = Vec::new();
-                    for (i, value) in full_args.iter().enumerate() {
-                        let temp_name = format!("__temp_arg_{}", i);
-                        self.context.bind(temp_name.clone(), value.clone());
-                        temp_args.push(AstNode::Variable(temp_name));
-                    }
-
-                    // Call the original function
-                    let result =
-                        self.evaluate_function_call(func_name, &temp_args, is_builtin, data);
-
-                    // Pop temp scope
-                    self.context.pop_scope();
-
-                    return result;
-                }
-            }
-        }
-
         // Evaluate lambda body (normal case)
         // Use captured_data for lexical scoping if available, otherwise use call-site data
         let body_data = captured_data.unwrap_or(data);
-        let result = self.evaluate_internal(body, body_data)?;
-
-        // Pop lambda scope, preserving any lambdas referenced by the return value
-        // Fast path: scalar results can never contain lambda references
-        let is_scalar = matches!(
-            &result,
-            JValue::Number(_)
-                | JValue::Bool(_)
-                | JValue::String(_)
-                | JValue::Null
-                | JValue::Undefined
-        );
-        if is_scalar {
-            self.context.pop_scope();
-        } else {
-            let lambdas_to_keep = self.extract_lambda_ids(&result);
-            self.context.pop_scope_preserving_lambdas(&lambdas_to_keep);
-        }
-
-        Ok(result)
+        let result = self.evaluate_internal(body, body_data);
+        // A returned closure carries its own storage; popping is unconditional.
+        self.context.pop_scope();
+        result
     }
 
     /// Invoke a lambda with tail call optimization using a trampoline
@@ -8597,11 +8542,11 @@ impl Evaluator {
     /// growing the stack, enabling deep recursion for tail-recursive functions.
     fn invoke_lambda_with_tco(
         &mut self,
-        stored_lambda: &StoredLambda,
+        stored_lambda: &Rc<StoredLambda>,
         initial_args: &[JValue],
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
-        let mut current_lambda = stored_lambda.clone();
+        let mut current_lambda = Rc::clone(stored_lambda);
         let mut current_args = initial_args.to_vec();
         let mut current_data = data.clone();
 
@@ -8648,16 +8593,15 @@ impl Evaluator {
                 LambdaResult::JValue(v) => break v,
                 LambdaResult::TailCall { lambda, args, data } => {
                     // Continue with the tail call - no stack growth
-                    current_lambda = *lambda;
+                    current_lambda = lambda;
                     current_args = args;
                     current_data = data;
                 }
             }
         };
 
-        // Pop the persistent TCO scope, preserving lambdas referenced by the result
-        let lambdas_to_keep = self.extract_lambda_ids(&result);
-        self.context.pop_scope_preserving_lambdas(&lambdas_to_keep);
+        // Pop the persistent TCO scope; escaping closures carry their own storage.
+        self.context.pop_scope();
 
         Ok(result)
     }
@@ -8668,7 +8612,7 @@ impl Evaluator {
     /// manages the persistent scope for the trampoline loop.
     fn invoke_lambda_body_for_tco(
         &mut self,
-        lambda: &StoredLambda,
+        lambda: &Rc<StoredLambda>,
         values: &[JValue],
         data: &JValue,
     ) -> Result<LambdaResult, EvaluatorError> {
@@ -8683,6 +8627,13 @@ impl Evaluator {
         // Apply captured environment
         for (name, value) in &lambda.captured_env {
             self.context.bind(name.clone(), value.clone());
+        }
+
+        // Late-bound self-reference (shadows a captured binding of the same
+        // name; parameters shadow it in turn)
+        if let Some(self_name) = &lambda.self_name {
+            self.context
+                .bind(self_name.clone(), JValue::Lambda(Rc::clone(lambda)));
         }
 
         // Bind parameters
@@ -8780,11 +8731,13 @@ impl Evaluator {
                         captured_env,
                         captured_data: Some(data.clone()),
                         thunk: *thunk,
+                        self_name: Some(var_name.clone()),
+                        partial: None,
+                        live_token: LiveLambdaToken::new(),
                     };
-                    self.context.bind_lambda(var_name, stored_lambda);
-                    let lambda_repr =
-                        JValue::lambda("anon", params.clone(), None::<String>, None::<String>);
-                    return Ok(LambdaResult::JValue(lambda_repr));
+                    let lambda_value = JValue::Lambda(Rc::new(stored_lambda));
+                    self.context.bind(var_name, lambda_value.clone());
+                    return Ok(LambdaResult::JValue(lambda_value));
                 }
 
                 // Evaluate the RHS
@@ -8795,15 +8748,15 @@ impl Evaluator {
 
             // Function call - this is where TCO happens
             AstNode::Function { name, args, .. } => {
-                // Check if this is a call to a stored lambda (user function)
-                if let Some(stored_lambda) = self.context.lookup_lambda(name).cloned() {
+                // Check if this is a call to a lambda value (user function)
+                if let Some(stored_lambda) = self.context.lookup_lambda_value(name).cloned() {
                     if stored_lambda.thunk {
                         let mut evaluated_args = Vec::with_capacity(args.len());
                         for arg in args {
                             evaluated_args.push(self.evaluate_internal(arg, data)?);
                         }
                         return Ok(LambdaResult::TailCall {
-                            lambda: Box::new(stored_lambda),
+                            lambda: stored_lambda,
                             args: evaluated_args,
                             data: data.clone(),
                         });
@@ -8820,19 +8773,18 @@ impl Evaluator {
                 let callable = self.evaluate_internal(procedure, data)?;
 
                 // Check if it's a lambda with TCO
-                if let JValue::Lambda { lambda_id, .. } = &callable {
-                    if let Some(stored_lambda) = self.context.lookup_lambda(lambda_id).cloned() {
-                        if stored_lambda.thunk {
-                            let mut evaluated_args = Vec::with_capacity(args.len());
-                            for arg in args {
-                                evaluated_args.push(self.evaluate_internal(arg, data)?);
-                            }
-                            return Ok(LambdaResult::TailCall {
-                                lambda: Box::new(stored_lambda),
-                                args: evaluated_args,
-                                data: data.clone(),
-                            });
+                if let JValue::Lambda(stored_lambda) = &callable {
+                    if stored_lambda.thunk {
+                        let stored_lambda = Rc::clone(stored_lambda);
+                        let mut evaluated_args = Vec::with_capacity(args.len());
+                        for arg in args {
+                            evaluated_args.push(self.evaluate_internal(arg, data)?);
                         }
+                        return Ok(LambdaResult::TailCall {
+                            lambda: stored_lambda,
+                            args: evaluated_args,
+                            data: data.clone(),
+                        });
                     }
                 }
                 // Not a thunk - evaluate normally
@@ -9937,61 +9889,6 @@ impl Evaluator {
         }
     }
 
-    /// Extract lambda IDs from a value (used for closure preservation)
-    /// Finds any lambda_id references in the value so they can be preserved
-    /// when exiting a block scope
-    fn extract_lambda_ids(&self, value: &JValue) -> Vec<String> {
-        // Fast path: scalars can never contain lambda references
-        match value {
-            JValue::Number(_)
-            | JValue::Bool(_)
-            | JValue::String(_)
-            | JValue::Null
-            | JValue::Undefined
-            | JValue::Regex { .. }
-            | JValue::Builtin { .. } => return Vec::new(),
-            _ => {}
-        }
-        let mut ids = Vec::new();
-        self.collect_lambda_ids(value, &mut ids);
-        ids
-    }
-
-    fn collect_lambda_ids(&self, value: &JValue, ids: &mut Vec<String>) {
-        match value {
-            JValue::Lambda { lambda_id, .. } => {
-                let id_str = lambda_id.to_string();
-                if !ids.contains(&id_str) {
-                    ids.push(id_str);
-                    // Transitively follow the stored lambda's captured_env
-                    // to find all referenced lambdas. This is critical for
-                    // closures like the Y-combinator where returned lambdas
-                    // capture other lambdas in their environment.
-                    if let Some(stored) = self.context.lookup_lambda(lambda_id) {
-                        let env_values: Vec<JValue> =
-                            stored.captured_env.values().cloned().collect();
-                        for env_value in &env_values {
-                            self.collect_lambda_ids(env_value, ids);
-                        }
-                    }
-                }
-            }
-            JValue::Object(map) => {
-                // Recurse into object values
-                for v in map.values() {
-                    self.collect_lambda_ids(v, ids);
-                }
-            }
-            JValue::Array(arr) => {
-                // Recurse into array elements
-                for v in arr.iter() {
-                    self.collect_lambda_ids(v, ids);
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Addition
     /// Get human-readable type name for error messages
     fn type_name(value: &JValue) -> &'static str {
@@ -10198,12 +10095,11 @@ impl Evaluator {
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
         // First, look up the function to ensure it exists
-        let is_lambda = self.context.lookup_lambda(name).is_some()
-            || (self
-                .context
-                .lookup(name)
-                .map(|v| matches!(v, JValue::Lambda { .. }))
-                .unwrap_or(false));
+        let is_lambda = self
+            .context
+            .lookup(name)
+            .map(|v| matches!(v, JValue::Lambda { .. }))
+            .unwrap_or(false);
 
         // Built-in functions must be called with $ prefix for partial application
         // Without $, it's an error (T1007) suggesting the user forgot the $
@@ -10240,65 +10136,83 @@ impl Evaluator {
             .map(|(i, _)| format!("__p{}", i))
             .collect();
 
-        // Store the partial application info as a special lambda
-        // When invoked, it will call the original function with bound + placeholder args
-        let partial_id = format!(
-            "__partial_{}_{}_{}",
-            name,
-            placeholder_positions.len(),
-            bound_args.len()
-        );
-
-        // Create a stored lambda that represents this partial application
-        // The body is a marker that we'll interpret specially during invocation
-        let stored_lambda = StoredLambda {
-            params: param_names.clone(),
-            body: AstNode::String(format!(
-                "__partial_call:{}:{}:{}",
-                name,
+        // A user-defined target is captured as a closure value so the partial
+        // still works after the target's defining scope pops; builtins and
+        // host fns stay name-resolved (they are global and cannot dangle, and
+        // by-name resolution preserves call-time shadowing).
+        let target = match self.context.lookup_lambda_value(name) {
+            Some(rc) => PartialTarget::Lambda(Rc::clone(rc)),
+            None => PartialTarget::Named {
+                name: name.to_string(),
                 is_builtin,
-                args.len()
-            )),
-            compiled_body: None, // Partial application uses a special body marker
-            signature: None,
-            captured_env: {
-                let mut env = self.capture_current_environment();
-                // Store the bound arguments in the captured environment
-                for (pos, value) in &bound_args {
-                    env.insert(format!("__bound_arg_{}", pos), value.clone());
-                }
-                // Store placeholder positions
-                env.insert(
-                    "__placeholder_positions".to_string(),
-                    JValue::array(
-                        placeholder_positions
-                            .iter()
-                            .map(|p| JValue::Number(*p as f64))
-                            .collect::<Vec<_>>(),
-                    ),
-                );
-                // Store total argument count
-                env.insert(
-                    "__total_args".to_string(),
-                    JValue::Number(args.len() as f64),
-                );
-                env
             },
-            captured_data: Some(data.clone()),
-            thunk: false,
         };
 
-        self.context.bind_lambda(partial_id.clone(), stored_lambda);
+        let stored_lambda = StoredLambda {
+            params: param_names,
+            body: AstNode::Null, // Inert: invocation dispatches on `partial`
+            compiled_body: None,
+            signature: None,
+            captured_env: HashMap::new(),
+            captured_data: None, // Targets evaluate against the call-site data
+            thunk: false,
+            self_name: None,
+            partial: Some(Rc::new(PartialApplication {
+                target,
+                bound_args,
+                placeholder_positions,
+                total_args: args.len(),
+            })),
+            live_token: LiveLambdaToken::new(),
+        };
 
-        // Return a lambda object that can be invoked
-        let lambda_obj = JValue::lambda(
-            partial_id.as_str(),
-            param_names,
-            Some(name.to_string()),
-            None::<String>,
-        );
+        Ok(JValue::Lambda(Rc::new(stored_lambda)))
+    }
 
-        Ok(lambda_obj)
+    /// Invoke a partial application: rebuild the full argument list (bound
+    /// values in their creation-time positions, call arguments filling the
+    /// placeholder positions in order, anything else Null) and apply the
+    /// target.
+    fn invoke_partial(
+        &mut self,
+        partial: &PartialApplication,
+        values: &[JValue],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
+        let mut full_args: Vec<JValue> = vec![JValue::Null; partial.total_args];
+        for (pos, value) in &partial.bound_args {
+            if *pos < partial.total_args {
+                full_args[*pos] = value.clone();
+            }
+        }
+        for (i, &pos) in partial.placeholder_positions.iter().enumerate() {
+            if pos < partial.total_args {
+                full_args[pos] = values.get(i).cloned().unwrap_or(JValue::Null);
+            }
+        }
+
+        match &partial.target {
+            PartialTarget::Lambda(stored) => {
+                let stored = Rc::clone(stored);
+                self.invoke_stored_lambda(&stored, &full_args, data)
+            }
+            PartialTarget::Named { name, is_builtin } => {
+                // Route through evaluate_function_call so builtins, host fns,
+                // late shadowing bindings and per-function special cases all
+                // behave exactly as a direct call would. It takes AST
+                // arguments, so pass the values via temporary bindings.
+                self.context.push_scope();
+                let mut temp_args: Vec<AstNode> = Vec::with_capacity(full_args.len());
+                for (i, value) in full_args.iter().enumerate() {
+                    let temp_name = format!("__temp_arg_{}", i);
+                    self.context.bind(temp_name.clone(), value.clone());
+                    temp_args.push(AstNode::Variable(temp_name));
+                }
+                let result = self.evaluate_function_call(name, &temp_args, *is_builtin, data);
+                self.context.pop_scope();
+                result
+            }
+        }
     }
 }
 
