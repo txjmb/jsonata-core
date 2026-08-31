@@ -100,11 +100,13 @@ jobs:
           echo "results_file=$RESULTS_FILE" >> $GITHUB_OUTPUT
           echo "Benchmark results saved to: $RESULTS_FILE"
 
-      - name: Update docs/performance.md (local copy)
+      - name: Update docs/performance.md and the README chart (local copies)
         run: |
           python benchmarks/python/generate_performance_doc.py \
             "benchmarks/${{ steps.run_benchmark.outputs.results_file }}" \
             docs/performance.md
+          python benchmarks/python/generate_readme_chart.py \
+            "benchmarks/${{ steps.run_benchmark.outputs.results_file }}"
 
       - name: Upload results as artifact
         uses: actions/upload-artifact@v7
@@ -113,9 +115,10 @@ jobs:
           path: |
             benchmarks/results/*.json
             docs/performance.md
+            docs/assets/realistic-workload-*.svg
           retention-days: 30
 
-      - name: Commit docs/performance.md and save results (only if record=true)
+      - name: Commit performance docs and save results (only if record=true)
         if: github.event.inputs.record == 'true'
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
@@ -136,12 +139,20 @@ jobs:
           git fetch origin main
           git worktree add /tmp/performance-doc-commit FETCH_HEAD
           cp docs/performance.md /tmp/performance-doc-commit/docs/performance.md
+
+          # The README chart is generated straight INTO the worktree rather
+          # than copied from this checkout: the dispatch ref may not be main,
+          # and copying a whole README across would clobber whatever else has
+          # landed there. The generator only rewrites its own marked block.
+          python "$(pwd)/benchmarks/python/generate_readme_chart.py" \
+            "$RESULTS_FILE" /tmp/performance-doc-commit
+
           cd /tmp/performance-doc-commit
-          if git diff --quiet -- docs/performance.md; then
-            echo "docs/performance.md unchanged - skipping commit"
+          if git diff --quiet -- docs/performance.md README.md docs/assets; then
+            echo "performance docs unchanged - skipping commit"
           else
-            git add docs/performance.md
-            git commit -m "docs(benchmarks): update performance.md (manual run, ${SHORT_SHA})"
+            git add docs/performance.md README.md docs/assets
+            git commit -m "docs(benchmarks): update performance.md and README chart (manual run, ${SHORT_SHA})"
             git push origin HEAD:main
           fi
           cd -
