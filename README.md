@@ -107,10 +107,10 @@ let result = Evaluator::new().evaluate(&ast, &data)?;
 ```toml
 # Cargo.toml
 [dependencies]
-jsonata-core = "2.2.8"          # pure Rust, no Python dependency
+jsonata-core = "2.2.9"          # pure Rust, no Python dependency
 
 # Optional: disable SIMD for constrained targets
-jsonata-core = { version = "2.2.8", default-features = false }
+jsonata-core = { version = "2.2.9", default-features = false }
 ```
 
 ---
