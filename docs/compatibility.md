@@ -1,6 +1,6 @@
 # JSONata Compatibility
 
-jsonatapy aims for 100% compatibility with the [JSONata 2.1.0 specification](https://docs.jsonata.org/).
+jsonatapy aims for 100% compatibility with the [JSONata specification](https://docs.jsonata.org/).
 
 ## Test Suite Overview
 
@@ -8,9 +8,10 @@ jsonatapy includes a comprehensive test adapter that runs the complete reference
 
 ### Reference Test Suite
 
-- **Total Tests**: 1258
-- **Passing**: 1258 (100%)
-- **Source**: Official jsonata-js repository (v2.1.0) at `tests/jsonata-js/`
+- **Total Tests**: 1686
+- **Passing**: 1686 (100%)
+- **Known divergences**: none. `KNOWN_DIVERGENCES` in `tests/python/test_reference_suite.py` is the registry; entries there are strict `xfail`, so one that starts passing fails the suite until it is removed
+- **Source**: Official jsonata-js repository (v2.2.2) at `tests/jsonata-js/`
 
 ## Current Compatibility Status
 
@@ -19,7 +20,11 @@ jsonatapy includes a comprehensive test adapter that runs the complete reference
 uv run pytest tests/python/test_reference_suite.py
 ```
 
-Results show 100% compatibility with the JSONata 2.1.0 specification.
+Results show 1686/1686 (100%) of the suite passing against the reference JSONata implementation.
+
+Two of those 1686 pass only because *something* was raised, not because the error code was
+compared — our message for them carries no code for the suite to check. `UNVERIFIED_ERROR_CEILING`
+in `tests/python/test_reference_suite.py` pins that count at 2 so it cannot quietly grow.
 
 ## Test Groups
 

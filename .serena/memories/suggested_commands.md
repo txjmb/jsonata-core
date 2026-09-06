@@ -10,7 +10,7 @@ maturin build --release      # produce a wheel in dist/
 ### Test
 ```bash
 cargo test                                              # Rust unit + tests/integration_test.rs
-uv run pytest tests/python/test_reference_suite.py       # 1258 JSONata-js reference cases (primary compat gate)
+uv run pytest tests/python/test_reference_suite.py       # 1686 JSONata-js reference cases (primary compat gate; 1686 pass)
 uv run pytest tests/python/ -v                           # full Python suite
 uv run pytest tests/python/test_functions.py::test_string_functions -v   # single test
 ```

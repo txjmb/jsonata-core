@@ -28,5 +28,5 @@
 - **Test-driven against the JS suite**: the JSONata-js reference suite
   (`tests/python/test_reference_suite.py` over the `tests/jsonata-js` submodule) is the
   compatibility oracle. Any evaluator/compiler change should be checked against the FULL
-  1258-case suite, not just a hand-picked subset — subtle regressions have historically hidden
+  1686-case suite, not just a hand-picked subset — subtle regressions have historically hidden
   in low-frequency edge cases (e.g. lambda id aliasing at ~0.5% call frequency).

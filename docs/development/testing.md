@@ -9,7 +9,7 @@ jsonatapy has three layers of testing:
 ```
 tests/
 ├── python/                      # Python integration tests
-│   ├── test_reference_suite.py  # Reference suite runner (1258 tests)
+│   ├── test_reference_suite.py  # Reference suite runner (1686 tests)
 │   ├── test_basic.py            # Basic functionality
 │   ├── test_functions.py        # Built-in functions
 │   ├── test_lambda.py           # Lambda functions
@@ -34,10 +34,10 @@ tests/
    - Error handling validation
    - Located in `tests/python/`
 
-3. **Reference Test Suite** (1258 tests)
+3. **Reference Test Suite** (1686 tests)
    - Official JSONata compatibility tests
    - Comprehensive language feature coverage
-   - Ensures 100% compatibility with jsonata-js
+   - 1686/1686 passing (no known divergences)
    - Imported from jsonata-js repository
 
 ## Running Tests
@@ -292,7 +292,7 @@ def test_with_fixture(sample_data):
 
 ### Overview
 
-The reference test suite contains 1258 tests from the official jsonata-js repository. These tests ensure 100% compatibility with the JSONata specification.
+The reference test suite contains 1686 tests from the official jsonata-js repository (v2.2.2). 1686 pass. Any future divergence goes in `KNOWN_DIVERGENCES` in `tests/python/test_reference_suite.py` as a strict xfail, so it cannot silently grow.
 
 ### Location
 
@@ -309,7 +309,7 @@ git submodule update --remote tests/jsonata-js
 ### Running Reference Tests
 
 ```bash
-# All reference tests (1258 tests)
+# All reference tests (1686 tests)
 uv run pytest tests/python/test_reference_suite.py
 
 # Verbose output

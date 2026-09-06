@@ -26,6 +26,19 @@ pub enum SignatureError {
 
     #[error("T0411: Context value does not match function signature (expected {expected})")]
     ContextTypeMismatch { index: usize, expected: String },
+
+    /// A `<` type parameter applied to anything but `a` or `f`. Upstream
+    /// (signature.js:140) raises this while *parsing* the signature, so the
+    /// parser escalates it -- which is why it is a variant rather than text
+    /// inside `InvalidSignature`.
+    #[error("S0401: Type parameters can only be applied to functions and arrays (got {found})")]
+    TypeParameterNotAllowed { found: String },
+
+    /// A choice group whose contents include a parameterized type, e.g.
+    /// `<(sa<n>)>`. signature.js:118 recognises the shape specifically in
+    /// order to reject it; like S0401 it is a parse-time error upstream.
+    #[error("S0402: Choice groups containing parameterized types are not supported ({choice})")]
+    ChoiceGroupParameterized { choice: String },
 }
 
 /// Parameter type
@@ -347,10 +360,28 @@ impl Signature {
             let mut union_types = Vec::new();
 
             // Parse all types until we hit ')'
+            let mut choice = String::new();
             while chars.peek() != Some(&')') && chars.peek().is_some() {
                 let type_char = chars.next().ok_or_else(|| {
                     SignatureError::InvalidSignature("Unexpected end in union type".to_string())
                 })?;
+                choice.push(type_char);
+
+                // signature.js:118 scans the whole group for a '<' before
+                // interpreting any of it: a parameterized type inside a choice
+                // group is a recognised-but-unsupported shape, not an
+                // unexpected character.
+                if type_char == '<' {
+                    // Consume the rest of the group so the reported `choice`
+                    // matches upstream's substring between the parentheses.
+                    for c in chars.by_ref() {
+                        if c == ')' {
+                            break;
+                        }
+                        choice.push(c);
+                    }
+                    return Err(SignatureError::ChoiceGroupParameterized { choice });
+                }
 
                 let param_type = ParamType::from_char(type_char).ok_or_else(|| {
                     SignatureError::InvalidSignature(format!(
@@ -426,11 +457,9 @@ impl Signature {
                 }
                 _ => {
                     // '<' not valid after other types
-                    return Err(SignatureError::InvalidSignature(format!(
-                        "S0401: Type parameters can only be applied to functions and arrays \
-                         (got {:?})",
-                        param_type
-                    )));
+                    return Err(SignatureError::TypeParameterNotAllowed {
+                        found: format!("{param_type:?}"),
+                    });
                 }
             }
         }
@@ -1054,5 +1083,35 @@ mod builtin_signature_table_tests {
                 .unwrap(),
             vec![JValue::array(vec![JValue::Null])]
         );
+    }
+
+    #[test]
+    fn choice_group_with_parameterized_type_is_s0402() {
+        // signature.js:118 recognises `(` ... `<` ... `)` specifically in order
+        // to reject it. Ours used to fail while still reading characters, so
+        // the shape surfaced as an uncoded "invalid type character" error.
+        let err = Signature::parse("<(sa<n>)>").expect_err("choice group with `<` is rejected");
+        assert!(
+            matches!(err, SignatureError::ChoiceGroupParameterized { .. }),
+            "expected ChoiceGroupParameterized, got {err:?}"
+        );
+        assert!(err.to_string().contains("S0402"), "got {err}");
+    }
+
+    #[test]
+    fn type_parameter_on_a_non_container_is_s0401() {
+        // `<` may only follow `a` or `f`. Upstream raises this at parse time,
+        // so it needs to be matchable as a variant, not a string.
+        let err = Signature::parse("<n<s>>").expect_err("`n<s>` is rejected");
+        assert!(
+            matches!(err, SignatureError::TypeParameterNotAllowed { .. }),
+            "expected TypeParameterNotAllowed, got {err:?}"
+        );
+        assert!(err.to_string().contains("S0401"), "got {err}");
+    }
+
+    #[test]
+    fn plain_choice_group_still_parses() {
+        Signature::parse("<(sa)>").expect("a choice group without `<` is valid");
     }
 }

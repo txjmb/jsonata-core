@@ -113,4 +113,4 @@ class TestMetadata:
     def test_jsonata_version_exists(self):
         """Test that JSONata reference version is available"""
         assert hasattr(jsonatapy, "__jsonata_version__")
-        assert jsonatapy.__jsonata_version__ == "2.1.0"
+        assert jsonatapy.__jsonata_version__ == "2.2.2"

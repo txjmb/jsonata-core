@@ -200,7 +200,7 @@ JSONata has the following types:
 
 jsonatapy aims for 100% compatibility with the reference JavaScript implementation. Currently:
 
-- **1258/1258 tests passing** (100% compatibility)
+- **1686/1686 tests passing** (100% compatibility)
 - All language features supported
 - All built-in functions implemented
 - Full lambda and higher-order function support

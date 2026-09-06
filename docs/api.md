@@ -350,7 +350,7 @@ data = jsonatapy.JsonataData.from_json('{"orders": [{"price": 150}, {"price": 50
 Package version.
 
 ```python
-print(jsonatapy.__version__)  # "2.1.0"
+print(jsonatapy.__version__)  # "2.2.8"
 ```
 
 ### `__jsonata_version__`
@@ -358,7 +358,7 @@ print(jsonatapy.__version__)  # "2.1.0"
 JSONata specification version supported.
 
 ```python
-print(jsonatapy.__jsonata_version__)  # "2.1.0"
+print(jsonatapy.__jsonata_version__)  # "2.2.2"
 ```
 
 ## Guardrails

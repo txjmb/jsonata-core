@@ -1,8 +1,9 @@
 """
 Test adapter for the JSONata reference test suite.
 
-This module loads and runs all 1682 test cases from the reference JavaScript JSONata
-implementation. All 1682 pass. See
+This module loads and runs all 1686 test cases from the reference JavaScript JSONata
+implementation (jsonata-js v2.2.2). 1686 pass; KNOWN_DIVERGENCES below is the registry
+for any that stop passing, and its entries are strict xfail. See
 docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md and
 docs/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design.md for the
 history of how the gap (widened test discovery, datetime picture-strings,
@@ -97,31 +98,11 @@ def extract_error_code(error_msg: str) -> str | None:
 # Reference cases that are known to diverge, each with the reason. Marked
 # xfail(strict), so one that starts passing fails the suite and has to be
 # removed from here. Empty is the goal, and currently the state.
-# Reference cases that are known to diverge, each with the reason. Marked
-# xfail(strict), so one that starts passing fails the suite and has to be
-# removed from here. Empty is the goal, and currently the state.
 #
 # Note what does NOT belong here: a case we satisfy only because our error
 # carries no code for the suite to compare. That is not a known divergence, it
-# is an unverified case -- counted by UNVERIFIED_ERROR_CEILING above.
-# Tracked in #150 -- both need the parser to recognise a construct, not an
-# error-variant mapping.
-KNOWN_DIVERGENCES: dict[str, str] = {
-    "errors/case005": (
-        "`unknown(function)` is T1006 upstream. `function` is a keyword here, so the parser "
-        "commits to a lambda and fails on its shape (S0202) before anything decides the call "
-        "target is not a function. Getting T1006 means recognising the call context first, "
-        "which is a parser restructure rather than an error-code mapping. The trigger is the "
-        "keyword `function` in argument position, not the call target: `foo(function)` fails "
-        "the same way and `unknown(fn)` is already correct. See #150."
-    ),
-    "function-signatures/case034": (
-        "`<(sa<n>)>` -- a choice group containing a parameterized type -- is S0402 upstream. "
-        "Our signature parser rejects the shape while still reading tokens, so it surfaces as "
-        "S0202. Needs the signature grammar to parse a choice group's contents far enough to "
-        "detect a parameterized type inside one; `<(sa)>` without the parameter works. See #150."
-    ),
-}
+# is an unverified case -- counted by UNVERIFIED_ERROR_CEILING below.
+KNOWN_DIVERGENCES: dict[str, str] = {}
 
 
 def _build_pytest_params(

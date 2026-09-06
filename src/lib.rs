@@ -179,7 +179,7 @@ pub mod _bench {
 // ── Python bindings (only when the "python" feature is enabled) ───────────────
 
 /// The JSONata reference implementation version this library targets.
-const JSONATA_REFERENCE_VERSION: &str = "2.1.0";
+const JSONATA_REFERENCE_VERSION: &str = "2.2.2";
 
 #[cfg(feature = "python")]
 use crate::value::JValue;

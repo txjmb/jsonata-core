@@ -4,6 +4,7 @@
 #![allow(clippy::approx_constant)]
 
 use crate::ast::{AstNode, BinaryOp, PathStep, Stage, UnaryOp};
+use crate::signature::SignatureError;
 use thiserror::Error;
 
 /// Parser errors
@@ -193,14 +194,23 @@ pub enum Token {
     True,
     False,
     Null,
-    Undefined,                                // The `undefined` keyword
-    Regex { pattern: String, flags: String }, // /pattern/flags
+    Undefined, // The `undefined` keyword
+    Regex {
+        pattern: String,
+        flags: String,
+    }, // /pattern/flags
 
     // Identifiers and operators
     Identifier(String),
     Variable(String),
     ParentVariable(String), // $$ variables
-    Function,               // function keyword
+    /// A lambda opener -- `function` or `λ`. jsonata-js has no such keyword:
+    /// its tokenizer emits both as ordinary names and only `parser.js`'s call
+    /// handler treats one as a lambda, when it is the callee of a `(`. We keep
+    /// a distinct token (the parser needs the distinction one token earlier
+    /// than upstream does) but carry the lexeme, so the non-lambda position
+    /// can fall back to exactly the name that was written.
+    Function(String),
 
     // Operators
     Plus,
@@ -682,9 +692,12 @@ impl Lexer {
                     return Ok(Token::Question);
                 }
                 Some('λ') => {
-                    // Lambda symbol (alternative to "function" keyword)
+                    // Lambda symbol (alternative to "function" keyword).
+                    // Recorded via emit_token, like the `function` spelling it
+                    // stands in for, so a following `/` is judged against it
+                    // rather than against whatever preceded it.
                     self.advance();
-                    return Ok(Token::Function);
+                    return self.emit_token(Token::Function("λ".to_string()));
                 }
                 Some('.') => {
                     self.advance();
@@ -734,7 +747,10 @@ impl Lexer {
                         | Some(Token::QuestionQuestion)
                         | Some(Token::QuestionColon) => true,
                         Some(Token::And) | Some(Token::Or) | Some(Token::In) => true,
-                        Some(Token::Function) => true,
+                        // Deliberately NOT Token::Function: a lambda's next
+                        // token is always `(`, so a `/` can only follow
+                        // `function`/`λ` when they are a bare name -- a value,
+                        // after which `/` divides.
                         Some(Token::Identifier(s)) if s == "and" || s == "or" || s == "in" => true,
                         _ => false, // After values, treat as division
                     };
@@ -792,7 +808,7 @@ impl Lexer {
                         "false" => Token::False,
                         "null" => Token::Null,
                         "undefined" => Token::Undefined,
-                        "function" => Token::Function,
+                        "function" => Token::Function(ident),
                         // "and", "or", "in" are now contextual keywords (handled in parser)
                         _ => Token::Identifier(ident),
                     };
@@ -1001,6 +1017,35 @@ impl Parser {
         }
 
         signature.push('>');
+
+        // jsonata-js validates the signature here, *before* advancing to the
+        // body's `{` (parser.js:670), so a bad signature outranks whatever the
+        // token stream does next -- which is what makes `<(sa<n>)>>` S0402
+        // upstream rather than the S0202 its stray trailing `>` would earn.
+        //
+        // Only the two codes upstream raises at parse time are escalated.
+        // signature.js's parseSignature switch has no default case, so a
+        // character it does not recognise is skipped silently; ours rejects
+        // it. Escalating the rest would turn every one of those strictness
+        // gaps into a new parse failure, so they stay deferred to call time.
+        match crate::signature::Signature::parse(&signature) {
+            Err(SignatureError::TypeParameterNotAllowed { .. }) => {
+                return Err(ParserError::Coded {
+                    code: "S0401",
+                    message: "Type parameters can only be applied to functions and arrays"
+                        .to_string(),
+                })
+            }
+            Err(SignatureError::ChoiceGroupParameterized { .. }) => {
+                return Err(ParserError::Coded {
+                    code: "S0402",
+                    message: "Choice groups containing parameterized types are not supported"
+                        .to_string(),
+                })
+            }
+            _ => {}
+        }
+
         Ok(signature)
     }
 
@@ -1184,9 +1229,23 @@ impl Parser {
                 self.advance()?;
                 Ok(AstNode::Parent(String::new()))
             }
-            Token::Function => {
+            Token::Function(lexeme) => {
                 // Parse lambda: function($param1, $param2, ...) { body }
-                self.advance()?; // skip 'function'
+                let lexeme = lexeme.clone();
+                self.advance()?; // skip 'function' / 'λ'
+
+                // Only a `(` makes this a lambda. Upstream reaches the same
+                // rule from the other side -- `function` is a name there, and
+                // parser.js:642 promotes the *call* to a lambda when its
+                // callee is that name -- so anything else is an ordinary path
+                // step. That is why `unknown(function)` gets as far as
+                // evaluating `unknown` and fails T1006, rather than failing on
+                // the shape of a lambda nobody wrote.
+                if self.current_token != Token::LeftParen {
+                    return Ok(AstNode::Path {
+                        steps: vec![PathStep::new(AstNode::Name(lexeme))],
+                    });
+                }
                 self.expect(Token::LeftParen)?;
 
                 // Parse parameters
@@ -2655,5 +2714,108 @@ mod tests {
         // S0214: @'s RHS must be a bare variable reference
         let err = parse("Order@foo").unwrap_err();
         assert!(err.to_string().starts_with("S0214"));
+    }
+
+    /// jsonata-js has no `function` keyword: its tokenizer emits `function`
+    /// and `λ` as ordinary names, and parser.js only reads a call as a lambda
+    /// when the *callee* name is one of those two. So `function` anywhere else
+    /// is a path step, which is why `unknown(function)` reaches evaluation and
+    /// fails as T1006 rather than as a malformed lambda.
+    #[test]
+    fn bare_function_keyword_is_a_name() {
+        let ast = parse("unknown(function)").unwrap();
+        match ast {
+            AstNode::Function { name, args, .. } => {
+                assert_eq!(name, "unknown");
+                assert_eq!(args.len(), 1);
+                match &args[0] {
+                    AstNode::Path { steps } => {
+                        assert_eq!(steps.len(), 1);
+                        assert_eq!(steps[0].node, AstNode::Name("function".to_string()));
+                    }
+                    other => panic!("expected the argument to be a Path, got {other:?}"),
+                }
+            }
+            other => panic!("expected a Function node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bare_lambda_symbol_keeps_its_own_lexeme() {
+        // `λ` is a name character upstream, so a bare `λ` looks up the field
+        // "λ" -- not the field "function".
+        let ast = parse("λ").unwrap();
+        match ast {
+            AstNode::Path { steps } => {
+                assert_eq!(steps.len(), 1);
+                assert_eq!(steps[0].node, AstNode::Name("λ".to_string()));
+            }
+            other => panic!("expected a Path node, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn function_keyword_before_a_paren_is_still_a_lambda() {
+        assert!(matches!(
+            parse("function($x){$x}").unwrap(),
+            AstNode::Lambda { .. }
+        ));
+        assert!(matches!(
+            parse("λ($x){$x}").unwrap(),
+            AstNode::Lambda { .. }
+        ));
+    }
+
+    /// Upstream validates a lambda's signature *before* looking for the body's
+    /// `{`, so S0402 wins over the S0202 that the stray trailing `>` would
+    /// otherwise produce. (The `>>` is not a typo -- it is what the reference
+    /// suite's case034 carries, and upstream reports S0402 for it too.)
+    #[test]
+    fn choice_group_with_parameterized_type_is_s0402_at_parse_time() {
+        for expr in ["λ($arr)<(sa<n>)>>{$arr}", "λ($arr)<(sa<n>)>{$arr}"] {
+            let err = parse(expr).unwrap_err();
+            assert!(
+                err.to_string().contains("S0402"),
+                "{expr}: expected S0402, got {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn type_parameter_on_a_non_container_is_s0401_at_parse_time() {
+        let err = parse("λ($arg)<n<n>>{$arg}").unwrap_err();
+        assert!(err.to_string().contains("S0401"), "got {err}");
+    }
+
+    /// A `/` can only follow `function`/`λ` when they are a bare name (a
+    /// lambda's next token is always `(`), and a name is a value -- so the `/`
+    /// divides rather than opening a regex literal, exactly as upstream reads
+    /// `function / 2` as 21.
+    #[test]
+    fn a_slash_after_a_bare_function_name_divides() {
+        for expr in ["function / 2", "λ / 2"] {
+            assert!(
+                matches!(
+                    parse(expr).unwrap(),
+                    AstNode::Binary {
+                        op: BinaryOp::Divide,
+                        ..
+                    }
+                ),
+                "{expr} should divide, not open a regex literal"
+            );
+        }
+    }
+
+    /// signature.js's parseSignature switch has no default case -- a character
+    /// it does not recognise is skipped silently. We are stricter, so only the
+    /// two codes upstream raises at parse time may be escalated there; every
+    /// other complaint has to keep surfacing at call time as it does today.
+    #[test]
+    fn an_unrecognised_signature_character_does_not_fail_at_parse_time() {
+        assert!(matches!(
+            parse("function($x)<z>{$x}").unwrap(),
+            AstNode::Lambda { .. }
+        ));
     }
 }

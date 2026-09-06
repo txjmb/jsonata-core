@@ -166,4 +166,4 @@ CI compiles and runs it (as both C and C++) on every change to the C ABI.
 - [`jsonata` CLI](../../docs/) — a jq-style command-line interface to the
   same engine.
 - [jsonata-js](https://github.com/jsonata-js/jsonata) — the reference
-  implementation this engine tracks (1682/1682 reference tests passing).
+  implementation this engine tracks (1686/1686 reference tests passing, v2.2.2).

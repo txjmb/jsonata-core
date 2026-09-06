@@ -176,7 +176,7 @@ See [official JSONata docs](https://docs.jsonata.org/) for the full language ref
 
 ## Performance
 
-`jsonata-core` passes **1682/1682** JSONata reference tests and is the fastest JSONata
+`jsonata-core` passes **1686/1686** JSONata reference tests and is the fastest JSONata
 implementation available in either Rust or Python:
 
 - **~6x faster on average** than the JavaScript reference implementation (V8), across all
@@ -201,7 +201,7 @@ benchmark methodology.
 
 ## Features
 
-- **1682/1682 JSONata reference tests passing**
+- **1686/1686 JSONata reference tests passing**
 - **Pure Rust core** — no JavaScript runtime, no Node.js dependency
 - **Optional Python bindings** — PyO3/maturin, zero-copy where possible
 - **Cross-platform** — Linux, macOS (Intel & ARM), Windows; Python 3.10–3.14

@@ -66,7 +66,7 @@ See [CLI reference](cli.md) for the full flag/exit-code contract.
 
 ## Performance highlights
 
-- **1682/1682** JSONata reference tests passing
+- **1686/1686** JSONata reference tests passing
 - **~6x faster on average** than the JavaScript reference implementation — up to ~16x for pure
   expression workloads (strings, conditionals)
 - **~40x faster** than jsonata-rs on pure-Rust Criterion benchmarks (no Python overhead)

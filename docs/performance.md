@@ -10,7 +10,7 @@ jsonatapy is a high-performance Rust implementation of JSONata with Python bindi
 |----------------|----------|---------|-------------|
 | **jsonatapy** | Rust + Python | 2.2.8 | This project (compiled Rust extension via PyO3) |
 | **jsonatapy** (rust-only) | Rust + Python | 2.2.8 | Same library, JSON string I/O path (bypasses Python object conversion) |
-| **jsonata-js** | JavaScript | 2.1.0 | Reference implementation (Node.js v20.20.2) |
+| **jsonata-js** | JavaScript | 2.2.2 | Reference implementation (Node.js v20.20.2) |
 | **jsonata-python** | Python | unknown | Pure Python implementation |
 | **jsonata-rs** | Rust | 0.3 | Pure Rust implementation (CLI benchmark, no Python overhead) |
 

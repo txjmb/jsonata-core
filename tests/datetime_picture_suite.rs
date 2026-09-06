@@ -2,7 +2,7 @@
 // function-tomillis, function-formatInteger, function-parseInteger) for the shared
 // picture-string engine in src/datetime.rs. This is NOT a replacement for
 // `pytest tests/python/test_reference_suite.py` (which remains the real gate and covers
-// the full 1682-case suite through the actual Python API) -- it exists purely so the
+// the full 1686-case suite through the actual Python API) -- it exists purely so the
 // picture-string engine can be iterated on with `cargo test` (seconds) instead of a
 // maturin rebuild + pytest cycle (~2.5 minutes) per fix. See
 // docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md, Phases 1-2.

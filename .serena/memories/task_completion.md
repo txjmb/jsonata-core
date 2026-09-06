@@ -8,7 +8,7 @@ cargo fmt --check          # or `cargo fmt` to auto-fix, then verify
 cargo clippy -- -D warnings
 cargo test
 maturin develop --release  # rebuild extension so Python tests exercise the new Rust code
-uv run pytest tests/python/test_reference_suite.py   # full 1258-case JS compat suite
+uv run pytest tests/python/test_reference_suite.py   # full 1686-case JS compat suite (1686 pass)
 uv run pytest tests/python/ -v                       # rest of the Python suite
 uv run ruff check python/ tests/
 uv run mypy python/

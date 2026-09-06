@@ -10,7 +10,7 @@ This directory contains automated CI/CD workflows for jsonatapy. All workflows f
 
 - Rust unit tests (all platforms)
 - Python integration tests (Python 3.9-3.12)
-- Reference JSONata test suite (1258 tests)
+- Reference JSONata test suite (1686 tests, 1686 passing)
 - Cross-platform testing (Linux, macOS, Windows)
 
 **Usage:**

@@ -11,11 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`function` and `λ` are names, not keywords.** They open a lambda only when immediately
+  followed by `(`, matching jsonata-js, which has no such keyword and decides lambda-ness from
+  the callee of a call. Anywhere else they are ordinary path steps, so `function` now reads a
+  field called `function` (and `λ` a field called `λ`) instead of being a parse error.
+- **A `/` after a bare `function`/`λ` divides** instead of opening a regex literal. The lexer
+  treated the lambda opener as an operator for this purpose, but a lambda's next token is always
+  `(` — so a `/` can only follow one of these when it is a name, and a name is a value.
+  `function / 2` is now 21, as upstream.
+- **A lambda's signature is validated when it is parsed**, not when it is first called — but
+  only for the two errors jsonata-js also raises at parse time, `S0401` and `S0402`. Every other
+  signature complaint still surfaces at call time as before.
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **`unknown(function)` now reports `T1006`** ("Attempted to invoke a non-function") instead of
+  `S0202`. The `function` keyword in argument position used to commit the parser to a lambda,
+  which then failed on its shape before anything decided the call target was not a function.
+  (reference suite `errors/case005`, [#150](https://github.com/txjmb/jsonata-core/issues/150))
+- **A choice group containing a parameterized type — `<(sa<n>)>` — now reports `S0402`**
+  ("Choice groups containing parameterized types are not supported") instead of `S0202`. The
+  signature parser rejected the shape while still reading characters, so it never got far enough
+  to say what it was looking at. `S0401` was carried as text inside an uncoded error and is now
+  a first-class variant too.
+  (reference suite `function-signatures/case034`,
+  [#150](https://github.com/txjmb/jsonata-core/issues/150))
+
+  With these two, the jsonata-js reference suite is at **1686/1686** and
+  `KNOWN_DIVERGENCES` is empty.
 
 ### Security
 

@@ -128,7 +128,7 @@ Thanks to the broader JSONata community:
 
 ### Reference Test Suite
 
-jsonatapy achieves 100% compatibility by passing all 1258 tests from the jsonata-js reference test suite. This comprehensive test coverage is thanks to the JSONata maintainers' commitment to quality.
+jsonatapy passes 1686 of the 1686 tests from the jsonata-js reference test suite. This comprehensive test coverage is thanks to the JSONata maintainers' commitment to quality.
 
 **Location:** [jsonata-js/test/test-suite](https://github.com/jsonata-js/jsonata/tree/master/test/test-suite)
 
