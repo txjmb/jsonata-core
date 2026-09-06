@@ -63,10 +63,11 @@ benchmarks/javascript/package-lock.json
 # Test artifacts
 # tests/jsonata-js/ - Now a git submodule, don't ignore
 
-# Claude Code local settings (personal per-developer permissions/config,
-# not meant to be shared across the team)
-.claude/settings.local.json
-.claude/worktrees/
+# Claude Code local state (personal per-developer permissions/config, worktrees
+# and lock files, not meant to be shared across the team). Nothing under here is
+# tracked; the previous two-line form left stray lock files showing up as
+# untracked on every `git status`.
+.claude/
 
 # Temporary files
 *.tmp
