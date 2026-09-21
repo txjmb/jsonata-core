@@ -16,10 +16,8 @@ class TestCompile:
 
     def test_compile_invalid_expression(self):
         """Test that invalid expressions raise ValueError"""
-        # This will fail once parser is implemented
-        # with pytest.raises(ValueError):
-        #     jsonatapy.compile("invalid [[[ syntax")
-        pass
+        with pytest.raises(ValueError):
+            jsonatapy.compile("invalid [[[ syntax")
 
     def test_compile_coded_error_s0214_no_prefix(self):
         """Test that S0214 coded errors appear without 'Parse error:' prefix.

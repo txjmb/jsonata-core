@@ -18,7 +18,7 @@ for size in sizes:
     iterations = 100
     start = time.perf_counter()
     for _ in range(iterations):
-        result = expr.evaluate(data)
+        expr.evaluate(data)
     end = time.perf_counter()
 
     avg_time = (end - start) / iterations

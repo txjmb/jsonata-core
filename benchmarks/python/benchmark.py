@@ -174,11 +174,13 @@ class BenchmarkSuite:
             result = subprocess.run(
                 ["node", "--version"], capture_output=True, text=True, timeout=5
             )
-            if result.returncode == 0:
-                print(f"✓ Node.js detected: {result.stdout.strip()}")
-                return True
         except (subprocess.SubprocessError, FileNotFoundError):
-            pass
+            # node is not installed, or the version probe hung.
+            result = None
+
+        if result is not None and result.returncode == 0:
+            print(f"✓ Node.js detected: {result.stdout.strip()}")
+            return True
 
         print("⚠ Node.js not found - JavaScript benchmarks will be skipped")
         return False
@@ -536,9 +538,10 @@ class BenchmarkSuite:
                     kb = int(line.split(":")[1].strip())
                     return kb / 1024  # Convert to MB
         except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+            # /usr/bin/time is missing (non-Linux) or the measured run timed out.
+            return -1.0
 
-        # Fallback: just return -1 if /usr/bin/time not available
+        # /usr/bin/time ran but reported no "Maximum resident set size" line.
         return -1.0
 
     def benchmark(
@@ -912,10 +915,10 @@ class BenchmarkSuite:
 
             console.print(stats_table)
 
-    def save_results(self, filename: str | None = None):
-        """Save results to JSON file."""
+    def save_results(self, filename: str | None = None) -> Path | None:
+        """Save results to JSON file, returning the path written (None if disabled)."""
         if not self.output_json:
-            return
+            return None
 
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -966,7 +969,7 @@ class BenchmarkSuite:
         output_dir.mkdir(exist_ok=True)
 
         # 1. Speedup comparison chart
-        _fig, ax = plt.subplots(figsize=(14, 8))
+        _, ax = plt.subplots(figsize=(14, 8))
 
         test_names = []
         speedups = []
@@ -979,7 +982,7 @@ class BenchmarkSuite:
                 colors.append("green" if result.jsonatapy_speedup > 1 else "red")
 
         y_pos = np.arange(len(test_names))
-        bars = ax.barh(y_pos, speedups, color=colors, alpha=0.7)
+        ax.barh(y_pos, speedups, color=colors, alpha=0.7)
 
         ax.set_yticks(y_pos)
         ax.set_yticklabels(test_names, fontsize=8)
@@ -999,7 +1002,7 @@ class BenchmarkSuite:
         print(f"✓ Speedup graph saved to {speedup_path}")
 
         # 2. Category-wise comparison
-        _fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        _, axes = plt.subplots(2, 2, figsize=(16, 12))
         axes = axes.flatten()
 
         for idx, (category, results) in enumerate(list(categories.items())[:4]):
@@ -1048,7 +1051,7 @@ class BenchmarkSuite:
 
         # 3. Overall statistics pie chart
         if speedups:
-            _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+            _, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
             # Pie chart: faster vs slower
             faster_count = sum(1 for s in speedups if s > 1)
