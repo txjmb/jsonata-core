@@ -72,6 +72,19 @@ jobs:
             else
               echo "## ✅ No Rust Security Vulnerabilities Found" >> $GITHUB_STEP_SUMMARY
             fi
+
+            # Warnings (yanked crates, unmaintained advisories) are not
+            # vulnerabilities and must not fail the build, but they are worth
+            # seeing - a yanked crate in Cargo.lock is a pending upgrade.
+            WARN_COUNT=$(jq '[.warnings[]?[]] | length' audit-results.json 2>/dev/null || echo "0")
+            if [ "$WARN_COUNT" -gt "0" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### ⚠️ $WARN_COUNT cargo-audit warning(s)" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              jq -r '.warnings | to_entries[] | .key as $kind | .value[] | "\($kind): \(.package.name) \(.package.version)"' audit-results.json >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
 
       - name: Upload audit results
@@ -170,26 +183,59 @@ jobs:
           AUDIT_EXIT=$?
           echo "exit_code=$AUDIT_EXIT" >> $GITHUB_OUTPUT
 
+      - name: Run pip-audit on uv.lock
+        id: pip_audit_lock
+        continue-on-error: true
+        run: |
+          # The environment audit above only sees what happens to be installed on
+          # the runner. Dependabot alerts are raised against uv.lock, so audit the
+          # resolved lockfile too - otherwise a vulnerable pinned dev dependency
+          # stays green here while the Security tab fills up.
+          uv export --frozen --no-hashes --all-extras -o uv-lock-requirements.txt
+          pip-audit -r uv-lock-requirements.txt --desc --format json > pip-audit-lock.json
+          pip-audit -r uv-lock-requirements.txt --desc > pip-audit-lock.txt 2>&1 || true
+
       - name: Parse pip-audit results
         if: always()
         run: |
+          FAIL=0
+
           if [ -f pip-audit.json ]; then
             VULN_COUNT=$(jq '[.dependencies[] | select((.vulns | length) > 0)] | length' pip-audit.json 2>/dev/null || echo "0")
-            echo "Found $VULN_COUNT vulnerabilities"
+            echo "Found $VULN_COUNT vulnerabilities in the installed environment"
 
             if [ "$VULN_COUNT" -gt "0" ]; then
-              echo "## 🔴 Python Security Vulnerabilities Found" >> $GITHUB_STEP_SUMMARY
+              echo "## 🔴 Python Security Vulnerabilities Found (environment)" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
               cat pip-audit.txt >> $GITHUB_STEP_SUMMARY
               echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-
-              # Fail the job
-              exit 1
+              FAIL=1
             else
-              echo "## ✅ No Python Security Vulnerabilities Found" >> $GITHUB_STEP_SUMMARY
+              echo "## ✅ No Python Security Vulnerabilities Found (environment)" >> $GITHUB_STEP_SUMMARY
             fi
           fi
+
+          if [ -f pip-audit-lock.json ]; then
+            LOCK_VULN_COUNT=$(jq '[.dependencies[] | select((.vulns | length) > 0)] | length' pip-audit-lock.json 2>/dev/null || echo "0")
+            echo "Found $LOCK_VULN_COUNT vulnerabilities in uv.lock"
+
+            if [ "$LOCK_VULN_COUNT" -gt "0" ]; then
+              echo "## 🔴 Python Security Vulnerabilities Found (uv.lock)" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Run \`uv lock --upgrade-package <name>\` for each affected package." >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              cat pip-audit-lock.txt >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              FAIL=1
+            else
+              echo "## ✅ No Python Security Vulnerabilities Found (uv.lock)" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+          # Fail the job if either audit found something
+          exit $FAIL
 
       - name: Upload audit results
         if: always()
@@ -199,6 +245,8 @@ jobs:
           path: |
             pip-audit.json
             pip-audit.txt
+            pip-audit-lock.json
+            pip-audit-lock.txt
           retention-days: 90
 
   codeql-rust:
