@@ -28,7 +28,9 @@ def run_js_benchmark(expression, data, iterations):
         if result.returncode == 0:
             return float(result.stdout.strip())
     except Exception:
-        pass
+        # node missing, the script erroring out, or a non-numeric stdout all
+        # mean "no JavaScript baseline for this run".
+        return -1
     return -1
 
 
@@ -51,7 +53,7 @@ print(f"JavaScript: {js_time:8.2f} ms ({js_time / iterations:8.4f} ms/iter)")
 expr = jsonatapy.compile(expression)
 start = time.perf_counter()
 for _ in range(iterations):
-    result = expr.evaluate(data)
+    expr.evaluate(data)
 py_time = (time.perf_counter() - start) * 1000
 print(f"Python (regular): {py_time:8.2f} ms ({py_time / iterations:8.4f} ms/iter)")
 print(f"  Slowdown: {py_time / js_time:.2f}x")
@@ -60,7 +62,7 @@ print(f"  Slowdown: {py_time / js_time:.2f}x")
 json_str = json.dumps(data)
 start = time.perf_counter()
 for _ in range(iterations):
-    result_str = expr.evaluate_json(json_str)
+    expr.evaluate_json(json_str)
 py_json_time = (time.perf_counter() - start) * 1000
 print(f"Python (JSON API): {py_json_time:8.2f} ms ({py_json_time / iterations:8.4f} ms/iter)")
 print(f"  Speedup vs Regular: {py_time / py_json_time:.2f}x")
@@ -86,7 +88,7 @@ expr2 = jsonatapy.compile(expression2)
 json_str2 = json.dumps(large_data)
 start = time.perf_counter()
 for _ in range(iterations2):
-    result_str = expr2.evaluate_json(json_str2)
+    expr2.evaluate_json(json_str2)
 py_json_time2 = (time.perf_counter() - start) * 1000
 print(f"Python (JSON API): {py_json_time2:8.2f} ms ({py_json_time2 / iterations2:8.4f} ms/iter)")
 print(f"  vs JavaScript: {py_json_time2 / js_time2:.2f}x")

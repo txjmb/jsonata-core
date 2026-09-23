@@ -19,7 +19,7 @@ print("\nTest 1: Regular API (evaluate)")
 iterations = 100
 start = time.perf_counter()
 for _ in range(iterations):
-    result = expr.evaluate(data)
+    expr.evaluate(data)
 elapsed_regular = (time.perf_counter() - start) / iterations * 1000
 print(f"Time: {elapsed_regular:.3f} ms per evaluation")
 
@@ -27,7 +27,7 @@ print(f"Time: {elapsed_regular:.3f} ms per evaluation")
 print("\nTest 2: JSON String API (evaluate_json)")
 start = time.perf_counter()
 for _ in range(iterations):
-    result_str = expr.evaluate_json(json_str)
+    expr.evaluate_json(json_str)
 elapsed_json = (time.perf_counter() - start) / iterations * 1000
 print(f"Time: {elapsed_json:.3f} ms per evaluation")
 
@@ -46,12 +46,12 @@ small_json_str = json.dumps(small_data)
 
 start = time.perf_counter()
 for _ in range(iterations):
-    result = expr.evaluate(small_data)
+    expr.evaluate(small_data)
 elapsed_small_regular = (time.perf_counter() - start) / iterations * 1000
 
 start = time.perf_counter()
 for _ in range(iterations):
-    result_str = expr.evaluate_json(small_json_str)
+    expr.evaluate_json(small_json_str)
 elapsed_small_json = (time.perf_counter() - start) / iterations * 1000
 
 print(f"Regular API:    {elapsed_small_regular:.3f} ms")

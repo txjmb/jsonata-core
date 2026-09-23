@@ -55,7 +55,8 @@ def get_versions():
                 versions["jsonata_python"] = line.split(":", 1)[1].strip()
                 break
     except Exception:
-        pass
+        # uv missing, not on PATH, or the query timed out - fall back below.
+        versions["jsonata_python"] = "unknown"
     if "jsonata_python" not in versions:
         versions["jsonata_python"] = "unknown"
 
@@ -134,7 +135,7 @@ def generate_markdown(data, versions):
     md = [
         "# Performance Benchmarks\n",
         "jsonatapy is a high-performance Rust implementation of JSONata with Python bindings. "
-        "This page presents benchmark comparisons against other JSONata implementations.\n",
+        + "This page presents benchmark comparisons against other JSONata implementations.\n",
     ]
 
     # Versions table

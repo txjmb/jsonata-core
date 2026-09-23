@@ -243,9 +243,6 @@ def test_reference_suite(test_id: str, group_name: str, spec: dict[str, Any], en
         group_name: Name of the test group
         spec: Test specification dictionary with expr, data, and expected outcome
     """
-    # Import here to avoid circular imports
-    import jsonatapy
-
     # Extract test components
     expr = spec.get("expr")
 
