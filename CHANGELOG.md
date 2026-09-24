@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.10] - 2026-09-24
+
+### Added
 - `SECURITY.md` security policy: security fixes ship as a new patch release of the latest
   minor line (currently 2.2.x) with no backports, and vulnerabilities are reported privately
   through the repository's Security tab rather than in public issues. (#171)
