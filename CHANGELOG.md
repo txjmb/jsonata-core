@@ -10,12 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- GitHub Release notes are now the version's `CHANGELOG.md` section (via the new
+  `scripts/release-notes.sh`) instead of a list of every commit subject since the previous tag,
+  which included merge commits, superseded intermediate steps and unrelated housekeeping. The
+  notes also link to the full commit comparison and include the Cargo install line.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- The release workflow now updates the `jsonata-core = "…"` install snippet in `README.md` when
+  it bumps the version. It previously went stale on every release and needed a manual follow-up
+  commit. The snippet is updated to 2.2.10 here.
 
 ### Security
 
