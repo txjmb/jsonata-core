@@ -145,6 +145,26 @@ jobs:
         run: |
           cargo update -p jsonata-core
 
+      - name: Update README.md install snippet
+        run: |
+          VERSION="${{ needs.validate-version.outputs.version }}"
+          # The README's Cargo example pins the crate version. Without this step it went
+          # stale on every release and needed a manual follow-up commit, which then
+          # showed up in the next release's commit history.
+          sed -i -E \
+            -e "s/^(jsonata-core = \")[0-9]+\.[0-9]+\.[0-9]+(\")/\1$VERSION\2/" \
+            -e "s/^(jsonata-core = \{ version = \")[0-9]+\.[0-9]+\.[0-9]+(\")/\1$VERSION\2/" \
+            README.md
+
+          # Warn rather than fail: a reworded README snippet should not block a release,
+          # but it should not go silently stale either.
+          if ! grep -q "^jsonata-core = \"$VERSION\"" README.md; then
+            echo "::warning::README.md has no 'jsonata-core = \"$VERSION\"' line after the update. Update the install snippet by hand, or fix this step's pattern."
+          fi
+
+          echo "README.md install snippet:"
+          grep -n "^jsonata-core = " README.md || true
+
       - name: Bump CHANGELOG.md
         run: |
           VERSION="${{ needs.validate-version.outputs.version }}"
@@ -171,7 +191,7 @@ jobs:
       - name: Commit version bump
         run: |
           VERSION="${{ needs.validate-version.outputs.version }}"
-          git add Cargo.toml pyproject.toml Cargo.lock CHANGELOG.md
+          git add Cargo.toml pyproject.toml Cargo.lock CHANGELOG.md README.md
 
           # Skip commit if nothing changed (re-run case)
           if git diff --cached --quiet; then
@@ -528,9 +548,13 @@ jobs:
       changelog: ${{ steps.changelog.outputs.changelog }}
 
     steps:
+      # Check out the release tag, like the build jobs do. The dispatched ref is the
+      # commit BEFORE update-version's bump, where CHANGELOG.md still says
+      # [Unreleased]; the tag carries the finalised [$VERSION] section.
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          ref: refs/tags/v${{ needs.validate-version.outputs.version }}
           fetch-depth: 0
 
       - name: Generate changelog
@@ -539,19 +563,22 @@ jobs:
           VERSION="v${{ needs.validate-version.outputs.version }}"
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
-          if [ -z "$PREV_TAG" ]; then
-            COMMITS=$(git log --pretty=format:"- %s (%h)" HEAD)
-          else
-            COMMITS=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
-          fi
+          # The release notes are this version's curated CHANGELOG.md section, not a
+          # list of commit subjects: that list included merge commits, superseded
+          # intermediate steps and unrelated housekeeping. release-notes.sh fails the
+          # job if the section is missing or empty, and this job runs before publishing.
+          {
+            echo "## Release $VERSION"
+            echo
+            ./scripts/release-notes.sh "${{ needs.validate-version.outputs.version }}"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              echo "**Full commit list:** https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION}"
+              echo
+            fi
+          } > changelog.md
 
-          cat > changelog.md <<EOF
-          ## Release $VERSION
-
-          ### Changes
-
-          $COMMITS
-
+          cat >> changelog.md <<EOF
           ### Test Suite Compatibility
 
           See the [README](https://github.com/${{ github.repository }}#readme) for the current
@@ -563,6 +590,11 @@ jobs:
 
           \`\`\`bash
           pip install jsonatapy==${{ needs.validate-version.outputs.version }}
+          \`\`\`
+
+          \`\`\`toml
+          # Cargo.toml
+          jsonata-core = "${{ needs.validate-version.outputs.version }}"
           \`\`\`
 
           ### Verification
