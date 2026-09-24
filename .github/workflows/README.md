@@ -113,8 +113,7 @@ This directory contains automated CI/CD workflows for jsonatapy. All workflows f
 **Features:**
 - ✅ Rust dependency audit (`cargo audit`)
 - ✅ Rust license/security check (`cargo deny`)
-- ✅ Python dependency audit (`pip-audit`)
-- ✅ CodeQL analysis (Rust and Python)
+- ✅ Python dependency audit (`pip-audit`, installed environment and `uv.lock`)
 - ✅ Dependency review on PRs
 - ✅ Secret scanning (gitleaks)
 - ✅ Automatic security advisories
@@ -123,9 +122,13 @@ This directory contains automated CI/CD workflows for jsonatapy. All workflows f
 1. **cargo-audit** - Check Rust dependencies for known vulnerabilities
 2. **cargo-deny** - License compliance and security policy enforcement
 3. **pip-audit** - Python package vulnerability scanning
-4. **CodeQL** - Static analysis for Rust and Python code
-5. **Dependency Review** - PR-based dependency change analysis
-6. **Secret Scanning** - Detect exposed secrets in commits
+4. **Dependency Review** - PR-based dependency change analysis
+5. **Secret Scanning** - Detect exposed secrets in commits
+
+CodeQL static analysis is not part of this workflow. It runs through CodeQL
+**default setup** (Settings → Code security → Code scanning), which GitHub manages
+and which covers Rust, Python, C/C++, JavaScript/TypeScript and GitHub Actions.
+Results appear in the Security tab and as the `CodeQL` check on pull requests.
 
 **Usage:**
 ```bash
