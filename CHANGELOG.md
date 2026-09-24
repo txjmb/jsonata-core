@@ -8,16 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `SECURITY.md` security policy: security fixes ship as a new patch release of the latest
+  minor line (currently 2.2.x) with no backports, and vulnerabilities are reported privately
+  through the repository's Security tab rather than in public issues. (#171)
+- Benchmark tables gain a per-row **jsonata-core (pure Rust)** column, measured by a new
+  `benchmarks/rust` harness that evaluates this project's engine as a Rust library with no
+  Python boundary. The column previously labelled `jsonatapy (rust)` is relabelled
+  `jsonatapy (json I/O)`: it was always the `evaluate_json` path of the same engine, not a
+  separate Rust implementation. (#162)
+- The README's performance section now shows an auto-generated chart of the "Realistic
+  Workload" benchmarks, regenerated alongside `docs/performance.md` on each release. (#165)
+- `CONTRIBUTORS.md`. (#167)
 
 ### Changed
+- Updated Rust dependencies: `simd-json` 0.18.0 → 0.18.1 (#163), `indexmap` 2.14.0 → 2.14.2
+  (#168), and `clap` 4.6.6 → 4.6.7, used only by the `jsonata` CLI (#169).
+- CodeQL now runs through GitHub's CodeQL default setup, covering Rust, Python, C/C++,
+  JavaScript/TypeScript and GitHub Actions, instead of CodeQL jobs in the Security Scanning
+  workflow. (#170, #171)
+- The Security Scanning workflow now audits the resolved `uv.lock` with `pip-audit`, not just
+  the packages installed on the runner, and fails on a vulnerable locked dependency. It also
+  lists `cargo-audit` warnings such as yanked crates, without failing the build on them. (#170)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- The default docs URL (`/stable/`) served the previous release's performance page: the
+  release job deployed docs from the release tag, which never contains that release's own
+  benchmark numbers. Release docs now take `docs/performance.md` from `main` after the
+  benchmark job records it, and the docs workflow can republish the released docs line
+  without a new release. (#164)
+- Resolved all 18 open CodeQL code-quality alerts in the benchmark and test scripts, and
+  implemented the previously stubbed `test_compile_invalid_expression` test. (#170)
 
 ### Security
+- `Cargo.lock`: `chacha20` 0.10.1 → 0.10.2. 0.10.1 was yanked; it reaches the build through
+  `rand` and was compiled into the 2.2.9 Python wheels and CLI binaries. (#170)
+- `uv.lock`: `anyio` 4.14.1 → 4.15.1 (CVE-2026-63374, CVE-2026-64847, CVE-2026-63349),
+  `cryptography` 49.0.0 → 50.0.1 (PYSEC-2026-3552), and `mkdocs-material` 9.7.6 → 9.7.7
+  (PYSEC-2026-3864). These are development and documentation dependencies only; the published
+  `jsonatapy` package has no Python dependencies and was not affected. (#170)
 
 ## [2.2.9] "Perform-ata" - 2026-08-31
 
