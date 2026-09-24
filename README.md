@@ -32,7 +32,7 @@
 </a>
 
 *Click the chart for the full category-by-category tables, including jsonata-python
-and jsonata-rs, which are left off the chart because at 68 ms–9 s they would
+and jsonata-rs, which are left off the chart because at 67 ms–9 s they would
 flatten everything else into a sliver.*
 <!-- END generated performance chart -->
 
