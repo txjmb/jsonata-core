@@ -7461,7 +7461,7 @@ impl Evaluator {
                 }
 
                 if results.is_empty() {
-                    Ok(JValue::Null)
+                    Ok(JValue::Undefined)
                 } else if results.len() == 1 && !is_global {
                     // Single match (non-global) returns the match object directly
                     Ok(results.into_iter().next().unwrap())

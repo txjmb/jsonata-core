@@ -2937,3 +2937,37 @@ fn test_builtin_null_handling_matches_reference() {
         .is_err());
     assert_eq!(ev("$sort([3, 1, 2])"), JValue::from(json!([1, 2, 3])));
 }
+
+/// `$match` with no match yields undefined (an empty sequence in reference
+/// JSONata), not `null`, so `$exists`, `$count` and array construction see
+/// "nothing" rather than a single null item.
+#[test]
+fn test_match_no_match_is_undefined() {
+    for expr in [
+        r#"$match("xyz", /abc/)"#,
+        r#"$match("xyz", /abc/g)"#,
+        r#"$match("xyz", /abc/, 2)"#,
+        r#"$match("xyz", function($s, $offset) { null })"#,
+    ] {
+        let ast = parse(expr).unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &JValue::Null).unwrap();
+        assert!(result.is_undefined(), "{expr} => {result:?}");
+    }
+}
+
+#[test]
+fn test_match_no_match_exists_count_and_array() {
+    for (expr, expected) in [
+        (r#"$exists($match("xyz", /abc/))"#, json!(false)),
+        (r#"$count($match("xyz", /abc/))"#, json!(0)),
+        (r#"[$match("xyz", /abc/)]"#, json!([])),
+        // positive control
+        (r#"$exists($match("abc", /abc/))"#, json!(true)),
+    ] {
+        let ast = parse(expr).unwrap();
+        let mut evaluator = Evaluator::new();
+        let result = evaluator.evaluate(&ast, &JValue::Null).unwrap();
+        assert_eq!(result, JValue::from(expected), "{expr}");
+    }
+}

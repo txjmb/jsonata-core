@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The release workflow now updates the `jsonata-core = "…"` install snippet in `README.md` when
   it bumps the version. It previously went stale on every release and needed a manual follow-up
   commit. The snippet is updated to 2.2.10 here.
+- `$match` now returns undefined (an empty sequence, as in jsonata-js) instead of `null` when a
+  regex matches nothing. Since 2.2.8 made `$exists(null)` true, `$exists($match(...))` was true and
+  `$count($match(...))` was 1 for a failed match; they are now false and 0, and `[$match(...)]`
+  is `[]`. (#176)
 
 ### Security
 
