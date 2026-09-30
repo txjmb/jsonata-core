@@ -39,3 +39,10 @@ def test_case_insensitive_still_works_everywhere():
 
 def test_no_flags_unchanged():
     assert ev('$match("a\nb", /^b/)') is None
+
+
+def test_match_no_match_is_absent_not_null():
+    # jsonata-js returns an empty sequence (undefined) when nothing matches
+    assert ev('$exists($match("xyz", /abc/))') is False
+    assert ev('$count($match("xyz", /abc/))') == 0
+    assert ev('$exists($match("abc", /abc/))') is True
