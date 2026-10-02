@@ -26,13 +26,13 @@
     <source media="(prefers-color-scheme: dark)"
             srcset="https://raw.githubusercontent.com/txjmb/jsonata-core/main/docs/assets/realistic-workload-dark.svg">
     <img width="880"
-         alt="Realistic-workload benchmark on a 100-product dataset, lower is better: jsonatapy is 7.5x faster than the jsonata-js reference on the geometric mean of 5 e-commerce queries, and the pure-Rust jsonata-core engine is faster still."
+         alt="Realistic-workload benchmark on a 100-product dataset, lower is better: jsonatapy is 8.7x faster than the jsonata-js reference on the geometric mean of 5 e-commerce queries, and the pure-Rust jsonata-core engine is faster still."
          src="https://raw.githubusercontent.com/txjmb/jsonata-core/main/docs/assets/realistic-workload-light.svg">
   </picture>
 </a>
 
 *Click the chart for the full category-by-category tables, including jsonata-python
-and jsonata-rs, which are left off the chart because at 67 ms–9 s they would
+and jsonata-rs, which are left off the chart because at 68 ms–9 s they would
 flatten everything else into a sliver.*
 <!-- END generated performance chart -->
 
