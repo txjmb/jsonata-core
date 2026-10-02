@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.11] - 2026-10-02
+
+### Added
+
+### Changed
 - GitHub Release notes are now the version's `CHANGELOG.md` section (via the new
   `scripts/release-notes.sh`) instead of a list of every commit subject since the previous tag,
   which included merge commits, superseded intermediate steps and unrelated housekeeping. The
