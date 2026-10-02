@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/release-notes.sh`) instead of a list of every commit subject since the previous tag,
   which included merge commits, superseded intermediate steps and unrelated housekeeping. The
   notes also link to the full commit comparison and include the Cargo install line.
+- Updated Rust dependencies: `thiserror` 2.0.20 → 2.0.21 and `rand` 0.10.2 → 0.10.3. (#175)
 
 ### Deprecated
 
@@ -26,9 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `$match` now returns undefined (an empty sequence, as in jsonata-js) instead of `null` when a
   regex matches nothing. Since 2.2.8 made `$exists(null)` true, `$exists($match(...))` was true and
   `$count($match(...))` was 1 for a failed match; they are now false and 0, and `[$match(...)]`
-  is `[]`. (#176)
+  is `[]`. (#176, #177)
 
 ### Security
+- Updated the locked Python dev dependencies `pyjwt` 2.13.0 → 2.15.1 and `urllib3` 2.7.0 → 2.8.0,
+  clearing 15 advisories that `pip-audit` reported against `uv.lock` and that were failing the
+  Security Scanning workflow. Both are transitive dependencies of optional extras (`fastmcp` and
+  the docs tooling), not of the published crate or of the wheel, which has no runtime
+  dependencies. This only changes the repository's lockfile; users of the `mcp` extra resolve
+  their own versions and should upgrade `pyjwt` to 2.15.1 or later. (#178)
 
 ## [2.2.10] - 2026-09-24
 
