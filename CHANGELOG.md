@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `$match` now returns undefined (an empty sequence, as in jsonata-js) instead of `null` when a
   regex matches nothing. Since 2.2.8 made `$exists(null)` true, `$exists($match(...))` was true and
   `$count($match(...))` was 1 for a failed match; they are now false and 0, and `[$match(...)]`
-  is `[]`. (#176, #177)
+  is `[]`. (#176, #177) Thanks to @MonkeyChap for the problem identification and fix.
 
 ### Security
 - Updated the locked Python dev dependencies `pyjwt` 2.13.0 → 2.15.1 and `urllib3` 2.7.0 → 2.8.0,
