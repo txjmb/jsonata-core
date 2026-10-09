@@ -222,7 +222,7 @@ benchmark methodology.
 
 ## Features
 
-- **1682/1682 JSONata reference tests passing**
+- **1686/1686 JSONata reference tests passing**
 - **Pure Rust core** — no JavaScript runtime, no Node.js dependency
 - **Optional Python bindings** — PyO3/maturin, zero-copy where possible
 - **Cross-platform** — Linux, macOS (Intel & ARM), Windows; Python 3.10–3.14
