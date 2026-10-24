@@ -491,6 +491,7 @@ pub unsafe extern "C" fn jsonata_set_limits(
         timeout_ms: (timeout_ms > 0).then_some(timeout_ms),
         max_stack_depth: (max_stack_depth > 0).then_some(max_stack_depth as usize),
         max_sequence_length: (max_sequence_length > 0).then_some(max_sequence_length as usize),
+        cancel: None,
     };
     clear_error();
     0

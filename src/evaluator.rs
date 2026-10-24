@@ -3691,12 +3691,76 @@ impl TupleKeyBindings {
     }
 }
 
+/// A handle that stops an evaluation from another thread.
+///
+/// Clones share one flag. Put a clone in [`EvaluatorOptions::cancel`] and call
+/// [`CancelToken::cancel`] on another, and the evaluation raises U1003 at its
+/// next checkpoint: each node it evaluates, each element a higher-order
+/// builtin (`$map`, `$filter`, `$reduce`, `$single`, `$sift`, `$each`,
+/// `$sort`) hands its callback, each match `$replace` hands its replacement
+/// function, and each pass of a tail-call loop. These are the places
+/// `timeout_ms` is checked.
+///
+/// A single builtin call over a large input, such as `$string` of a long
+/// array, finishes before the flag is seen. If that call is the last step,
+/// the evaluation returns its result even though the token was cancelled, so
+/// check [`CancelToken::is_cancelled`] after it returns when that matters.
+///
+/// An [`Evaluator`] keeps its options, so one built with a cancelled token
+/// fails every later evaluation. Pass a fresh token with each call, as below,
+/// or build a new `Evaluator`.
+///
+/// ```
+/// use jsonata_core::evaluator::{CancelToken, EvaluatorOptions};
+/// use jsonata_core::value::JValue;
+/// use jsonata_core::Expression;
+///
+/// let expr = Expression::compile("($inf := function(){ $inf() }; $inf())")?;
+///
+/// let token = CancelToken::new();
+/// let canceller = token.clone();
+/// std::thread::spawn(move || {
+///     std::thread::sleep(std::time::Duration::from_millis(10));
+///     canceller.cancel();
+/// });
+/// let options = EvaluatorOptions {
+///     cancel: Some(token),
+///     ..Default::default()
+/// };
+/// let err = expr.evaluate_with_options(&JValue::Null, options).unwrap_err();
+/// assert!(err.to_string().contains("U1003"));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct CancelToken(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl CancelToken {
+    /// A token that has not been cancelled.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Stop every evaluation that holds a clone of this token. It cannot be
+    /// reset.
+    pub fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether [`CancelToken::cancel`] has been called on any clone.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// Resource-limit guardrails, mirroring jsonata-js 2.2.1's `timeout`/`stack`/`sequence`
 /// evaluator options. All fields default to `None` = unlimited (current behavior).
 #[derive(Default, Clone, Debug)]
 pub struct EvaluatorOptions {
     /// Maximum wall-clock evaluation time in milliseconds. Exceeding it raises D1012.
     pub timeout_ms: Option<u64>,
+    /// Stops the evaluation with U1003 once the token is cancelled, from any
+    /// thread. jsonata-js has no equivalent; see [`CancelToken`].
+    pub cancel: Option<CancelToken>,
     /// Maximum evaluation stack depth, like jsonata-js's `stack` option. Exceeding
     /// it raises D1011. Without it, evaluation may nest up to the built-in
     /// `MAX_EVAL_DEPTH` (30,000 levels, about 10,000 non-tail recursive calls),
@@ -4262,14 +4326,29 @@ pub(crate) fn check_sequence_length(
     Ok(())
 }
 
-/// Per-iteration D1012 check for loop-based compiled/VM constructs (map/filter/
-/// reduce element loops, FilterByBytecode) that don't pass through
-/// `evaluate_internal`'s per-node checkpoint and would otherwise run untimed.
+/// U1003 once the caller has cancelled the evaluation. jsonata-js has no
+/// cancellation and so no code for it; like U1001 and U1002 this one is ours.
+#[inline(always)]
+pub(crate) fn check_cancelled(options: &EvaluatorOptions) -> Result<(), EvaluatorError> {
+    match &options.cancel {
+        Some(token) if token.is_cancelled() => Err(EvaluatorError::EvaluationError(
+            "U1003: Evaluation cancelled".to_string(),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Per-iteration D1012 and U1003 check for loops that don't pass through
+/// `evaluate_internal`'s per-node checkpoint and would otherwise run untimed:
+/// compiled map/filter/reduce element loops, FilterByBytecode, the tail-call
+/// trampoline, and the higher-order builtins' loops over a builtin, host or
+/// partial callback, whose call evaluates no node.
 #[inline]
 pub(crate) fn check_loop_timeout(
     options: &EvaluatorOptions,
     start_time: Option<Instant>,
 ) -> Result<(), EvaluatorError> {
+    check_cancelled(options)?;
     if let Some(timeout_ms) = options.timeout_ms {
         if let Some(start) = start_time {
             if start.elapsed().as_millis() as u64 > timeout_ms {
@@ -4915,6 +4994,7 @@ impl Evaluator {
             } else {
                 // Unexpected param count - fall back to generic path
                 while i < left.len() && j < right.len() {
+                    check_loop_timeout(&self.options, self.start_time)?;
                     let cmp_result = self.apply_function(
                         comparator,
                         &[left[i].clone(), right[j].clone()],
@@ -4932,6 +5012,7 @@ impl Evaluator {
         } else {
             // Non-lambda comparator: use generic apply_function path
             while i < left.len() && j < right.len() {
+                check_loop_timeout(&self.options, self.start_time)?;
                 let cmp_result =
                     self.apply_function(comparator, &[left[i].clone(), right[j].clone()], data)?;
                 if js_truthy(&cmp_result) {
@@ -5111,9 +5192,9 @@ impl Evaluator {
         self.with_checkpoint(|ev| ev.evaluate_internal_impl(node, data))
     }
 
-    /// Run one level of evaluation under the recursion-depth, timeout and
-    /// native-stack checks every node evaluation makes. Inlined so the hot
-    /// node-evaluation path pays no extra call frame for it. The trampoline's
+    /// Run one level of evaluation under the recursion-depth, cancellation,
+    /// timeout and native-stack checks every node evaluation makes. Inlined so
+    /// the hot node-evaluation path pays no extra call frame for it. The trampoline's
     /// own recursion paths that bypass `evaluate_internal` (a tail call of a
     /// higher-order builtin or of a composition) run under it too, so no
     /// recursion cycle grows the native stack unchecked (#191).
@@ -5150,6 +5231,11 @@ impl Evaluator {
                     )
                 },
             ));
+        }
+
+        if let Err(e) = check_cancelled(&self.options) {
+            self.recursion_depth -= 1;
+            return Err(e);
         }
 
         // Check evaluation timeout (D1012). `start_time` is only set (in
@@ -8347,6 +8433,7 @@ impl Evaluator {
                         let call_args =
                             hof_object_call_args(value, key, obj_value.as_ref(), param_count);
 
+                        check_loop_timeout(&evaluator.options, evaluator.start_time)?;
                         let pred_result =
                             evaluator.apply_function(func_node, &call_args, context_data)?;
                         if evaluator.is_truthy(&pred_result) {
@@ -8549,6 +8636,7 @@ impl Evaluator {
                             let call_args =
                                 hof_array_call_args(item, index, arr_value.as_ref(), param_count);
 
+                            check_loop_timeout(&self.options, self.start_time)?;
                             let mapped = self.apply_function(&args[1], &call_args, data)?;
                             // Filter out undefined results but keep explicit null (JSONata map semantics)
                             // undefined comes from missing else clause, null is explicit
@@ -8686,6 +8774,7 @@ impl Evaluator {
                     let call_args =
                         hof_array_call_args(item, index, arr_value.as_ref(), param_count);
 
+                    check_loop_timeout(&self.options, self.start_time)?;
                     let predicate_result = self.apply_function(&args[1], &call_args, data)?;
                     if self.is_truthy(&predicate_result) {
                         result.push(item.clone());
@@ -8848,6 +8937,7 @@ impl Evaluator {
                         ],
                     };
 
+                    check_loop_timeout(&self.options, self.start_time)?;
                     accumulator = self.apply_function(&args[1], &call_args, data)?;
                 }
 
@@ -8908,6 +8998,7 @@ impl Evaluator {
                         // hofFuncArgs shaping (see hof_array_call_args)
                         let call_args =
                             hof_array_call_args(item, index, arr_value.as_ref(), param_count);
+                        check_loop_timeout(&self.options, self.start_time)?;
                         let predicate_result = self.apply_function(&args[1], &call_args, data)?;
                         if self.is_truthy(&predicate_result) {
                             matches.push(item.clone());
@@ -8960,6 +9051,7 @@ impl Evaluator {
                             let call_args =
                                 hof_object_call_args(value, key, obj_whole.as_ref(), param_count);
 
+                            check_loop_timeout(&self.options, self.start_time)?;
                             let fn_result = self.apply_function(func_arg, &call_args, data)?;
                             // Skip undefined results only. jsonata-js guards
                             // this push with `typeof val !== 'undefined'`, so an
@@ -10223,6 +10315,7 @@ impl Evaluator {
                 group,
             );
         }
+        check_loop_timeout(&self.options, self.start_time)?;
         match self.as_callback(|ev| ev.call_function_value(replacement, &[match_object()], data))? {
             JValue::String(replaced) => {
                 out.push_str(&replaced);

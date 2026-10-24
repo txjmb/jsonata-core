@@ -4,7 +4,7 @@
 // to process complete JSONata expressions.
 
 use jsonata_core::{
-    evaluator::{Context, Evaluator, EvaluatorOptions},
+    evaluator::{CancelToken, Context, Evaluator, EvaluatorOptions},
     parser::parse,
     value::JValue,
 };
@@ -1020,6 +1020,161 @@ fn test_no_timeout_configured_never_raises_d1012() {
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data);
     assert!(result.is_ok(), "expected Ok, got: {result:?}");
+}
+
+/// Options carrying `token`, with a 10 s timeout so a cancel that is never
+/// seen fails with D1012 instead of hanging the test run.
+fn cancellable(token: &CancelToken) -> EvaluatorOptions {
+    EvaluatorOptions {
+        cancel: Some(token.clone()),
+        timeout_ms: Some(10_000),
+        ..Default::default()
+    }
+}
+
+/// Evaluates `expr_str` with a host function `$tick` that cancels the
+/// evaluation on its `cancel_on`th call. It returns `"x"`, since a string suits
+/// every callback slot and a `$replace` replacement must return one. Returns
+/// the error and how many times `$tick` ran.
+fn evaluate_cancelled_on_call(
+    expr_str: &str,
+    cancel_on: usize,
+) -> (jsonata_core::evaluator::EvaluatorError, usize) {
+    let ast = parse(expr_str).unwrap();
+    let token = CancelToken::new();
+    let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+    let mut evaluator = Evaluator::with_options(Context::new(), cancellable(&token));
+    let (tick_token, tick_calls) = (token.clone(), calls.clone());
+    evaluator
+        .register_fn("tick", move |_args: &[JValue]| {
+            tick_calls.set(tick_calls.get() + 1);
+            if tick_calls.get() == cancel_on {
+                tick_token.cancel();
+            }
+            Ok(JValue::string("x"))
+        })
+        .unwrap();
+    let err = evaluator
+        .evaluate(&ast, &JValue::Null)
+        .expect_err("expected a U1003 cancellation");
+    (err, calls.get())
+}
+
+/// A token cancelled before evaluation starts stops it at the first node.
+#[test]
+fn test_cancel_before_evaluation_raises_u1003() {
+    let ast = parse("$sum([1..10])").unwrap();
+    let token = CancelToken::new();
+    token.cancel();
+    let err = Evaluator::with_options(Context::new(), cancellable(&token))
+        .evaluate(&ast, &JValue::Null)
+        .expect_err("expected U1003");
+    assert!(
+        err.to_string().contains("U1003"),
+        "expected U1003, got: {err}"
+    );
+}
+
+/// A token cancelled before the run stops a compiled `Expression` too, whose
+/// simple expressions run on the bytecode VM rather than the tree-walker.
+#[test]
+fn test_cancel_before_evaluation_raises_u1003_on_compiled_expression() {
+    let token = CancelToken::new();
+    token.cancel();
+    let data = JValue::from(json!({"a": 1}));
+    for expr_str in ["a + 1", "a", "$sum([a, 2])"] {
+        let expr =
+            jsonata_core::Expression::compile_with_options(expr_str, cancellable(&token)).unwrap();
+        let err = expr.evaluate(&data).expect_err("expected U1003");
+        assert!(
+            err.to_string().contains("U1003"),
+            "{expr_str}: expected U1003, got: {err}"
+        );
+    }
+}
+
+/// A runaway tail-recursive loop, which has no iteration cap, stops once
+/// another thread cancels it. The trampoline checks on every pass.
+#[test]
+fn test_cancel_from_another_thread_stops_tail_recursion() {
+    let ast = parse("($inf := function(){$inf()}; $inf())").unwrap();
+    let token = CancelToken::new();
+    let canceller = token.clone();
+    let cancel_thread = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        canceller.cancel();
+    });
+    let err = Evaluator::with_options(Context::new(), cancellable(&token))
+        .evaluate(&ast, &JValue::Null)
+        .expect_err("expected U1003");
+    cancel_thread.join().unwrap();
+    assert!(
+        err.to_string().contains("U1003"),
+        "expected U1003, got: {err}"
+    );
+}
+
+/// A cancel stops a higher-order builtin between elements, whether its
+/// callback is a lambda, whose body is checked like any node, or a host
+/// function, whose call evaluates no node and is checked by the loop.
+#[test]
+fn test_cancel_stops_higher_order_builtins_between_elements() {
+    let cases = [
+        "$map([1..2000], function($x){ $tick($x) })",
+        "$map([1..2000], $tick)",
+        "$filter([1..2000], $tick)",
+        "$reduce([1..2000], $tick)",
+        "$single([1..2000], $tick)",
+        "$sift($merge([1..2000].{$string($): $}), $tick)",
+        "$each($merge([1..2000].{$string($): $}), $tick)",
+        "$sort([1..2000], $tick)",
+        "$replace($pad('', 2000, 'a'), /a/, $tick)",
+    ];
+    for expr_str in cases {
+        let (err, calls) = evaluate_cancelled_on_call(expr_str, 100);
+        assert!(
+            err.to_string().contains("U1003"),
+            "{expr_str}: expected U1003, got: {err}"
+        );
+        assert_eq!(calls, 100, "{expr_str}: $tick ran {calls} times");
+    }
+}
+
+/// `timeout_ms` stops `$map` over a host callback too. The loop had no
+/// check, so a slow callback ran past the deadline to the end of the array.
+#[test]
+fn test_timeout_stops_map_over_a_host_callback() {
+    let ast = parse("$map([1..1000], $slow)").unwrap();
+    let options = EvaluatorOptions {
+        timeout_ms: Some(50),
+        ..Default::default()
+    };
+    let mut evaluator = Evaluator::with_options(Context::new(), options);
+    evaluator
+        .register_fn("slow", |args: &[JValue]| {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            Ok(args.first().cloned().unwrap_or(JValue::Null))
+        })
+        .unwrap();
+    let err = evaluator
+        .evaluate(&ast, &JValue::Null)
+        .expect_err("expected D1012");
+    assert!(
+        err.to_string().contains("D1012"),
+        "expected D1012, got: {err}"
+    );
+}
+
+/// A token that is never cancelled changes no result.
+#[test]
+fn test_uncancelled_token_changes_nothing() {
+    let ast = parse("$map([1..1000], function($x){$x*2})").unwrap();
+    let token = CancelToken::new();
+    let with_token = Evaluator::with_options(Context::new(), cancellable(&token))
+        .evaluate(&ast, &JValue::Null)
+        .unwrap();
+    let without = Evaluator::new().evaluate(&ast, &JValue::Null).unwrap();
+    assert_eq!(with_token, without);
 }
 
 /// jsonata-js's own canonical guardrails-documentation example: an infinite

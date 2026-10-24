@@ -199,6 +199,7 @@ impl<'prog> Vm<'prog> {
         data: &JValue,
         vars: Option<&HashMap<&str, &JValue>>,
     ) -> Result<JValue, EvaluatorError> {
+        crate::evaluator::check_cancelled(&self.options)?;
         let data = &data.clone().into_outer_wrapper();
         let start_time = if self.options.timeout_ms.is_some() {
             Some(std::time::Instant::now())
@@ -829,5 +830,24 @@ mod tests {
             .run(&data, None)
             .expect_err("expected D1012");
         assert!(err.to_string().contains("D1012"), "got: {err}");
+    }
+
+    #[test]
+    fn test_filter_by_bytecode_raises_u1003_when_cancelled() {
+        let data: JValue = serde_json::json!({
+            "items": (0..1000).collect::<Vec<i32>>()
+        })
+        .into();
+        let prog = compile_and_assert_uses_filter_by_bytecode("items[$ >= 0]");
+        let token = crate::evaluator::CancelToken::new();
+        token.cancel();
+        let options = EvaluatorOptions {
+            cancel: Some(token),
+            ..Default::default()
+        };
+        let err = Vm::with_options(&prog, options)
+            .run(&data, None)
+            .expect_err("expected U1003");
+        assert!(err.to_string().contains("U1003"), "got: {err}");
     }
 }

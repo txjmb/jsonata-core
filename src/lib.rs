@@ -343,6 +343,7 @@ impl JsonataExpression {
             timeout_ms: timeout.or(self.default_options.timeout_ms),
             max_stack_depth: max_stack_depth.or(self.default_options.max_stack_depth),
             max_sequence_length: max_sequence_length.or(self.default_options.max_sequence_length),
+            cancel: self.default_options.cancel.clone(),
         }
     }
 
@@ -792,6 +793,7 @@ fn build_evaluator_options(
         timeout_ms: timeout,
         max_stack_depth,
         max_sequence_length,
+        cancel: None,
     }
 }
 

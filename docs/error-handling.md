@@ -102,6 +102,11 @@ any iteration limit, as in jsonata-js, so set `timeout` to stop a runaway one), 
 nested too deeply to parse. They exist independently of any guardrail you configure and cannot be
 disabled.
 
+`U1003` (Rust API only) is raised at the next checkpoint after the `CancelToken` in
+`EvaluatorOptions::cancel` is cancelled from another thread. A single builtin call over a large
+input finishes first, so an evaluation whose last step is such a call returns its result. It too
+has no jsonata-js equivalent.
+
 ### Type Errors
 
 Raised when operations receive incompatible types.
