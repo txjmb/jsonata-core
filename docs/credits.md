@@ -28,7 +28,8 @@ The JavaScript reference implementation (jsonata-js) serves as the authoritative
 
 Thank you to all contributors who have helped build jsonatapy:
 
-- Contributors list will be maintained as the project grows
+- [@MonkeyChap](https://github.com/MonkeyChap): problem identification and fix for #176 / #177
+- [@jonking-ajar](https://github.com/jonking-ajar): evaluation cancellation with `CancelToken`, and the `timeout_ms` fix for higher-order builtins (#264)
 - See [GitHub Contributors](https://github.com/txjmb/jsonata-core/graphs/contributors) for the complete list
 
 ### Community
