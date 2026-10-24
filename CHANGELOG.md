@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Upgrade notes**
+
+- **Breaking for Rust code that builds `EvaluatorOptions` field by field.** `EvaluatorOptions`
+  has a new public `cancel` field (see Added), so a struct literal that lists every field
+  without `..Default::default()` no longer compiles. Add `cancel: None`, or end the literal with
+  `..Default::default()`. Strict semver would call this a major change. It ships in a patch
+  release because jsonata-core's version tracks the jsonata-js version it targets (2.2), and
+  code that uses `..Default::default()` is unaffected. The Python and C APIs are unchanged.
+- **`jsonatapy[mcp]` now needs fastmcp 4.1.2 or later**, which brings `mcp` 2.x (see Changed).
+
 ### Added
 
 - **An evaluation can be cancelled from another thread.** `EvaluatorOptions` has a new
@@ -16,9 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `$replace` hands its replacement function, and each pass of a tail-call loop. A single
   builtin call over a large input finishes first, as it does under `timeout_ms`, and if it is
   the last step the evaluation returns its result. jsonata-js has no cancellation, so the
-  code is in the `U` series. This is a Rust API only. Code that builds `EvaluatorOptions`
-  field by field without `..Default::default()` must add `cancel: None`, so strict semver
-  would call this a breaking change.
+  code is in the `U` series. This is a Rust API only. See the upgrade notes above for the
+  `EvaluatorOptions` source break.
 
 ### Changed
 
