@@ -2512,6 +2512,10 @@ jsonata-js equivalent. <code>U1001</code> is raised when evaluation nests deeper
 any iteration limit, as in jsonata-js, so set <code>timeout</code> to stop a runaway one), and <code>U1002</code> when an expression is
 nested too deeply to parse. They exist independently of any guardrail you configure and cannot be
 disabled.</p>
+<p><code>U1003</code> (Rust API only) is raised at the next checkpoint after the <code>CancelToken</code> in
+<code>EvaluatorOptions::cancel</code> is cancelled from another thread. A single builtin call over a large
+input finishes first, so an evaluation whose last step is such a call returns its result. It too
+has no jsonata-js equivalent.</p>
 <h3 id="type-errors">Type Errors<a class="headerlink" href="#type-errors" title="Permanent link">&para;</a></h3>
 <p>Raised when operations receive incompatible types.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">jsonatapy</span>
