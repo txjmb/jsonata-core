@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The `mcp` extra now needs fastmcp 4.1.2 or later** (was 3.0). fastmcp 4 brings `mcp` 2.x
+  and replaces `httpx` with `httpx2`, so an environment that pins `mcp<2` or depends on
+  `httpx` alongside `jsonatapy[mcp]` may need updating. The `jsonatapy mcp` server itself is
+  unchanged. 4.1.2 is also the first 4.x release with the fix for GHSA-7xgj-8392-5q4r.
+
 ### Deprecated
 
 ### Removed
