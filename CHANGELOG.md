@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builtin call over a large input finishes first, as it does under `timeout_ms`, and if it is
   the last step the evaluation returns its result. jsonata-js has no cancellation, so the
   code is in the `U` series. This is a Rust API only. See the upgrade notes above for the
-  `EvaluatorOptions` source break.
+  `EvaluatorOptions` source break. (#264) Thanks to @jonking-ajar for the design, the
+  implementation and its tests.
 
 ### Changed
 
@@ -48,7 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the call evaluates no node, so `$map(items, $string)` over a large array ran to the end past
   its timeout. A lambda callback was already stopped, since its body is checked like any node.
   An expression with `timeout_ms` set that used to finish late in one of these loops and
-  return a result now fails with D1012 instead.
+  return a result now fails with D1012 instead. (#264) Thanks to @jonking-ajar, who found and
+  fixed this alongside the cancellation work.
 
 ### Security
 
