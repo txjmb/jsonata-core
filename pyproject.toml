@@ -42,10 +42,10 @@ dev = [
     "ruff>=0.3.0",        # Linting and formatting
     "mypy>=1.0",
     "maturin>=1.0",
-    "fastmcp>=3.0",       # So `dev` installs can run the full test suite (Task 9)
+    "fastmcp>=4.1.2",     # So `dev` installs can run the full test suite (Task 9)
 ]
 mcp = [
-    "fastmcp>=3.0",
+    "fastmcp>=4.1.2",
 ]
 bench = [
     "jsonata>=0.2.0",     # jsonata-python for benchmarking
@@ -82,7 +82,7 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.0",
     "maturin>=1.0",
-    "fastmcp>=3.0",
+    "fastmcp>=4.1.2",
 ]
 
 [tool.ruff]
