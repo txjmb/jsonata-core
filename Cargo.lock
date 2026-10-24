@@ -620,7 +620,7 @@ dependencies = [
 
 [[package]]
 name = "jsonata-core"
-version = "2.2.12"
+version = "2.2.13"
 dependencies = [
  "assert_cmd",
  "base64",

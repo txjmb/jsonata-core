@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "jsonatapy"
-version = "2.2.12"
+version = "2.2.13"
 description = "High-performance Python/Rust implementation of JSONata query and transformation language"
 authors = [
     {name = "txjmb", email = "txjmb@users.noreply.github.com"}

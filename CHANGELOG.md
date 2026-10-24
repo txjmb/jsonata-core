@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.13] - 2026-10-24
+
 **Upgrade notes**
 
 - **Breaking for Rust code that builds `EvaluatorOptions` field by field.** `EvaluatorOptions`
