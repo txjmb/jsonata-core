@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -33,10 +33,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -1992,19 +1992,19 @@
 <tr>
 <td><strong>jsonatapy</strong></td>
 <td>Rust + Python</td>
-<td>2.2.12</td>
+<td>2.2.13</td>
 <td>This project (compiled Rust extension via PyO3); data crosses the boundary as Python dicts</td>
 </tr>
 <tr>
 <td><strong>jsonatapy</strong> (JSON string I/O)</td>
 <td>Rust + Python</td>
-<td>2.2.12</td>
+<td>2.2.13</td>
 <td>Same library via <code>evaluate_json</code>: data crosses as JSON strings, parsed/serialized by serde per call</td>
 </tr>
 <tr>
 <td><strong>jsonata-core</strong> (pure Rust)</td>
 <td>Rust</td>
-<td>2.2.12</td>
+<td>2.2.13</td>
 <td>This project's engine measured as a Rust library — no Python at all, data pre-parsed, expression pre-compiled (criterion methodology, per table row)</td>
 </tr>
 <tr>
@@ -2039,7 +2039,7 @@
 <p><strong>jsonata-python</strong> — uses its documented <code>Context</code> object (<code>ctx = jsonata.Context()</code>, then <code>ctx(expr, data)</code> in the loop) rather than the one-off <code>transform()</code> convenience function. <code>transform()</code> re-bootstraps an embedded Duktape engine — reloading the <code>jsonata.js</code> library into it — on every single call; reusing a <code>Context</code> keeps that engine warm and is the library's own documented path for repeated evaluation. It is <em>not</em> a true compile-once equivalent, since <code>Context.__call__</code> still re-parses the expression string on every call, so some of the remaining gap to jsonatapy/jsonata-js is real parsing cost this library doesn't let a caller amortize away.</p>
 </li>
 </ul>
-<p>Benchmarks run on 2026-10-20.</p>
+<p>Benchmarks run on 2026-10-24.</p>
 <h2 id="summary-by-category">Summary by Category<a class="headerlink" href="#summary-by-category" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2051,7 +2051,7 @@
 <tbody>
 <tr>
 <td>Simple Paths</td>
-<td><strong>5.6x faster</strong></td>
+<td><strong>5.5x faster</strong></td>
 </tr>
 <tr>
 <td>Array Operations</td>
@@ -2059,15 +2059,15 @@
 </tr>
 <tr>
 <td>Complex Transformations</td>
-<td><strong>8.0x faster</strong></td>
+<td><strong>8.1x faster</strong></td>
 </tr>
 <tr>
 <td>Deep Nesting</td>
-<td><strong>3.3x faster</strong></td>
+<td><strong>3.4x faster</strong></td>
 </tr>
 <tr>
 <td>String Operations</td>
-<td><strong>6.8x faster</strong></td>
+<td><strong>7.0x faster</strong></td>
 </tr>
 <tr>
 <td>Higher-Order Functions</td>
@@ -2075,7 +2075,7 @@
 </tr>
 <tr>
 <td>Realistic Workload</td>
-<td><strong>9.7x faster</strong></td>
+<td><strong>9.8x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2099,46 +2099,46 @@
 <tr>
 <td>Simple Path</td>
 <td>tiny</td>
-<td>3.404</td>
-<td>4.530</td>
-<td>0.649</td>
-<td>16.950</td>
-<td>1828.735</td>
-<td>61.720</td>
+<td>3.386</td>
+<td>4.474</td>
+<td>0.664</td>
+<td>16.830</td>
+<td>1832.398</td>
+<td>61.919</td>
 <td><strong>5.0x faster</strong></td>
 </tr>
 <tr>
 <td>Deep Path (5 levels)</td>
 <td>tiny</td>
-<td>4.300</td>
-<td>6.530</td>
-<td>1.214</td>
-<td>25.290</td>
-<td>3007.201</td>
-<td>72.317</td>
-<td><strong>5.9x faster</strong></td>
+<td>4.278</td>
+<td>6.443</td>
+<td>1.145</td>
+<td>25.570</td>
+<td>3019.097</td>
+<td>72.431</td>
+<td><strong>6.0x faster</strong></td>
 </tr>
 <tr>
 <td>Array Index Access</td>
 <td>100 elements</td>
-<td>5.223</td>
-<td>9.060</td>
-<td>1.322</td>
-<td>11.320</td>
-<td>938.527</td>
-<td>86.545</td>
+<td>5.152</td>
+<td>9.021</td>
+<td>1.348</td>
+<td>11.340</td>
+<td>940.223</td>
+<td>86.619</td>
 <td><strong>2.2x faster</strong></td>
 </tr>
 <tr>
 <td>Arithmetic Expression</td>
 <td>tiny</td>
-<td>2.434</td>
-<td>3.833</td>
-<td>0.693</td>
-<td>22.450</td>
-<td>2610.019</td>
-<td>56.884</td>
-<td><strong>9.2x faster</strong></td>
+<td>2.488</td>
+<td>3.773</td>
+<td>0.721</td>
+<td>22.250</td>
+<td>2616.748</td>
+<td>56.676</td>
+<td><strong>8.9x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2161,101 +2161,101 @@
 <tr>
 <td>Array Sum (100 elements)</td>
 <td>100 elements</td>
-<td>1.552</td>
-<td>2.330</td>
-<td>0.764</td>
+<td>1.559</td>
+<td>2.327</td>
+<td>0.729</td>
 <td>6.820</td>
-<td>304.152</td>
-<td>17.949</td>
+<td>304.260</td>
+<td>18.034</td>
 <td><strong>4.4x faster</strong></td>
 </tr>
 <tr>
 <td>Array Max (100 elements)</td>
 <td>100 elements</td>
-<td>1.338</td>
-<td>2.109</td>
-<td>0.519</td>
-<td>6.430</td>
-<td>297.051</td>
-<td>17.958</td>
+<td>1.328</td>
+<td>2.087</td>
+<td>0.512</td>
+<td>6.400</td>
+<td>298.039</td>
+<td>18.536</td>
 <td><strong>4.8x faster</strong></td>
 </tr>
 <tr>
 <td>Array Count (100 elements)</td>
 <td>100 elements</td>
-<td>2.129</td>
-<td>3.687</td>
-<td>0.520</td>
-<td>8.680</td>
-<td>528.524</td>
-<td>34.971</td>
-<td><strong>4.1x faster</strong></td>
+<td>2.174</td>
+<td>3.741</td>
+<td>0.485</td>
+<td>8.790</td>
+<td>528.277</td>
+<td>35.076</td>
+<td><strong>4.0x faster</strong></td>
 </tr>
 <tr>
 <td>Array Sum (1000 elements)</td>
 <td>1000 elements</td>
-<td>2.470</td>
-<td>3.914</td>
-<td>1.053</td>
-<td>4.670</td>
-<td>179.011</td>
-<td>24.192</td>
+<td>2.448</td>
+<td>3.911</td>
+<td>1.046</td>
+<td>4.680</td>
+<td>178.601</td>
+<td>24.129</td>
 <td><strong>1.9x faster</strong></td>
 </tr>
 <tr>
 <td>Array Max (1000 elements)</td>
 <td>1000 elements</td>
-<td>1.973</td>
-<td>3.410</td>
-<td>0.555</td>
-<td>3.850</td>
-<td>166.481</td>
-<td>24.144</td>
+<td>1.952</td>
+<td>3.411</td>
+<td>0.551</td>
+<td>3.820</td>
+<td>166.827</td>
+<td>24.124</td>
 <td><strong>2.0x faster</strong></td>
 </tr>
 <tr>
 <td>Array Sum (10000 elements)</td>
 <td>10000 elements</td>
-<td>6.103</td>
-<td>10.034</td>
-<td>2.523</td>
-<td>8.870</td>
-<td>353.030</td>
-<td>59.941</td>
+<td>6.003</td>
+<td>9.960</td>
+<td>2.520</td>
+<td>8.840</td>
+<td>354.652</td>
+<td>59.875</td>
 <td><strong>1.5x faster</strong></td>
 </tr>
 <tr>
 <td>Array Mapping (extract field)</td>
 <td>100 objects</td>
-<td>7.896</td>
-<td>26.010</td>
-<td>1.273</td>
-<td>21.450</td>
-<td>2674.303</td>
-<td>205.974</td>
+<td>7.848</td>
+<td>25.866</td>
+<td>1.126</td>
+<td>21.560</td>
+<td>2685.686</td>
+<td>205.796</td>
 <td><strong>2.7x faster</strong></td>
 </tr>
 <tr>
 <td>Array Mapping + Sum</td>
 <td>100 objects</td>
 <td>7.555</td>
-<td>25.315</td>
-<td>2.013</td>
-<td>24.770</td>
-<td>2979.160</td>
-<td>205.888</td>
+<td>25.179</td>
+<td>1.813</td>
+<td>24.710</td>
+<td>2988.570</td>
+<td>205.826</td>
 <td><strong>3.3x faster</strong></td>
 </tr>
 <tr>
 <td>Array Filtering (predicate)</td>
 <td>100 objects</td>
-<td>5.207</td>
-<td>16.578</td>
-<td>1.972</td>
-<td>50.790</td>
-<td>6730.847</td>
-<td>107.011</td>
-<td><strong>9.8x faster</strong></td>
+<td>5.213</td>
+<td>16.577</td>
+<td>1.855</td>
+<td>50.700</td>
+<td>6747.586</td>
+<td>107.142</td>
+<td><strong>9.7x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2278,46 +2278,46 @@
 <tr>
 <td>Object Construction (simple)</td>
 <td>tiny</td>
-<td>3.887</td>
-<td>3.766</td>
-<td>2.955</td>
-<td>26.760</td>
-<td>2532.480</td>
-<td>33.965</td>
-<td><strong>6.9x faster</strong></td>
+<td>3.878</td>
+<td>3.703</td>
+<td>2.942</td>
+<td>27.410</td>
+<td>2541.370</td>
+<td>34.027</td>
+<td><strong>7.1x faster</strong></td>
 </tr>
 <tr>
 <td>Object Construction (nested)</td>
 <td>tiny</td>
-<td>6.077</td>
-<td>4.964</td>
-<td>4.278</td>
-<td>33.410</td>
-<td>2898.102</td>
-<td>36.880</td>
+<td>6.059</td>
+<td>4.882</td>
+<td>4.234</td>
+<td>33.450</td>
+<td>2909.645</td>
+<td>36.949</td>
 <td><strong>5.5x faster</strong></td>
 </tr>
 <tr>
 <td>Conditional Expression</td>
 <td>tiny</td>
-<td>1.118</td>
-<td>1.660</td>
-<td>0.393</td>
-<td>13.630</td>
-<td>1356.527</td>
-<td>26.342</td>
-<td><strong>12.2x faster</strong></td>
+<td>1.114</td>
+<td>1.632</td>
+<td>0.404</td>
+<td>13.660</td>
+<td>1357.382</td>
+<td>26.370</td>
+<td><strong>12.3x faster</strong></td>
 </tr>
 <tr>
 <td>Multiple Nested Functions</td>
 <td>tiny</td>
-<td>2.579</td>
-<td>2.946</td>
-<td>2.717</td>
-<td>19.180</td>
-<td>1777.014</td>
-<td>27.906</td>
-<td><strong>7.4x faster</strong></td>
+<td>2.550</td>
+<td>2.898</td>
+<td>2.534</td>
+<td>19.380</td>
+<td>1777.184</td>
+<td>27.908</td>
+<td><strong>7.6x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2340,23 +2340,23 @@
 <tr>
 <td>Deep Path (12 levels)</td>
 <td>12 levels</td>
-<td>4.510</td>
-<td>6.165</td>
-<td>0.993</td>
-<td>25.880</td>
-<td>2912.411</td>
-<td>55.386</td>
-<td><strong>5.7x faster</strong></td>
+<td>4.431</td>
+<td>6.140</td>
+<td>0.986</td>
+<td>25.680</td>
+<td>2923.662</td>
+<td>55.351</td>
+<td><strong>5.8x faster</strong></td>
 </tr>
 <tr>
 <td>Nested Array Access</td>
 <td>4-level nested arrays</td>
-<td>8.435</td>
-<td>13.128</td>
-<td>0.599</td>
-<td>7.980</td>
-<td>611.698</td>
-<td>107.419</td>
+<td>8.446</td>
+<td>13.137</td>
+<td>0.605</td>
+<td>7.990</td>
+<td>612.404</td>
+<td>107.348</td>
 <td>1.1x slower</td>
 </tr>
 </tbody>
@@ -2380,68 +2380,68 @@
 <tr>
 <td>String Uppercase</td>
 <td>tiny</td>
-<td>3.946</td>
-<td>4.569</td>
-<td>3.147</td>
-<td>22.560</td>
-<td>2395.996</td>
-<td>53.487</td>
-<td><strong>5.7x faster</strong></td>
+<td>3.881</td>
+<td>4.475</td>
+<td>3.042</td>
+<td>22.840</td>
+<td>2397.208</td>
+<td>53.416</td>
+<td><strong>5.9x faster</strong></td>
 </tr>
 <tr>
 <td>String Lowercase</td>
 <td>tiny</td>
-<td>3.962</td>
-<td>4.566</td>
-<td>3.197</td>
-<td>22.450</td>
-<td>2397.158</td>
-<td>53.252</td>
-<td><strong>5.7x faster</strong></td>
+<td>3.890</td>
+<td>4.499</td>
+<td>3.045</td>
+<td>22.470</td>
+<td>2396.763</td>
+<td>53.517</td>
+<td><strong>5.8x faster</strong></td>
 </tr>
 <tr>
 <td>String Length</td>
 <td>tiny</td>
-<td>3.634</td>
-<td>4.386</td>
-<td>2.660</td>
-<td>24.600</td>
-<td>2597.104</td>
-<td>54.863</td>
+<td>3.609</td>
+<td>4.321</td>
+<td>2.456</td>
+<td>24.520</td>
+<td>2597.458</td>
+<td>54.815</td>
 <td><strong>6.8x faster</strong></td>
 </tr>
 <tr>
 <td>String Concatenation</td>
 <td>tiny</td>
-<td>3.063</td>
-<td>3.147</td>
-<td>2.786</td>
-<td>25.230</td>
-<td>1923.759</td>
-<td>30.246</td>
-<td><strong>8.2x faster</strong></td>
+<td>3.019</td>
+<td>3.109</td>
+<td>2.749</td>
+<td>25.540</td>
+<td>1924.715</td>
+<td>30.334</td>
+<td><strong>8.5x faster</strong></td>
 </tr>
 <tr>
 <td>String Substring</td>
 <td>tiny</td>
-<td>2.843</td>
-<td>3.197</td>
-<td>2.909</td>
-<td>19.460</td>
-<td>1684.111</td>
-<td>28.590</td>
-<td><strong>6.8x faster</strong></td>
+<td>2.798</td>
+<td>3.121</td>
+<td>2.892</td>
+<td>19.510</td>
+<td>1684.446</td>
+<td>28.565</td>
+<td><strong>7.0x faster</strong></td>
 </tr>
 <tr>
 <td>String Contains</td>
 <td>tiny</td>
-<td>2.097</td>
-<td>2.534</td>
-<td>1.649</td>
-<td>16.170</td>
-<td>1416.831</td>
-<td>28.300</td>
-<td><strong>7.7x faster</strong></td>
+<td>2.063</td>
+<td>2.459</td>
+<td>1.562</td>
+<td>16.130</td>
+<td>1416.221</td>
+<td>28.293</td>
+<td><strong>7.8x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2464,35 +2464,35 @@
 <tr>
 <td>$map with lambda</td>
 <td>100 elements</td>
-<td>1.600</td>
-<td>1.706</td>
-<td>1.509</td>
-<td>23.930</td>
-<td>2673.195</td>
-<td>7.207</td>
-<td><strong>15.0x faster</strong></td>
+<td>1.596</td>
+<td>1.737</td>
+<td>1.485</td>
+<td>23.550</td>
+<td>2687.759</td>
+<td>7.305</td>
+<td><strong>14.8x faster</strong></td>
 </tr>
 <tr>
 <td>$filter with lambda</td>
 <td>100 elements</td>
-<td>1.639</td>
-<td>1.763</td>
-<td>1.415</td>
-<td>23.490</td>
-<td>2678.940</td>
-<td>7.097</td>
-<td><strong>14.3x faster</strong></td>
+<td>1.623</td>
+<td>1.725</td>
+<td>1.473</td>
+<td>23.540</td>
+<td>2692.735</td>
+<td>7.163</td>
+<td><strong>14.5x faster</strong></td>
 </tr>
 <tr>
 <td>$reduce with lambda</td>
 <td>100 elements</td>
-<td>3.030</td>
-<td>3.202</td>
-<td>2.994</td>
-<td>22.710</td>
-<td>2690.943</td>
-<td>7.747</td>
-<td><strong>7.5x faster</strong></td>
+<td>3.032</td>
+<td>3.185</td>
+<td>3.077</td>
+<td>22.970</td>
+<td>2700.852</td>
+<td>7.783</td>
+<td><strong>7.6x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2515,57 +2515,57 @@
 <tr>
 <td>Filter by category</td>
 <td>100 products</td>
-<td>7.512</td>
-<td>41.332</td>
-<td>2.089</td>
-<td>52.020</td>
-<td>7431.301</td>
-<td>313.541</td>
+<td>7.508</td>
+<td>41.289</td>
+<td>2.061</td>
+<td>51.620</td>
+<td>7456.994</td>
+<td>314.265</td>
 <td><strong>6.9x faster</strong></td>
 </tr>
 <tr>
 <td>Calculate total value</td>
 <td>100 products</td>
-<td>7.763</td>
-<td>40.220</td>
-<td>4.197</td>
-<td>37.620</td>
-<td>5155.273</td>
-<td>313.388</td>
-<td><strong>4.8x faster</strong></td>
+<td>7.661</td>
+<td>40.274</td>
+<td>4.200</td>
+<td>37.780</td>
+<td>5171.325</td>
+<td>314.276</td>
+<td><strong>4.9x faster</strong></td>
 </tr>
 <tr>
 <td>Complex transformation</td>
 <td>100 products</td>
-<td>14.476</td>
-<td>23.511</td>
-<td>8.471</td>
-<td>87.790</td>
-<td>9303.218</td>
-<td>135.284</td>
-<td><strong>6.1x faster</strong></td>
+<td>14.458</td>
+<td>23.448</td>
+<td>8.537</td>
+<td>86.910</td>
+<td>9339.702</td>
+<td>135.515</td>
+<td><strong>6.0x faster</strong></td>
 </tr>
 <tr>
 <td>Group by category (aggregate)</td>
 <td>100 products</td>
-<td>11.520</td>
-<td>23.559</td>
-<td>7.974</td>
-<td>88.190</td>
+<td>11.501</td>
+<td>23.311</td>
+<td>7.709</td>
+<td>88.470</td>
 <td>N/A</td>
-<td>133.484</td>
+<td>133.051</td>
 <td><strong>7.7x faster</strong></td>
 </tr>
 <tr>
 <td>Top rated products</td>
 <td>100 products</td>
-<td>1.645</td>
-<td>9.070</td>
-<td>1.037</td>
-<td>37.460</td>
-<td>4512.405</td>
-<td>66.834</td>
-<td><strong>22.8x faster</strong></td>
+<td>1.611</td>
+<td>9.086</td>
+<td>1.059</td>
+<td>37.570</td>
+<td>4533.237</td>
+<td>66.951</td>
+<td><strong>23.3x faster</strong></td>
 </tr>
 </tbody>
 </table>
@@ -2581,32 +2581,32 @@
 <tbody>
 <tr>
 <td>Filter by category (data handle)</td>
-<td>11.766</td>
+<td>11.736</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Filter by category (data→json)</td>
-<td>5.640</td>
+<td>6.258</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Complex transformation (data handle)</td>
-<td>27.195</td>
+<td>26.929</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Complex transformation (data→json)</td>
-<td>23.194</td>
+<td>22.905</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Aggregate (data handle)</td>
-<td>4.726</td>
+<td>4.634</td>
 <td>500</td>
 </tr>
 <tr>
 <td>Aggregate (data→json)</td>
-<td>4.670</td>
+<td>4.607</td>
 <td>500</td>
 </tr>
 </tbody>
@@ -2614,13 +2614,13 @@
 <h2 id="performance-characteristics">Performance Characteristics<a class="headerlink" href="#performance-characteristics" title="Permanent link">&para;</a></h2>
 <p><strong>Faster than JavaScript:</strong></p>
 <ul>
-<li>Simple Paths (<strong>5.6x faster</strong>)</li>
+<li>Simple Paths (<strong>5.5x faster</strong>)</li>
 <li>Array Operations (<strong>3.8x faster</strong>)</li>
-<li>Complex Transformations (<strong>8.0x faster</strong>)</li>
-<li>Deep Nesting (<strong>3.3x faster</strong>)</li>
-<li>String Operations (<strong>6.8x faster</strong>)</li>
+<li>Complex Transformations (<strong>8.1x faster</strong>)</li>
+<li>Deep Nesting (<strong>3.4x faster</strong>)</li>
+<li>String Operations (<strong>7.0x faster</strong>)</li>
 <li>Higher-Order Functions (<strong>12.3x faster</strong>)</li>
-<li>Realistic Workload (<strong>9.7x faster</strong>)</li>
+<li>Realistic Workload (<strong>9.8x faster</strong>)</li>
 </ul>
 <p><strong>Comparable to JavaScript:</strong></p>
 <ul>
@@ -2641,7 +2641,7 @@
 </span></code></pre></div>
 <h2 id="methodology">Methodology<a class="headerlink" href="#methodology" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Date:</strong> 2026-10-20</li>
+<li><strong>Date:</strong> 2026-10-24</li>
 <li><strong>Platform:</strong> GitHub Actions (self-hosted Michaels-Mini, physical/dedicated hardware, macOS ARM64)</li>
 <li><strong>Python:</strong> 3.14.6</li>
 <li><strong>Node.js:</strong> v20.20.2</li>
@@ -2738,10 +2738,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
       
     
   </body>
