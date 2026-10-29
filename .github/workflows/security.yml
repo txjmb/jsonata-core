@@ -43,9 +43,10 @@ jobs:
         id: audit
         continue-on-error: true
         run: |
-          # Run audit and save output
-          cargo audit --json > audit-results.json
-          AUDIT_EXIT=$?
+          # Run audit and save output. Steps run under `bash -e`, so capture
+          # the findings exit instead of letting it end the step early.
+          AUDIT_EXIT=0
+          cargo audit --json > audit-results.json || AUDIT_EXIT=$?
 
           # Also generate human-readable output
           cargo audit > audit-report.txt 2>&1 || true
@@ -178,9 +179,11 @@ jobs:
         id: pip_audit
         continue-on-error: true
         run: |
-          pip-audit --desc --format json > pip-audit.json
+          # Steps run under `bash -e`, so a findings exit from the first
+          # pip-audit would end the step before the text report is written.
+          AUDIT_EXIT=0
+          pip-audit --desc --format json > pip-audit.json || AUDIT_EXIT=$?
           pip-audit --desc > pip-audit.txt 2>&1 || true
-          AUDIT_EXIT=$?
           echo "exit_code=$AUDIT_EXIT" >> $GITHUB_OUTPUT
 
       - name: Run pip-audit on uv.lock
@@ -192,7 +195,7 @@ jobs:
           # resolved lockfile too - otherwise a vulnerable pinned dev dependency
           # stays green here while the Security tab fills up.
           uv export --frozen --no-hashes --all-extras -o uv-lock-requirements.txt
-          pip-audit -r uv-lock-requirements.txt --desc --format json > pip-audit-lock.json
+          pip-audit -r uv-lock-requirements.txt --desc --format json > pip-audit-lock.json || true
           pip-audit -r uv-lock-requirements.txt --desc > pip-audit-lock.txt 2>&1 || true
 
       - name: Parse pip-audit results
@@ -374,8 +377,8 @@ jobs:
     timeout-minutes: 5
 
     permissions:
-      contents: write
-      security-events: write
+      contents: read
+      issues: write
 
     steps:
       - name: Create issue for vulnerabilities
