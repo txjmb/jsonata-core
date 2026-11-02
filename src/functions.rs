@@ -1882,10 +1882,21 @@ pub mod array {
 
     /// $distinct(array) - Get unique elements
     pub fn distinct(arr: &[JValue]) -> Result<JValue, FunctionError> {
+        distinct_checked(arr, || Ok::<(), FunctionError>(()))
+    }
+
+    /// `distinct` with `check` called before each element, so a caller can
+    /// stop the quadratic walk part way, as the `$distinct` builtin does on
+    /// cancellation.
+    pub(crate) fn distinct_checked<E: From<FunctionError>>(
+        arr: &[JValue],
+        mut check: impl FnMut() -> Result<(), E>,
+    ) -> Result<JValue, E> {
         let mut result = Vec::new();
         let mut seen: Vec<JValue> = Vec::new();
 
         for value in arr {
+            check()?;
             // Materialize a lazy element before comparing so an unconvertible
             // Python value raises `TypeError` here instead of being silently
             // treated as "always distinct from everything else" -- `values_equal`'s

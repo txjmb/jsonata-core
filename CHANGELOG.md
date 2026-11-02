@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A cancel now stops `$distinct` and `$keys` part way.** Both compare each element with every one
+  kept so far, and over a large input that ran to the end before U1003 was seen.
+
 ### Security
 
 ## [2.2.13] - 2026-10-24
