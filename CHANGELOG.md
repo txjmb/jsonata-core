@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`\d`, `\w`, `\s` and `\b` in a regex now mean what they mean in jsonata-js**: ASCII digits and
+  word characters and ECMAScript's whitespace, so `$contains("٣", /\d/)` is `false`.
+
 ### Security
 
 ## [2.2.13] - 2026-10-24

@@ -637,6 +637,7 @@ dependencies = [
  "pyo3",
  "rand",
  "regex",
+ "regex-syntax",
  "serde",
  "serde_json",
  "simd-json",
