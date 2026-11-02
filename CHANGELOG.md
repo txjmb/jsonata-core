@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Object keys are in JavaScript's order**: integer-like keys first in ascending order, then the
+  rest in insertion order, so `$keys({"b":1,"2":2})` is `["2","b"]` as in jsonata-js.
+
 ### Security
 
 ## [2.2.13] - 2026-10-24
