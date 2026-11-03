@@ -93,10 +93,134 @@ pub mod string {
             regex_pattern.push_str(&inline);
             regex_pattern.push(')');
         }
-        regex_pattern.push_str(pattern);
+        regex_pattern.push_str(&javascript_classes(pattern));
 
         Regex::new(&regex_pattern)
             .map_err(|e| FunctionError::ArgumentError(format!("Invalid regex: {}", e)))
+    }
+
+    /// ECMAScript's WhiteSpace and LineTerminator code points, as members of a
+    /// bracketed class. `\x20` keeps the space under `(?x)`.
+    const JS_SPACE: &str = r"\t\n\x0B\x0C\r\x20\xA0\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}";
+
+    /// Rewrites `\d`, `\w`, `\s`, `\b` and their negations to the meaning a
+    /// JavaScript `RegExp` without the `u` flag gives them: ASCII digits and
+    /// word characters, and ECMAScript's whitespace. The regex crate reads
+    /// them as Unicode classes, so `\d` would match `٣`. A pattern that does
+    /// not parse is returned unchanged and fails in `Regex::new` as before.
+    fn javascript_classes(pattern: &str) -> Cow<'_, str> {
+        let ast = match regex_syntax::ast::parse::Parser::new().parse(pattern) {
+            Ok(ast) => ast,
+            Err(_) => return Cow::Borrowed(pattern),
+        };
+        let edits = match regex_syntax::ast::visit(&ast, ClassEdits::new(pattern)) {
+            Ok(edits) => edits,
+            Err(never) => match never {},
+        };
+        if edits.is_empty() {
+            return Cow::Borrowed(pattern);
+        }
+        // Splice from the last edit back, so earlier spans stay valid.
+        let mut rewritten = pattern.to_string();
+        for (span, replacement) in edits.iter().rev() {
+            rewritten.replace_range(span.clone(), replacement);
+        }
+        Cow::Owned(rewritten)
+    }
+
+    /// Collects the byte span and JavaScript replacement of each Perl class
+    /// and word boundary in a parsed pattern.
+    struct ClassEdits<'p> {
+        pattern: &'p str,
+        edits: Vec<(std::ops::Range<usize>, String)>,
+    }
+
+    impl<'p> ClassEdits<'p> {
+        fn new(pattern: &'p str) -> Self {
+            ClassEdits {
+                pattern,
+                edits: Vec::new(),
+            }
+        }
+
+        fn push(&mut self, span: &regex_syntax::ast::Span, replacement: String) {
+            self.edits
+                .push((span.start.offset..span.end.offset, replacement));
+        }
+    }
+
+    impl regex_syntax::ast::Visitor for ClassEdits<'_> {
+        type Output = Vec<(std::ops::Range<usize>, String)>;
+        type Err = std::convert::Infallible;
+
+        fn finish(self) -> Result<Self::Output, Self::Err> {
+            Ok(self.edits)
+        }
+
+        fn visit_pre(&mut self, ast: &regex_syntax::ast::Ast) -> Result<(), Self::Err> {
+            use regex_syntax::ast::{AssertionKind, Ast, ClassPerlKind};
+            match ast {
+                Ast::ClassPerl(class) => {
+                    let replacement = match (&class.kind, class.negated) {
+                        (ClassPerlKind::Digit, false) => "[0-9]".to_string(),
+                        (ClassPerlKind::Digit, true) => "[^0-9]".to_string(),
+                        // ASCII mode keeps case folding under `i` to ASCII, so
+                        // `\w` does not reach U+017F or U+212A.
+                        (ClassPerlKind::Word, false) => r"(?-u:\w)".to_string(),
+                        // `(?-u:\W)` could match invalid UTF-8; without `i`,
+                        // folding cannot pull U+017F and U+212A out of `\W`.
+                        (ClassPerlKind::Word, true) => "(?-i:[^0-9A-Za-z_])".to_string(),
+                        (ClassPerlKind::Space, false) => format!("[{}]", JS_SPACE),
+                        (ClassPerlKind::Space, true) => format!("[^{}]", JS_SPACE),
+                    };
+                    self.push(&class.span, replacement);
+                }
+                Ast::Assertion(assertion) => match assertion.kind {
+                    AssertionKind::WordBoundary => {
+                        self.push(&assertion.span, r"(?-u:\b)".to_string())
+                    }
+                    AssertionKind::NotWordBoundary => {
+                        self.push(&assertion.span, r"(?-u:\B)".to_string())
+                    }
+                    // JavaScript reads `\b{start}` as `\b` and then the
+                    // braces as literal text.
+                    AssertionKind::WordBoundaryStart
+                    | AssertionKind::WordBoundaryEnd
+                    | AssertionKind::WordBoundaryStartHalf
+                    | AssertionKind::WordBoundaryEndHalf => {
+                        let span = &assertion.span;
+                        let braces = &self.pattern[span.start.offset + 2..span.end.offset];
+                        let literal = braces.replace('{', r"\{").replace('}', r"\}");
+                        self.push(span, format!(r"(?-u:\b){}", literal));
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+            Ok(())
+        }
+
+        fn visit_class_set_item_pre(
+            &mut self,
+            item: &regex_syntax::ast::ClassSetItem,
+        ) -> Result<(), Self::Err> {
+            use regex_syntax::ast::{ClassPerlKind, ClassSetItem};
+            if let ClassSetItem::Perl(class) = item {
+                let members = match class.kind {
+                    ClassPerlKind::Digit => "0-9",
+                    ClassPerlKind::Word => "0-9A-Za-z_",
+                    ClassPerlKind::Space => JS_SPACE,
+                };
+                // A negated class nests, as `[^…]` inside the bracket.
+                let replacement = if class.negated {
+                    format!("[^{}]", members)
+                } else {
+                    members.to_string()
+                };
+                self.push(&class.span, replacement);
+            }
+            Ok(())
+        }
     }
 
     /// $string(value, prettify) - Convert value to string
