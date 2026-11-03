@@ -4512,3 +4512,50 @@ fn test_no_filter_on_nothing_after_sort_or_chain() {
         assert!(default.contains(code), "default: {expr} => {default}");
     }
 }
+
+/// `\d`, `\w`, `\s` and `\b` keep the meaning a jsonata-js regex gives them,
+/// which is a JavaScript `RegExp` without the `u` flag: ASCII digits and word
+/// characters, and ECMAScript's whitespace. Each expected value is
+/// jsonata-js 2.2.2's.
+#[test]
+fn test_regex_classes_match_javascript() {
+    for (expr, expected) in [
+        // Arabic-Indic three is no digit.
+        (r#"$contains("٣", /\d/)"#, "Ok(false)"),
+        (r#"$contains("٣", /[\d]/)"#, "Ok(false)"),
+        (r#"$contains("٣", /\D/)"#, "Ok(true)"),
+        (r#"$contains("٣", /[^\d]/)"#, "Ok(true)"),
+        (r#"$contains("٣", /[\D]/)"#, "Ok(true)"),
+        (r##"$replace("a1 b٣", /\d/, "#")"##, r##"Ok("a# b٣")"##),
+        // A letter outside ASCII is no word character, and so a boundary.
+        (r#"$contains("é", /\w/)"#, "Ok(false)"),
+        (r#"$contains("é", /\W/)"#, "Ok(true)"),
+        (r#"$contains("café", /caf\b/)"#, "Ok(true)"),
+        (r#"$contains("aé", /a\B/)"#, "Ok(false)"),
+        (r#"$contains("ab", /a\B/)"#, "Ok(true)"),
+        // Case folding does not carry the Kelvin sign or long s into `\w`.
+        (r#"$contains("K", /\w/i)"#, "Ok(false)"),
+        (r#"$contains("ſ", /\w/i)"#, "Ok(false)"),
+        (r#"$contains("K", /\W/i)"#, "Ok(true)"),
+        (r#"$contains("ſ", /\W/i)"#, "Ok(true)"),
+        // ECMAScript whitespace takes NBSP, VT and BOM but not NEL.
+        (r#"$contains(" ", /\s/)"#, "Ok(true)"),
+        (r#"$contains("\u000B", /\s/)"#, "Ok(true)"),
+        (r#"$contains("﻿", /\s/)"#, "Ok(true)"),
+        (r#"$contains("\u0085", /\s/)"#, "Ok(false)"),
+        (r#"$contains("\u0085", /\S/)"#, "Ok(true)"),
+        (r#"$contains(" ", /[\s]/)"#, "Ok(true)"),
+        (r#"$contains("\u0085", /[^\s]/)"#, "Ok(true)"),
+        (r#"$split("a b", /\s/)"#, r#"Ok(["a","b"])"#),
+        // An escaped backslash is no class.
+        (r#"$contains("a\\d", /\\d/)"#, "Ok(true)"),
+        (r#"$contains("5", /\\d/)"#, "Ok(false)"),
+        // JavaScript reads `\b{start}` as a boundary and literal braces.
+        (r#"$contains("x{start}", /x\b{start}/)"#, "Ok(true)"),
+        (r#"$contains("x", /x\b{start}/)"#, "Ok(false)"),
+    ] {
+        let (tree_walker, default) = eval_both_engines(expr, EvaluatorOptions::default());
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
