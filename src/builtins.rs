@@ -916,7 +916,9 @@ pub(crate) fn dispatch_pure(
             // genuinely absent argument) moves to Undefined.
             None | Some(JValue::Undefined) => Ok(JValue::Undefined),
             Some(JValue::Array(arr)) if arr.len() > 1 => {
-                let mut result = functions::array::distinct(arr)?;
+                let mut result = functions::array::distinct_checked(arr, || {
+                    crate::evaluator::check_cancelled(options)
+                })?;
                 // jsonata-js builds a sequence only when the input was one.
                 if arr.sequence {
                     result.mark_sequence();
@@ -1035,6 +1037,7 @@ pub(crate) fn dispatch_pure(
                     let normalized_item = crate::evaluator::normalize_lazy(item)?;
                     if let JValue::Object(obj) = &normalized_item {
                         for key in obj.keys() {
+                            crate::evaluator::check_cancelled(options)?;
                             let k = JValue::string(key.clone());
                             if !all_keys.contains(&k) {
                                 all_keys.push(k);
@@ -1631,5 +1634,28 @@ mod tests {
             matches!(&got, JValue::String(s) if s.starts_with("1970-01-01")),
             "expected an epoch timestamp, got {got:?}"
         );
+    }
+
+    #[test]
+    fn distinct_and_keys_stop_on_cancel() {
+        // Both walk their input once per element against everything kept so
+        // far, so a cancel has to be seen inside the walk, not only after it.
+        let token = crate::evaluator::CancelToken::new();
+        token.cancel();
+        let opts = EvaluatorOptions {
+            cancel: Some(token),
+            ..Default::default()
+        };
+        for (name, arg) in [
+            ("distinct", serde_json::json!([1, 2, 1])),
+            ("keys", serde_json::json!([{"a": 1}, {"b": 2}])),
+        ] {
+            let err = dispatch_pure(name, &[JValue::from(arg)], &JValue::Undefined, &opts)
+                .expect_err("a cancelled evaluation must not finish the walk");
+            assert!(
+                err.to_string().contains("U1003"),
+                "{name}: expected U1003, got {err}"
+            );
+        }
     }
 }
