@@ -24,7 +24,7 @@ def _run_mcp(argv: list[str]) -> int:
         from ._cli.mcp_server import serve
     except ImportError:
         print(
-            "error: the 'mcp' extra is not installed. Run:\n"
+            "error: the 'mcp' extra is not installed (it needs Python 3.11 or later). Run:\n"
             '  uvx --from "jsonatapy[mcp]" jsonatapy mcp\n'
             "or: pip install jsonatapy[mcp]",
             file=sys.stderr,
