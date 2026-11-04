@@ -4548,6 +4548,8 @@ fn test_object_keys_in_javascript_order() {
             assert_eq!(tree_walker, expected, "tree-walker: {expr}");
             assert_eq!(default, expected, "default: {expr}");
         }
+    }
+}
 /// `\d`, `\w`, `\s` and `\b` keep the meaning a jsonata-js regex gives them,
 /// which is a JavaScript `RegExp` without the `u` flag: ASCII digits and word
 /// characters, and ECMAScript's whitespace. Each expected value is
