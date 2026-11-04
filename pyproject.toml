@@ -42,10 +42,12 @@ dev = [
     "ruff>=0.3.0",        # Linting and formatting
     "mypy>=1.0",
     "maturin>=1.0",
-    "fastmcp>=4.1.2",     # So `dev` installs can run the full test suite (Task 9)
+    "fastmcp>=4.1.2; python_version >= '3.11'",  # So `dev` installs can run the full test suite
 ]
 mcp = [
-    "fastmcp>=4.1.2",
+    # 3.11+ only: fastmcp pulls in dnspython through email-validator, and dnspython 2.9.0,
+    # the first release with the fix for GHSA-45c3-73f7-pv4m, dropped 3.10.
+    "fastmcp>=4.1.2; python_version >= '3.11'",
 ]
 bench = [
     "jsonata>=0.2.0",     # jsonata-python for benchmarking
@@ -82,7 +84,7 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.0",
     "maturin>=1.0",
-    "fastmcp>=4.1.2",
+    "fastmcp>=4.1.2; python_version >= '3.11'",
 ]
 
 [tool.ruff]

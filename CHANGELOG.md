@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Compiled regexes are reused.** The same regex literal evaluated again, such as once per element
   under `$map`, no longer compiles again; each thread keeps up to 256.
+- Updated Rust dependencies: `simd-json` 0.18.1 → 0.19.0, used by the default `simd` feature. (#274)
+- **The `mcp` extra now needs Python 3.11 or later.** On Python 3.10, `pip install
+  'jsonatapy[mcp]'` installs no `fastmcp`, and `jsonatapy mcp` says the extra needs 3.11. Its
+  `dnspython` dependency (through `email-validator`) has no release for 3.10 with the fix for
+  GHSA-45c3-73f7-pv4m. The rest of `jsonatapy` still supports 3.10.
 
 ### Deprecated
 
@@ -37,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nor the Ohm and Angstrom signs with `ω` and `å`; and characters outside the BMP no longer fold.
 
 ### Security
+
+- `uv.lock`: `authlib` 1.7.2 → 1.9.1 (seven advisories), `joserfc` 1.7.3 → 1.7.7
+  (GHSA-jpxq-7h8p-2q76, GHSA-9pg5-8c7x-5hfx), and `dnspython` 2.8.0 → 2.9.0
+  (GHSA-45c3-73f7-pv4m), which no longer resolves for Python 3.10 now that the `mcp` extra needs
+  3.11 (see Changed). All three are transitive dependencies of the optional `mcp` extra, not
+  of the published crate or of the wheel, which has no runtime dependencies. Users of the `mcp`
+  extra resolve their own versions and should upgrade these. (#269, #270)
 
 ## [2.2.13] - 2026-10-24
 

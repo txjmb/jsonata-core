@@ -121,7 +121,7 @@ errors specifically, `Parse error: `).
 ## MCP server (Python only)
 
 `jsonatapy` can also run as an [MCP](https://modelcontextprotocol.io/) server,
-exposing JSONata evaluation as tools for AI agents:
+exposing JSONata evaluation as tools for AI agents. The `mcp` extra needs Python 3.11 or later:
 
 ```bash
 pip install 'jsonatapy[mcp]'
