@@ -31,6 +31,15 @@ jobs:
         with:
           submodules: true
 
+      # --all-features enables the `python` feature, which links libpython.
+      # Without this step the build linked the runner image's system Python,
+      # and broke when an image update dropped libpython3.12.so.
+      - name: Set up Python
+        id: python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -39,11 +48,17 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      # PYO3_PYTHON makes pyo3's build script re-run, so a cached build
+      # configuration that points at the old system Python is not reused.
       - name: Run Rust tests
         run: cargo test --all-features
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
 
       - name: Run Rust doc tests
         run: cargo test --doc
+        env:
+          PYO3_PYTHON: ${{ steps.python.outputs.python-path }}
 
   python-tests:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}

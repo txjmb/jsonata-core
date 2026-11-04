@@ -26,7 +26,7 @@
     <source media="(prefers-color-scheme: dark)"
             srcset="https://raw.githubusercontent.com/txjmb/jsonata-core/main/docs/assets/realistic-workload-dark.svg">
     <img width="880"
-         alt="Realistic-workload benchmark on a 100-product dataset, lower is better: jsonatapy is 8.1x faster than the jsonata-js reference on the geometric mean of 5 e-commerce queries, and the pure-Rust jsonata-core engine is faster still."
+         alt="Realistic-workload benchmark on a 100-product dataset, lower is better: jsonatapy is 8.2x faster than the jsonata-js reference on the geometric mean of 5 e-commerce queries, and the pure-Rust jsonata-core engine is faster still."
          src="https://raw.githubusercontent.com/txjmb/jsonata-core/main/docs/assets/realistic-workload-light.svg">
   </picture>
 </a>

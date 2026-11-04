@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Object keys are in JavaScript's order**: integer-like keys first in ascending order, then the
   rest in insertion order, so `$keys({"b":1,"2":2})` is `["2","b"]` as in jsonata-js.
+- **A cancel now stops `$distinct` and `$keys` part way.** Both compare each element with every one
+  kept so far, and over a large input that ran to the end before U1003 was seen.
+- **`\d`, `\w`, `\s` and `\b` in a regex now mean what they mean in jsonata-js**: ASCII digits and
+  word characters and ECMAScript's whitespace, so `$contains("٣", /\d/)` is `false`.
 
 ### Security
 
