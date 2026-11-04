@@ -316,10 +316,70 @@ impl<'a> IntoIterator for &'a JItems {
 /// `IndexMap<String, JValue>` whose drop does not recurse (#233).
 /// Dereferences to the map, so it reads and updates like one; build it with
 /// [`JValue::object`] or `JMap::from(map)`.
+///
+/// Its keys are in JavaScript's own-key order, as `Object.keys` lists them:
+/// the array-index keys first in ascending number, then every other key in
+/// insertion order. Building one orders it, and [`JMap::insert`] keeps it so.
 #[derive(Clone, Default, PartialEq)]
 pub struct JMap(IndexMap<String, JValue>);
 
+/// The value of `key` when JavaScript treats it as an array index: `0`, or
+/// digits with no leading zero up to 4294967294.
+fn array_index(key: &str) -> Option<u32> {
+    let bytes = key.as_bytes();
+    match bytes.first()? {
+        b'0' => (bytes.len() == 1).then_some(0),
+        b'1'..=b'9' if bytes.len() <= 10 && bytes.iter().all(u8::is_ascii_digit) => key
+            .parse::<u64>()
+            .ok()
+            .filter(|&n| n <= 4_294_967_294)
+            .map(|n| n as u32),
+        _ => None,
+    }
+}
+
+/// Puts `map`'s keys in JavaScript's own-key order. The sort is stable, so
+/// the other keys keep their insertion order, and it is skipped when no key
+/// starts with a digit.
+fn order_keys(map: &mut IndexMap<String, JValue>) {
+    if !map
+        .keys()
+        .any(|key| key.as_bytes().first().is_some_and(u8::is_ascii_digit))
+    {
+        return;
+    }
+    map.sort_by(|a, _, b, _| match (array_index(a), array_index(b)) {
+        (Some(a), Some(b)) => a.cmp(&b),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+}
+
 impl JMap {
+    /// Sets `key` to `value` and keeps JavaScript's key order: an existing
+    /// key keeps its place, a new array-index key goes to its place among the
+    /// index keys, and any other new key goes last. Returns the old value.
+    pub fn insert(&mut self, key: String, value: JValue) -> Option<JValue> {
+        if let Some(slot) = self.0.get_mut(&key) {
+            return Some(std::mem::replace(slot, value));
+        }
+        match array_index(&key) {
+            Some(index) => {
+                let at = self
+                    .0
+                    .keys()
+                    .position(|other| array_index(other).map_or(true, |other| other > index))
+                    .unwrap_or(self.0.len());
+                self.0.shift_insert(at, key, value);
+            }
+            None => {
+                self.0.insert(key, value);
+            }
+        }
+        None
+    }
+
     /// The map itself. Never clones.
     #[inline]
     pub fn into_inner(mut self) -> IndexMap<String, JValue> {
@@ -348,7 +408,8 @@ impl DerefMut for JMap {
 
 impl From<IndexMap<String, JValue>> for JMap {
     #[inline]
-    fn from(map: IndexMap<String, JValue>) -> Self {
+    fn from(mut map: IndexMap<String, JValue>) -> Self {
+        order_keys(&mut map);
         JMap(map)
     }
 }
@@ -363,7 +424,7 @@ impl From<JMap> for IndexMap<String, JValue> {
 impl FromIterator<(String, JValue)> for JMap {
     #[inline]
     fn from_iter<I: IntoIterator<Item = (String, JValue)>>(iter: I) -> Self {
-        JMap(IndexMap::from_iter(iter))
+        JMap::from(IndexMap::from_iter(iter))
     }
 }
 
@@ -779,6 +840,8 @@ impl JValue {
     }
 
     /// Get a mutable reference to the inner IndexMap, cloning if shared (Rc::make_mut).
+    /// An insert through it appends a new key in insertion order; use
+    /// [`JMap::insert`] to keep JavaScript's key order.
     #[inline]
     pub fn as_object_mut(&mut self) -> Option<&mut IndexMap<String, JValue>> {
         match self {
@@ -866,9 +929,10 @@ impl JValue {
         })
     }
 
+    /// An object from `m`, its keys put in JavaScript's own-key order.
     #[inline]
     pub fn object(m: IndexMap<String, JValue>) -> Self {
-        JValue::Object(Rc::new(JMap(m)))
+        JValue::Object(Rc::new(JMap::from(m)))
     }
 
     #[inline]

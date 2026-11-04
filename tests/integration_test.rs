@@ -4513,6 +4513,43 @@ fn test_no_filter_on_nothing_after_sort_or_chain() {
     }
 }
 
+/// Object keys come out in JavaScript's own-key order: the array-index keys
+/// (`0`, or digits with no leading zero up to 4294967294) first in ascending
+/// number, then every other key in insertion order. This holds for objects
+/// an expression builds, objects it updates, and input from JSON. Each
+/// expected value is jsonata-js 2.2.2's.
+#[test]
+fn test_object_keys_in_javascript_order() {
+    let input = r#"{"b":1,"2":2}"#;
+    for data in [
+        JValue::from_json_str(input).unwrap(),
+        JValue::from(serde_json::from_str::<serde_json::Value>(input).unwrap()),
+    ] {
+        for (expr, expected) in [
+            (
+                r#"$keys({"b":1,"2":2,"1":3,"4294967295":4,"01":5})"#,
+                r#"Ok(["1","2","b","4294967295","01"])"#,
+            ),
+            (
+                r#"$keys({"b":1,"4294967294":1,"0":2,"-1":3,"1.5":4})"#,
+                r#"Ok(["0","4294967294","b","-1","1.5"])"#,
+            ),
+            (r#"$keys($merge([{"b":1},{"2":2}]))"#, r#"Ok(["2","b"])"#),
+            (r#"$keys($ ~> | $ | {"1": 4} |)"#, r#"Ok(["1","2","b"])"#),
+            (
+                r#"$keys($ ~> | $ | {"b": 4, "a": 5} |)"#,
+                r#"Ok(["2","b","a"])"#,
+            ),
+            (r#"$keys($)"#, r#"Ok(["2","b"])"#),
+            (r#"$string({"b":1,"2":2})"#, r#"Ok("{\"2\":2,\"b\":1}")"#),
+        ] {
+            let (tree_walker, default) =
+                eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+            assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+            assert_eq!(default, expected, "default: {expr}");
+        }
+    }
+}
 /// `\d`, `\w`, `\s` and `\b` keep the meaning a jsonata-js regex gives them,
 /// which is a JavaScript `RegExp` without the `u` flag: ASCII digits and word
 /// characters, and ECMAScript's whitespace. Each expected value is
