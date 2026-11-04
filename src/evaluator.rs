@@ -1396,7 +1396,7 @@ fn eval_compiled_node(
                     arg, data, vars, ctx, shape, options, start_time,
                 )?);
             }
-            crate::builtins::dispatch_pure(name, &evaled_args, data, options)
+            crate::builtins::dispatch_pure(name, &evaled_args, data, options, start_time)
         }
 
         // Block: evaluate each expression in sequence, return the last value.
@@ -8249,7 +8249,13 @@ impl Evaluator {
         // per-function logic. Only the builtins that call back into evaluation
         // are still handled below.
         if crate::builtins::is_pure_builtin(name) {
-            return crate::builtins::dispatch_pure(name, &evaluated_args, data, &self.options);
+            return crate::builtins::dispatch_pure(
+                name,
+                &evaluated_args,
+                data,
+                &self.options,
+                self.start_time,
+            );
         }
 
         // JSONata feature: when a function is called with one fewer argument than
@@ -10757,7 +10763,13 @@ impl Evaluator {
         // "at least 1 argument" first would wrongly reject `$zip`/`$millis`
         // (arity 0) reached by reference.
         if crate::builtins::is_pure_builtin(name) {
-            return crate::builtins::dispatch_pure(name, values, context, &self.options);
+            return crate::builtins::dispatch_pure(
+                name,
+                values,
+                context,
+                &self.options,
+                self.start_time,
+            );
         }
 
         // `$eval` is evaluator-dependent but its arguments are ordinary
