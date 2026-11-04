@@ -1795,7 +1795,7 @@ directly:</p>
 errors specifically, <code>Parse error:</code>).</p>
 <h2 id="mcp-server-python-only">MCP server (Python only)<a class="headerlink" href="#mcp-server-python-only" title="Permanent link">&para;</a></h2>
 <p><code>jsonatapy</code> can also run as an <a href="https://modelcontextprotocol.io/">MCP</a> server,
-exposing JSONata evaluation as tools for AI agents:</p>
+exposing JSONata evaluation as tools for AI agents. The <code>mcp</code> extra needs Python 3.11 or later:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'jsonatapy[mcp]'</span>
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>jsonatapy<span class="w"> </span>mcp<span class="w">          </span><span class="c1"># stdio transport</span>
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>jsonatapy<span class="w"> </span>mcp<span class="w"> </span>--http<span class="w">   </span><span class="c1"># HTTP transport (default port 8000)</span>
