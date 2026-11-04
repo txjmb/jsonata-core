@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.14] - 2026-11-04
+
+### Added
+
+### Changed
+
 - **Compiled regexes are reused.** The same regex literal evaluated again, such as once per element
   under `$map`, no longer compiles again; each thread keeps up to 256.
 - Updated Rust dependencies: `simd-json` 0.18.1 → 0.19.0, used by the default `simd` feature. (#274)
