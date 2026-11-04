@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Compiled regexes are reused.** The same regex literal evaluated again, such as once per element
+  under `$map`, no longer compiles again; each thread keeps up to 256.
+
 ### Deprecated
 
 ### Removed
@@ -18,11 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Object keys are in JavaScript's order**: integer-like keys first in ascending order, then the
-  rest in insertion order, so `$keys({"b":1,"2":2})` is `["2","b"]` as in jsonata-js.
-- **A cancel now stops `$distinct` and `$keys` part way.** Both compare each element with every one
-  kept so far, and over a large input that ran to the end before U1003 was seen.
+  rest in insertion order, so `$keys({"b":1,"2":2})` is `["2","b"]` as in jsonata-js. Python
+  callers see it too: a dict an expression builds comes back in that order, while a dict passed
+  through untouched is the caller's own object and keeps its order.
+- **A cancel or a timeout now stops `$distinct` and `$keys` part way.** Both compare each element
+  with every one kept so far, and over a large input that ran to the end before U1003 or D1012 was
+  seen.
 - **`\d`, `\w`, `\s` and `\b` in a regex now mean what they mean in jsonata-js**: ASCII digits and
   word characters and ECMAScript's whitespace, so `$contains("٣", /\d/)` is `false`.
+- **A regex with the `i` flag folds case as jsonata-js does**, by upper case rather than Unicode
+  case folding. The Kelvin sign (U+212A) and the long s (U+017F) match only themselves, so
+  `$contains("\u212A", /k/i)` and `/[\w]/i` against it are `false`; `ß` and `ẞ` no longer match,
+  nor the Ohm and Angstrom signs with `ω` and `å`; and characters outside the BMP no longer fold.
 
 ### Security
 

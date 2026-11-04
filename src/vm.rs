@@ -546,7 +546,8 @@ fn run_inner(
                 let n = *arg_count as usize;
                 let start = stack.len().saturating_sub(n);
                 let args: Vec<JValue> = stack.drain(start..).collect();
-                stack.push(dispatch_pure(name, &args, data, options)?.unwrap_sequence());
+                stack
+                    .push(dispatch_pure(name, &args, data, options, start_time)?.unwrap_sequence());
                 ip += 1;
             }
 

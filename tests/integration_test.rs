@@ -4596,3 +4596,77 @@ fn test_regex_classes_match_javascript() {
         assert_eq!(default, expected, "default: {expr}");
     }
 }
+
+/// A regex with the `i` flag folds case as a JavaScript `RegExp` without the
+/// `u` flag does, by upper case rather than Unicode case folding: no
+/// non-ASCII character folds onto an ASCII one, so the Kelvin sign (U+212A)
+/// and the long s (U+017F) match only themselves and `k`, `K`, `s` and `S`
+/// match only ASCII; `ß` and `ẞ` do not match, nor the Ohm and Angstrom signs
+/// with `ω` and `å`; and nothing outside the BMP folds. Each expected value is
+/// jsonata-js 2.2.2's.
+#[test]
+fn test_regex_case_folding_matches_javascript() {
+    for (expr, expected) in [
+        (r#"$contains("K", /k/i)"#, "Ok(false)"),
+        (r#"$contains("K", /K/i)"#, "Ok(false)"),
+        (r#"$contains("K", /[\w]/i)"#, "Ok(false)"),
+        (r#"$contains("K", /[a-z]/i)"#, "Ok(false)"),
+        (r#"$contains("K", /[^k]/i)"#, "Ok(true)"),
+        (r#"$contains("K", /K/i)"#, "Ok(true)"),
+        (r#"$contains("K", /[Kk]/i)"#, "Ok(true)"),
+        (r#"$contains("k", /K/i)"#, "Ok(false)"),
+        (r#"$contains("K", /[K]/i)"#, "Ok(false)"),
+        (r#"$contains("K", /[Kk]/i)"#, "Ok(true)"),
+        (r#"$contains("k", /[^K]/i)"#, "Ok(true)"),
+        (r#"$contains("ſ", /s/i)"#, "Ok(false)"),
+        (r#"$contains("ſ", /[\w]/i)"#, "Ok(false)"),
+        (r#"$contains("ſ", /[^a-z]/i)"#, "Ok(true)"),
+        (r#"$contains("ſ", /ſ/i)"#, "Ok(true)"),
+        (r#"$contains("S", /ſ/i)"#, "Ok(false)"),
+        (
+            r##"$replace("Kelvin K k K", /k/i, "#")"##,
+            r##"Ok("#elvin K # #")"##,
+        ),
+        // Everything else still folds.
+        (r#"$contains("HELLO", /hello/i)"#, "Ok(true)"),
+        (r#"$contains("é", /É/i)"#, "Ok(true)"),
+        (r#"$contains("É", /[à-ÿ]/i)"#, "Ok(true)"),
+        (r#"$contains("Σ", /σ/i)"#, "Ok(true)"),
+        (r#"$replace("Café CAFÉ", /café/i, "T")"#, r#"Ok("T T")"#),
+        (
+            r#"$match("Foo bar FOO", /(f)(o+)/i).groups"#,
+            r#"Ok(["F","oo","F","OO"])"#,
+        ),
+        (r#"$contains("x\nAB", /^ab$/im)"#, "Ok(true)"),
+        (r#"$contains("x\nAB", /^ab$/i)"#, "Ok(false)"),
+        (r#"$contains("hello", /\bHELLO\b/i)"#, "Ok(true)"),
+        (r#"$contains("A+", /a\+/i)"#, "Ok(true)"),
+        // Negated classes keep excluding both cases.
+        (r#"$contains("K", /[^k]/i)"#, "Ok(false)"),
+        (r#"$contains("A", /[^a-z]/i)"#, "Ok(false)"),
+        (r#"$replace("aXb", /[^x]/i, "-")"#, r#"Ok("-X-")"#),
+        (r#"$contains("\u212A", /[^\u212A]/i)"#, "Ok(false)"),
+        (r#"$contains("s", /[^\u017F]/i)"#, "Ok(true)"),
+        (r#"$contains("\u212A", /[^\w]/i)"#, "Ok(true)"),
+        (r#"$contains("\u212A", /[^\W]/i)"#, "Ok(false)"),
+        // Literals in groups, repeated or written as escapes.
+        (r#"$contains("\u212A", /(?:k)/i)"#, "Ok(false)"),
+        (r#"$contains("KKK", /k{3}/i)"#, "Ok(true)"),
+        (r#"$contains("\u212A", /\x6B/i)"#, "Ok(false)"),
+        (r##"$replace("Sss\u017F", /s/i, "_")"##, r##"Ok("___ſ")"##),
+        // Beyond ASCII, JavaScript matches what upper-cases alike, which is
+        // not always what Unicode folds alike.
+        (r#"$contains("ẞ", /ß/i)"#, "Ok(false)"),
+        (r#"$contains("Ω", /ω/i)"#, "Ok(false)"),
+        (r#"$contains("Å", /[å]/i)"#, "Ok(false)"),
+        (r#"$contains("ϑ", /θ/i)"#, "Ok(true)"),
+        (r#"$contains("ϴ", /[^θ]/i)"#, "Ok(true)"),
+        // Outside the BMP nothing folds without the `u` flag.
+        (r#"$contains("𐐨", /𐐀/i)"#, "Ok(false)"),
+        (r#"$contains("𐐀", /𐐀/i)"#, "Ok(true)"),
+    ] {
+        let (tree_walker, default) = eval_both_engines(expr, EvaluatorOptions::default());
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}

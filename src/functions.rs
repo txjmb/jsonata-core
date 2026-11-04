@@ -62,6 +62,7 @@ fn js_slice<T: Clone>(arr: &[T], start: i64, end: Option<i64>) -> Vec<T> {
 pub mod string {
     use super::*;
     use regex::Regex;
+    use std::collections::HashMap;
 
     /// Helper to detect and extract regex from a JValue
     pub fn extract_regex(value: &JValue) -> Option<(String, String)> {
@@ -72,7 +73,46 @@ pub mod string {
     }
 
     /// Helper to build a Regex from pattern and flags
-    pub fn build_regex(pattern: &str, flags: &str) -> Result<Regex, FunctionError> {
+    ///
+    /// Compiling is far costlier than matching and the same literal is
+    /// built again on every call (once per element under `$map`), so each
+    /// thread keeps what it compiled, keyed by flags and pattern, up to 256.
+    /// The result is shared rather than cloned, since a cloned `Regex` would
+    /// start with an empty search cache.
+    pub fn build_regex(pattern: &str, flags: &str) -> Result<std::rc::Rc<Regex>, FunctionError> {
+        type Compiled = HashMap<String, HashMap<String, std::rc::Rc<Regex>>>;
+        thread_local! {
+            static COMPILED: std::cell::RefCell<(usize, Compiled)> =
+                std::cell::RefCell::new((0, HashMap::new()));
+        }
+        const COMPILED_LIMIT: usize = 256;
+        let cached = COMPILED.with(|c| {
+            c.borrow()
+                .1
+                .get(flags)
+                .and_then(|by_pattern| by_pattern.get(pattern))
+                .cloned()
+        });
+        if let Some(re) = cached {
+            return Ok(re);
+        }
+        let re = std::rc::Rc::new(compile_regex(pattern, flags)?);
+        COMPILED.with(|c| {
+            let (count, compiled) = &mut *c.borrow_mut();
+            if *count >= COMPILED_LIMIT {
+                compiled.clear();
+                *count = 0;
+            }
+            compiled
+                .entry(flags.to_string())
+                .or_default()
+                .insert(pattern.to_string(), re.clone());
+            *count += 1;
+        });
+        Ok(re)
+    }
+
+    fn compile_regex(pattern: &str, flags: &str) -> Result<Regex, FunctionError> {
         // Convert JSONata flags to Rust inline regex flags. Only emit the
         // group for flags Rust regex knows; a bare "(?)" (e.g. from the
         // internal-only `g` flag alone) is a syntax error.
@@ -93,10 +133,289 @@ pub mod string {
             regex_pattern.push_str(&inline);
             regex_pattern.push(')');
         }
-        regex_pattern.push_str(&javascript_classes(pattern));
+        let classes = javascript_classes(pattern);
+        if flags.contains('i') {
+            regex_pattern.push_str(&javascript_case_fold(&classes));
+        } else {
+            regex_pattern.push_str(&classes);
+        }
 
         Regex::new(&regex_pattern)
             .map_err(|e| FunctionError::ArgumentError(format!("Invalid regex: {}", e)))
+    }
+
+    /// JavaScript's `Canonicalize` for a `RegExp` with `i` and without `u`:
+    /// the upper case of `c` when that is one character, except that a
+    /// non-ASCII character never becomes an ASCII one. Without `u` a pattern
+    /// is UTF-16 code units, so a character outside the BMP, being two
+    /// surrogates, is its own canonical form.
+    fn javascript_canonical(c: char) -> char {
+        if c as u32 > 0xFFFF {
+            return c;
+        }
+        let mut upper = c.to_uppercase();
+        match (upper.next(), upper.next()) {
+            (Some(u), None) if c.is_ascii() || !u.is_ascii() => u,
+            _ => c,
+        }
+    }
+
+    /// The characters whose case-insensitive matches differ between the
+    /// regex crate and JavaScript, each with what it matches in JavaScript.
+    ///
+    /// The regex crate folds with Unicode simple case folding; JavaScript
+    /// matches two characters when their `javascript_canonical` forms are
+    /// equal. They part on few characters: the Kelvin sign and `k`, the long
+    /// s and `s`, the Ohm sign and `ω`, the Angstrom sign and `å`, `ß` and
+    /// `ẞ`, Greek with iota subscript, and every cased character outside the
+    /// BMP, which JavaScript does not fold at all without `u`. Built
+    /// once, from the characters that have a case mapping, since only those
+    /// fold; that takes a few milliseconds on the first `i` regex.
+    fn fold_differences() -> &'static HashMap<char, Vec<char>> {
+        static DIFFERENCES: std::sync::OnceLock<HashMap<char, Vec<char>>> =
+            std::sync::OnceLock::new();
+        DIFFERENCES.get_or_init(|| {
+            // Every cased character is below U+20000 (the last are Adlam's,
+            // at U+1E900).
+            let cased: Vec<char> = (0..0x20000_u32)
+                .filter_map(char::from_u32)
+                .filter(|&c| {
+                    c.to_uppercase().ne(std::iter::once(c))
+                        || c.to_lowercase().ne(std::iter::once(c))
+                })
+                .collect();
+            let mut by_canonical: HashMap<char, Vec<char>> = HashMap::new();
+            for &c in &cased {
+                by_canonical
+                    .entry(javascript_canonical(c))
+                    .or_default()
+                    .push(c);
+            }
+            let javascript_matches = |c: char| -> Vec<char> {
+                let canonical = javascript_canonical(c);
+                let mut matches = by_canonical.get(&canonical).cloned().unwrap_or_default();
+                if javascript_canonical(canonical) == canonical {
+                    matches.push(canonical);
+                }
+                matches.push(c);
+                matches.sort_unstable();
+                matches.dedup();
+                matches
+            };
+            let regex_matches = |c: char| -> Vec<char> {
+                let mut folded = char_class(c);
+                folded.case_fold_simple();
+                folded.iter().flat_map(|r| r.start()..=r.end()).collect()
+            };
+            // Anything the regex crate folds is cased, or folds with a
+            // cased character.
+            let mut candidates: Vec<char> = cased.iter().flat_map(|&c| regex_matches(c)).collect();
+            candidates.sort_unstable();
+            candidates.dedup();
+            candidates
+                .into_iter()
+                .filter_map(|c| {
+                    let matches = javascript_matches(c);
+                    (regex_matches(c) != matches).then_some((c, matches))
+                })
+                .collect()
+        })
+    }
+
+    /// Rewrites `pattern`, compiled under `(?i)`, so that it matches what a
+    /// JavaScript `RegExp` with `i` and without `u` matches, for the
+    /// characters in `fold_differences`; the regex crate's own folding is
+    /// already JavaScript's for every other character.
+    ///
+    /// Each of those characters as a literal becomes a group that turns `i`
+    /// off and lists what it matches in JavaScript. Each bracketed class is
+    /// translated as the regex crate would under `i`, and if its membership
+    /// of those characters differs from JavaScript's, the class is replaced
+    /// by that translation with them set right, also with `i` off. A pattern
+    /// that does not parse is returned unchanged and fails in `Regex::new`
+    /// as before.
+    fn javascript_case_fold(pattern: &str) -> Cow<'_, str> {
+        let ast = match regex_syntax::ast::parse::Parser::new().parse(pattern) {
+            Ok(ast) => ast,
+            Err(_) => return Cow::Borrowed(pattern),
+        };
+        let edits = match regex_syntax::ast::visit(&ast, FoldEdits::new(pattern)) {
+            Ok(edits) => edits,
+            Err(never) => match never {},
+        };
+        splice(pattern, edits)
+    }
+
+    /// `pattern` with each `(span, replacement)` edit made. The spans must
+    /// not overlap and be in order.
+    fn splice(pattern: &str, edits: Vec<(std::ops::Range<usize>, String)>) -> Cow<'_, str> {
+        if edits.is_empty() {
+            return Cow::Borrowed(pattern);
+        }
+        // Splice from the last edit back, so earlier spans stay valid.
+        let mut rewritten = pattern.to_string();
+        for (span, replacement) in edits.into_iter().rev() {
+            rewritten.replace_range(span, &replacement);
+        }
+        Cow::Owned(rewritten)
+    }
+
+    fn char_class(c: char) -> regex_syntax::hir::ClassUnicode {
+        use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
+        ClassUnicode::new([ClassUnicodeRange::new(c, c)])
+    }
+
+    fn class_has(class: &regex_syntax::hir::ClassUnicode, c: char) -> bool {
+        class.iter().any(|r| r.start() <= c && c <= r.end())
+    }
+
+    /// `class` printed as a pattern that matches exactly it with `i` off.
+    fn case_sensitive(class: regex_syntax::hir::ClassUnicode) -> String {
+        use regex_syntax::hir::{Class, Hir};
+        format!("(?-i:{})", Hir::class(Class::Unicode(class)))
+    }
+
+    /// Collects the `javascript_case_fold` edits of a parsed pattern.
+    struct FoldEdits<'p> {
+        pattern: &'p str,
+        /// How many `(?-i:…)` groups enclose the node being visited. Only
+        /// `javascript_classes` writes them (a jsonata-js pattern cannot hold
+        /// a flag group), around a class that is already exact, so what they
+        /// hold is left alone.
+        case_sensitive_groups: usize,
+        edits: Vec<(std::ops::Range<usize>, String)>,
+    }
+
+    /// Whether `ast` is a group that turns `i` off.
+    fn turns_case_off(ast: &regex_syntax::ast::Ast) -> bool {
+        use regex_syntax::ast::{Ast, Flag, FlagsItemKind, GroupKind};
+        let Ast::Group(group) = ast else {
+            return false;
+        };
+        let GroupKind::NonCapturing(flags) = &group.kind else {
+            return false;
+        };
+        let mut negated = false;
+        flags.items.iter().any(|item| match item.kind {
+            FlagsItemKind::Negation => {
+                negated = true;
+                false
+            }
+            FlagsItemKind::Flag(Flag::CaseInsensitive) => negated,
+            FlagsItemKind::Flag(_) => false,
+        })
+    }
+
+    impl<'p> FoldEdits<'p> {
+        fn new(pattern: &'p str) -> Self {
+            FoldEdits {
+                pattern,
+                case_sensitive_groups: 0,
+                edits: Vec::new(),
+            }
+        }
+
+        /// The regex crate's translation of a bracketed class as a Unicode
+        /// class, case-insensitive or not.
+        fn translate(
+            &self,
+            class: &regex_syntax::ast::ClassBracketed,
+            case_insensitive: bool,
+        ) -> Option<regex_syntax::hir::ClassUnicode> {
+            use regex_syntax::hir::{Class, ClassUnicode, ClassUnicodeRange, HirKind};
+            let ast = regex_syntax::ast::Ast::ClassBracketed(Box::new(class.clone()));
+            let hir = regex_syntax::hir::translate::TranslatorBuilder::new()
+                .case_insensitive(case_insensitive)
+                .build()
+                .translate(self.pattern, &ast)
+                .ok()?;
+            match hir.into_kind() {
+                HirKind::Class(Class::Unicode(class)) => Some(class),
+                // A class of one character comes back as its literal.
+                HirKind::Literal(literal) => {
+                    let text = std::str::from_utf8(&literal.0).ok()?;
+                    Some(ClassUnicode::new(
+                        text.chars().map(|c| ClassUnicodeRange::new(c, c)),
+                    ))
+                }
+                _ => None,
+            }
+        }
+
+        /// The class to use for `class`, if the regex crate's own folding of
+        /// it gets any character in `fold_differences` wrong.
+        fn fold_class(
+            &self,
+            class: &regex_syntax::ast::ClassBracketed,
+        ) -> Option<regex_syntax::hir::ClassUnicode> {
+            let mut folded = self.translate(class, true)?;
+            // What the class lists, before folding and negation.
+            let mut positive = class.clone();
+            positive.negated = false;
+            let listed = self.translate(&positive, false)?;
+
+            let mut changed = false;
+            for (&c, matches) in fold_differences() {
+                // In JavaScript a class takes `c` when it lists anything
+                // that `c` matches, and a negated one when it lists nothing.
+                let wanted = matches.iter().any(|&m| class_has(&listed, m)) != class.negated;
+                if class_has(&folded, c) != wanted {
+                    if wanted {
+                        folded.union(&char_class(c));
+                    } else {
+                        folded.difference(&char_class(c));
+                    }
+                    changed = true;
+                }
+            }
+            changed.then_some(folded)
+        }
+    }
+
+    impl regex_syntax::ast::Visitor for FoldEdits<'_> {
+        type Output = Vec<(std::ops::Range<usize>, String)>;
+        type Err = std::convert::Infallible;
+
+        fn finish(self) -> Result<Self::Output, Self::Err> {
+            Ok(self.edits)
+        }
+
+        fn visit_pre(&mut self, ast: &regex_syntax::ast::Ast) -> Result<(), Self::Err> {
+            use regex_syntax::ast::Ast;
+            use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
+            if turns_case_off(ast) {
+                self.case_sensitive_groups += 1;
+            }
+            if self.case_sensitive_groups > 0 {
+                return Ok(());
+            }
+            let (span, replacement) = match ast {
+                Ast::Literal(literal) => match fold_differences().get(&literal.c) {
+                    Some(matches) => (
+                        &literal.span,
+                        case_sensitive(ClassUnicode::new(
+                            matches.iter().map(|&m| ClassUnicodeRange::new(m, m)),
+                        )),
+                    ),
+                    None => return Ok(()),
+                },
+                Ast::ClassBracketed(class) => match self.fold_class(class) {
+                    Some(folded) => (&class.span, case_sensitive(folded)),
+                    None => return Ok(()),
+                },
+                _ => return Ok(()),
+            };
+            self.edits
+                .push((span.start.offset..span.end.offset, replacement));
+            Ok(())
+        }
+
+        fn visit_post(&mut self, ast: &regex_syntax::ast::Ast) -> Result<(), Self::Err> {
+            if turns_case_off(ast) {
+                self.case_sensitive_groups -= 1;
+            }
+            Ok(())
+        }
     }
 
     /// ECMAScript's WhiteSpace and LineTerminator code points, as members of a
@@ -117,15 +436,7 @@ pub mod string {
             Ok(edits) => edits,
             Err(never) => match never {},
         };
-        if edits.is_empty() {
-            return Cow::Borrowed(pattern);
-        }
-        // Splice from the last edit back, so earlier spans stay valid.
-        let mut rewritten = pattern.to_string();
-        for (span, replacement) in edits.iter().rev() {
-            rewritten.replace_range(span.clone(), replacement);
-        }
-        Cow::Owned(rewritten)
+        splice(pattern, edits)
     }
 
     /// Collects the byte span and JavaScript replacement of each Perl class

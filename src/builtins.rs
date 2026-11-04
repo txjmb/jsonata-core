@@ -241,11 +241,17 @@ fn describe_operand(v: &JValue) -> String {
 /// boundary collapses it, so a builtin passed as a callback (`$map(arr,
 /// $keys)`) is unwrapped once, by the higher-order function's own result,
 /// exactly as in jsonata-js.
+///
+/// `start_time` is when the evaluation started, if it has a timeout; the
+/// builtins whose walk is quadratic (`$distinct`, `$keys` over an array)
+/// check it with the cancel token per element, so neither runs on past
+/// D1012 or U1003.
 pub(crate) fn dispatch_pure(
     name: &str,
     args: &[JValue],
     context: &JValue,
     options: &EvaluatorOptions,
+    start_time: Option<std::time::Instant>,
 ) -> Result<JValue, EvaluatorError> {
     // 1. Implicit context insertion. The union of what the two paths used to
     //    do separately: only the tree-walker had `fromMillis` here and
@@ -917,7 +923,7 @@ pub(crate) fn dispatch_pure(
             None | Some(JValue::Undefined) => Ok(JValue::Undefined),
             Some(JValue::Array(arr)) if arr.len() > 1 => {
                 let mut result = functions::array::distinct_checked(arr, || {
-                    crate::evaluator::check_cancelled(options)
+                    crate::evaluator::check_loop_timeout(options, start_time)
                 })?;
                 // jsonata-js builds a sequence only when the input was one.
                 if arr.sequence {
@@ -1037,7 +1043,7 @@ pub(crate) fn dispatch_pure(
                     let normalized_item = crate::evaluator::normalize_lazy(item)?;
                     if let JValue::Object(obj) = &normalized_item {
                         for key in obj.keys() {
-                            crate::evaluator::check_cancelled(options)?;
+                            crate::evaluator::check_loop_timeout(options, start_time)?;
                             let k = JValue::string(key.clone());
                             if !all_keys.contains(&k) {
                                 all_keys.push(k);
@@ -1611,6 +1617,7 @@ mod tests {
             &[JValue::Undefined],
             &JValue::Number(5.0),
             &opts,
+            None,
         )
         .expect_err("a numeric context cannot satisfy substring's first parameter");
         assert!(
@@ -1628,7 +1635,7 @@ mod tests {
         // assert on the member only one list had.
         let opts = EvaluatorOptions::default();
         // $fromMillis() with a numeric context formats that context.
-        let got = dispatch_pure("fromMillis", &[], &JValue::Number(0.0), &opts)
+        let got = dispatch_pure("fromMillis", &[], &JValue::Number(0.0), &opts, None)
             .expect("fromMillis should read the context");
         assert!(
             matches!(&got, JValue::String(s) if s.starts_with("1970-01-01")),
@@ -1650,11 +1657,39 @@ mod tests {
             ("distinct", serde_json::json!([1, 2, 1])),
             ("keys", serde_json::json!([{"a": 1}, {"b": 2}])),
         ] {
-            let err = dispatch_pure(name, &[JValue::from(arg)], &JValue::Undefined, &opts)
+            let err = dispatch_pure(name, &[JValue::from(arg)], &JValue::Undefined, &opts, None)
                 .expect_err("a cancelled evaluation must not finish the walk");
             assert!(
                 err.to_string().contains("U1003"),
                 "{name}: expected U1003, got {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn distinct_and_keys_stop_on_timeout() {
+        // The same walks honour the evaluation timeout, not only a cancel.
+        let opts = EvaluatorOptions {
+            timeout_ms: Some(1),
+            ..Default::default()
+        };
+        let started = std::time::Instant::now();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        for (name, arg) in [
+            ("distinct", serde_json::json!([1, 2, 1])),
+            ("keys", serde_json::json!([{"a": 1}, {"b": 2}])),
+        ] {
+            let err = dispatch_pure(
+                name,
+                &[JValue::from(arg)],
+                &JValue::Undefined,
+                &opts,
+                Some(started),
+            )
+            .expect_err("a timed-out evaluation must not finish the walk");
+            assert!(
+                err.to_string().contains("D1012"),
+                "{name}: expected D1012, got {err}"
             );
         }
     }
