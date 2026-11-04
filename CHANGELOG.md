@@ -40,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - `uv.lock`: `authlib` 1.7.2 → 1.9.1 (seven advisories), `joserfc` 1.7.3 → 1.7.7
-  (GHSA-jpxq-7h8p-2q76, GHSA-9pg5-8c7x-5hfx), and `dnspython` locked at 2.9.0
-  (GHSA-45c3-73f7-pv4m). All three are transitive dependencies of the optional `mcp` extra, not
+  (GHSA-jpxq-7h8p-2q76, GHSA-9pg5-8c7x-5hfx), and `dnspython` 2.8.0 → 2.9.0 on Python 3.11 and
+  later (GHSA-45c3-73f7-pv4m). dnspython 2.9.0 needs Python 3.11, so the Python 3.10 resolution
+  stays on 2.8.0 and has no fixed release. All three are transitive dependencies of the optional `mcp` extra, not
   of the published crate or of the wheel, which has no runtime dependencies. Users of the `mcp`
   extra resolve their own versions and should upgrade these. (#269, #270)
 
