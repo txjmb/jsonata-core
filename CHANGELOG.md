@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `uv.lock`: `dnspython` 2.9.0 → 2.9.2 (CVE-2026-128089) and `opentelemetry-api` 1.45.1 → 1.45.2
+  (CVE-2026-126360), clearing the two advisories that failed the scheduled Security Scanning run
+  on 2026-11-14. Both are transitive dependencies of the optional `mcp` extra, not of the
+  published crate or of the wheel, which has no runtime dependencies. Users of the `mcp` extra
+  resolve their own versions and should upgrade both packages.
+
 ## [2.2.14] - 2026-11-04
 
 ### Added
