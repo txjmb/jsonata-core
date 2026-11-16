@@ -928,8 +928,16 @@ fn process_path(
                     BinaryOp::Filter => PathOp::Filter(rhs),
                     BinaryOp::KeepArray => PathOp::KeepArray,
                     BinaryOp::FocusBind | BinaryOp::IndexBind => {
+                        // The parser only builds a binding with a variable
+                        // (S0214); a tree from elsewhere may not.
                         let AstNode::Variable(var) = rhs else {
-                            unreachable!("the parser makes a binding's rhs a variable")
+                            drop_ast_node_iteratively(rhs);
+                            drop_ast_node_iteratively(*lhs);
+                            ops.into_iter().for_each(PathOp::drop_iteratively);
+                            return Err(AstTransformError::Syntax(
+                                "S0214: The right side of a binding must be a variable name"
+                                    .to_string(),
+                            ));
                         };
                         if op == BinaryOp::FocusBind {
                             PathOp::Focus(var)
@@ -1269,11 +1277,24 @@ fn apply_filter(
         ));
     }
     let mut predicate = transform_node(predicate, state, depth + 1)?;
-    // A bare `%` predicate has no `seekingParent` in jsonata-js (only
-    // `pushAncestry` gives a parent node's slot to what holds it), so `[`
-    // never seeks it, and it is left unresolved.
-    if matches!(predicate.node, AstNode::Parent(_)) {
-        predicate.pending.clear();
+    // A `%` predicate, with its own predicates, `[]` or `@` or not, is
+    // still a parent node in jsonata-js, which has no `seekingParent` of its
+    // own (only `pushAncestry` gives a parent's slot to what holds it), so
+    // `[` never seeks it, and it is left unresolved (`x[%]`, `x[%[0]]`).
+    let parent_label = match &predicate.node {
+        AstNode::Parent(label) => Some(label),
+        AstNode::Path { steps } => match steps.as_slice() {
+            [PathStep {
+                node: AstNode::Parent(label),
+                index_var: None,
+                ..
+            }] => Some(label),
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some(label) = parent_label.cloned() {
+        predicate.pending.retain(|slot| slot.label != label);
     }
     let last = proc.steps.len() - 1;
     let (prefix, rest) = proc.steps.split_at_mut(last);

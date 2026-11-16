@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transform (`|x|{"z":1}|($)`) works. Where an expression has more than one path error (S0209,
   S0210, S0213, S0215, S0216, S0217), the one reported is the one jsonata-js raises first, with
   a call's arguments before its procedure: `1.b.2()` and `a[0]@$v(1.b)` are S0213. A second `#`
-  on a step without other stages replaces its index (`a#$i#$j`). A bare `%` predicate (`x[%]`)
+  on a step without other stages replaces its index (`a#$i#$j`). A `%` predicate (`x[%]`, `x[%[0]]`)
   and a `%` under `#` or `^` (`%#$i`, `%^(x)`) are left unresolved, giving undefined as in
   jsonata-js rather than S0217 or the input. `x ~> $f()#$i` is T2006. S0209, S0210 and S0213
   keep their "Parse error" prefix. Known differences: a `%` that a parenthesised operand can't

@@ -5004,8 +5004,19 @@ fn test_path_transform_third_review_cases() {
         );
         assert!(default.contains(expected), "default: {expr} => {default}");
     }
-    // These give nothing, as in jsonata-js.
-    for expr in ["1[%]", "x[%]", "%#$i", "%^(x)", "a.(%#$i)"] {
+    // These give nothing, as in jsonata-js: a `%` predicate, with its own
+    // predicates or bindings or not, is never sought.
+    for expr in [
+        "1[%]",
+        "x[%]",
+        "%#$i",
+        "%^(x)",
+        "a.(%#$i)",
+        "a[%[0]]",
+        "x[%[]]",
+        "a.b[%[true]]",
+        "a.b[%@$p]",
+    ] {
         let (tree_walker, default) =
             eval_both_engines_on(expr, json!({"x": [3, 1, 2], "id": 1, "a": {"b": 1}}));
         assert_eq!(tree_walker, "undefined", "tree-walker: {expr}");

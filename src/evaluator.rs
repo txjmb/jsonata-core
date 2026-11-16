@@ -3944,15 +3944,15 @@ fn hof_callback_index(name: &str, arg_count: usize) -> Option<usize> {
 /// can name it.
 const REGEX_NEXT: &str = "regex next";
 
-/// The text a regex function value matches against, as JavaScript's
-/// `RegExp.prototype.exec` converts its argument with `String()`. `None`
-/// (the call gives undefined) for undefined, which jsonata-js would match as
-/// the text "undefined", and for a function.
 /// T1006, as jsonata-js `apply` raises it for a value that isn't a function.
 fn not_a_function() -> EvaluatorError {
     EvaluatorError::TypeError("T1006: Attempted to invoke a non-function".to_string())
 }
 
+/// The text a regex function value matches against, as JavaScript's
+/// `RegExp.prototype.exec` converts its argument with `String()`. `None`
+/// (the call gives undefined) for undefined, which jsonata-js would match as
+/// the text "undefined", and for a function.
 fn regex_subject(value: &JValue) -> Option<String> {
     fn js_string(value: &JValue) -> Option<String> {
         Some(match value {
