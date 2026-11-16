@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking for Rust users of the AST:** `parser::Parser::parse` now returns the finished
   tree, with ancestry resolved, as `parser::parse` does, and `ast_transform::resolve_ancestry`
-  is no longer public. `BinaryOp` has the
-  raw path operators `Map`, `Filter` and `KeepArray`, and `AstTransformError` has `Syntax`, so an
-  exhaustive match on either needs the new arms.
+  is no longer public. `BinaryOp` has the raw path operators `Map`, `Filter` and `KeepArray`,
+  and `AstTransformError` has `Syntax`, so an exhaustive match on either needs the new arms.
+  This doesn't call for a major version: the AST is an internal representation, not a
+  supported API. `parse()`, `Expression::compile`, the C API and the Python package are
+  unchanged, so the release stays on 2.x.
 
 ### Deprecated
 
