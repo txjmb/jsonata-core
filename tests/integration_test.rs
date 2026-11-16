@@ -4305,7 +4305,13 @@ fn test_function_argument_runs_with_a_null_input() {
         (r#"($h := function($f){ $map([1,2], $f) }; $h(function($v,$i){ $i }))"#.to_string(), "[0,1]"),
         (r#"($h := function($f){ $map([1,2], $f) }; $h($string))"#.to_string(), r#"["1","2"]"#),
         (r#"($h := function($f){ $sort([3,1,2], $f) }; $h(function($a,$b){ $a > $b }))"#.to_string(), "[1,2,3]"),
-        (r#"($h := function($f, $n){ $n = 0 ? "done" : $f($f, $n-1) }; $h($h, 20000))"#.to_string(), r#""done""#),
+        (r#"($h := function($f, $n){ $n = 0 ? "done" : $f($f, $n-1) }; $h($h, 100000))"#.to_string(), r#""done""#),
+        (r#"($h := function($f, $n){ $n = 0 ? $eval("a") : $f($f, $n-1) }; $h($h, 3))"#.to_string(), "undefined"),
+        // The left side of `~>` is the call's context, not wrapped; the
+        // other arguments are.
+        (format!(r#"({h}; $g := function($e){{ $eval("a") }}; $g ~> $h())"#), "5"),
+        (r#"($h := function($f, $y){ $f("x") }; $g := function($e){ $eval("a") }; $g ~> $h(1))"#.to_string(), "5"),
+        (r#"($h := function($y, $f){ $f("x") }; 1 ~> $h(function($e){ $eval("a") }))"#.to_string(), "undefined"),
         (
             r#"($Y := function($f){ (function($x){ $x($x) })(function($x){ $f(function($y){ $x($x)($y) }) }) }; $fact := $Y(function($self){ function($n){ $n <= 1 ? 1 : $n * $self($n - 1) } }); $fact(10))"#.to_string(),
             "3628800",
@@ -4315,6 +4321,14 @@ fn test_function_argument_runs_with_a_null_input() {
         assert_eq!(tree_walker, expected, "tree-walker: {expr}");
         assert_eq!(default, expected, "default: {expr}");
     }
+    // A wrapped function's context parameter reads the null input: T0411,
+    // as for any value of the wrong type in its place.
+    let (tree_walker, default) = eval_both_engines_on(
+        r#"($h := function($f){ $f() }; $h(function($x)<s-:s>{ $x }))"#,
+        json!("str"),
+    );
+    assert!(tree_walker.contains("T0411"), "tree-walker: {tree_walker}");
+    assert!(default.contains("T0411"), "default: {default}");
 }
 
 #[test]
@@ -4543,6 +4557,12 @@ fn test_filter_on_nothing_index_zero_and_raising_operators() {
         ("nope[[1..1.5]]", "T2004"),
         ("nope[$$.s+1]", "T2001"),
         ("nope[[price]+1]", "T2001"),
+        // `$` inside a nested filter reads that filter's items.
+        ("nope[[1,\"a\"][$ > 1]]", "T2009"),
+        // An object constructor's own checks.
+        ("nope[{1:2}]", "T1003"),
+        ("nope[{true:2}]", "T1003"),
+        ("nope[{\"a\":1,\"a\":2}]", "D1009"),
         ("arr[x+'a']", "T2002"),
         // `$eval` reports its expression's errors as D3121.
         ("nope[$eval('1+\"a\"')]", "D3121"),
@@ -4570,6 +4590,8 @@ fn test_filter_on_nothing_index_zero_and_raising_operators() {
         ("nope[$$.a+1]", undefined.as_str()),
         ("nope[[]]", undefined.as_str()),
         ("nope[$count([1])][$error('E')]", undefined.as_str()),
+        ("nope[{\"a\":1,\"b\":2}]", undefined.as_str()),
+        ("nope[{k: 1}]", undefined.as_str()),
         ("arr[x > 0]", r##"Ok({"x":1})"##),
         ("arr[$$.a > 1]", r##"Ok({"x":1})"##),
     ] {
@@ -4578,6 +4600,23 @@ fn test_filter_on_nothing_index_zero_and_raising_operators() {
         assert_eq!(tree_walker, expected, "tree-walker: {expr}");
         assert_eq!(default, expected, "default: {expr}");
     }
+}
+
+// `$eval` keeps the codes of the engine's own guardrails rather than
+// reporting them as D3121: a depth limit set in the options is D1011.
+#[test]
+fn test_eval_keeps_guardrail_codes() {
+    let data = JValue::from_json_str("{}").unwrap();
+    let options = EvaluatorOptions {
+        max_stack_depth: Some(100),
+        ..EvaluatorOptions::default()
+    };
+    let expr = "$eval('($f := function($n){ $n = 0 ? 0 : 1 + $f($n-1) }; $f(1000))')";
+    let (tree_walker, default) = eval_both_engines_with(expr, options, &data);
+    assert!(tree_walker.contains("D1011"), "tree-walker: {tree_walker}");
+    assert!(!tree_walker.contains("D3121"), "tree-walker: {tree_walker}");
+    assert!(default.contains("D1011"), "default: {default}");
+    assert!(!default.contains("D3121"), "default: {default}");
 }
 
 // ── No filter on nothing after a sort or a `~>` call ─────────────────────────
