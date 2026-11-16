@@ -732,6 +732,24 @@ impl Proc {
     /// slots are forgotten and evaluate to undefined (`(%.x).y`). Here they
     /// keep seeking and end as S0217, the error the same `%` gives without
     /// the `.y`.
+    /// `#` and `^` on a bare `%` (`%#$i`, `%^(x)`): jsonata-js gives a
+    /// parent node no `seekingParent` of its own (only `.` carries its
+    /// slot on, and `pushAncestry` gives it to what holds it), so these
+    /// leave the `%` unresolved.
+    fn forget_bare_parent(&mut self) {
+        if self.is_path {
+            return;
+        }
+        if let [PathStep {
+            node: AstNode::Parent(label),
+            ..
+        }] = self.steps.as_slice()
+        {
+            let label = label.clone();
+            self.pending.retain(|slot| slot.label != label);
+        }
+    }
+
     fn make_path(&mut self) {
         if !self.is_path {
             self.is_path = true;
@@ -1056,6 +1074,7 @@ fn apply_path_op(
             Ok(())
         }
         PathOp::Index(var) => {
+            proc.forget_bare_parent();
             proc.make_path();
             let step = proc.target_step();
             // An index binding on a step that already has stages
@@ -1137,6 +1156,18 @@ fn apply_map(
         path.steps.push(step);
         rest.pending
     };
+    // jsonata-js's `resolveAncestry` after `.` seeks the last step's own
+    // slot when it is a `%`, even one that `#` or `^` forgot
+    // (`a.%#$i`, see `Proc::forget_bare_parent`).
+    let mut new_slots = new_slots;
+    if let Some(AstNode::Parent(label)) = path.steps.last().map(|step| &step.node) {
+        if !new_slots.iter().any(|slot| slot.label == *label) {
+            new_slots.push(PendingAncestor {
+                label: label.clone(),
+                level: 1,
+            });
+        }
+    }
     let checked = path.checked;
     check_literal_steps(&mut path.steps[checked..])?;
     path.checked = path.steps.len();
@@ -1192,6 +1223,21 @@ fn literal_step_value(node: &AstNode) -> Option<String> {
     }
 }
 
+/// The operand of a unary minus as a number literal. jsonata-js folds the
+/// minus into the number node, which keeps its predicates and `[]`, so a
+/// number with them (`-1[0]`, here a one-step path) is still a literal.
+fn negated_literal_number(node: &AstNode) -> Option<f64> {
+    match node {
+        AstNode::Path { steps } => match steps.as_slice() {
+            [step] if step.focus.is_none() && step.index_var.is_none() => {
+                negated_literal_number(&step.node)
+            }
+            _ => None,
+        },
+        other => literal_number(other),
+    }
+}
+
 /// A number literal, possibly under any number of unary minuses (`--2`).
 fn literal_number(node: &AstNode) -> Option<f64> {
     match node {
@@ -1199,7 +1245,7 @@ fn literal_number(node: &AstNode) -> Option<f64> {
         AstNode::Unary {
             op: crate::ast::UnaryOp::Negate,
             operand,
-        } => literal_number(operand).map(|n| -n),
+        } => negated_literal_number(operand).map(|n| -n),
         _ => None,
     }
 }
@@ -1222,7 +1268,13 @@ fn apply_filter(
             "S0209: A predicate cannot follow a grouping expression in a step".to_string(),
         ));
     }
-    let predicate = transform_node(predicate, state, depth + 1)?;
+    let mut predicate = transform_node(predicate, state, depth + 1)?;
+    // A bare `%` predicate has no `seekingParent` in jsonata-js (only
+    // `pushAncestry` gives a parent node's slot to what holds it), so `[`
+    // never seeks it, and it is left unresolved.
+    if matches!(predicate.node, AstNode::Parent(_)) {
+        predicate.pending.clear();
+    }
     let last = proc.steps.len() - 1;
     let (prefix, rest) = proc.steps.split_at_mut(last);
     let step = &mut rest[0];
@@ -1312,6 +1364,7 @@ fn apply_sort(
     depth: usize,
 ) -> Result<(), AstTransformError> {
     let was_path = path.is_path;
+    path.forget_bare_parent();
     path.make_path();
     let mut transformed_terms = Vec::with_capacity(terms.len());
     let mut terms = terms.into_iter();

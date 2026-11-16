@@ -11,9 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `parser::Parser::parse` now returns the finished tree, with ancestry resolved, as
-  `parser::parse` does. `ast_transform::resolve_ancestry` takes only the parser's raw tree, and
-  rejects a path that didn't come from it.
+- **Breaking for Rust users of the AST:** `parser::Parser::parse` now returns the finished
+  tree, with ancestry resolved, as `parser::parse` does. `ast_transform::resolve_ancestry` takes
+  only the parser's raw tree, and rejects a path that didn't come from it. `BinaryOp` has the
+  raw path operators `Map`, `Filter` and `KeepArray`, and `AstTransformError` has `Syntax`, so an
+  exhaustive match on either needs the new arms.
 
 ### Deprecated
 
@@ -26,16 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   powers for the path operators (`.` 75; `[`, `(`, `@`, `#` 80; group-by `{` 70; sort `^` 40) and
   leaves them as raw nodes, which `ast_transform` resolves in jsonata-js's `processAST` order.
   `-a{...}` and `a = b^(x)` now group as in jsonata-js. Calling something that isn't a function
-  (`1()`, `"f"@$v()`, `[1]()`) is T1006 (T1008 for `1(?)`) when the call runs, as in jsonata-js,
-  not a parse error, so a call of a filtered, sorted or grouped step now evaluates and calling a
+  (`1()`, `"f"@$v()`, `[1]()`) is T1006 (T1008 for `1(?)`) when the call runs, after its
+  arguments, as in jsonata-js (`1($error("x"))` is D3137), not a parse error, so a call of a filtered, sorted or grouped step now evaluates and calling a
   transform (`|x|{"z":1}|($)`) works. Where an expression has more than one path error (S0209,
   S0210, S0213, S0215, S0216, S0217), the one reported is the one jsonata-js raises first, with
   a call's arguments before its procedure: `1.b.2()` and `a[0]@$v(1.b)` are S0213. A second `#`
-  on a step replaces its index (`a#$i#$j`). S0209, S0210 and S0213 keep their "Parse error"
-  prefix. Known differences: a `%` that a parenthesised operand can't resolve is still S0217
-  when a `.` follows (`(%.x).y`), where jsonata-js gives undefined; and the members of an array
-  or object constructor run in order, so the first member's error is reported, where jsonata-js
-  runs them concurrently.
+  on a step without other stages replaces its index (`a#$i#$j`). A bare `%` predicate (`x[%]`)
+  and a `%` under `#` or `^` (`%#$i`, `%^(x)`) are left unresolved, giving undefined as in
+  jsonata-js rather than S0217 or the input. `x ~> $f()#$i` is T2006. S0209, S0210 and S0213
+  keep their "Parse error" prefix. Known differences: a `%` that a parenthesised operand can't
+  resolve is still S0217 when a `.` follows (`(%.x).y`), where jsonata-js gives undefined; `#`
+  after `[]` adds an index rather than replacing one (`x[]#$i#$j` keeps `$i`); and the members
+  of an array or object constructor run in order, so the first member's error is reported,
+  where jsonata-js runs them concurrently.
 - **Filters on a missing step run as jsonata-js runs them**
   ([#260](https://github.com/txjmb/jsonata-core/issues/260)). jsonata-js evaluates the filters
   of a step that gives nothing against `[undefined]`. A computed index of 0 now keeps that
