@@ -3944,6 +3944,11 @@ fn hof_callback_index(name: &str, arg_count: usize) -> Option<usize> {
 /// can name it.
 const REGEX_NEXT: &str = "regex next";
 
+/// T1006, as jsonata-js `apply` raises it for a value that isn't a function.
+fn not_a_function() -> EvaluatorError {
+    EvaluatorError::TypeError("T1006: Attempted to invoke a non-function".to_string())
+}
+
 /// The text a regex function value matches against, as JavaScript's
 /// `RegExp.prototype.exec` converts its argument with `String()`. `None`
 /// (the call gives undefined) for undefined, which jsonata-js would match as
@@ -6106,8 +6111,21 @@ impl Evaluator {
         // a filter or `[]` (`x ~> $map($f)[0]`). jsonata-js parses a call
         // with a `?` argument as a partial application, not a call, so that
         // is applied like any function value below.
+        // A `#` or `@` on the call makes it a path in jsonata-js, which
+        // isn't a call (`x ~> $string()#$i` is T2006).
         let (call, path_steps) = match rhs {
-            AstNode::Path { steps } if steps.len() == 1 => (&steps[0].node, Some(steps)),
+            AstNode::Path { steps }
+                if steps.len() == 1
+                    && steps[0].index_var.is_none()
+                    && steps[0].focus.is_none()
+                    && steps[0].ancestor_label.is_none()
+                    && steps[0]
+                        .stages
+                        .iter()
+                        .all(|stage| matches!(stage, Stage::Filter(_) | Stage::KeepArray)) =>
+            {
+                (&steps[0].node, Some(steps))
+            }
             _ => (rhs, None),
         };
         if let AstNode::Function {
@@ -6135,7 +6153,7 @@ impl Evaluator {
             if !args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
                 let lhs_value = self.evaluate_internal(lhs, data)?;
                 let callable = self.evaluate_internal(procedure, data)?;
-                self.check_callable(&callable, procedure)?;
+                self.check_missing_sigil(&callable, procedure)?;
                 let mut values = Vec::with_capacity(args.len() + 1);
                 values.push(lhs_value);
                 // The other arguments are wrapped as in any call (#254).
@@ -6147,6 +6165,9 @@ impl Evaluator {
                     } else {
                         arg
                     });
+                }
+                if !callable.is_function() {
+                    return Err(not_a_function());
                 }
                 let result = self.call_function_value(&callable, &values, data)?;
                 return match path_steps {
@@ -8172,6 +8193,12 @@ impl Evaluator {
                 "Index binding operator (#) must be resolved by ast_transform pass".to_string(),
             )),
 
+            BinaryOp::Map | BinaryOp::Filter | BinaryOp::KeepArray => {
+                Err(EvaluatorError::EvaluationError(
+                    "A path operator must be resolved by ast_transform pass".to_string(),
+                ))
+            }
+
             // These operators are all handled as special cases earlier in evaluate_binary_op
             BinaryOp::ColonEqual | BinaryOp::Coalesce | BinaryOp::Default | BinaryOp::ChainPipe => {
                 unreachable!()
@@ -8444,18 +8471,21 @@ impl Evaluator {
             }
             // Reached only for a call written WITHOUT the `$`. jsonata-js
             // separates the two cases: a name that is a builtin was almost
-            // certainly missing its sigil, and gets T1005 with the suggestion;
-            // anything else is T1006.
-            return Err(if self.is_builtin_function(name) {
-                EvaluatorError::ReferenceError(format!(
+            // certainly missing its sigil, and gets T1005 with the suggestion
+            // before the arguments are evaluated; anything else is T1006,
+            // which jsonata-js's `apply` raises after them.
+            if self.is_builtin_function(name) {
+                return Err(EvaluatorError::ReferenceError(format!(
                     "T1005: Attempted to invoke a non-function. Did you mean ${}?",
                     name
-                ))
-            } else {
-                EvaluatorError::ReferenceError(
-                    "T1006: Attempted to invoke a non-function".to_string(),
-                )
-            });
+                )));
+            }
+            for arg in args {
+                self.evaluate_internal(arg, data)?;
+            }
+            return Err(EvaluatorError::ReferenceError(
+                "T1006: Attempted to invoke a non-function".to_string(),
+            ));
         }
 
         self.evaluate_builtin_call(name, args, data)
@@ -10305,7 +10335,7 @@ impl Evaluator {
             return self.build_partial_application(target, args, data);
         }
         let tail_call = std::mem::take(&mut self.tail_call_args);
-        self.check_callable(&callable, procedure)?;
+        self.check_missing_sigil(&callable, procedure)?;
         let wrap = !tail_call && matches!(callable, JValue::Lambda(_));
         let mut evaluated_args = Vec::with_capacity(args.len());
         for arg in args.iter() {
@@ -10316,16 +10346,22 @@ impl Evaluator {
                 arg
             });
         }
+        // jsonata-js raises T1006 in `apply`, after the arguments: their
+        // errors come first (`1($error("x"))` is D3137).
+        if !callable.is_function() {
+            return Err(not_a_function());
+        }
         self.call_function_value(&callable, &evaluated_args, data)
     }
 
-    /// The error for calling `callable`, the value of `procedure`, when it
-    /// is not a function: T1006, or T1005 as jsonata-js `evaluateFunction`
-    /// raises it.
-    fn check_callable(&self, callable: &JValue, procedure: &AstNode) -> Result<(), EvaluatorError> {
-        if callable.is_function() {
-            return Ok(());
-        }
+    /// T1005 for calling `callable`, the value of `procedure`, as jsonata-js
+    /// `evaluateFunction` raises it before evaluating the arguments: the
+    /// procedure gives nothing and probably missed its `$`.
+    fn check_missing_sigil(
+        &self,
+        callable: &JValue,
+        procedure: &AstNode,
+    ) -> Result<(), EvaluatorError> {
         // A procedure path that gives nothing, and whose first step names
         // something bound in the environment, was probably missing its `$`:
         // T1005 with the suggestion, as for `uppercase#$i()` or
@@ -10340,9 +10376,7 @@ impl Evaluator {
                 }
             }
         }
-        Err(EvaluatorError::TypeError(
-            "T1006: Attempted to invoke a non-function".to_string(),
-        ))
+        Ok(())
     }
 
     /// The name of a called path's first step, which jsonata-js looks up

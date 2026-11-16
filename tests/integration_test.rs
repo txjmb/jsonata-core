@@ -4461,8 +4461,8 @@ fn test_focus_binding_error_precedes_literal_step() {
 // ── Calls of bound steps: literals, blocks, predicates, error order ──────────
 //
 // A literal, wildcard or constructor is no more callable under `#`/`@` than
-// on its own (`"f"()`, `a.1()`): `"f"@$v()` and `a.1#$i()` are the same T1006
-// parse error, ahead of any S0213 for the step or error elsewhere. A bound
+// on its own (`"f"()`, `a.1()`): `"f"@$v()` and `a.1#$i()` are T1006 when
+// the call runs, as in jsonata-js, after any parse error. A bound
 // `.(expr)` step is called as its block (`a.(1)@$v()` is T1006). A filter on
 // a step that gives nothing is still evaluated once, as jsonata-js's
 // `evaluateFilter` does with `[undefined]`. And a `@` on a sort or group-by
@@ -4499,10 +4499,13 @@ fn test_call_of_bound_literal_and_filter_on_nothing() {
         ("x[$string(1,2,3)]", "T0410"),
         ("a.x[$string(1,2,3)]", "T0410"),
         ("x[true][$string(1,2,3)]", "T0410"),
-        // In a constructor, before the errors of other members.
-        (r##"[$string(1,2,3), "f"@$v()]"##, "T1006"),
-        ("[$string(1,2,3), *@$v()]", "T1006"),
-        (r##"{"k": $error("x"), "j": "f"@$v()}"##, "T1006"),
+        // In a constructor, the first member's error. Deviation: jsonata-js
+        // evaluates an array's members concurrently (`Promise.all`), so
+        // there the error raised after the fewest `await`s wins, which is
+        // T1006 for the first three too.
+        (r##"[$string(1,2,3), "f"@$v()]"##, "T0410"),
+        ("[$string(1,2,3), *@$v()]", "T0410"),
+        (r##"{"k": $error("x"), "j": "f"@$v()}"##, "D3137"),
         ("[%^(x), 1@$v()]", "T1006"),
         // A sort under a unary minus binds looser than `.`.
         ("true.-a^(x)@$v", "S0213"),
@@ -4874,5 +4877,154 @@ fn test_regex_case_folding_matches_javascript() {
         let (tree_walker, default) = eval_both_engines(expr, EvaluatorOptions::default());
         assert_eq!(tree_walker, expected, "tree-walker: {expr}");
         assert_eq!(default, expected, "default: {expr}");
+    }
+}
+
+// ── Path operators built by ast_transform (#219 stage 2) ─────────────────────
+
+/// A predicate on each step of a long right-nested path costs one depth
+/// unit per level for the step and one for its predicate, as before #219.
+#[test]
+fn test_nested_predicate_paths_fit_the_depth_limit() {
+    let outcome = on_small_stack(|| {
+        let expr = format!("{}0{}", "a.b[".repeat(400), "]".repeat(400));
+        match parse(&expr) {
+            Ok(_) => "parsed".to_string(),
+            Err(e) => e.to_string(),
+        }
+    });
+    assert_eq!(outcome, "parsed");
+}
+
+/// Each `^` wraps the steps before it in a `Sort`, so a long chain of them
+/// is a deep tree: past the depth limit it's a clean U1002, not a stack
+/// overflow later.
+#[test]
+fn test_long_sort_chain_is_u1002() {
+    let outcome = on_small_stack(|| {
+        let expr = format!("a{}", "^(x)".repeat(600));
+        match parse(&expr) {
+            Ok(_) => "parsed".to_string(),
+            Err(e) => e.to_string(),
+        }
+    });
+    assert!(outcome.contains("U1002"), "got: {outcome}");
+}
+
+/// jsonata-js raises the errors of a path in `processAST` order: a literal
+/// step in the path comes before a call of something that isn't a function.
+#[test]
+fn test_path_errors_come_in_jsonata_js_order() {
+    for (expr, code) in [
+        ("1.b.2()", "S0213"),
+        (r#"1.b."x"()"#, "S0213"),
+        // Arguments come before the procedure.
+        ("a[0]@$v(1.b)", "S0213"),
+        ("a^(b)@$v(1.c)", "S0213"),
+        ("1(2.a)", "S0213"),
+        ("(1.a)(2.b)", "The literal value 2"),
+        // Calling a value that isn't a function fails when it runs.
+        ("2()+(1.a)", "S0213"),
+    ] {
+        let err = parse(expr).unwrap_err().to_string();
+        assert!(err.contains(code), "{expr} => {err}");
+    }
+}
+
+/// Calling something that isn't a function is T1006 (T1008 for a partial
+/// application) when the call runs, as in jsonata-js, and a transform is a
+/// function to call.
+#[test]
+fn test_call_of_non_function_fails_when_run() {
+    let data = JValue::from_json_str(r#"{"a":{"f":"x","b":1},"x":{"y":1}}"#).unwrap();
+    for (expr, expected) in [
+        ("a.2()", "T1006"),
+        ("1()", "T1006"),
+        (r#""s"()"#, "T1006"),
+        (r#"a."f"()"#, "T1006"),
+        ("*()", "T1006"),
+        ("[1]()", "T1006"),
+        ("{}()", "T1006"),
+        ("1(?)", "T1008"),
+        ("a.b.2(?)", "T1008"),
+        (r#"|x|{"z":1}|($).x.z"#, "Ok(1)"),
+        // `#` after `#` replaces the step's index, as in jsonata-js.
+        ("a#$i#$j.[$i,$j]", "Ok(0)"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(expected),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains(expected), "default: {expr} => {default}");
+    }
+}
+
+/// S0209, S0210 and S0213 are syntax errors, reported with the parser's
+/// "Parse error" prefix as before #219.
+#[test]
+fn test_path_syntax_errors_keep_parse_error_prefix() {
+    for expr in [r#"[1,2]{"k":$}[0]"#, "a{'k':1}{'j':2}", "a.2"] {
+        let err = parse(expr).unwrap_err().display_message();
+        assert!(err.starts_with("Parse error"), "{expr} => {err}");
+    }
+}
+
+/// Third review of #219 stage 2: each case was checked against jsonata-js.
+#[test]
+fn test_path_transform_third_review_cases() {
+    let data = JValue::from_json_str(r#"{"x":[3,1,2],"id":1,"a":{"b":1}}"#).unwrap();
+    for (expr, expected) in [
+        // jsonata-js folds `-` into a number that keeps its predicate.
+        ("-1[0]^($).x", "S0213: The literal value -1"),
+        ("-1[]^($).x", "S0213"),
+        (r#"-1[0]{"k":1}.x"#, "S0213"),
+        ("--1[0]^($).x", "S0213"),
+        // `#` makes a call a path, which `~>` can't apply.
+        ("x ~> $string()#$i^($)", "T2006"),
+        ("x ~> $string()#$i", "T2006"),
+        // A bare `%` predicate is never sought.
+        ("a.1[%]", "S0213"),
+        // `#` and `^` leave a bare `%` unresolved; a `.` before it seeks it.
+        (r#"{"k": $i}[%#$i].-1"#, "S0213"),
+        ("[%#$i]", "Ok([])"),
+        ("a.b.%[0]#$i", r#"Ok({"b":1})"#),
+        // A call's arguments are evaluated before T1006.
+        (r#"1($error("x"))"#, "D3137"),
+        (r#"[1]($error("x"))"#, "D3137"),
+        (r#"1("s"(?))"#, "T1008"),
+        ("1($count(1,2))", "T0410"),
+        // A call by a bare name too.
+        (r#"b($error("x"))"#, "D3137"),
+        (r#"a.b($error("x"))"#, "D3137"),
+        (r#"x ~> b($error("x"))"#, "D3137"),
+        ("string(1)", "T1005"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(expected),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains(expected), "default: {expr} => {default}");
+    }
+    // These give nothing, as in jsonata-js: a `%` predicate, with its own
+    // predicates or bindings or not, is never sought.
+    for expr in [
+        "1[%]",
+        "x[%]",
+        "%#$i",
+        "%^(x)",
+        "a.(%#$i)",
+        "a[%[0]]",
+        "x[%[]]",
+        "a.b[%[true]]",
+        "a.b[%@$p]",
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_on(expr, json!({"x": [3, 1, 2], "id": 1, "a": {"b": 1}}));
+        assert_eq!(tree_walker, "undefined", "tree-walker: {expr}");
+        assert_eq!(default, "undefined", "default: {expr}");
     }
 }

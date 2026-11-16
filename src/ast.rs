@@ -400,8 +400,16 @@ pub enum BinaryOp {
     // Binary-node representation as FocusBind (rather than a dedicated
     // `AstNode::IndexBind` struct variant) so the retired `IndexBind`
     // variant has zero remaining construction sites once removed from
-    // ast.rs -- see Task 4's ast_transform.rs migrate_binding_markers.
+    // ast.rs. ast_transform's `process_path` resolves it.
     IndexBind,
+
+    // Raw parse-time path operators, as jsonata-js's parser leaves them for
+    // `processAST`: `lhs.rhs` (Map), `lhs[rhs]` (Filter) and `lhs[]`
+    // (KeepArray, whose rhs is `Undefined`). ast_transform turns them into
+    // `Path` steps and stages; the evaluator never sees them.
+    Map,
+    Filter,
+    KeepArray,
 
     // Coalescing
     Coalesce, // ??

@@ -3,9 +3,8 @@
 
 #![allow(clippy::approx_constant)]
 
-use crate::ast::{AstNode, BinaryOp, PathStep, Stage, StepId, UnaryOp};
+use crate::ast::{AstNode, BinaryOp, PathStep, UnaryOp};
 use crate::signature::SignatureError;
-use std::collections::HashSet;
 use thiserror::Error;
 
 /// Parser errors
@@ -38,211 +37,6 @@ fn invalid_escape_message(seq: &str) -> String {
             "S0103: Unsupported escape sequence: \\{}",
             seq.trim_start_matches('\\')
         )
-    }
-}
-
-/// Calling something that is not a function. jsonata-js distinguishes an
-/// ordinary invocation (T1006) from a *partial* application -- a call carrying
-/// a `?` placeholder -- which is T1008.
-fn invalid_call_message(args: &[AstNode]) -> String {
-    if args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
-        "T1008: Attempted to partially apply a non-function".to_string()
-    } else {
-        "T1006: Attempted to invoke a non-function".to_string()
-    }
-}
-
-/// Whether a call of `procedure`, a step under `#`/`@` bindings split off
-/// for a call (see `split_bound_last_step`), is rejected while parsing, as
-/// the call of the step on its own would be: a literal, a wildcard,
-/// descendant or parent step, or an array or object constructor. A step
-/// with predicates is evaluated and called, as `"f"[0]()` is.
-fn bound_call_rejected(procedure: &AstNode) -> bool {
-    match procedure {
-        AstNode::Binary {
-            op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-            lhs,
-            ..
-        } => bound_call_rejected(lhs),
-        AstNode::Path { steps } => match steps.as_slice() {
-            [step] if step.stages.is_empty() => bound_call_rejected(&step.node),
-            _ => false,
-        },
-        node => !matches!(
-            node,
-            AstNode::Lambda { .. }
-                | AstNode::Block(_)
-                | AstNode::Call { .. }
-                | AstNode::Function { .. }
-                | AstNode::Regex { .. }
-                | AstNode::Variable(_)
-                | AstNode::Name(_)
-                | AstNode::Path { .. }
-                | AstNode::Binary { .. }
-                | AstNode::FunctionApplication(_)
-                | AstNode::Sort { .. }
-                | AstNode::ObjectTransform { .. }
-        ),
-    }
-}
-
-/// Makes a bound `.(expr)` step of a call's procedure its block again:
-/// `a.(f)@$v()` calls what `(f)` gives, bound, as `a.(f)()` calls `(f)`.
-fn unwrap_bound_application(procedure: &mut AstNode) {
-    match procedure {
-        AstNode::Binary {
-            op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-            lhs,
-            ..
-        } => unwrap_bound_application(lhs),
-        AstNode::Path { steps } if steps.len() == 1 => {
-            let step = &mut steps[0];
-            if let AstNode::FunctionApplication(inner) = &mut step.node {
-                if matches!(**inner, AstNode::Block(_)) {
-                    step.node = std::mem::replace(&mut **inner, AstNode::Undefined);
-                    // A step with a new node is a new step (see `PathStep::id`).
-                    step.id = StepId::default();
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Whether `node` is a path node in jsonata-js, so that a group-by on it is
-/// the path's `group` rather than a step's. A name or a `.` makes a path, and
-/// so do `^` and `#` on anything; `[` and `@` keep their operand's kind. A
-/// one-step `Path` came from `[` on its step, so it is a path when the step
-/// is: `acct[0]` and `x^(y)[0]` are, `$x[0]`, `*[0]` and `(e)[0]` aren't.
-fn is_group_path(node: &AstNode) -> bool {
-    match node {
-        AstNode::Path { steps } => match steps.as_slice() {
-            [step] => matches!(step.node, AstNode::Name(_)) || is_group_path(&step.node),
-            _ => true,
-        },
-        AstNode::Sort { .. } => true,
-        AstNode::Binary {
-            op: BinaryOp::IndexBind,
-            ..
-        } => true,
-        AstNode::Binary {
-            op: BinaryOp::FocusBind,
-            lhs,
-            ..
-        } => is_group_path(lhs),
-        _ => false,
-    }
-}
-
-/// Whether jsonata-js's `[` would find a group on the step a predicate
-/// after `node` attaches to (S0209): the node itself when it isn't a path,
-/// or a path's last step. `#` and `@` bind that same step, and `[]` keeps it.
-fn step_has_group(node: &AstNode) -> bool {
-    match node {
-        AstNode::ObjectTransform { .. } => true,
-        AstNode::Path { steps } => matches!(
-            steps.last().map(|s| &s.node),
-            Some(AstNode::ObjectTransform { .. })
-        ),
-        AstNode::Binary {
-            op: BinaryOp::FocusBind | BinaryOp::IndexBind,
-            lhs,
-            ..
-        } => step_has_group(lhs),
-        _ => false,
-    }
-}
-
-/// Whether jsonata-js's `{` would find a group already on `node` (S0210). A
-/// group on a path's step doesn't count, so `#`, which makes a path, ends the
-/// check, while `[]` and `@` leave a grouped non-path as it is.
-fn node_has_group(node: &AstNode) -> bool {
-    match node {
-        AstNode::ObjectTransform { .. } => true,
-        AstNode::Path { steps } if !is_group_path(node) => {
-            matches!(steps[0].node, AstNode::ObjectTransform { .. })
-        }
-        AstNode::Binary {
-            op: BinaryOp::FocusBind,
-            lhs,
-            ..
-        } => node_has_group(lhs),
-        _ => false,
-    }
-}
-
-/// The steps a `.` extends: the left side's own when it is a path, or the
-/// left side as the one step. As jsonata-js's `.` turns every string literal
-/// step of the path into a name, a string heading a step does too, under
-/// the predicates, group-by, sort and bindings it carries: `"s".k`,
-/// `"s"[0].k`, `"s"{k: v}.p`, `"s"#$i.k` and `"s"^(v).k` read field `s`.
-fn path_steps_before_dot(lhs: AstNode) -> Vec<PathStep> {
-    match lhs {
-        AstNode::Path { steps } => steps
-            .into_iter()
-            .map(|mut step| {
-                step.node = string_step_to_name(step.node);
-                step
-            })
-            .collect(),
-        other => vec![PathStep::new(string_step_to_name(other))],
-    }
-}
-
-/// `node` as a path step, with a string literal at its head made a name.
-fn string_step_to_name(node: AstNode) -> AstNode {
-    match node {
-        AstNode::String(name) => AstNode::Name(name),
-        AstNode::Path { steps } if steps.len() == 1 => AstNode::Path {
-            steps: path_steps_before_dot(AstNode::Path { steps }),
-        },
-        AstNode::ObjectTransform { input, pattern } => AstNode::ObjectTransform {
-            input: Box::new(string_step_to_name(*input)),
-            pattern,
-        },
-        AstNode::Sort { input, terms } => AstNode::Sort {
-            input: Box::new(string_step_to_name(*input)),
-            terms,
-        },
-        AstNode::Binary {
-            op: op @ (BinaryOp::IndexBind | BinaryOp::FocusBind),
-            lhs,
-            rhs,
-        } => AstNode::Binary {
-            op,
-            lhs: Box::new(string_step_to_name(*lhs)),
-            rhs,
-        },
-        other => other,
-    }
-}
-
-/// Splits a `#`/`@`-bound path into the steps before its last one and the
-/// bound last step on its own, which jsonata-js would have parsed as the
-/// call's procedure: `a.b#$i` gives `[a]` and `b#$i`. Anything that is not
-/// a longer path keeps no context steps.
-fn split_bound_last_step(node: AstNode) -> (Vec<PathStep>, AstNode) {
-    match node {
-        AstNode::Binary {
-            op: op @ (BinaryOp::IndexBind | BinaryOp::FocusBind),
-            lhs,
-            rhs,
-        } => {
-            let (context_steps, inner) = split_bound_last_step(*lhs);
-            (
-                context_steps,
-                AstNode::Binary {
-                    op,
-                    lhs: Box::new(inner),
-                    rhs,
-                },
-            )
-        }
-        AstNode::Path { mut steps } if steps.len() > 1 => {
-            let last = steps.pop().expect("a longer path has a last step");
-            (steps, AstNode::Path { steps: vec![last] })
-        }
-        other => (Vec::new(), other),
     }
 }
 
@@ -1055,181 +849,6 @@ pub struct Parser {
     /// to a deeper node every iteration without a new recursive call).
     /// Both must be bounded by this one counter; see `MAX_PARSE_DEPTH`.
     depth: usize,
-    /// An S0213 ("literal value cannot be used as a step") noticed while
-    /// parsing, held until the whole expression has parsed.
-    ///
-    /// jsonata-js raises S0213 from `processAST`, a pass that runs after
-    /// parsing, so a *parse* error beats it: `$.7a` is S0201 for the
-    /// unexpected trailing `a`, even though the `7` step is also invalid.
-    /// Raising it inline made us answer S0213 there. Deferring restores the
-    /// ordering without moving the check itself into a post-parse pass.
-    pending_step_error: Option<ParserError>,
-    /// Set when a misplaced `@` (S0215/S0216, which ast_transform raises)
-    /// comes before the pending S0213 in jsonata-js's `processAST` order,
-    /// which checks a node after its operands as the parser finishes it
-    /// after them: `1[0]@$v.a` is S0215, not the S0213 of the `.`. The
-    /// S0213 then waits for ast_transform, which raises the S0215 or any
-    /// error it meets first (`$[%.id]@$v` is S0217), and is raised only if
-    /// ast_transform raises nothing.
-    focus_bind_first: bool,
-    /// Set while parsing the right-hand operand of a `.` (not inside any
-    /// bracket, parenthesis, brace or argument list there), where a group-by
-    /// or sort can sit under a unary minus (`a.-b^(x)@$v`). jsonata-js
-    /// binds those looser than `.`, so a `@` misplaced on one comes after
-    /// the `.`'s S0213 there: see `deferred_focus`.
-    in_dot_rhs: bool,
-    /// A misplaced `@` on a sort or group-by met in a `.`'s right-hand
-    /// operand, which goes first only if that `.` finds no S0213.
-    deferred_focus: bool,
-    /// When `pending_step_error` is set, the id of the step that the `.`
-    /// that noticed it added last. Postfix `[...]`, `#` and `@` after it
-    /// extend that step here, but in jsonata-js they bind tighter than `.`
-    /// and belong to its right-hand operand, which `processAST` checks
-    /// first: a misplaced `@` on that step goes before the S0213
-    /// (`1.a[0]@$v` is S0215).
-    pending_dot_step: Option<u64>,
-    /// The ids of the name steps made from a quoted string after `.`
-    /// (`a."f"`), so that a call of such a step can make it a string again:
-    /// see `requote_called_step`.
-    quoted_steps: HashSet<u64>,
-}
-
-/// Whether jsonata-js's `@` case raises S0215 or S0216 for binding `lhs`,
-/// the raw node before `@`, as ast_transform's `check_focus_bind_target`
-/// does: see `focus_bind_misplaced`. A `#` binding before it leaves the
-/// step's predicates as they are (`1[0]#$i@$v` is S0215).
-fn focus_bind_lhs_misplaced(lhs: &AstNode) -> bool {
-    match lhs {
-        AstNode::Path { steps } => steps
-            .last()
-            .is_some_and(|last| focus_bind_misplaced(&last.stages, &last.node)),
-        AstNode::Binary {
-            op: BinaryOp::IndexBind,
-            lhs,
-            ..
-        } => focus_bind_lhs_misplaced(lhs),
-        other => focus_bind_misplaced(&[], other),
-    }
-}
-
-/// Whether a `@` on a step with these `stages` and this `node` is an error:
-/// S0215 for a step with predicates (`[]` is not one), S0216 for a sort
-/// step, looking through a group-by to the step it groups.
-fn focus_bind_misplaced(stages: &[Stage], node: &AstNode) -> bool {
-    if stages
-        .iter()
-        .any(|stage| !matches!(stage, Stage::KeepArray))
-    {
-        return true;
-    }
-    match node {
-        AstNode::ObjectTransform { input, .. } => match &**input {
-            AstNode::Path { steps } => steps
-                .last()
-                .is_some_and(|last| focus_bind_misplaced(&last.stages, &last.node)),
-            other => focus_bind_misplaced(&[], other),
-        },
-        AstNode::Sort { .. } => true,
-        _ => false,
-    }
-}
-
-/// Whether the step a `@` binds in `lhs` has predicates (S0215), as opposed
-/// to being a sort or group-by (see `focus_bind_lhs_misplaced`).
-fn focus_bind_lhs_has_predicates(lhs: &AstNode) -> bool {
-    match lhs {
-        AstNode::Path { steps } => steps.last().is_some_and(|last| {
-            last.stages
-                .iter()
-                .any(|stage| !matches!(stage, Stage::KeepArray))
-        }),
-        AstNode::Binary {
-            op: BinaryOp::IndexBind,
-            lhs,
-            ..
-        } => focus_bind_lhs_has_predicates(lhs),
-        _ => false,
-    }
-}
-
-/// The id of the last step of `lhs`, a path under any `#`/`@` bindings: the
-/// step a `@` after them binds. Not through a group-by or sort, which bind
-/// looser than `.` in jsonata-js.
-fn bound_last_step_id(lhs: &AstNode) -> Option<u64> {
-    match lhs {
-        AstNode::Path { steps } => {
-            let last = steps.last()?;
-            match &last.node {
-                // A predicate after a binding makes the bound node a step
-                // of its own (`1.a@$u[0]`).
-                bound @ AstNode::Binary {
-                    op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-                    ..
-                } => bound_last_step_id(bound),
-                _ => Some(last.id.get()),
-            }
-        }
-        AstNode::Binary {
-            op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-            lhs,
-            ..
-        } => bound_last_step_id(lhs),
-        _ => None,
-    }
-}
-
-/// One step of `check_path_literal_steps`: the literal's text when `node`
-/// is a step jsonata-js rejects, after turning a string step into a name.
-///
-/// `#$i`, `@$v`, a sort `^(...)` and a group `{...}` still wrap their
-/// operand here (ast_transform folds them into the path later), but in
-/// jsonata-js the operand is already a step of this path, with the binding,
-/// sort or group attached to it or appended after it. So the check looks
-/// through them: at the literal (`2#$q.a`, `null@$x.a`, `null^(x).a`,
-/// `2{"k":1}.a`) or at the steps of a path operand (`null[0]#$i.a`).
-fn check_literal_step(node: &mut AstNode) -> Option<String> {
-    match node {
-        AstNode::Binary {
-            op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-            lhs,
-            ..
-        } => check_literal_step(lhs),
-        AstNode::Sort { input, .. } | AstNode::ObjectTransform { input, .. } => {
-            check_literal_step(input)
-        }
-        AstNode::Path { steps } => steps
-            .iter_mut()
-            .find_map(|step| check_literal_step(&mut step.node)),
-        AstNode::String(field_name) => {
-            *node = AstNode::Name(std::mem::take(field_name));
-            None
-        }
-        _ => literal_step_value(node),
-    }
-}
-
-/// The value of `node` when it is a literal jsonata-js rejects as a path step
-/// (S0213): a number -- including one under unary minus, which jsonata-js
-/// folds into the number -- or `true`, `false` or `null`. Strings are not
-/// rejected; they become field names.
-fn literal_step_value(node: &AstNode) -> Option<String> {
-    match node {
-        AstNode::Boolean(b) => Some(b.to_string()),
-        AstNode::Null => Some("null".to_string()),
-        _ => literal_number(node).map(|n| n.to_string()),
-    }
-}
-
-/// A number literal, possibly under any number of unary minuses (`--2`).
-fn literal_number(node: &AstNode) -> Option<f64> {
-    match node {
-        AstNode::Number(n) => Some(*n),
-        AstNode::Unary {
-            op: UnaryOp::Negate,
-            operand,
-        } => literal_number(operand).map(|n| -n),
-        _ => None,
-    }
 }
 
 impl Parser {
@@ -1240,41 +859,46 @@ impl Parser {
             lexer,
             current_token,
             depth: 0,
-            pending_step_error: None,
-            pending_dot_step: None,
-            focus_bind_first: false,
-            in_dot_rhs: false,
-            deferred_focus: false,
-            quoted_steps: HashSet::new(),
         })
     }
 
-    /// Makes the step a call's `procedure` names a string again when it was
-    /// a quoted string after `.`: in `a."f"[0]()` and `a."f"#$i()`,
-    /// jsonata-js's `(` takes `"f"[0]` or `"f"#$i` as its procedure before
-    /// `.` turns the path's string steps into names, so the procedure is the
-    /// string, whose value is not a function: T1006, never the T1005 that
-    /// suggests `$f` for a called name. `procedure` is a one-step path, or
-    /// such a path under `#`/`@` bindings.
-    fn requote_called_step(&self, procedure: &mut AstNode) {
-        match procedure {
-            AstNode::Path { steps } if steps.len() == 1 => {
-                let step = &mut steps[0];
-                if !self.quoted_steps.contains(&step.id.get()) {
-                    return;
-                }
-                if let AstNode::Name(name) = &mut step.node {
-                    step.node = AstNode::String(std::mem::take(name));
-                    // A step with a new node is a new step (see `PathStep::id`).
-                    step.id = StepId::default();
-                }
-            }
-            AstNode::Binary {
-                op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-                lhs,
-                ..
-            } => self.requote_called_step(lhs),
-            _ => {}
+    /// The node for calling `lhs` with `args`, where `lhs` is the raw node
+    /// before `(` (in a path, `(` binds tighter than `.`, so `a.b()` calls
+    /// `b()` in each context item). A name or a `$` variable is a function
+    /// call by name; other expressions are evaluated and their value
+    /// called; calling a value that isn't a function is T1006 when it is
+    /// evaluated, as in jsonata-js.
+    fn call_node(lhs: AstNode, args: Vec<AstNode>) -> AstNode {
+        match lhs {
+            AstNode::Path { steps } => match <[PathStep; 1]>::try_from(steps) {
+                Ok(
+                    [PathStep {
+                        node: AstNode::Name(name),
+                        ..
+                    }],
+                ) => AstNode::Function {
+                    name,
+                    args,
+                    is_builtin: false,
+                },
+                Ok([step]) => AstNode::Call {
+                    procedure: Box::new(AstNode::Path { steps: vec![step] }),
+                    args,
+                },
+                Err(steps) => AstNode::Call {
+                    procedure: Box::new(AstNode::Path { steps }),
+                    args,
+                },
+            },
+            AstNode::Variable(name) => AstNode::Function {
+                name,
+                args,
+                is_builtin: true,
+            },
+            procedure => AstNode::Call {
+                procedure: Box::new(procedure),
+                args,
+            },
         }
     }
 
@@ -1317,13 +941,18 @@ impl Parser {
             Token::Ampersand => Some((50, 51)),
             Token::Plus | Token::Minus => Some((50, 51)),
             Token::Star | Token::Slash | Token::Percent => Some((60, 61)),
-            Token::Dot => Some((75, 85)), // Right bp is higher to prevent consuming postfix operators
+            // The path operators bind as in jsonata-js (`operators` in
+            // parser.js): `.` is 75, `[`, `(`, `#` and `@` are 80, a
+            // group-by `{` is 70 and a sort `^` is 40. So `a.b[0]` is
+            // `a.(b[0])` and `a.b{k: v}` is `(a.b){k: v}`, and ast_transform
+            // builds the path from them as `processAST` does.
+            Token::Dot => Some((75, 76)),
             Token::LeftBracket => Some((80, 81)),
             Token::LeftParen => Some((80, 81)),
-            Token::LeftBrace => Some((80, 81)), // Object constructor as postfix
-            Token::Caret => Some((80, 81)),     // Sort operator as postfix
-            Token::Hash => Some((80, 81)),      // Index binding operator as postfix
-            Token::At => Some((80, 81)),        // Focus binding operator as postfix
+            Token::LeftBrace => Some((70, 71)),
+            Token::Caret => Some((40, 41)),
+            Token::Hash => Some((80, 81)),
+            Token::At => Some((80, 81)),
             Token::Question => Some((20, 21)),
             Token::QuestionQuestion => Some((15, 16)), // Coalescing operator
             Token::QuestionColon => Some((15, 16)),    // Default operator
@@ -1504,10 +1133,12 @@ impl Parser {
             Token::LeftParen => {
                 self.advance()?; // skip '('
 
-                // Check for empty parentheses () which means undefined
+                // Empty parentheses are an empty block, as in jsonata-js: it
+                // evaluates to undefined, and as a path step
+                // (`Account.Order.().%`) the ancestry pass walks past it.
                 if self.current_token == Token::RightParen {
                     self.advance()?;
-                    return Ok(AstNode::Undefined);
+                    return Ok(AstNode::Block(Vec::new()));
                 }
 
                 // Parse block expressions (separated by semicolons)
@@ -1602,7 +1233,9 @@ impl Parser {
             }
             Token::Minus => {
                 self.advance()?;
-                let operand = self.parse_expression(70)?; // High precedence for unary
+                // jsonata-js's prefix `-` takes `expression(70)`, which stops
+                // at an operator of binding power 70, such as a group-by.
+                let operand = self.parse_expression(71)?;
                 Ok(AstNode::Unary {
                     op: UnaryOp::Negate,
                     operand: Box::new(operand),
@@ -1742,16 +1375,11 @@ impl Parser {
     fn parse_expression(&mut self, min_bp: u8) -> Result<AstNode, ParserError> {
         let entry_depth = self.depth;
         self.bump_parse_depth()?;
-        // A whole expression (in brackets, an argument list, a block...) is
-        // never the operand of an enclosing `.` itself.
-        let in_dot_rhs = self.in_dot_rhs && min_bp > 0;
-        let outer_in_dot_rhs = std::mem::replace(&mut self.in_dot_rhs, in_dot_rhs);
 
         let result = stacker::maybe_grow(PARSER_RED_ZONE, PARSER_GROW_STACK_SIZE, || {
             self.parse_expression_impl(min_bp)
         });
 
-        self.in_dot_rhs = outer_in_dot_rhs;
         self.depth = entry_depth;
         result
     }
@@ -1784,216 +1412,36 @@ impl Parser {
                 break;
             }
 
-            // A group-by on a path belongs to the whole path, as in jsonata-js,
-            // where `{` sets `group` on the path node and every later postfix
-            // operator keeps extending that same path. So `a.b{k: v}.c`
-            // groups `a.b.c`, `a.b{k: v}[0]` filters step `b`, and in
-            // `a{k: v}.$f(x)` the call is a step of the path (#208). The
-            // group is taken off here, the operator applies to the path, and
-            // the group goes back on around the result. That covers each
-            // postfix operator but `{`, whose second group is S0210. A group
-            // on anything else (a block, `$x`, `*`) stays a step of its own.
-            let path_group = match &lhs {
-                AstNode::ObjectTransform { input, .. }
-                    if is_group_path(input)
-                        && matches!(
-                            self.current_token,
-                            Token::Dot
-                                | Token::LeftBracket
-                                | Token::LeftParen
-                                | Token::Caret
-                                | Token::Hash
-                                | Token::At
-                        ) =>
-                {
-                    match std::mem::replace(&mut lhs, AstNode::Undefined) {
-                        AstNode::ObjectTransform { input, pattern } => {
-                            lhs = *input;
-                            Some(pattern)
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                _ => None,
-            };
-
-            // Handle infix operators
+            // The path operators `.`, `[`, `{`, `^`, `@` and `#` build raw
+            // nodes, as jsonata-js's parser does; ast_transform then turns
+            // them into paths, as its `processAST` does, raising their
+            // errors in its order.
             match &self.current_token {
                 Token::Dot => {
                     self.advance()?;
-
-                    // Check for .[expr] syntax (array grouping)
-                    if self.current_token == Token::LeftBracket {
-                        self.advance()?;
-
-                        // Parse the array elements
-                        let mut elements = Vec::new();
-                        if self.current_token != Token::RightBracket {
-                            loop {
-                                elements.push(self.parse_expression(0)?);
-                                if self.current_token != Token::Comma {
-                                    break;
-                                }
-                                self.advance()?;
-                            }
-                        }
-
-                        self.expect(Token::RightBracket)?;
-
-                        // Create ArrayGroup node as a path step
-                        let mut steps = path_steps_before_dot(lhs);
-
-                        steps.push(PathStep::new(AstNode::ArrayGroup(elements)));
-                        self.check_path_literal_steps(&mut steps);
-                        self.bump_parse_depth()?;
-                        lhs = AstNode::Path { steps };
-                    } else if self.current_token == Token::LeftParen {
-                        // Check for .(expr) syntax (function application)
-                        self.advance()?;
-
-                        // Empty block `.()`: a parenthesised step with no
-                        // expression (e.g. `Account.Order.().%`). jsonata-js
-                        // treats `()` as an empty block that evaluates to
-                        // undefined; like every `.(...)` step it is a
-                        // `FunctionApplication` of a `Block`, here an empty one,
-                        // which the ancestry pass walks past.
-                        if self.current_token == Token::RightParen {
-                            self.advance()?;
-                            let mut steps = path_steps_before_dot(lhs);
-                            steps.push(PathStep::new(AstNode::FunctionApplication(Box::new(
-                                AstNode::Block(Vec::new()),
-                            ))));
-                            self.check_path_literal_steps(&mut steps);
-                            self.bump_parse_depth()?;
-                            lhs = AstNode::Path { steps };
-                        } else {
-                            // Parse the expression(s) to apply - may be block with semicolons
-                            let mut expressions = vec![self.parse_expression(0)?];
-
-                            while self.current_token == Token::Semicolon {
-                                self.advance()?;
-                                if self.current_token == Token::RightParen {
-                                    break;
-                                }
-                                expressions.push(self.parse_expression(0)?);
-                            }
-
-                            self.expect(Token::RightParen)?;
-
-                            // Always a Block, even with one expression: a `.(...)` step
-                            // is a jsonata-js block, which gets a frame of its own, and
-                            // the Block is what tells it apart from a `.$fn(...)` step,
-                            // whose FunctionApplication holds the call itself. (The
-                            // `.function(){...}(...)` desugaring is a Block too.)
-                            let expr = AstNode::Block(expressions);
-
-                            // Create FunctionApplication node as a path step
-                            let mut steps = path_steps_before_dot(lhs);
-
-                            steps.push(PathStep::new(AstNode::FunctionApplication(Box::new(expr))));
-                            self.check_path_literal_steps(&mut steps);
-                            self.bump_parse_depth()?;
-                            lhs = AstNode::Path { steps };
-                        }
-                    } else {
-                        // Normal dot path
-                        let outer_in_dot_rhs = std::mem::replace(&mut self.in_dot_rhs, true);
-                        let outer_deferred = std::mem::replace(&mut self.deferred_focus, false);
-                        let rhs = self.parse_expression(right_bp);
-                        self.in_dot_rhs = outer_in_dot_rhs;
-                        let deferred_focus =
-                            std::mem::replace(&mut self.deferred_focus, outer_deferred);
-                        let rhs = rhs?;
-
-                        // Flatten path expressions
-                        let mut steps = path_steps_before_dot(lhs);
-
-                        match rhs {
-                            AstNode::Path {
-                                steps: mut rhs_steps,
-                            } => {
-                                steps.append(&mut rhs_steps);
-                            }
-                            // Convert string literals to field names when they appear after a dot
-                            // e.g., $."Field.Name" should access a property named "Field.Name"
-                            AstNode::String(field_name) => {
-                                let step = PathStep::new(AstNode::Name(field_name));
-                                self.quoted_steps.insert(step.id.get());
-                                steps.push(step);
-                            }
-                            _ => steps.push(PathStep::new(rhs)),
-                        }
-                        self.check_path_literal_steps(&mut steps);
-                        if deferred_focus && self.pending_step_error.is_none() {
-                            self.focus_bind_first = true;
-                        }
-
-                        // Check for following predicates and attach as stages to the last step
-                        // This implements JSONata semantics where foo.bar[0] has [0] apply during extraction
-                        while self.current_token == Token::LeftBracket {
-                            self.advance()?;
-
-                            // `[]` is the keepSingleton marker, not the filter
-                            // `[true]`: it keeps the result an array instead of
-                            // filtering and unwrapping. They parsed to the same
-                            // node until KeepArray split them.
-                            let stage = if self.current_token == Token::RightBracket {
-                                Stage::KeepArray
-                            } else {
-                                Stage::Filter(Box::new(self.parse_expression(0)?))
-                            };
-
-                            self.expect(Token::RightBracket)?;
-
-                            // Attach predicate as stage to the last step
-                            if let Some(last_step) = steps.last_mut() {
-                                last_step.stages.push(stage);
-                            }
-                        }
-
-                        self.bump_parse_depth()?;
-                        lhs = AstNode::Path { steps };
-                    }
+                    let rhs = self.parse_expression(right_bp)?;
+                    self.bump_parse_depth()?;
+                    lhs = AstNode::Binary {
+                        op: BinaryOp::Map,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    };
                 }
                 Token::LeftBracket => {
                     self.advance()?;
-
-                    // S0209: A predicate cannot follow a grouping expression in a step.
-                    // `[]` is not a predicate: jsonata-js sets keepArray on the
-                    // grouped node instead, so `$x{k: v}[]` is the one-step path
-                    // checked here when a predicate follows it.
-                    if step_has_group(&lhs) && self.current_token != Token::RightBracket {
-                        return Err(ParserError::InvalidSyntax(
-                            "S0209: A predicate cannot follow a grouping expression in a step"
-                                .to_string(),
-                        ));
-                    }
-
-                    // A postfix predicate or `[]` attaches to the last step of
-                    // the path as a stage, as jsonata-js does: on a path it
-                    // filters that step's result per input item; on any other
-                    // expression (`$x[0]`, `(expr)[0]`, `[1,2][0]`) it becomes
-                    // the single step of a new path, which filters the whole
-                    // value. `[]` is the keep-array marker, distinct from the
-                    // filter `[true]`.
-                    let stage = if self.current_token == Token::RightBracket {
-                        Stage::KeepArray
+                    // `[]` is the keepSingleton marker, not the filter `[true]`.
+                    let (op, rhs) = if self.current_token == Token::RightBracket {
+                        (BinaryOp::KeepArray, AstNode::Undefined)
                     } else {
-                        Stage::Filter(Box::new(self.parse_expression(0)?))
+                        (BinaryOp::Filter, self.parse_expression(0)?)
                     };
                     self.expect(Token::RightBracket)?;
-
-                    let mut steps = match lhs {
-                        AstNode::Path { steps } => steps,
-                        _ => vec![PathStep::new(lhs)],
-                    };
-                    steps
-                        .last_mut()
-                        .expect("a path has at least one step")
-                        .stages
-                        .push(stage);
                     self.bump_parse_depth()?;
-                    lhs = AstNode::Path { steps };
+                    lhs = AstNode::Binary {
+                        op,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    };
                 }
                 Token::LeftParen => {
                     self.advance()?;
@@ -2018,223 +1466,8 @@ impl Parser {
                     }
 
                     self.expect(Token::RightParen)?;
-
-                    // Check if lhs is a lambda or callable expression
-                    match lhs {
-                        // Direct invocations: lambda(args), block(args), chained calls, function result calls
-                        AstNode::Lambda { .. }
-                        | AstNode::Block(_)
-                        | AstNode::Call { .. }
-                        | AstNode::Function { .. }
-                        | AstNode::Regex { .. } => {
-                            self.bump_parse_depth()?;
-                            lhs = AstNode::Call {
-                                procedure: Box::new(lhs),
-                                args,
-                            };
-                        }
-                        ref other_lhs => {
-                            // Extract function name from lhs
-                            match other_lhs {
-                                // Handle bare function names: uppercase()
-                                AstNode::Path { steps }
-                                    if steps.len() == 1
-                                        && matches!(steps[0].node, AstNode::Name(_))
-                                        && steps[0].stages.is_empty()
-                                        && steps[0].focus.is_none()
-                                        && steps[0].index_var.is_none() =>
-                                {
-                                    let AstNode::Name(name) = &steps[0].node else {
-                                        unreachable!()
-                                    };
-                                    let name = name.clone();
-                                    self.bump_parse_depth()?;
-                                    lhs = AstNode::Function {
-                                        name,
-                                        args,
-                                        is_builtin: false,
-                                    };
-                                }
-                                // Any other one-step path, such as `$o[0]()` or
-                                // `$string[0](1)`: jsonata-js evaluates the
-                                // procedure expression and calls what it gives,
-                                // raising T1006 when that is not a function.
-                                AstNode::Path { steps } if steps.len() == 1 => {
-                                    self.bump_parse_depth()?;
-                                    lhs = AstNode::Call {
-                                        procedure: Box::new(lhs),
-                                        args,
-                                    };
-                                }
-                                // Handle path ending with $function: foo.bar.$lowercase(args)
-                                AstNode::Path { steps } if steps.len() > 1 => {
-                                    let last_step = &steps[steps.len() - 1].node;
-
-                                    // Check if last step is a Variable (function reference)
-                                    if let AstNode::Variable(func_name) = last_step {
-                                        // Extract all but the last step as the path context
-                                        let mut context_steps = steps.clone();
-                                        context_steps.pop();
-
-                                        // Create function call
-                                        let func_call = AstNode::Function {
-                                            name: func_name.clone(),
-                                            args: args.clone(),
-                                            is_builtin: true, // Variable means $ prefix
-                                        };
-
-                                        // Append function application to the path
-                                        context_steps.push(PathStep::new(
-                                            AstNode::FunctionApplication(Box::new(func_call)),
-                                        ));
-
-                                        self.bump_parse_depth()?;
-                                        lhs = AstNode::Path {
-                                            steps: context_steps,
-                                        };
-                                    }
-                                    // A name as the last step: `m.next()` calls the
-                                    // function in each context item's `next`
-                                    // field, as `next()` does on its own.
-                                    else if let AstNode::Name(func_name) = last_step {
-                                        let last = &steps[steps.len() - 1];
-                                        if last.focus.is_some() || last.index_var.is_some() {
-                                            return Err(ParserError::InvalidSyntax(
-                                                invalid_call_message(&args),
-                                            ));
-                                        }
-                                        // `$o.g[0]()` calls what `g[0]` gives in
-                                        // each context item, as jsonata-js's `(`
-                                        // binds tighter than `.`.
-                                        let quoted = self.quoted_steps.contains(&last.id.get());
-                                        let func_call = if last.stages.is_empty() && !quoted {
-                                            AstNode::Function {
-                                                name: func_name.clone(),
-                                                args,
-                                                is_builtin: false,
-                                            }
-                                        } else {
-                                            let mut procedure = AstNode::Path {
-                                                steps: vec![last.clone()],
-                                            };
-                                            self.requote_called_step(&mut procedure);
-                                            AstNode::Call {
-                                                procedure: Box::new(procedure),
-                                                args,
-                                            }
-                                        };
-                                        let mut context_steps = steps.clone();
-                                        context_steps.pop();
-                                        context_steps.push(PathStep::new(
-                                            AstNode::FunctionApplication(Box::new(func_call)),
-                                        ));
-                                        self.bump_parse_depth()?;
-                                        lhs = AstNode::Path {
-                                            steps: context_steps,
-                                        };
-                                    }
-                                    // An inline lambda (or a parenthesised expression) as the
-                                    // last step: `a.function($v){...}(args)` or `a.(f)(args)`.
-                                    // jsonata-js calls the procedure once per context item with
-                                    // exactly the arguments written -- the context value is NOT
-                                    // passed as an implicit first argument (#202).
-                                    else if matches!(
-                                        last_step,
-                                        AstNode::Lambda { .. } | AstNode::FunctionApplication(_)
-                                    ) && steps[steps.len() - 1].stages.is_empty()
-                                        && steps[steps.len() - 1].focus.is_none()
-                                        && steps[steps.len() - 1].index_var.is_none()
-                                    {
-                                        let mut context_steps = steps.clone();
-                                        let procedure = match context_steps.pop().map(|s| s.node) {
-                                            Some(AstNode::FunctionApplication(inner)) => *inner,
-                                            Some(lambda) => lambda,
-                                            None => {
-                                                return Err(ParserError::InvalidSyntax(
-                                                    invalid_call_message(&args),
-                                                ))
-                                            }
-                                        };
-                                        context_steps.push(PathStep::new(
-                                            AstNode::FunctionApplication(Box::new(AstNode::Call {
-                                                procedure: Box::new(procedure),
-                                                args,
-                                            })),
-                                        ));
-
-                                        self.bump_parse_depth()?;
-                                        lhs = AstNode::Path {
-                                            steps: context_steps,
-                                        };
-                                    } else {
-                                        return Err(ParserError::InvalidSyntax(
-                                            invalid_call_message(&args),
-                                        ));
-                                    }
-                                }
-                                // A step with an index or focus binding, such as
-                                // `$o#$i(3)` or `$o.g[0]#$i(3)`: jsonata-js's `(`
-                                // takes the bound step as its procedure, so it is
-                                // evaluated and its value called. As `#` and `@`
-                                // bind tighter than `.` there, a bound last step
-                                // of a longer path is called once per context
-                                // item, like `$o.g[0]()` above. Errors the step
-                                // raises (S0215 for `$o[0]@$v`) surface as they
-                                // would without the call.
-                                AstNode::Binary {
-                                    op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-                                    ..
-                                } => {
-                                    let bound = std::mem::replace(&mut lhs, AstNode::Undefined);
-                                    let (mut context_steps, mut procedure) =
-                                        split_bound_last_step(bound);
-                                    self.requote_called_step(&mut procedure);
-                                    // A literal is no more callable bound than
-                                    // it is on its own (`"f"()`, `a.1()`):
-                                    // `"f"@$v()` and `a.1#$i()` are the same
-                                    // T1006 parse error.
-                                    if bound_call_rejected(&procedure) {
-                                        return Err(ParserError::InvalidSyntax(
-                                            invalid_call_message(&args),
-                                        ));
-                                    }
-                                    // A `.(expr)` step is called as its block,
-                                    // as `a.(f)()` is: in jsonata-js `(`
-                                    // takes `(f)@$v` as its procedure.
-                                    unwrap_bound_application(&mut procedure);
-                                    let call = AstNode::Call {
-                                        procedure: Box::new(procedure),
-                                        args,
-                                    };
-                                    self.bump_parse_depth()?;
-                                    lhs = if context_steps.is_empty() {
-                                        call
-                                    } else {
-                                        context_steps.push(PathStep::new(
-                                            AstNode::FunctionApplication(Box::new(call)),
-                                        ));
-                                        AstNode::Path {
-                                            steps: context_steps,
-                                        }
-                                    };
-                                }
-                                // Handle $-prefixed function names: $uppercase()
-                                AstNode::Variable(name) => {
-                                    self.bump_parse_depth()?;
-                                    lhs = AstNode::Function {
-                                        name: name.clone(),
-                                        args,
-                                        is_builtin: true,
-                                    };
-                                }
-                                _ => {
-                                    return Err(ParserError::InvalidSyntax(invalid_call_message(
-                                        &args,
-                                    )))
-                                }
-                            };
-                        }
-                    }
+                    self.bump_parse_depth()?;
+                    lhs = Self::call_node(lhs, args);
                 }
                 Token::Question => {
                     self.advance()?;
@@ -2256,28 +1489,16 @@ impl Parser {
                     };
                 }
                 Token::LeftBrace => {
-                    // S0210: Each step can only have one grouping expression
-                    if node_has_group(&lhs) {
-                        return Err(ParserError::InvalidSyntax(
-                            "S0210: Each step can only have one grouping expression".to_string(),
-                        ));
-                    }
-
-                    // Object constructor as postfix: expr{key: value}
+                    // A group-by: `lhs{key: value, ...}`.
                     self.advance()?; // skip '{'
 
                     let mut pairs = Vec::new();
 
                     if self.current_token != Token::RightBrace {
                         loop {
-                            // Parse key expression - parse_expression handles identifiers correctly
                             let key = self.parse_expression(0)?;
-
                             self.expect(Token::Colon)?;
-
-                            // Parse value expression - can be any expression including paths
                             let value = self.parse_expression(0)?;
-
                             pairs.push((key, value));
 
                             if self.current_token != Token::Comma {
@@ -2289,89 +1510,35 @@ impl Parser {
 
                     self.expect(Token::RightBrace)?;
 
-                    // Object constructor with input: lhs{k:v} means transform lhs using the object pattern
                     self.bump_parse_depth()?;
                     lhs = AstNode::ObjectTransform {
                         input: Box::new(lhs),
                         pattern: pairs,
                     };
                 }
-                Token::Hash => {
-                    // Index binding operator: #$var
-                    // Binds the current array index to the specified variable
-                    self.advance()?; // skip '#'
-
-                    // Expect a variable name. A bare `#` without a `$var` (e.g.
-                    // `Account.Order@$o#i.Product`) is S0214, mirroring jsonata-js's
-                    // inline check for `@`/`#` (parser.js ~L834-847).
+                Token::Hash | Token::At => {
+                    // `#$var` (index binding) or `@$var` (focus binding). A
+                    // missing `$var` is S0214, as in jsonata-js.
+                    let (op, symbol) = if self.current_token == Token::Hash {
+                        (BinaryOp::IndexBind, "#")
+                    } else {
+                        (BinaryOp::FocusBind, "@")
+                    };
+                    self.advance()?;
                     let var_name = match &self.current_token {
                         Token::Variable(name) => name.clone(),
                         _ => {
                             return Err(ParserError::Coded {
                                 code: "S0214",
-                                message: "Expected a variable reference after #".to_string(),
+                                message: format!("Expected a variable reference after {symbol}"),
                             });
                         }
                     };
                     self.advance()?; // skip variable
 
-                    // Produces a generic Binary(IndexBind) marker -- ast_transform
-                    // resolves this into a PathStep.index_var flag, mirroring how
-                    // @$var/FocusBind is represented (see Token::At below). Using
-                    // the same generic Binary shape (rather than a dedicated
-                    // AstNode::IndexBind variant) lets that variant be retired
-                    // from ast.rs entirely.
                     self.bump_parse_depth()?;
                     lhs = AstNode::Binary {
-                        op: BinaryOp::IndexBind,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(AstNode::Variable(var_name)),
-                    };
-                }
-                Token::At => {
-                    // Focus binding operator: @$var
-                    // Produces a generic Binary(FocusBind) marker -- ast_transform
-                    // resolves this into a PathStep.focus flag, matching
-                    // jsonata-js's parser.js:834-847 (which does the same S0214
-                    // check inline, deferring all other semantics to processAST).
-                    self.advance()?; // skip '@'
-
-                    let var_name = match &self.current_token {
-                        Token::Variable(name) => name.clone(),
-                        _ => {
-                            return Err(ParserError::Coded {
-                                code: "S0214",
-                                message: "Expected a variable reference after @".to_string(),
-                            });
-                        }
-                    };
-                    self.advance()?; // skip variable
-
-                    // jsonata-js's `@` case checks its step before any `.`
-                    // around it checks for literal steps, so a misplaced `@`
-                    // noticed before any S0213, or on the step the `.` that
-                    // noticed it added last, goes first (`1[0]@$v.a`,
-                    // `1.a[0]@$v`): see `focus_bind_first`. A group-by
-                    // lifted off `lhs` binds looser than `.` in jsonata-js,
-                    // so there the `.` came first (`1.a[0]{k: v}@$v`).
-                    if !self.focus_bind_first && focus_bind_lhs_misplaced(&lhs) {
-                        // On a sort or group-by inside a `.`'s operand
-                        // (`a.-b^(x)@$v`), it waits for that `.`.
-                        let loose = path_group.is_some() || !focus_bind_lhs_has_predicates(&lhs);
-                        if self.in_dot_rhs && loose {
-                            self.deferred_focus = true;
-                        } else {
-                            let on_dot_step = path_group.is_none()
-                                && self.pending_dot_step.is_some()
-                                && self.pending_dot_step == bound_last_step_id(&lhs);
-                            self.focus_bind_first =
-                                self.pending_step_error.is_none() || on_dot_step;
-                        }
-                    }
-
-                    self.bump_parse_depth()?;
-                    lhs = AstNode::Binary {
-                        op: BinaryOp::FocusBind,
+                        op,
                         lhs: Box::new(lhs),
                         rhs: Box::new(AstNode::Variable(var_name)),
                     };
@@ -2463,64 +1630,34 @@ impl Parser {
                     };
                 }
             }
-
-            if let Some(pattern) = path_group {
-                lhs = AstNode::ObjectTransform {
-                    input: Box::new(lhs),
-                    pattern,
-                };
-            }
         }
 
         Ok(lhs)
     }
 
-    /// The literal-step pass jsonata-js runs over every path built by `.`
-    /// (`processAST`, binary `.` case, in parser.js): it walks *all* the
-    /// steps of the combined path -- the left-hand steps as well as the new
-    /// right-hand ones -- and
-    ///
-    /// - raises S0213 for a step that is a number or one of the values
-    ///   `true`/`false`/`null` (`null.$`, `2#$q.a`, `a.2`), and
-    /// - turns a string step into a field name (`"a"[0].b`, `"a".(b)`).
-    ///
-    /// The S0213 is recorded rather than raised (see `pending_step_error`).
-    /// A unary minus on a number counts as a number: jsonata-js folds `-2`
-    /// into the number `-2` before this check runs.
-    fn check_path_literal_steps(&mut self, steps: &mut [PathStep]) {
-        let last_step = steps.last().map(|last| last.id.get());
-        for step in steps.iter_mut() {
-            if let Some(literal) = check_literal_step(&mut step.node) {
-                if self.pending_step_error.is_none() {
-                    self.pending_step_error = Some(ParserError::InvalidSyntax(format!(
-                        "S0213: The literal value {} cannot be used as a step within a path expression",
-                        literal
-                    )));
-                    self.pending_dot_step = last_step;
-                }
-                // jsonata-js throws at the first one, so no later step matters.
-                return;
-            }
-        }
+    /// Parse the whole expression into the tree the evaluator runs: the
+    /// raw parse (`parse_raw`) after ast_transform's post-parse pass.
+    pub fn parse(&mut self) -> Result<AstNode, ParserError> {
+        let raw_ast = self.parse_raw()?;
+        crate::ast_transform::resolve_ancestry(raw_ast).map_err(ParserError::from)
     }
 
-    pub fn parse(&mut self) -> Result<AstNode, ParserError> {
+    /// Parse the whole expression into the raw tree, before ast_transform's
+    /// post-parse pass, as jsonata-js's parser leaves it for `processAST`:
+    /// the path operators are still `Binary` nodes (`Map`, `Filter`,
+    /// `KeepArray`, `FocusBind`, `IndexBind`), `ObjectTransform` and
+    /// `Sort`, which the evaluator can't run.
+    pub(crate) fn parse_raw(&mut self) -> Result<AstNode, ParserError> {
         let ast = self.parse_expression(0)?;
 
         // A token left over is S0201 in jsonata-js -- its general "syntax
-        // error at this token" -- and it beats a deferred S0213, which the
-        // reference only reaches in its post-parse pass.
+        // error at this token" -- and it beats every error of the
+        // post-parse pass, which only runs on a complete parse.
         if self.current_token != Token::Eof {
             return Err(ParserError::InvalidSyntax(format!(
                 "S0201: Syntax error: {:?}",
                 self.current_token
             )));
-        }
-
-        if !self.focus_bind_first {
-            if let Some(error) = self.pending_step_error.take() {
-                return Err(error);
-            }
         }
 
         Ok(ast)
@@ -2588,23 +1725,26 @@ impl Parser {
 /// unconditionally, matching jsonata-js's processAST always running
 /// immediately after the raw Pratt parse.
 pub fn parse(expression: &str) -> Result<AstNode, ParserError> {
-    let mut parser = Parser::new(expression.to_string())?;
-    let raw_ast = parser.parse()?;
-    let ast = crate::ast_transform::resolve_ancestry(raw_ast).map_err(|e| match e {
-        crate::ast_transform::AstTransformError::Coded { code, message } => {
-            ParserError::Coded { code, message }
+    Parser::new(expression.to_string())?.parse()
+}
+
+impl From<crate::ast_transform::AstTransformError> for ParserError {
+    fn from(error: crate::ast_transform::AstTransformError) -> Self {
+        match error {
+            crate::ast_transform::AstTransformError::Coded { code, message } => {
+                ParserError::Coded { code, message }
+            }
+            crate::ast_transform::AstTransformError::Syntax(message) => {
+                ParserError::InvalidSyntax(message)
+            }
         }
-    })?;
-    // An S0213 left for ast_transform to go first (see `focus_bind_first`).
-    match parser.pending_step_error.take() {
-        Some(error) => Err(error),
-        None => Ok(ast),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::Stage;
 
     // Lexer tests
     #[test]
@@ -2755,8 +1895,7 @@ mod tests {
 
     #[test]
     fn test_empty_brackets() {
-        let mut parser = Parser::new("foo[]".to_string()).unwrap();
-        let ast = parser.parse().unwrap();
+        let ast = parse("foo[]").unwrap();
 
         // `[]` is the keep-array stage on the step it follows, as in jsonata-js.
         if let AstNode::Path { steps } = ast {
@@ -2775,8 +1914,7 @@ mod tests {
     /// filters and then unwraps a lone result.
     #[test]
     fn test_empty_brackets_differ_from_literal_true_predicate() {
-        let mut parser = Parser::new("foo[true]".to_string()).unwrap();
-        let ast = parser.parse().unwrap();
+        let ast = parse("foo[true]").unwrap();
 
         if let AstNode::Path { steps } = ast {
             assert_eq!(steps.len(), 1);
@@ -2794,14 +1932,14 @@ mod tests {
     /// the one step of a new path and filters the whole value.
     #[test]
     fn test_postfix_predicate_is_a_stage_of_the_last_step() {
-        let ast = Parser::new("a.b[0]".to_string()).unwrap().parse().unwrap();
+        let ast = parse("a.b[0]").unwrap();
         let AstNode::Path { steps } = ast else {
             panic!("Expected Path")
         };
         assert_eq!(steps.len(), 2);
         assert!(matches!(steps[1].stages.as_slice(), [Stage::Filter(_)]));
 
-        let ast = Parser::new("$x[0][]".to_string()).unwrap().parse().unwrap();
+        let ast = parse("$x[0][]").unwrap();
         let AstNode::Path { steps } = ast else {
             panic!("Expected Path")
         };
@@ -3200,22 +2338,25 @@ mod tests {
     #[test]
     fn test_parent_operator_parses_as_prefix() {
         // Tests the RAW grammar rule (bare `%` in primary position) in
-        // isolation from ast_transform's ancestor resolution -- uses
-        // Parser::new(...).parse() directly rather than the free `parse()`
-        // function, since the free function now runs ast_transform
-        // unconditionally (Step 8), and `%.OrderID` alone has no preceding
-        // step for `%` to resolve against (that's covered by
-        // ast_transform's own S0217 tests).
+        // isolation from ast_transform's ancestor resolution, with
+        // `parse_raw`: `%.OrderID` alone has no preceding step for `%` to
+        // resolve against (that's covered by ast_transform's own S0217
+        // tests).
         let mut parser = Parser::new("%.OrderID".to_string()).unwrap();
-        let ast = parser.parse().unwrap();
-        // %.OrderID should parse as a path with two steps: Parent, then Name("OrderID")
+        let ast = parser.parse_raw().unwrap();
+        // The raw parse is a `.` of the parent and the name, as in
+        // jsonata-js; ast_transform makes it a path.
         match ast {
-            AstNode::Path { steps } => {
-                assert_eq!(steps.len(), 2);
-                assert!(matches!(steps[0].node, AstNode::Parent(_)));
-                assert!(matches!(steps[1].node, AstNode::Name(ref n) if n == "OrderID"));
+            AstNode::Binary {
+                op: BinaryOp::Map,
+                lhs,
+                rhs,
+            } => {
+                assert!(matches!(*lhs, AstNode::Parent(_)));
+                assert!(matches!(*rhs, AstNode::Path { ref steps }
+                    if matches!(steps[0].node, AstNode::Name(ref n) if n == "OrderID")));
             }
-            other => panic!("expected Path, got {:?}", other),
+            other => panic!("expected a `.`, got {:?}", other),
         }
     }
 
@@ -3235,11 +2376,11 @@ mod tests {
     #[test]
     fn test_focus_bind_parses_as_binary_marker() {
         // Tests the RAW grammar rule in isolation from ast_transform (which
-        // now runs unconditionally in the free `parse()` and would rewrite
-        // this into a Path with a `focus` flag instead -- see
+        // `parse()` runs, and which rewrites this into a Path with a
+        // `focus` flag instead -- see
         // ast_transform.rs's own real-parser-based tests for that).
         let mut parser = Parser::new("Order@$o".to_string()).unwrap();
-        let ast = parser.parse().unwrap();
+        let ast = parser.parse_raw().unwrap();
         match ast {
             AstNode::Binary {
                 op: BinaryOp::FocusBind,
@@ -3264,7 +2405,7 @@ mod tests {
         // #$var now reuses the same generic Binary marker shape as @$var
         // (Task 4 retires the dedicated AstNode::IndexBind struct variant).
         let mut parser = Parser::new("arr#$i".to_string()).unwrap();
-        let ast = parser.parse().unwrap();
+        let ast = parser.parse_raw().unwrap();
         match ast {
             AstNode::Binary {
                 op: BinaryOp::IndexBind,

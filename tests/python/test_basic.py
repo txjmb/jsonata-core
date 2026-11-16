@@ -106,12 +106,13 @@ class TestCompile:
             ('a.("f")@$v()', "T1006"),
             ('x["f"@$v()]', "T1006"),
             ("x[$string(1,2,3)]", "T0410"),
-            ('[$string(1,2,3), "f"@$v()]', "T1006"),
+            # Members run in order here; jsonata-js runs them concurrently.
+            ('[$string(1,2,3), "f"@$v()]', "T0410"),
             ("true.-a^(x)@$v", "S0213"),
         ],
     )
     def test_call_of_bound_literal_and_filter_on_nothing(self, expression, code):
-        """A bound literal call is T1006 at once, and a filter on nothing still runs."""
+        """A bound literal call is T1006 when it runs, and a filter on nothing still runs."""
         with pytest.raises(ValueError, match=code):
             jsonatapy.compile(expression).evaluate({"a": {"b": [1, 2]}})
 
