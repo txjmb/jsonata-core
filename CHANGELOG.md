@@ -28,12 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A group-by on a step that isn't a path applies where jsonata-js applies it** (stage 3 of
   [#219](https://github.com/txjmb/jsonata-core/issues/219)). On a block, `*` or other node, the
   group now runs inside the step, after the node's predicates and before the step binds its
-  focus, index or ancestor: `(objs)@$v{"k": $v.p}.$v` binds `$v` to the grouped object. `#`, and
-  a `.` before the node, turn its predicates into stages applied after the group, so
-  `(objs)[false]{"k": 1}#$j` is undefined while `(objs)[false]{"k": 1}` is `{"k": 1}`. A `%` slot
-  left on a step that another step follows is never resolved and evaluates to nothing, as in
-  jsonata-js, rather than failing with S0217 (`(objs)[%.%.x].p`, `a#$i[%.%.x]`). This removes the
-  remaining pinned path-semantics divergences.
+  focus, index or ancestor: `(objs)@$v{"k": $v.p}.$v` binds `$v` to the grouped object. `#`
+  turns the node's predicates into stages applied after the group, so `(objs)[false]{"k": 1}#$j`
+  is undefined while `(objs)[false]{"k": 1}` is `{"k": 1}`. A `%` slot left on a step that another
+  step follows, or put on a path's last step by a predicate, is never resolved and evaluates to
+  nothing, as in jsonata-js, rather than failing with S0217 or resolving against an earlier step
+  (`(objs)[%.%.x].p`, `a#$i[%.%.x]`, `a.b{"k": 1}[%.%.a]`). This removes the remaining pinned
+  path-semantics divergences.
 
 - **Paths are built the way jsonata-js builds them** (stage 2 of
   [#219](https://github.com/txjmb/jsonata-core/issues/219)). The parser uses jsonata-js's binding

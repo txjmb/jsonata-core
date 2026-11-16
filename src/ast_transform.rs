@@ -811,11 +811,20 @@ fn parent_step_label(step: &PathStep) -> Option<&str> {
     }
 }
 
-/// jsonata-js's `#`, and `.` on its right side, turn a node's `predicate`
-/// into its `stages`, which `evaluateTupleStep` applies after the node is
-/// evaluated, group-by and all. On a node with a group-by that moves its
-/// filters from before the group to after it: `(objs)[false]{"a": 1}` is
-/// `{"a": 1}`, but `(objs)[false]{"a": 1}#$j` is undefined.
+/// A step's stages split into its filters (jsonata-js's `predicate` on a
+/// node that isn't a path) and the rest.
+fn split_filters(stages: Vec<Stage>) -> (Vec<Stage>, Vec<Stage>) {
+    stages
+        .into_iter()
+        .partition(|stage| matches!(stage, Stage::Filter(_)))
+}
+
+/// jsonata-js's `#` turns a node's `predicate` into its `stages`, which
+/// `evaluateTupleStep` applies after the node is evaluated, group-by and
+/// all. On a node with a group-by that moves its filters from before the
+/// group to after it: `(objs)[false]{"a": 1}` is `{"a": 1}`, but
+/// `(objs)[false]{"a": 1}#$j` is undefined. (`.` does the same to its right
+/// side, but a group-by binds looser than `.`, so that side never has one.)
 fn lift_group_filters(step: &mut PathStep) {
     let AstNode::ObjectTransform { input, .. } = &mut step.node else {
         return;
@@ -826,9 +835,7 @@ fn lift_group_filters(step: &mut PathStep) {
     let [inner] = steps.as_mut_slice() else {
         return;
     };
-    let (filters, rest): (Vec<Stage>, Vec<Stage>) = std::mem::take(&mut inner.stages)
-        .into_iter()
-        .partition(|stage| matches!(stage, Stage::Filter(_)));
+    let (filters, rest) = split_filters(std::mem::take(&mut inner.stages));
     inner.stages = rest;
     if step_is_plain(inner) {
         let inner = steps.pop().expect("one step");
@@ -1217,7 +1224,6 @@ fn apply_map(
         slots
     } else {
         let mut step = rest.steps.into_iter().next().expect("one step");
-        lift_group_filters(&mut step);
         step.node = match step.node {
             // A `.(...)` step is a block applied to each context item, and
             // a call is made once per item: both are `FunctionApplication`
@@ -1364,8 +1370,7 @@ fn apply_filter(
         predicate.pending.retain(|slot| slot.label != label);
     }
     let last = proc.steps.len() - 1;
-    let (prefix, rest) = proc.steps.split_at_mut(last);
-    let step = &mut rest[0];
+    let step = &mut proc.steps[last];
     let mut slots = Vec::with_capacity(predicate.pending.len());
     for slot in predicate.pending {
         let level = match slot.level {
@@ -1379,13 +1384,13 @@ fn apply_filter(
         });
     }
     step.stages.push(Stage::Filter(Box::new(predicate.node)));
-    if proc.is_path && prefix.is_empty() {
+    if proc.is_path {
         // jsonata-js's `[` on a path leaves the slots on its last step
-        // (`pushAncestry(step, predicate)`), for a `.` after it.
+        // (`pushAncestry(step, predicate)`) without seeking the steps
+        // before it: only a `.` after the step does (`a.b{"k": 1}[%.%.a]`
+        // leaves `%.%` unresolved).
         proc.step_pending
             .extend(slots.into_iter().filter(|slot| slot.level > 0));
-    } else if proc.is_path {
-        seek_back(prefix, slots, &mut proc.pending, state, depth)?;
     } else {
         proc.pending.extend(slots);
     }
@@ -1453,9 +1458,7 @@ fn apply_group(
             inner_tuple,
             id: _,
         } = step;
-        let (filters, rest): (Vec<Stage>, Vec<Stage>) = stages
-            .into_iter()
-            .partition(|stage| matches!(stage, Stage::Filter(_)));
+        let (filters, rest) = split_filters(stages);
         let mut inner = PathStep::with_stages(node, filters);
         // A block whose tail a `%` resolves through gives a tuple stream,
         // which its filters and the group read as tuples.

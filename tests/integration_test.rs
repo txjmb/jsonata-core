@@ -5031,10 +5031,11 @@ fn test_path_transform_third_review_cases() {
 
 /// A group-by on a node that isn't a path applies inside the step, as
 /// jsonata-js evaluates it: after the node's predicates, before the step
-/// binds its focus, index or ancestor (#219). `#` and a `.` before the node
-/// make its predicates stages, applied after the group. A `%` slot left on
-/// a step that a later step follows is never resolved, so it evaluates to
-/// nothing rather than failing with S0217. Every result is jsonata-js's.
+/// binds its focus, index or ancestor (#219). `#` makes its predicates
+/// stages, applied after the group. A `%` slot left on a step that a later
+/// step follows, or on a path's step by a predicate, is never resolved, so
+/// it evaluates to nothing rather than failing with S0217. Every result is
+/// jsonata-js's.
 #[test]
 fn test_group_by_on_node_that_is_not_a_path() {
     let input = r#"{"objs":[{"p":1},{"p":2}],"a":{"b":1},"acct":{"Order":[{"id":"o1","P":[{"N":"A"},{"N":"B"}]},{"id":"o2","P":[{"N":"C"}]}]}}"#;
@@ -5051,8 +5052,7 @@ fn test_group_by_on_node_that_is_not_a_path() {
             r#"(acct.Order.P)@$v{N: N}.$v"#,
             r#"Ok({"A":"A","B":"B","C":"C"})"#,
         ),
-        // Predicates come before the group, unless `#` or a `.` before the
-        // node makes them stages.
+        // Predicates come before the group, unless `#` makes them stages.
         (r#"(objs)[false]{"k": 1}"#, r#"Ok({"k":1})"#),
         (r#"(objs)[false]{"k": 1}#$j"#, "undefined"),
         (r#"(objs)[0]{"k": p}#$j"#, r#"Ok({"k":[1,2]})"#),
@@ -5070,6 +5070,15 @@ fn test_group_by_on_node_that_is_not_a_path() {
         (r#"(objs)[%.%.x].p"#, "undefined"),
         (r#"a#$i[%.%.x]"#, "undefined"),
         (r#"a#$i[%.%.x].b"#, "undefined"),
+        // A predicate on a path's step doesn't seek the steps before it.
+        (r#"a.b{"k": 1}[%.%.a]"#, "Ok({})"),
+        (r#"acct.Order.P{"k": N}[%.%.Order]"#, "Ok({})"),
+        (r#"acct.Order.P{"k": N}[][%.%.Order]"#, "Ok({})"),
+        (r#"acct.Order.P{"k": N}[%.%.Order].k"#, "Ok({})"),
+        (
+            r#"acct.Order.P{"k": N}[%.id = "o1"]"#,
+            r#"Ok({"k":["A","B"]})"#,
+        ),
         // The step binds its ancestor after the group.
         (r#"*[%.x]{"k": 1}.%"#, root),
         (r#"*[false]{"k": 1}.%"#, root),
