@@ -784,6 +784,19 @@ function comboExpressions() {
       for (const op2 of COMBO_OPS) out.push(base + op1 + op2);
     }
   }
+  // A group-by on a parenthesized block that is bound or filtered first
+  // (#219). In jsonata-js the group sits on the block step itself, so its
+  // pairs read the step's tuple stream and a later step, sort or bind sees
+  // the grouped object as that step's result.
+  for (const base of ['(acct.Order.P)', '(objs)']) {
+    for (const op of ['@$v', '#$i', '[%.id = "o1"]', '[%.%.x]', '[0]']) {
+      for (const group of ['{N: N}', '{"k": p}', '{"k": $v.p}', '{"k": $i}']) {
+        for (const after of ['', '.N', '.k', '.$v', '.$i', '^(N)', '^(k)', '#$j', '#$j.$j', '@$w.$w']) {
+          out.push(base + op + group + after);
+        }
+      }
+    }
+  }
   return [...new Set(out)];
 }
 
