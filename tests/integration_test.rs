@@ -4592,6 +4592,9 @@ fn test_filter_on_nothing_index_zero_and_raising_operators() {
         ("nope[{true:2}]", "T1003"),
         ("nope[{\"a\":1,\"a\":2}]", "D1009"),
         ("arr[x+'a']", "T2002"),
+        // Two numbers can still fail: `1/0` is not finite (D1001).
+        ("nope[(1/0) + 1]", "D1001"),
+        ("arr.nope[(1/0) + 1]", "D1001"),
         // A variable operand counts, compiled or not.
         ("$map(['s'], function($v){ arr.nope[$v + 1] })", "T2001"),
         ("$map(['s'], function($v){ arr.nope[-$v] })", "D1002"),
@@ -4643,6 +4646,7 @@ fn test_filter_on_nothing_index_zero_and_raising_operators() {
         ),
         ("arr.nope[$contains('x','A') and x > 5]", undefined.as_str()),
         ("arr.nope[1+1]", undefined.as_str()),
+        ("nope[1+1]", undefined.as_str()),
         ("arr[$$.a > 1]", r##"Ok({"x":1})"##),
     ] {
         let (tree_walker, default) =

@@ -2145,11 +2145,17 @@ fn compiled_eval_field_path(
                 })
                 .and_then(build_shape_cache);
             let mut filtered = Vec::with_capacity(values.len());
+            let mut ran_on_nothing = false;
             for value in values {
                 if value.is_undefined() {
                     // An item without the field: its one filter runs for
                     // its errors and selects nothing (see `run_on_nothing`).
-                    eval_compiled_inner(filter, &value, vars, ctx, None, options, start_time)?;
+                    // It reads nothing that differs between such items, so
+                    // once per step gives every error it can.
+                    if !ran_on_nothing {
+                        ran_on_nothing = true;
+                        eval_compiled_inner(filter, &value, vars, ctx, None, options, start_time)?;
+                    }
                     continue;
                 }
                 let value = compiled_apply_filter(
@@ -4419,7 +4425,7 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
                 | BinaryOp::Modulo => {
                     let kind = match (l, r) {
                         (K::Undefined, _) | (_, K::Undefined) => K::Undefined,
-                        (K::Number { .. }, K::Number { .. }) => K::Number { integer: false },
+                        // Possibly not finite (`1/0`, an overflow).
                         _ => K::Unknown,
                     };
                     (kind, raises || binary_may_raise_on_nothing(*op, l, r))
@@ -4434,7 +4440,9 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
                 | BinaryOp::And
                 | BinaryOp::Or
                 | BinaryOp::In => (K::Other, raises),
-                BinaryOp::Concatenate => (K::String, raises),
+                // `&` makes strings of its operands: D3001 for a number
+                // that isn't finite.
+                BinaryOp::Concatenate => (K::String, raises || l == K::Unknown || r == K::Unknown),
                 _ => (K::Unknown, true),
             }
         }
@@ -4492,14 +4500,18 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
 fn binary_may_raise_on_nothing(op: BinaryOp, l: KindOnNothing, r: KindOnNothing) -> bool {
     use KindOnNothing as K;
     match op {
-        // evaluateNumericExpression: T2001/T2002 for a defined non-number.
+        // evaluateNumericExpression: T2001/T2002 for a defined non-number,
+        // and D1001 once both are numbers (`1/0`, an overflow).
         BinaryOp::Add
         | BinaryOp::Subtract
         | BinaryOp::Multiply
         | BinaryOp::Divide
-        | BinaryOp::Modulo => [l, r]
-            .iter()
-            .any(|k| !matches!(k, K::Undefined | K::Number { .. })),
+        | BinaryOp::Modulo => {
+            [l, r]
+                .iter()
+                .any(|k| !matches!(k, K::Undefined | K::Number { .. }))
+                || matches!((l, r), (K::Number { .. }, K::Number { .. }))
+        }
         // evaluateComparisonExpression: T2010 for a defined value that is
         // neither a number nor a string, T2009 when both are defined and
         // of different types.

@@ -27,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `nope[[1..'a']]` T2004, `nope[$$.s+1]` T2001, `nope[{1:2}]` T1003 and
   `nope[{"a":1,"a":2}]` D1009 (all were undefined). Predicates whose operands are all paths from
   the context, such as `nope[price > 5]`, are still skipped. A compiled path step does the same:
-  it runs such a filter on an item without the field, so both engines agree and the filter keeps
-  its fast path where the field is there.
+  it runs such a filter once on a missing field, so both engines agree. Such a step leaves the
+  VM's single-step shortcut for the general compiled path, with no measurable cost
+  (`items[$contains(sku,'A')]` over 300,000 items times the same as before).
 - **`$eval` reports an error its expression raises as D3121**, with the inner message, as
   jsonata-js does: `$eval('1+"a"')` was T2002. Only unknown functions were wrapped before. The
   engine's own guardrails (timeout D1012, cancellation U1003, depth D1011 and U1001, sequence
