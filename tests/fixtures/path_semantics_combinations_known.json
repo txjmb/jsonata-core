@@ -5,8 +5,6 @@
    "issue": 219,
    "summary": "A group-by on a bound or filtered block: jsonata-js puts the group on the block step, so its pairs read the step's tuple stream and a later step, sort or bind reads the grouped result.",
    "expressions": [
-    "(acct.Order.P)#$i{\"k\": $i}#$j",
-    "(acct.Order.P)#$i{\"k\": $i}#$j.$j",
     "(acct.Order.P)@$v{\"k\": $i}#$j",
     "(acct.Order.P)@$v{\"k\": $i}.$v",
     "(acct.Order.P)@$v{\"k\": $i}^(N)",
@@ -64,8 +62,6 @@
     "(acct.Order.P)[%.id = \"o1\"]{N: N}#$j",
     "(acct.Order.P)[%.id = \"o1\"]{N: N}#$j.$j",
     "(acct.Order.P)[0]{N: N}#$j",
-    "(objs)#$i{\"k\": $i}#$j",
-    "(objs)#$i{\"k\": $i}#$j.$j",
     "(objs)@$v{\"k\": $i}#$j",
     "(objs)@$v{\"k\": $i}.$v",
     "(objs)@$v{\"k\": $i}^(N)",

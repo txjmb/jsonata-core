@@ -39,7 +39,7 @@ pub enum AstTransformError {
     #[error("{code}: {message}")]
     Coded { code: &'static str, message: String },
     /// A syntax error whose message starts with its code (S0209, S0210,
-    /// S0213, T1006, T1008), reported as the parser's `InvalidSyntax`.
+    /// S0213), reported as the parser's `InvalidSyntax`.
     #[error("{0}")]
     Syntax(String),
 }
@@ -444,6 +444,11 @@ impl Transformed {
 }
 
 /// Entry point: resolve all ancestor references in a freshly-parsed AST.
+///
+/// It takes the parser's raw tree, before paths are built: `.`, `[`, `{`,
+/// `^`, `@` and `#` as raw operators, and a name as a one-step path.
+/// `Parser::parse` and `parser::parse` already call it; a tree they
+/// return can't be passed in again.
 pub fn resolve_ancestry(ast: AstNode) -> Result<AstNode, AstTransformError> {
     let mut state = AncestryState::new();
     // Depth 0: the root of cycle 1+3's shared counter.
@@ -641,50 +646,6 @@ fn substitute_labels_impl(
     })
 }
 
-/// Calling something that is not a function. jsonata-js distinguishes an
-/// ordinary invocation (T1006) from a *partial* application -- a call carrying
-/// a `?` placeholder -- which is T1008.
-fn invalid_call_message(args: &[AstNode]) -> String {
-    if args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
-        "T1008: Attempted to partially apply a non-function".to_string()
-    } else {
-        "T1006: Attempted to invoke a non-function".to_string()
-    }
-}
-
-/// Whether calling the raw `procedure` is rejected before evaluation: a
-/// literal, a wildcard, descendant or parent step, or an array or object
-/// constructor, bound with `#`/`@` or not. A node with predicates is
-/// evaluated and called, as `"f"[0]()` is. jsonata-js raises T1006 for
-/// these only when the call runs; rejecting them here, after the errors
-/// of the procedure itself, keeps the long-standing parse-time T1006.
-fn call_rejected(procedure: &AstNode) -> bool {
-    // Look through the `@`/`#` bindings on the procedure (a loop: a long
-    // chain of them is a deep tree).
-    let mut node = procedure;
-    while let AstNode::Binary {
-        op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-        lhs,
-        ..
-    } = node
-    {
-        node = lhs;
-    }
-    !matches!(
-        node,
-        AstNode::Lambda { .. }
-            | AstNode::Block(_)
-            | AstNode::Call { .. }
-            | AstNode::Function { .. }
-            | AstNode::Regex { .. }
-            | AstNode::Variable(_)
-            | AstNode::Path { .. }
-            | AstNode::Binary { .. }
-            | AstNode::Sort { .. }
-            | AstNode::ObjectTransform { .. }
-    )
-}
-
 /// jsonata-js's `@` checks (`processAST`, binary `@`): S0215 when the step
 /// it binds has predicates (`[]` is not one), S0216 when it is a sort. A
 /// group-by on a node that isn't a path wraps the node, so the check looks
@@ -771,12 +732,11 @@ impl Proc {
     /// slots are forgotten and evaluate to undefined (`(%.x).y`). Here they
     /// keep seeking and end as S0217, the error the same `%` gives without
     /// the `.y`.
-    fn into_path(mut self) -> Self {
+    fn make_path(&mut self) {
         if !self.is_path {
             self.is_path = true;
             self.pending.retain(|slot| slot.level > 0);
         }
-        self
     }
 }
 
@@ -1004,17 +964,15 @@ fn process_path(
             if let Err(e) = check_transform_depth(depth + nesting) {
                 op.drop_iteratively();
                 ops.into_iter().for_each(PathOp::drop_iteratively);
-                drop_path_steps_iteratively(proc.steps);
+                drop_proc_iteratively(proc);
                 return Err(e);
             }
         }
-        proc = match apply_path_op(proc, op, state, depth + nesting) {
-            Ok(proc) => proc,
-            Err(e) => {
-                ops.into_iter().for_each(PathOp::drop_iteratively);
-                return Err(e);
-            }
-        };
+        if let Err(e) = apply_path_op(&mut proc, op, state, depth + nesting) {
+            ops.into_iter().for_each(PathOp::drop_iteratively);
+            drop_proc_iteratively(proc);
+            return Err(e);
+        }
     }
     Ok(proc)
 }
@@ -1028,37 +986,61 @@ fn process_base(
     depth: usize,
 ) -> Result<Proc, AstTransformError> {
     match node {
-        AstNode::Path { steps } => Ok(Proc {
-            steps,
-            is_path: true,
-            dotted: true,
-            group: None,
-            pending: Vec::new(),
-            checked: 0,
-        }),
+        // The parser's one-step path for a name.
+        AstNode::Path { steps }
+            if matches!(steps.as_slice(), [step]
+                if step_is_plain(step) && matches!(step.node, AstNode::Name(_))) =>
+        {
+            Ok(Proc {
+                steps,
+                is_path: true,
+                dotted: true,
+                group: None,
+                pending: Vec::new(),
+                checked: 0,
+            })
+        }
+        // Any other path was built by something else: this pass takes the
+        // parser's raw tree, where every other path is still made of path
+        // operators.
+        AstNode::Path { steps } => {
+            drop_path_steps_iteratively(steps);
+            Err(AstTransformError::Syntax(
+                "A path must come from the parser's raw tree".to_string(),
+            ))
+        }
         // `process_path` unwinds every other path operator.
         other => Ok(Proc::value(transform_node(other, state, depth + 1)?)),
     }
 }
 
+/// Hand a processed node whose processing failed to the iterative
+/// teardown.
+fn drop_proc_iteratively(proc: Proc) {
+    drop_path_steps_iteratively(proc.steps);
+    if let Some(pairs) = proc.group {
+        drop_ast_node_iteratively(AstNode::Object(pairs));
+    }
+}
+
+/// Apply one path operator to `proc`. On an error, `proc` may be left
+/// part-built, for the caller to tear down.
 fn apply_path_op(
-    proc: Proc,
+    proc: &mut Proc,
     op: PathOp,
     state: &mut AncestryState,
     depth: usize,
-) -> Result<Proc, AstTransformError> {
+) -> Result<(), AstTransformError> {
     match op {
         PathOp::Map(rhs) => apply_map(proc, rhs, state, depth),
         PathOp::Filter(predicate) => apply_filter(proc, predicate, state, depth),
         PathOp::KeepArray => {
-            let mut proc = proc;
             proc.target_step().stages.push(Stage::KeepArray);
-            Ok(proc)
+            Ok(())
         }
         PathOp::Group(pattern) => apply_group(proc, pattern, state, depth),
         PathOp::Sort(terms) => apply_sort(proc, terms, state, depth),
         PathOp::Focus(var) => {
-            let mut proc = proc;
             let proc_is_path = proc.is_path;
             let step = proc.target_step();
             check_focus_bind_target(&step.stages, &step.node)?;
@@ -1071,21 +1053,25 @@ fn apply_path_op(
             }
             step.focus = Some(var);
             step.is_tuple = true;
-            Ok(proc)
+            Ok(())
         }
         PathOp::Index(var) => {
-            let mut proc = proc.into_path();
+            proc.make_path();
             let step = proc.target_step();
-            // An index binding on a step that already has stages or an index
+            // An index binding on a step that already has stages
             // (`x[0]#$i`, `books#$ib[...]#$ib2`) is an ordered index stage,
-            // numbering the positions after those stages.
-            if !step.stages.is_empty() || step.index_var.is_some() {
+            // numbering the positions after those stages. Otherwise it is
+            // the step's index, replacing an earlier one (`a#$i#$j`), as
+            // jsonata-js's `#` sets `step.index`. A `[]` before it counts as
+            // a stage here: the index stage after it is how the evaluator
+            // keeps the `[]` (see `finish_value_step`).
+            if !step.stages.is_empty() {
                 step.stages.push(Stage::Index(var));
             } else {
                 step.index_var = Some(var);
             }
             step.is_tuple = true;
-            Ok(proc)
+            Ok(())
         }
     }
 }
@@ -1117,26 +1103,20 @@ fn seek_back(
 /// name; the `%` slots the new steps seek are resolved against the steps
 /// before them.
 fn apply_map(
-    lhs: Proc,
+    path: &mut Proc,
     rhs: AstNode,
     state: &mut AncestryState,
     depth: usize,
-) -> Result<Proc, AstTransformError> {
-    let mut path = lhs.into_path();
+) -> Result<(), AstTransformError> {
+    path.make_path();
     path.dotted = true;
     // The right side's operators are this path's steps: no deeper than
     // the left side's, so they cost no extra depth. (A `.` never has
     // another `.` directly on its right, so this can't recurse unchecked.)
-    let rest = match if is_path_operator(&rhs) {
-        process_path(rhs, state, depth)
+    let rest = if is_path_operator(&rhs) {
+        process_path(rhs, state, depth)?
     } else {
-        transform_node(rhs, state, depth + 1).map(Proc::value)
-    } {
-        Ok(rest) => rest,
-        Err(e) => {
-            drop_path_steps_iteratively(std::mem::take(&mut path.steps));
-            return Err(e);
-        }
+        Proc::value(transform_node(rhs, state, depth + 1)?)
     };
     let first_new = path.steps.len();
     let new_slots = if rest.is_path {
@@ -1166,8 +1146,7 @@ fn apply_map(
         &mut path.pending,
         state,
         depth,
-    )?;
-    Ok(path)
+    )
 }
 
 /// jsonata-js's S0213 check after `.`, over every step of the path: a step
@@ -1232,11 +1211,11 @@ fn literal_number(node: &AstNode) -> Option<f64> {
 /// through the steps before it; a node that isn't a path keeps every slot,
 /// resolved or not (#211).
 fn apply_filter(
-    mut proc: Proc,
+    proc: &mut Proc,
     predicate: AstNode,
     state: &mut AncestryState,
     depth: usize,
-) -> Result<Proc, AstTransformError> {
+) -> Result<(), AstTransformError> {
     if is_group_step(proc.target_step()) {
         drop_ast_node_iteratively(predicate);
         return Err(AstTransformError::Syntax(
@@ -1265,7 +1244,7 @@ fn apply_filter(
     } else {
         proc.pending.extend(slots);
     }
-    Ok(proc)
+    Ok(())
 }
 
 /// jsonata-js's `{` as a group-by (`processAST`, binary `{`): S0210 when
@@ -1274,11 +1253,11 @@ fn apply_filter(
 /// step's `ObjectTransform`. A `%` slot left in a key or value is dropped:
 /// jsonata-js processes the pairs without `pushAncestry` (#192).
 fn apply_group(
-    mut proc: Proc,
+    proc: &mut Proc,
     pattern: Vec<(AstNode, AstNode)>,
     state: &mut AncestryState,
     depth: usize,
-) -> Result<Proc, AstTransformError> {
+) -> Result<(), AstTransformError> {
     let has_group = if proc.is_path {
         proc.group.is_some()
     } else {
@@ -1319,7 +1298,7 @@ fn apply_group(
             pattern: pairs,
         }));
     }
-    Ok(proc)
+    Ok(())
 }
 
 /// jsonata-js's `^` (`processAST`, binary `^`): a sort step after the
@@ -1327,13 +1306,13 @@ fn apply_group(
 /// before it. The steps sorted become the `Sort`'s input, and the sort is
 /// one step in their place.
 fn apply_sort(
-    proc: Proc,
+    path: &mut Proc,
     terms: Vec<(AstNode, bool)>,
     state: &mut AncestryState,
     depth: usize,
-) -> Result<Proc, AstTransformError> {
-    let was_path = proc.is_path;
-    let mut path = proc.into_path();
+) -> Result<(), AstTransformError> {
+    let was_path = path.is_path;
+    path.make_path();
     let mut transformed_terms = Vec::with_capacity(terms.len());
     let mut terms = terms.into_iter();
     while let Some((expr, ascending)) = terms.next() {
@@ -1341,7 +1320,6 @@ fn apply_sort(
             Ok(t) => t,
             Err(e) => {
                 drop_ast_node_iteratively(AstNode::Array(terms.map(|(e, _)| e).collect()));
-                drop_path_steps_iteratively(std::mem::take(&mut path.steps));
                 return Err(e);
             }
         };
@@ -1354,7 +1332,6 @@ fn apply_sort(
                     .chain(terms.map(|(e, _)| e))
                     .collect(),
             ));
-            drop_path_steps_iteratively(std::mem::take(&mut path.steps));
             return Err(e);
         }
     }
@@ -1375,7 +1352,7 @@ fn apply_sort(
     path.checked = usize::from(input_checked);
     // A `[]` on the sort keeps the sorted result an array.
     path.dotted = true;
-    Ok(path)
+    Ok(())
 }
 
 /// Recursively rebuild `node`, resolving any `%`/`@`/`#` found within.
@@ -1563,24 +1540,26 @@ fn transform_children_impl(
             // Only args bubble (see doc comment above) -- procedure is
             // still structurally transformed, just doesn't contribute to
             // this Call's own pending.
-            let rejected = call_rejected(&procedure);
-            let procedure_t = match transform_node(*procedure, state, depth) {
-                Ok(t) => t,
-                Err(e) => {
-                    drop_ast_node_iteratively(AstNode::Array(args));
-                    return Err(e);
-                }
-            };
-            if rejected {
-                return Err(AstTransformError::Syntax(invalid_call_message(&args)));
-            }
+            // jsonata-js processes the arguments before the procedure, so
+            // their errors come first. Calling a value that isn't a function
+            // is T1006 when the call runs, as in jsonata-js.
             let mut pending = Vec::new();
             let mut transformed_args = Vec::with_capacity(args.len());
-            for a in args {
-                let t = transform_node(a, state, depth)?;
-                pending.extend(t.pending);
-                transformed_args.push(t.node);
+            let mut args = args.into_iter();
+            while let Some(a) = args.next() {
+                match transform_node(a, state, depth) {
+                    Ok(t) => {
+                        pending.extend(t.pending);
+                        transformed_args.push(t.node);
+                    }
+                    Err(e) => {
+                        drop_ast_node_iteratively(*procedure);
+                        drop_ast_node_iteratively(AstNode::Array(args.collect()));
+                        return Err(e);
+                    }
+                }
             }
+            let procedure_t = transform_node(*procedure, state, depth)?;
             Ok(Transformed {
                 node: AstNode::Call {
                     procedure: Box::new(procedure_t.node),
@@ -2250,21 +2229,28 @@ mod tests {
 
     #[test]
     fn test_path_step_with_stages_preserved() {
-        // Ensure stages (predicates) survive the transform unchanged when
-        // there's no binding marker involved.
+        let ast = crate::parser::Parser::new("Order[true]".to_string())
+            .unwrap()
+            .parse_raw()
+            .unwrap();
+        match resolve_ancestry(ast).unwrap() {
+            AstNode::Path { steps } => {
+                assert_eq!(steps[0].stages.len(), 1);
+            }
+            other => panic!("expected Path, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_path_not_from_the_parser_is_rejected() {
         let ast = AstNode::Path {
             steps: vec![PathStep::with_stages(
                 AstNode::Name("Order".to_string()),
                 vec![Stage::Filter(Box::new(AstNode::Boolean(true)))],
             )],
         };
-        let result = resolve_ancestry(ast).unwrap();
-        match result {
-            AstNode::Path { steps } => {
-                assert_eq!(steps[0].stages.len(), 1);
-            }
-            other => panic!("expected Path, got {:?}", other),
-        }
+        assert!(resolve_ancestry(ast).is_err());
+        assert!(resolve_ancestry(AstNode::Path { steps: vec![] }).is_err());
     }
 
     // --- Regression tests using the REAL parser (Task 3 review findings) ---

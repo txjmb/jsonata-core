@@ -849,11 +849,6 @@ pub struct Parser {
     /// to a deeper node every iteration without a new recursive call).
     /// Both must be bounded by this one counter; see `MAX_PARSE_DEPTH`.
     depth: usize,
-    /// Set by a `.` while its right-hand operand's first primary
-    /// expression is parsed: there `()` is an empty block step rather than
-    /// undefined, and a quoted field that is called (`a."f"()`) stays a
-    /// field step to call.
-    dot_rhs_head: bool,
 }
 
 impl Parser {
@@ -864,7 +859,6 @@ impl Parser {
             lexer,
             current_token,
             depth: 0,
-            dot_rhs_head: false,
         })
     }
 
@@ -872,25 +866,25 @@ impl Parser {
     /// before `(` (in a path, `(` binds tighter than `.`, so `a.b()` calls
     /// `b()` in each context item). A name or a `$` variable is a function
     /// call by name; other expressions are evaluated and their value
-    /// called. ast_transform rejects calling a literal, `*`, `**`, `%` or a
-    /// constructor (see `check_callable`), after the procedure's own
-    /// errors.
+    /// called; calling a value that isn't a function is T1006 when it is
+    /// evaluated, as in jsonata-js.
     fn call_node(lhs: AstNode, args: Vec<AstNode>) -> AstNode {
         match lhs {
-            AstNode::Path { steps }
+            AstNode::Path { mut steps }
                 if steps.len() == 1 && matches!(steps[0].node, AstNode::Name(_)) =>
             {
-                let Some(PathStep {
-                    node: AstNode::Name(name),
-                    ..
-                }) = steps.into_iter().next()
-                else {
-                    unreachable!()
-                };
-                AstNode::Function {
-                    name,
-                    args,
-                    is_builtin: false,
+                match steps.pop().map(|step| step.node) {
+                    Some(AstNode::Name(name)) => AstNode::Function {
+                        name,
+                        args,
+                        is_builtin: false,
+                    },
+                    other => AstNode::Call {
+                        procedure: Box::new(AstNode::Path {
+                            steps: other.into_iter().map(PathStep::new).collect(),
+                        }),
+                        args,
+                    },
                 }
             }
             AstNode::Variable(name) => AstNode::Function {
@@ -1080,18 +1074,10 @@ impl Parser {
 
     /// Parse a primary expression (literals, identifiers, variables, grouping)
     fn parse_primary(&mut self) -> Result<AstNode, ParserError> {
-        let dot_rhs_head = std::mem::replace(&mut self.dot_rhs_head, false);
         match &self.current_token {
             Token::String(s) => {
                 let value = s.clone();
                 self.advance()?;
-                // A quoted field after `.` that is called (`a."f"()`) calls
-                // what the field holds in each context item.
-                if dot_rhs_head && self.current_token == Token::LeftParen {
-                    return Ok(AstNode::Path {
-                        steps: vec![PathStep::new(AstNode::String(value))],
-                    });
-                }
                 Ok(AstNode::String(value))
             }
             Token::Number(n) => {
@@ -1144,16 +1130,12 @@ impl Parser {
             Token::LeftParen => {
                 self.advance()?; // skip '('
 
-                // Empty parentheses are undefined, but after a `.` they are
-                // an empty block step (`Account.Order.().%`), which the
-                // ancestry pass walks past.
+                // Empty parentheses are an empty block, as in jsonata-js: it
+                // evaluates to undefined, and as a path step
+                // (`Account.Order.().%`) the ancestry pass walks past it.
                 if self.current_token == Token::RightParen {
                     self.advance()?;
-                    return Ok(if dot_rhs_head {
-                        AstNode::Block(Vec::new())
-                    } else {
-                        AstNode::Undefined
-                    });
+                    return Ok(AstNode::Block(Vec::new()));
                 }
 
                 // Parse block expressions (separated by semicolons)
@@ -1434,12 +1416,7 @@ impl Parser {
             match &self.current_token {
                 Token::Dot => {
                     self.advance()?;
-                    // `.()` is an empty block step, and `."f"()` calls what
-                    // the field holds: see `dot_rhs_head`.
-                    self.dot_rhs_head = true;
-                    let rhs = self.parse_expression(right_bp);
-                    self.dot_rhs_head = false;
-                    let rhs = rhs?;
+                    let rhs = self.parse_expression(right_bp)?;
                     self.bump_parse_depth()?;
                     lhs = AstNode::Binary {
                         op: BinaryOp::Map,
