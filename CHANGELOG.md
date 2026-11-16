@@ -51,14 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a step without other stages replaces its index (`a#$i#$j`). A `%` predicate (`x[%]`, `x[%[0]]`)
   and a `%` under `#` or `^` (`%#$i`, `%^(x)`) are left unresolved, giving undefined as in
   jsonata-js rather than S0217 or the input. `x ~> $f()#$i` is T2006. S0209, S0210 and S0213
-  keep their "Parse error" prefix. Known differences: a `%` that a parenthesised operand can't
-  resolve is still S0217 when a `.` follows (`(%.x).y`), where jsonata-js gives undefined; `#`
-  after `[]` adds an index rather than replacing one (`x[]#$i#$j` keeps `$i`); and the members
-  of an array or object constructor run in order, so the first member's error is reported,
-  where jsonata-js runs them concurrently. Older differences this change leaves as they were,
-  for the next stages of #219: a predicate's `%` that jsonata-js leaves on its step is resolved
-  here (`acct.(o[%.%.x].id)`, `x[%.%.o]`); a `[]` after `#` keeps a singleton array that
-  jsonata-js unwraps (`acct.o[0]#$i[].id`); and an `@` on a grouped literal (`"n"@$x{n: v}.a`).
+  keep their "Parse error" prefix. Known differences: `#` after `[]` adds an index rather than
+  replacing one (`x[]#$i#$j` keeps `$i`); a `[]` after `#` keeps a singleton array that
+  jsonata-js unwraps (`acct.o[0]#$i[].id`); and the members of an array or object constructor
+  run in order, so the first member's error is reported, where jsonata-js runs them
+  concurrently.
 - **Filters on a missing step run as jsonata-js runs them**
   ([#260](https://github.com/txjmb/jsonata-core/issues/260)). jsonata-js evaluates the filters
   of a step that gives nothing against `[undefined]`. A computed index of 0 now keeps that

@@ -870,6 +870,8 @@ fn lift_group_filters(step: &mut PathStep) {
     let mut stages = filters;
     stages.append(&mut step.stages);
     step.stages = stages;
+    // A step with a new node is a new step (see `PathStep::id`).
+    step.id = StepId::default();
 }
 
 /// The node a processed operand of a path operator evaluates to, for any
@@ -1360,9 +1362,10 @@ fn literal_number(node: &AstNode) -> Option<f64> {
 /// jsonata-js's `[` (`processAST`, binary `[`): a predicate on a path's
 /// last step, or on the node itself. S0209 when that step has a group-by.
 /// A `%` slot of the predicate one level up resolves against the step
-/// itself; one further up skips it. On a path, what remains walks back
-/// through the steps before it; a node that isn't a path keeps every slot,
-/// resolved or not (#211).
+/// itself; one further up skips it. On a path, what remains stays on the
+/// step (`step_pending`), never seeking the steps before it, for a `.`
+/// after the path; a node that isn't a path keeps every slot, resolved or
+/// not (#211).
 fn apply_filter(
     proc: &mut Proc,
     predicate: AstNode,
