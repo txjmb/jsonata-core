@@ -159,7 +159,7 @@ impl BytecodeCompiler {
                         let fidx = self.intern_str(&step.field);
                         self.emit(Instr::GetField(fidx));
                     }
-                } else if steps.len() == 1 && !*from_dollar {
+                } else if steps.len() == 1 && !*from_dollar && !steps[0].run_on_nothing {
                     // Single step with filter: `field[predicate]`
                     // Emit: GetDataField("field") + FilterByBytecode(predicate_prog)
                     // The predicate is compiled to its own BytecodeProgram and run per

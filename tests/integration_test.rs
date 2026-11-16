@@ -4596,6 +4596,14 @@ fn test_filter_on_nothing_index_zero_and_raising_operators() {
         ("$map(['s'], function($v){ arr.nope[$v + 1] })", "T2001"),
         ("$map(['s'], function($v){ arr.nope[-$v] })", "D1002"),
         ("$map(['s'], function($v){ arr.nope[$v < 1] })", "T2009"),
+        // A call's result counts too, on the compiled path as well.
+        (
+            "$map(['s'], function($v){ arr.nope[$string($v) + 1] })",
+            "T2001",
+        ),
+        ("arr.nope[$count([]) < 'a']", "T2009"),
+        ("arr.nope[$string(1) + 1]", "T2001"),
+        ("$map([true], function($v){ arr.nope[x >= $v] })", "T2010"),
         // `$eval` reports its expression's errors as D3121.
         ("nope[$eval('1+\"a\"')]", "D3121"),
         ("$eval('1+\"a\"')", "D3121"),
@@ -4625,6 +4633,16 @@ fn test_filter_on_nothing_index_zero_and_raising_operators() {
         ("nope[{\"a\":1,\"b\":2}]", undefined.as_str()),
         ("nope[{k: 1}]", undefined.as_str()),
         ("arr[x > 0]", r##"Ok({"x":1})"##),
+        (
+            "$map([1], function($v){ arr[x >= $v] })",
+            r##"Ok({"x":1})"##,
+        ),
+        (
+            "$map([1], function($v){ arr.nope[x >= $v] })",
+            undefined.as_str(),
+        ),
+        ("arr.nope[$contains('x','A') and x > 5]", undefined.as_str()),
+        ("arr.nope[1+1]", undefined.as_str()),
         ("arr[$$.a > 1]", r##"Ok({"x":1})"##),
     ] {
         let (tree_walker, default) =

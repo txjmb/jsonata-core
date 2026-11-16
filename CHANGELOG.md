@@ -26,8 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `nope[1+'a']` is T2002, `nope[-'a']` D1002, `nope['a'<1]` T2009, `nope[true<1]` T2010,
   `nope[[1..'a']]` T2004, `nope[$$.s+1]` T2001, `nope[{1:2}]` T1003 and
   `nope[{"a":1,"a":2}]` D1009 (all were undefined). Predicates whose operands are all paths from
-  the context, such as `nope[price > 5]`, are still skipped. Filters with calls or variables still
-  compile; only one whose literals make it raise is left to the tree-walker.
+  the context, such as `nope[price > 5]`, are still skipped. A compiled path step does the same:
+  it runs such a filter on an item without the field, so both engines agree and the filter keeps
+  its fast path where the field is there.
 - **`$eval` reports an error its expression raises as D3121**, with the inner message, as
   jsonata-js does: `$eval('1+"a"')` was T2002. Only unknown functions were wrapped before. The
   engine's own guardrails (timeout D1012, cancellation U1003, depth D1011 and U1001, sequence

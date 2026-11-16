@@ -323,6 +323,9 @@ pub(crate) struct CompiledStep {
     /// Optional predicate filter (a `Stage::Filter`), applied to the value
     /// looked up in each input item, as jsonata-js applies a step's stages.
     pub filter: Option<CompiledExpr>,
+    /// The filter is run on an item without the field, for its errors, as
+    /// the tree-walker runs it (`Evaluator::filters_run_on_nothing`, #260).
+    pub run_on_nothing: bool,
 }
 
 /// Try to compile an AstNode subtree into a CompiledExpr.
@@ -1999,13 +2002,6 @@ fn try_compile_path(
         if numeric_literal(node).is_some() {
             return None;
         }
-        // A filter whose literals make it raise on a missing field runs on
-        // it in the tree-walker (`filters_run_on_nothing`); the compiled
-        // step would drop the item without running it. Calls and variables
-        // keep the compiled path (`NOTHING_RULES_COMPILE`).
-        if analyze_on_nothing(node, NOTHING_RULES_COMPILE, true).1 {
-            return None;
-        }
         try_compile_expr_inner(node, allowed_vars)
     };
 
@@ -2032,6 +2028,8 @@ fn try_compile_path(
                 };
                 compiled_steps.push(CompiledStep {
                     field: name.clone(),
+                    run_on_nothing: filter.is_some()
+                        && Evaluator::filters_run_on_nothing(&step.stages),
                     filter,
                 });
             }
@@ -2087,6 +2085,7 @@ fn field_chain_by_path_rules(
         .map(|field| CompiledStep {
             field: (*field).clone(),
             filter: None,
+            run_on_nothing: false,
         })
         .collect();
     compiled_eval_field_path(&steps, false, data, vars, ctx, options, start_time)
@@ -2129,7 +2128,11 @@ fn compiled_eval_field_path(
                 single => std::slice::from_ref(single),
             }
         };
-        let mut values = field_values(&step.field, items, options)?;
+        let mut values = if step.run_on_nothing {
+            field_values_of::<true>(&step.field, items, options)?
+        } else {
+            field_values(&step.field, items, options)?
+        };
         if let Some(filter) = &step.filter {
             // One shape cache for the step, from its first object: the
             // filtered values usually hold objects of one shape.
@@ -2143,6 +2146,12 @@ fn compiled_eval_field_path(
                 .and_then(build_shape_cache);
             let mut filtered = Vec::with_capacity(values.len());
             for value in values {
+                if value.is_undefined() {
+                    // An item without the field: its one filter runs for
+                    // its errors and selects nothing (see `run_on_nothing`).
+                    eval_compiled_inner(filter, &value, vars, ctx, None, options, start_time)?;
+                    continue;
+                }
                 let value = compiled_apply_filter(
                     filter,
                     &value,
@@ -4327,54 +4336,21 @@ enum KindOnNothing {
     Unknown,
 }
 
-/// How `analyze_on_nothing` judges what it can't see.
-#[derive(Clone, Copy)]
-struct NothingRules {
-    /// A call (of a function, lambda or `~>`) can raise, and its result is
-    /// of unknown kind. The tree-walker's gate counts calls; compiling a
-    /// filter does not, so a filter that calls something keeps the compiled
-    /// path, which never ran it on nothing (#259), and its result counts as
-    /// undefined there.
-    calls_raise: bool,
-}
-
-/// For the tree-walker: run a filter on nothing whenever it might raise.
-const NOTHING_RULES_STRICT: NothingRules = NothingRules { calls_raise: true };
-
-/// For compiling a filter: leave to the tree-walker a filter whose operands
-/// (literals, variables) can make an operator fail (`x[1+'a']`, `x[$v+1]`),
-/// so filters with calls keep the compiled path, as they did before #260.
-const NOTHING_RULES_COMPILE: NothingRules = NothingRules { calls_raise: false };
-
 /// What `node` gives with nothing as the context, and whether evaluating it
 /// there may raise, in one pass. `from_nothing` is whether a name or `$` in
 /// it reads that nothing: true for the predicate itself, false inside a later
 /// path step or a nested filter, where they read an item (`[1,"a"][$ > 1]`).
-fn analyze_on_nothing(
-    node: &AstNode,
-    rules: NothingRules,
-    from_nothing: bool,
-) -> (KindOnNothing, bool) {
+fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, bool) {
     use KindOnNothing as K;
     let context = if from_nothing {
         K::Undefined
     } else {
         K::Unknown
     };
-    // A call's result: unknown, or not looked at when calls don't count.
-    let called = if rules.calls_raise {
-        K::Unknown
-    } else {
-        K::Undefined
-    };
-    fn any<'a>(
-        nodes: impl IntoIterator<Item = &'a AstNode>,
-        rules: NothingRules,
-        from_nothing: bool,
-    ) -> bool {
+    fn any<'a>(nodes: impl IntoIterator<Item = &'a AstNode>, from_nothing: bool) -> bool {
         nodes
             .into_iter()
-            .any(|n| analyze_on_nothing(n, rules, from_nothing).1)
+            .any(|n| analyze_on_nothing(n, from_nothing).1)
     }
     match node {
         AstNode::Undefined => (K::Undefined, false),
@@ -4399,24 +4375,24 @@ fn analyze_on_nothing(
             let Some(first) = steps.first() else {
                 return (K::Undefined, false);
             };
-            let (kind, mut raises) = analyze_on_nothing(&first.node, rules, from_nothing);
+            let (kind, mut raises) = analyze_on_nothing(&first.node, from_nothing);
             if kind == K::Undefined {
                 return (K::Undefined, raises);
             }
             for (i, step) in steps.iter().enumerate() {
                 if i > 0 {
-                    raises |= analyze_on_nothing(&step.node, rules, false).1;
+                    raises |= analyze_on_nothing(&step.node, false).1;
                 }
                 for stage in &step.stages {
                     if let Stage::Filter(expr) = stage {
-                        raises |= analyze_on_nothing(expr, rules, false).1;
+                        raises |= analyze_on_nothing(expr, false).1;
                     }
                 }
             }
             (K::Unknown, raises)
         }
         AstNode::Unary { op, operand } => {
-            let (kind, raises) = analyze_on_nothing(operand, rules, from_nothing);
+            let (kind, raises) = analyze_on_nothing(operand, from_nothing);
             match op {
                 // evaluateUnary: D1002 for a defined non-number.
                 crate::ast::UnaryOp::Negate => {
@@ -4431,11 +4407,11 @@ fn analyze_on_nothing(
             }
         }
         AstNode::Binary { op, lhs, rhs } => {
-            let (l, lr) = analyze_on_nothing(lhs, rules, from_nothing);
-            let (r, rr) = analyze_on_nothing(rhs, rules, from_nothing);
+            let (l, lr) = analyze_on_nothing(lhs, from_nothing);
+            let (r, rr) = analyze_on_nothing(rhs, from_nothing);
             let raises = lr || rr;
             match op {
-                BinaryOp::ChainPipe => (called, raises || rules.calls_raise),
+                BinaryOp::ChainPipe => (K::Unknown, true),
                 BinaryOp::Add
                 | BinaryOp::Subtract
                 | BinaryOp::Multiply
@@ -4443,6 +4419,7 @@ fn analyze_on_nothing(
                 | BinaryOp::Modulo => {
                     let kind = match (l, r) {
                         (K::Undefined, _) | (_, K::Undefined) => K::Undefined,
+                        (K::Number { .. }, K::Number { .. }) => K::Number { integer: false },
                         _ => K::Unknown,
                     };
                     (kind, raises || binary_may_raise_on_nothing(*op, l, r))
@@ -4457,23 +4434,18 @@ fn analyze_on_nothing(
                 | BinaryOp::And
                 | BinaryOp::Or
                 | BinaryOp::In => (K::Other, raises),
-                // `&` makes strings of its operands: D3001 for a number
-                // that isn't finite, D1001-style errors for a function.
-                BinaryOp::Concatenate => (
-                    K::String,
-                    raises || matches!(l, K::Unknown) || matches!(r, K::Unknown),
-                ),
-                _ => (K::Unknown, raises || rules.calls_raise),
+                BinaryOp::Concatenate => (K::String, raises),
+                _ => (K::Unknown, true),
             }
         }
         AstNode::Array(items) | AstNode::ArrayGroup(items) => {
-            (K::Other, any(items.iter(), rules, from_nothing))
+            (K::Other, any(items.iter(), from_nothing))
         }
         AstNode::Block(items) => match items.split_last() {
             None => (K::Undefined, false),
             Some((last, rest)) => {
-                let (kind, raises) = analyze_on_nothing(last, rules, from_nothing);
-                (kind, raises || any(rest, rules, from_nothing))
+                let (kind, raises) = analyze_on_nothing(last, from_nothing);
+                (kind, raises || any(rest, from_nothing))
             }
         },
         // evaluateGroupExpression: T1003 for a key that is defined and not a
@@ -4481,8 +4453,8 @@ fn analyze_on_nothing(
         AstNode::Object(pairs) => {
             let mut raises = false;
             for (i, (key, value)) in pairs.iter().enumerate() {
-                let (kind, key_raises) = analyze_on_nothing(key, rules, from_nothing);
-                raises |= key_raises || analyze_on_nothing(value, rules, from_nothing).1;
+                let (kind, key_raises) = analyze_on_nothing(key, from_nothing);
+                raises |= key_raises || analyze_on_nothing(value, from_nothing).1;
                 raises |= !matches!(kind, K::Undefined | K::String);
                 if let AstNode::String(k) = key {
                     raises |= pairs[..i]
@@ -4502,25 +4474,12 @@ fn analyze_on_nothing(
                 std::iter::once(&**condition)
                     .chain(std::iter::once(&**then_branch))
                     .chain(else_branch.as_deref()),
-                rules,
                 from_nothing,
             ),
         ),
-        AstNode::Function { args, .. } => (
-            called,
-            rules.calls_raise || any(args.iter(), rules, from_nothing),
-        ),
-        AstNode::Call { procedure, args } => (
-            called,
-            rules.calls_raise
-                || any(
-                    std::iter::once(&**procedure).chain(args.iter()),
-                    rules,
-                    from_nothing,
-                ),
-        ),
+        AstNode::Function { .. } | AstNode::Call { .. } => (K::Unknown, true),
         // Unknown kinds of node count as calling.
-        _ => (K::Unknown, rules.calls_raise),
+        _ => (K::Unknown, true),
     }
 }
 
@@ -4533,18 +4492,14 @@ fn analyze_on_nothing(
 fn binary_may_raise_on_nothing(op: BinaryOp, l: KindOnNothing, r: KindOnNothing) -> bool {
     use KindOnNothing as K;
     match op {
-        // evaluateNumericExpression: T2001/T2002 for a defined non-number,
-        // and D1001 once both are numbers (`1/0`, an overflow).
+        // evaluateNumericExpression: T2001/T2002 for a defined non-number.
         BinaryOp::Add
         | BinaryOp::Subtract
         | BinaryOp::Multiply
         | BinaryOp::Divide
-        | BinaryOp::Modulo => {
-            [l, r]
-                .iter()
-                .any(|k| !matches!(k, K::Undefined | K::Number { .. }))
-                || matches!((l, r), (K::Number { .. }, K::Number { .. }))
-        }
+        | BinaryOp::Modulo => [l, r]
+            .iter()
+            .any(|k| !matches!(k, K::Undefined | K::Number { .. })),
         // evaluateComparisonExpression: T2010 for a defined value that is
         // neither a number nor a string, T2009 when both are defined and
         // of different types.
@@ -4874,7 +4829,6 @@ impl Evaluator {
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
-
             raw_hof: None,
             tail_apply_input: None,
             options: EvaluatorOptions::default(),
@@ -4892,7 +4846,6 @@ impl Evaluator {
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
-
             raw_hof: None,
             tail_apply_input: None,
             options: EvaluatorOptions::default(),
@@ -4912,7 +4865,6 @@ impl Evaluator {
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
-
             raw_hof: None,
             tail_apply_input: None,
             options,
@@ -7015,7 +6967,7 @@ impl Evaluator {
     /// `x[1+'a']` (T2002), `x[-'a']` (D1002) or `x[{1: 2}]` (T1003); see
     /// `analyze_on_nothing`. Unknown kinds of node count as calling.
     fn may_raise_on_nothing(node: &AstNode) -> bool {
-        analyze_on_nothing(node, NOTHING_RULES_STRICT, true).1
+        analyze_on_nothing(node, true).1
     }
 
     /// False when evaluating `node` cannot read the `$` binding, so an
@@ -9930,12 +9882,14 @@ impl Evaluator {
                     data,
                 } => {
                     // Continue with the tail call - no stack growth
-                    if null_input {
-                        self.tail_apply_input = Some(JValue::Null);
-                    }
                     current_lambda = lambda;
                     current_args = args;
                     current_data = data;
+                    if null_input {
+                        // A `-` parameter of its signature reads it too.
+                        self.tail_apply_input = Some(JValue::Null);
+                        current_data = JValue::Null;
+                    }
                 }
             }
         };
@@ -10110,10 +10064,7 @@ impl Evaluator {
                     (None, false)
                 } else {
                     match self.context.lookup(name) {
-                        Some(value @ JValue::Lambda(_)) => match tail_call_target(value) {
-                            Some(target) => (Some(target), false),
-                            None => (None, false),
-                        },
+                        Some(value @ JValue::Lambda(_)) => (tail_call_target(value), false),
                         Some(JValue::Builtin { name: b }) => (None, &**b == "eval"),
                         None => (None, name == "eval"),
                         Some(_) => (None, false),
@@ -10133,13 +10084,7 @@ impl Evaluator {
                         lambda: stored_lambda,
                         null_input,
                         args: evaluated_args,
-                        // A `-` parameter of its signature reads the null
-                        // input too.
-                        data: if null_input {
-                            JValue::Null
-                        } else {
-                            data.clone()
-                        },
+                        data: data.clone(),
                     });
                 }
                 // A builtin given a function with tail calls, as a tail call:
@@ -10261,13 +10206,7 @@ impl Evaluator {
                         lambda: stored_lambda,
                         null_input,
                         args: evaluated_args,
-                        // A `-` parameter of its signature reads the null
-                        // input too.
-                        data: if null_input {
-                            JValue::Null
-                        } else {
-                            data.clone()
-                        },
+                        data: data.clone(),
                     });
                 }
                 // `($eval)(...)` as a tail call, as `$eval(...)` above.
