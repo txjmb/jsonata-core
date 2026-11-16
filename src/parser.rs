@@ -40,51 +40,6 @@ fn invalid_escape_message(seq: &str) -> String {
     }
 }
 
-/// Calling something that is not a function. jsonata-js distinguishes an
-/// ordinary invocation (T1006) from a *partial* application -- a call carrying
-/// a `?` placeholder -- which is T1008.
-fn invalid_call_message(args: &[AstNode]) -> String {
-    if args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
-        "T1008: Attempted to partially apply a non-function".to_string()
-    } else {
-        "T1006: Attempted to invoke a non-function".to_string()
-    }
-}
-
-/// Whether a call of `procedure`, a node under `#`/`@` bindings, is
-/// rejected while parsing, as the call of the node on its own would be: a
-/// literal, a wildcard, descendant or parent step, or an array or object
-/// constructor. A node with predicates is evaluated and called, as
-/// `"f"[0]()` is.
-fn bound_call_rejected(procedure: &AstNode) -> bool {
-    match procedure {
-        AstNode::Binary {
-            op: BinaryOp::IndexBind | BinaryOp::FocusBind,
-            lhs,
-            ..
-        } => bound_call_rejected(lhs),
-        AstNode::Binary {
-            op: BinaryOp::Filter | BinaryOp::KeepArray,
-            ..
-        } => false,
-        node => !matches!(
-            node,
-            AstNode::Lambda { .. }
-                | AstNode::Block(_)
-                | AstNode::Call { .. }
-                | AstNode::Function { .. }
-                | AstNode::Regex { .. }
-                | AstNode::Variable(_)
-                | AstNode::Name(_)
-                | AstNode::Path { .. }
-                | AstNode::Binary { .. }
-                | AstNode::FunctionApplication(_)
-                | AstNode::Sort { .. }
-                | AstNode::ObjectTransform { .. }
-        ),
-    }
-}
-
 /// Running out of input while expecting something is S0203; finding the wrong
 /// thing is S0202. A missing *parameter name* is its own code, S0208.
 fn expected_message(expected: &str, found: &str) -> String {
@@ -917,9 +872,10 @@ impl Parser {
     /// before `(` (in a path, `(` binds tighter than `.`, so `a.b()` calls
     /// `b()` in each context item). A name or a `$` variable is a function
     /// call by name; other expressions are evaluated and their value
-    /// called. Calling a literal, `*`, `**`, `%` or a constructor is
-    /// rejected here (T1006, or T1008 for a partial application).
-    fn call_node(lhs: AstNode, args: Vec<AstNode>) -> Result<AstNode, ParserError> {
+    /// called. ast_transform rejects calling a literal, `*`, `**`, `%` or a
+    /// constructor (see `check_callable`), after the procedure's own
+    /// errors.
+    fn call_node(lhs: AstNode, args: Vec<AstNode>) -> AstNode {
         match lhs {
             AstNode::Path { steps }
                 if steps.len() == 1 && matches!(steps[0].node, AstNode::Name(_)) =>
@@ -931,22 +887,21 @@ impl Parser {
                 else {
                     unreachable!()
                 };
-                Ok(AstNode::Function {
+                AstNode::Function {
                     name,
                     args,
                     is_builtin: false,
-                })
+                }
             }
-            AstNode::Variable(name) => Ok(AstNode::Function {
+            AstNode::Variable(name) => AstNode::Function {
                 name,
                 args,
                 is_builtin: true,
-            }),
-            procedure if !bound_call_rejected(&procedure) => Ok(AstNode::Call {
+            },
+            procedure => AstNode::Call {
                 procedure: Box::new(procedure),
                 args,
-            }),
-            _ => Err(ParserError::InvalidSyntax(invalid_call_message(&args))),
+            },
         }
     }
 
@@ -1532,7 +1487,7 @@ impl Parser {
 
                     self.expect(Token::RightParen)?;
                     self.bump_parse_depth()?;
-                    lhs = Self::call_node(lhs, args)?;
+                    lhs = Self::call_node(lhs, args);
                 }
                 Token::Question => {
                     self.advance()?;
@@ -1700,12 +1655,24 @@ impl Parser {
         Ok(lhs)
     }
 
+    /// Parse the whole expression into the tree the evaluator runs: the
+    /// raw parse (`parse_raw`) after ast_transform's post-parse pass.
     pub fn parse(&mut self) -> Result<AstNode, ParserError> {
+        let raw_ast = self.parse_raw()?;
+        crate::ast_transform::resolve_ancestry(raw_ast).map_err(ParserError::from)
+    }
+
+    /// Parse the whole expression into the raw tree, before ast_transform's
+    /// post-parse pass, as jsonata-js's parser leaves it for `processAST`:
+    /// the path operators are still `Binary` nodes (`Map`, `Filter`,
+    /// `KeepArray`, `FocusBind`, `IndexBind`), `ObjectTransform` and
+    /// `Sort`, which the evaluator can't run.
+    pub(crate) fn parse_raw(&mut self) -> Result<AstNode, ParserError> {
         let ast = self.parse_expression(0)?;
 
         // A token left over is S0201 in jsonata-js -- its general "syntax
-        // error at this token" -- and it beats a deferred S0213, which the
-        // reference only reaches in its post-parse pass.
+        // error at this token" -- and it beats every error of the
+        // post-parse pass, which only runs on a complete parse.
         if self.current_token != Token::Eof {
             return Err(ParserError::InvalidSyntax(format!(
                 "S0201: Syntax error: {:?}",
@@ -1778,14 +1745,20 @@ impl Parser {
 /// unconditionally, matching jsonata-js's processAST always running
 /// immediately after the raw Pratt parse.
 pub fn parse(expression: &str) -> Result<AstNode, ParserError> {
-    let mut parser = Parser::new(expression.to_string())?;
-    let raw_ast = parser.parse()?;
-    let ast = crate::ast_transform::resolve_ancestry(raw_ast).map_err(|e| match e {
-        crate::ast_transform::AstTransformError::Coded { code, message } => {
-            ParserError::Coded { code, message }
+    Parser::new(expression.to_string())?.parse()
+}
+
+impl From<crate::ast_transform::AstTransformError> for ParserError {
+    fn from(error: crate::ast_transform::AstTransformError) -> Self {
+        match error {
+            crate::ast_transform::AstTransformError::Coded { code, message } => {
+                ParserError::Coded { code, message }
+            }
+            crate::ast_transform::AstTransformError::Syntax(message) => {
+                ParserError::InvalidSyntax(message)
+            }
         }
-    })?;
-    Ok(ast)
+    }
 }
 
 #[cfg(test)]
@@ -2385,14 +2358,12 @@ mod tests {
     #[test]
     fn test_parent_operator_parses_as_prefix() {
         // Tests the RAW grammar rule (bare `%` in primary position) in
-        // isolation from ast_transform's ancestor resolution -- uses
-        // Parser::new(...).parse() directly rather than the free `parse()`
-        // function, since the free function now runs ast_transform
-        // unconditionally (Step 8), and `%.OrderID` alone has no preceding
-        // step for `%` to resolve against (that's covered by
-        // ast_transform's own S0217 tests).
+        // isolation from ast_transform's ancestor resolution, with
+        // `parse_raw`: `%.OrderID` alone has no preceding step for `%` to
+        // resolve against (that's covered by ast_transform's own S0217
+        // tests).
         let mut parser = Parser::new("%.OrderID".to_string()).unwrap();
-        let ast = parser.parse().unwrap();
+        let ast = parser.parse_raw().unwrap();
         // The raw parse is a `.` of the parent and the name, as in
         // jsonata-js; ast_transform makes it a path.
         match ast {
@@ -2425,11 +2396,11 @@ mod tests {
     #[test]
     fn test_focus_bind_parses_as_binary_marker() {
         // Tests the RAW grammar rule in isolation from ast_transform (which
-        // now runs unconditionally in the free `parse()` and would rewrite
-        // this into a Path with a `focus` flag instead -- see
+        // `parse()` runs, and which rewrites this into a Path with a
+        // `focus` flag instead -- see
         // ast_transform.rs's own real-parser-based tests for that).
         let mut parser = Parser::new("Order@$o".to_string()).unwrap();
-        let ast = parser.parse().unwrap();
+        let ast = parser.parse_raw().unwrap();
         match ast {
             AstNode::Binary {
                 op: BinaryOp::FocusBind,
@@ -2454,7 +2425,7 @@ mod tests {
         // #$var now reuses the same generic Binary marker shape as @$var
         // (Task 4 retires the dedicated AstNode::IndexBind struct variant).
         let mut parser = Parser::new("arr#$i".to_string()).unwrap();
-        let ast = parser.parse().unwrap();
+        let ast = parser.parse_raw().unwrap();
         match ast {
             AstNode::Binary {
                 op: BinaryOp::IndexBind,

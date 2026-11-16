@@ -4876,3 +4876,58 @@ fn test_regex_case_folding_matches_javascript() {
         assert_eq!(default, expected, "default: {expr}");
     }
 }
+
+// ── Path operators built by ast_transform (#219 stage 2) ─────────────────────
+
+/// A predicate on each step of a long right-nested path costs one depth
+/// unit per level for the step and one for its predicate, as before #219.
+#[test]
+fn test_nested_predicate_paths_fit_the_depth_limit() {
+    let outcome = on_small_stack(|| {
+        let expr = format!("{}0{}", "a.b[".repeat(400), "]".repeat(400));
+        match parse(&expr) {
+            Ok(_) => "parsed".to_string(),
+            Err(e) => e.to_string(),
+        }
+    });
+    assert_eq!(outcome, "parsed");
+}
+
+/// Each `^` wraps the steps before it in a `Sort`, so a long chain of them
+/// is a deep tree: past the depth limit it's a clean U1002, not a stack
+/// overflow later.
+#[test]
+fn test_long_sort_chain_is_u1002() {
+    let outcome = on_small_stack(|| {
+        let expr = format!("a{}", "^(x)".repeat(600));
+        match parse(&expr) {
+            Ok(_) => "parsed".to_string(),
+            Err(e) => e.to_string(),
+        }
+    });
+    assert!(outcome.contains("U1002"), "got: {outcome}");
+}
+
+/// jsonata-js raises the errors of a path in `processAST` order: a literal
+/// step in the path comes before a call of something that isn't a function.
+#[test]
+fn test_path_errors_come_in_jsonata_js_order() {
+    for (expr, code) in [
+        ("1.b.2()", "S0213"),
+        (r#"1.b."x"()"#, "S0213"),
+        ("a.2()", "T1006"),
+    ] {
+        let err = parse(expr).unwrap_err().to_string();
+        assert!(err.contains(code), "{expr} => {err}");
+    }
+}
+
+/// S0209, S0210 and S0213 are syntax errors, reported with the parser's
+/// "Parse error" prefix as before #219.
+#[test]
+fn test_path_syntax_errors_keep_parse_error_prefix() {
+    for expr in [r#"[1,2]{"k":$}[0]"#, "a{'k':1}{'j':2}", "a.2"] {
+        let err = parse(expr).unwrap_err().display_message();
+        assert!(err.starts_with("Parse error"), "{expr} => {err}");
+    }
+}

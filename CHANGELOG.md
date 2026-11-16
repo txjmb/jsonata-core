@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Paths are built the way jsonata-js builds them** (stage 2 of
+  [#219](https://github.com/txjmb/jsonata-core/issues/219)). The parser uses jsonata-js's binding
+  powers for the path operators (`.` 75; `[`, `(`, `@`, `#` 80; group-by `{` 70; sort `^` 40) and
+  leaves them as raw nodes, which `ast_transform` resolves in jsonata-js's `processAST` order.
+  `-a{...}` and `a = b^(x)` now group as in jsonata-js. A call of a filtered, sorted or grouped
+  step is no longer a T1006 parse error. Where an expression has more than one path error
+  (S0209, S0210, S0213, S0215, S0216, S0217, T1006), the one reported is the one jsonata-js
+  raises first: `1.b.2()` is S0213. S0209, S0210 and S0213 keep their "Parse error" prefix.
+  One known difference stays: a `%` that a parenthesised operand can't resolve is still S0217
+  when a `.` follows (`(%.x).y`), where jsonata-js gives undefined.
 - **Filters on a missing step run as jsonata-js runs them**
   ([#260](https://github.com/txjmb/jsonata-core/issues/260)). jsonata-js evaluates the filters
   of a step that gives nothing against `[undefined]`. A computed index of 0 now keeps that

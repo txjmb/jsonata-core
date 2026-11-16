@@ -13,8 +13,9 @@
 // for the full derivation. The rules, in short:
 //
 // 1. There are three recursive cycles but only TWO independent stack budgets.
-//    Cycle 1 (transform_node / transform_children / transform_path_steps /
-//    migrate_binding_markers) and cycle 3 (walk_backward / seek_parent_step /
+//    Cycle 1 (transform_node / transform_children / process_path /
+//    process_base / apply_map / apply_filter / apply_group / apply_sort) and
+//    cycle 3 (walk_backward / seek_parent_step /
 //    seek_parent_wrapped) nest on the SAME native stack — cycle 3 is reached
 //    while cycle 1's frames are live — so they must share ONE depth counter.
 //    Cycle 2 (substitute_labels) runs only after cycle 1 has fully unwound
@@ -37,6 +38,10 @@ use thiserror::Error;
 pub enum AstTransformError {
     #[error("{code}: {message}")]
     Coded { code: &'static str, message: String },
+    /// A syntax error whose message starts with its code (S0209, S0210,
+    /// S0213, T1006, T1008), reported as the parser's `InvalidSyntax`.
+    #[error("{0}")]
+    Syntax(String),
 }
 
 /// jsonata-js's message for S0217 (`errorCodes` in jsonata.js), used for
@@ -55,8 +60,8 @@ fn coded(code: &'static str, message: impl Into<String>) -> AstTransformError {
 // doc comment above) ---
 //
 // Two INDEPENDENT depth counters, per the module doc comment's analysis:
-// one shared by cycle 1 (transform_node/transform_children/
-// transform_path_steps/migrate_binding_markers) AND cycle 3
+// one shared by cycle 1 (transform_node/transform_children/process_path
+// and the apply_* functions it calls) AND cycle 3
 // (walk_backward/seek_parent_step/seek_parent_wrapped) -- because cycle 3 is
 // reached from WITHIN live cycle-1 stack frames, their depths add and must
 // share one counter -- and a second, wholly separate counter for
@@ -181,7 +186,7 @@ fn check_label_substitution_depth(depth: usize) -> Result<(), AstTransformError>
 // the depth guard above protects against, found empirically while
 // validating this task's fix: when `check_transform_depth`/
 // `check_label_substitution_depth` trips inside `transform_node`/
-// `transform_children`/`transform_path_steps`, that function's OWN
+// `transform_children`/`process_path`, that function's OWN
 // `node`/`steps` parameter can still hold an ENORMOUS unprocessed remainder
 // (we bail out before ever destructuring it -- e.g. a `1+1+1+...` chain 200
 // levels past the ceiling still has ~199,800 more nested `Binary` levels
@@ -204,9 +209,9 @@ fn check_label_substitution_depth(depth: usize) -> Result<(), AstTransformError>
 //
 // Every function that OWNS an `AstNode`/`Vec<PathStep>`/`PathStep`
 // parameter and can bail out with that parameter's traversal still
-// incomplete (`transform_node`, `transform_children`, `transform_path_steps`,
-// and -- for the `step.stages` a step still carries when its OWN `.node`
-// fails to transform -- `migrate_binding_markers`) must route the abandoned
+// incomplete (`transform_node`, `transform_children`, `process_path` with
+// the path operators it has yet to apply, and the `apply_*` functions with
+// the steps they were handed) must route the abandoned
 // value through here instead of letting it drop implicitly. Anything that
 // already came back out of a SUCCESSFUL (`Ok`) call is guaranteed
 // depth-bounded (that call would have hit the guard above otherwise) and is
@@ -329,7 +334,7 @@ fn drop_ast_node_iteratively(node: AstNode) {
 }
 
 /// See `drop_ast_node_iteratively` -- the `Vec<PathStep>`-flavored entry
-/// point, used by `transform_path_steps`'s own bail-out (its parameter is a
+/// point, used by the `apply_*` functions' bail-outs (they own a path's
 /// `Vec<PathStep>`, not a single `AstNode`).
 fn drop_path_steps_iteratively(steps: Vec<PathStep>) {
     let mut stack = Vec::new();
@@ -636,6 +641,50 @@ fn substitute_labels_impl(
     })
 }
 
+/// Calling something that is not a function. jsonata-js distinguishes an
+/// ordinary invocation (T1006) from a *partial* application -- a call carrying
+/// a `?` placeholder -- which is T1008.
+fn invalid_call_message(args: &[AstNode]) -> String {
+    if args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
+        "T1008: Attempted to partially apply a non-function".to_string()
+    } else {
+        "T1006: Attempted to invoke a non-function".to_string()
+    }
+}
+
+/// Whether calling the raw `procedure` is rejected before evaluation: a
+/// literal, a wildcard, descendant or parent step, or an array or object
+/// constructor, bound with `#`/`@` or not. A node with predicates is
+/// evaluated and called, as `"f"[0]()` is. jsonata-js raises T1006 for
+/// these only when the call runs; rejecting them here, after the errors
+/// of the procedure itself, keeps the long-standing parse-time T1006.
+fn call_rejected(procedure: &AstNode) -> bool {
+    // Look through the `@`/`#` bindings on the procedure (a loop: a long
+    // chain of them is a deep tree).
+    let mut node = procedure;
+    while let AstNode::Binary {
+        op: BinaryOp::IndexBind | BinaryOp::FocusBind,
+        lhs,
+        ..
+    } = node
+    {
+        node = lhs;
+    }
+    !matches!(
+        node,
+        AstNode::Lambda { .. }
+            | AstNode::Block(_)
+            | AstNode::Call { .. }
+            | AstNode::Function { .. }
+            | AstNode::Regex { .. }
+            | AstNode::Variable(_)
+            | AstNode::Path { .. }
+            | AstNode::Binary { .. }
+            | AstNode::Sort { .. }
+            | AstNode::ObjectTransform { .. }
+    )
+}
+
 /// jsonata-js's `@` checks (`processAST`, binary `@`): S0215 when the step
 /// it binds has predicates (`[]` is not one), S0216 when it is a sort. A
 /// group-by on a node that isn't a path wraps the node, so the check looks
@@ -690,6 +739,9 @@ struct Proc {
     dotted: bool,
     group: Option<Vec<(AstNode, AstNode)>>,
     pending: Vec<PendingAncestor>,
+    /// How many of the leading steps the S0213 check after `.` has already
+    /// passed, so a long path isn't checked again at every `.`.
+    checked: usize,
 }
 
 impl Proc {
@@ -700,6 +752,7 @@ impl Proc {
             dotted: false,
             group: None,
             pending: t.pending,
+            checked: 0,
         }
     }
 
@@ -712,6 +765,12 @@ impl Proc {
     /// This node as a path, as jsonata-js's `.`, `^` and `#` make one of a
     /// node that isn't: the node becomes its one step. A slot it still
     /// seeks finds no step before it, so it seeks on from the path.
+    ///
+    /// Deviation from jsonata-js (kept from before #219): jsonata-js builds
+    /// the new path with an empty `seekingParent`, so the node's unresolved
+    /// slots are forgotten and evaluate to undefined (`(%.x).y`). Here they
+    /// keep seeking and end as S0217, the error the same `%` gives without
+    /// the `.y`.
     fn into_path(mut self) -> Self {
         if !self.is_path {
             self.is_path = true;
@@ -760,6 +819,7 @@ fn lower_value(proc: Proc) -> Transformed {
         dotted,
         group,
         pending,
+        checked: _,
     } = proc;
     // A path `#` made of another node has no `keepSingletonArray`, so a
     // `[]` on the node before the `#` keeps nothing (#213).
@@ -928,8 +988,27 @@ fn process_path(
             return Err(e);
         }
     };
+    // A sort, and a group-by on a node that isn't a path, wrap what came
+    // before them in new nodes, so a chain of them builds a deep tree
+    // without any recursion here. Count that nesting against the depth
+    // limit, as the passes after this one recurse through it.
+    let mut nesting = 0;
     while let Some(op) = ops.pop() {
-        proc = match apply_path_op(proc, op, state, depth) {
+        let wraps = match &op {
+            PathOp::Sort(_) => true,
+            PathOp::Group(_) => !proc.is_path,
+            _ => false,
+        };
+        if wraps {
+            nesting += 2;
+            if let Err(e) = check_transform_depth(depth + nesting) {
+                op.drop_iteratively();
+                ops.into_iter().for_each(PathOp::drop_iteratively);
+                drop_path_steps_iteratively(proc.steps);
+                return Err(e);
+            }
+        }
+        proc = match apply_path_op(proc, op, state, depth + nesting) {
             Ok(proc) => proc,
             Err(e) => {
                 ops.into_iter().for_each(PathOp::drop_iteratively);
@@ -955,8 +1034,9 @@ fn process_base(
             dotted: true,
             group: None,
             pending: Vec::new(),
+            checked: 0,
         }),
-        other if is_path_operator(&other) => process_path(other, state, depth + 1),
+        // `process_path` unwinds every other path operator.
         other => Ok(Proc::value(transform_node(other, state, depth + 1)?)),
     }
 }
@@ -1044,8 +1124,11 @@ fn apply_map(
 ) -> Result<Proc, AstTransformError> {
     let mut path = lhs.into_path();
     path.dotted = true;
+    // The right side's operators are this path's steps: no deeper than
+    // the left side's, so they cost no extra depth. (A `.` never has
+    // another `.` directly on its right, so this can't recurse unchecked.)
     let rest = match if is_path_operator(&rhs) {
-        process_path(rhs, state, depth + 1)
+        process_path(rhs, state, depth)
     } else {
         transform_node(rhs, state, depth + 1).map(Proc::value)
     } {
@@ -1074,7 +1157,9 @@ fn apply_map(
         path.steps.push(step);
         rest.pending
     };
-    check_literal_steps(&mut path.steps)?;
+    let checked = path.checked;
+    check_literal_steps(&mut path.steps[checked..])?;
+    path.checked = path.steps.len();
     seek_back(
         &mut path.steps[..first_new],
         new_slots,
@@ -1093,13 +1178,10 @@ fn apply_map(
 fn check_literal_steps(steps: &mut [PathStep]) -> Result<(), AstTransformError> {
     for step in steps.iter_mut() {
         if let Some(literal) = check_literal_step(&mut step.node) {
-            return Err(coded(
-                "S0213",
-                format!(
-                    "The literal value {} cannot be used as a step within a path expression",
-                    literal
-                ),
-            ));
+            return Err(AstTransformError::Syntax(format!(
+                "S0213: The literal value {} cannot be used as a step within a path expression",
+                literal
+            )));
         }
     }
     Ok(())
@@ -1157,9 +1239,8 @@ fn apply_filter(
 ) -> Result<Proc, AstTransformError> {
     if is_group_step(proc.target_step()) {
         drop_ast_node_iteratively(predicate);
-        return Err(coded(
-            "S0209",
-            "A predicate cannot follow a grouping expression in a step",
+        return Err(AstTransformError::Syntax(
+            "S0209: A predicate cannot follow a grouping expression in a step".to_string(),
         ));
     }
     let predicate = transform_node(predicate, state, depth + 1)?;
@@ -1205,9 +1286,8 @@ fn apply_group(
     };
     if has_group {
         drop_ast_node_iteratively(AstNode::Object(pattern));
-        return Err(coded(
-            "S0210",
-            "Each step can only have one grouping expression",
+        return Err(AstTransformError::Syntax(
+            "S0210: Each step can only have one grouping expression".to_string(),
         ));
     }
     let mut pairs = Vec::with_capacity(pattern.len());
@@ -1265,9 +1345,22 @@ fn apply_sort(
                 return Err(e);
             }
         };
-        seek_back(&mut path.steps, t.pending, &mut path.pending, state, depth)?;
         transformed_terms.push((t.node, ascending));
+        if let Err(e) = seek_back(&mut path.steps, t.pending, &mut path.pending, state, depth) {
+            drop_ast_node_iteratively(AstNode::Array(
+                transformed_terms
+                    .into_iter()
+                    .map(|(e, _)| e)
+                    .chain(terms.map(|(e, _)| e))
+                    .collect(),
+            ));
+            drop_path_steps_iteratively(std::mem::take(&mut path.steps));
+            return Err(e);
+        }
     }
+    // The sort step is checked for S0213 by looking into what it sorts, so
+    // it has passed when every step it sorts has.
+    let input_checked = path.checked == path.steps.len();
     let input = if was_path {
         AstNode::Path {
             steps: std::mem::take(&mut path.steps),
@@ -1279,6 +1372,7 @@ fn apply_sort(
         input: Box::new(input),
         terms: transformed_terms,
     })];
+    path.checked = usize::from(input_checked);
     // A `[]` on the sort keeps the sorted result an array.
     path.dotted = true;
     Ok(path)
@@ -1469,7 +1563,17 @@ fn transform_children_impl(
             // Only args bubble (see doc comment above) -- procedure is
             // still structurally transformed, just doesn't contribute to
             // this Call's own pending.
-            let procedure_t = transform_node(*procedure, state, depth)?;
+            let rejected = call_rejected(&procedure);
+            let procedure_t = match transform_node(*procedure, state, depth) {
+                Ok(t) => t,
+                Err(e) => {
+                    drop_ast_node_iteratively(AstNode::Array(args));
+                    return Err(e);
+                }
+            };
+            if rejected {
+                return Err(AstTransformError::Syntax(invalid_call_message(&args)));
+            }
             let mut pending = Vec::new();
             let mut transformed_args = Vec::with_capacity(args.len());
             for a in args {
@@ -1541,9 +1645,9 @@ fn transform_children_impl(
                 pending,
             })
         }
-        // Path operators are processed by `transform_node`.
-        node @ (AstNode::Sort { .. } | AstNode::ObjectTransform { .. }) => {
-            Ok(lower_value(process_path(node, state, depth)?))
+        // `transform_node` hands every path operator to `process_path`.
+        AstNode::Sort { .. } | AstNode::ObjectTransform { .. } | AstNode::Path { .. } => {
+            unreachable!("transform_node processes path operators")
         }
         AstNode::Transform {
             location,
@@ -1604,7 +1708,7 @@ fn transform_children_impl(
 /// nothing further back, treat it as still-pending / bubble it up).
 ///
 /// `depth` is the SAME shared cycle-1+cycle-3 counter used by
-/// `transform_node`/`transform_children`/`transform_path_steps` (see the
+/// `transform_node`/`transform_children`/`process_path` (see the
 /// module doc comment) -- `walk_backward` is reached FROM live cycle-1
 /// frames, so it must never reset to a fresh counter here.
 fn walk_backward(
@@ -1864,7 +1968,7 @@ mod tests {
     fn resolve_path(expr: &str) -> Vec<PathStep> {
         let ast = crate::parser::Parser::new(expr.to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         match resolve_ancestry(ast).unwrap() {
             AstNode::Path { steps } => steps,
@@ -2028,7 +2132,7 @@ mod tests {
         // Ground truth: the sort term's `%` tags SKU (the last input step).
         let ast = crate::parser::Parser::new("Account.Order.Product.SKU^(%.Price)".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         match resolve_ancestry(ast).unwrap() {
             AstNode::Sort { input, terms } => {
@@ -2061,7 +2165,7 @@ mod tests {
             "Account.Order.Product.SKU^(%.Price, >%.%.OrderID)".to_string(),
         )
         .unwrap()
-        .parse()
+        .parse_raw()
         .unwrap();
         match resolve_ancestry(ast).unwrap() {
             AstNode::Sort { input, terms } => {
@@ -2186,7 +2290,7 @@ mod tests {
         // at the top level (no Path at all, since there's no `.`).
         let ast = crate::parser::Parser::new("Order@$o".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2207,7 +2311,7 @@ mod tests {
         // top-level Binary{FocusBind,...} that was never migrated (Bug 2).
         let ast = crate::parser::Parser::new("Account.Order@$o".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2230,7 +2334,7 @@ mod tests {
         // when reaching transform_node as the raw top-level IndexBind node.
         let ast = crate::parser::Parser::new("arr#$i".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2252,7 +2356,7 @@ mod tests {
         // of raising S0217.
         let ast = crate::parser::Parser::new("$count(%)".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let err = resolve_ancestry(ast).unwrap_err();
         assert!(err.to_string().starts_with("S0217"));
@@ -2267,7 +2371,7 @@ mod tests {
         // 2-step path whose first step's node is itself a nested 2-step Path.
         let ast = crate::parser::Parser::new("Account.Order@$o.Product".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2291,7 +2395,7 @@ mod tests {
         // Same shape as above but for `#$i` (IndexBind) instead of `@$o`.
         let ast = crate::parser::Parser::new("Account.Order#$i.Product".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2327,7 +2431,7 @@ mod tests {
         // Account object, not the Order object.
         let ast = crate::parser::Parser::new("Account.Order.%".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2360,7 +2464,7 @@ mod tests {
         // back to Order (whose input is Account).
         let ast = crate::parser::Parser::new("Account.Order.Product.%.%".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2397,7 +2501,7 @@ mod tests {
         let ast =
             crate::parser::Parser::new("Account.Order.Product.{'order': %.OrderID}".to_string())
                 .unwrap()
-                .parse()
+                .parse_raw()
                 .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2445,7 +2549,7 @@ mod tests {
                 .to_string(),
         )
         .unwrap()
-        .parse()
+        .parse_raw()
         .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2516,7 +2620,7 @@ mod tests {
         // parens weren't there.
         let ast = crate::parser::Parser::new("Account.(Order.Product).%".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2570,7 +2674,7 @@ mod tests {
         let ast =
             crate::parser::Parser::new("(Account.Order).(Product).{'x': %.OrderID}".to_string())
                 .unwrap()
-                .parse()
+                .parse_raw()
                 .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2646,7 +2750,7 @@ mod tests {
         // resolvable: % with nothing at all before it in an enclosing path).
         let ast = crate::parser::Parser::new("%.OrderID".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let err = resolve_ancestry(ast).unwrap_err();
         assert!(err.to_string().starts_with("S0217"));
@@ -2659,7 +2763,7 @@ mod tests {
         for expr in ["a.b{%.id: c}", "a.b{c: %.id}", "a.b{c: %.%.x}"] {
             let ast = crate::parser::Parser::new(expr.to_string())
                 .unwrap()
-                .parse()
+                .parse_raw()
                 .unwrap();
             match resolve_ancestry(ast).unwrap() {
                 AstNode::ObjectTransform { input, .. } => match *input {
@@ -2680,7 +2784,7 @@ mod tests {
         for expr in ["%", "[1].%", "a.b{c: (1).%}"] {
             let ast = crate::parser::Parser::new(expr.to_string())
                 .unwrap()
-                .parse()
+                .parse_raw()
                 .unwrap();
             let err = resolve_ancestry(ast).unwrap_err();
             assert_eq!(err.to_string(), format!("S0217: {S0217_MESSAGE}"), "{expr}");
@@ -2693,7 +2797,7 @@ mod tests {
         // steps, so `b` is tagged rather than raising S0217.
         let ast = crate::parser::Parser::new("(a.b{c: d}).%".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let steps = match resolve_ancestry(ast).unwrap() {
             AstNode::Path { steps } => steps,
@@ -2721,7 +2825,7 @@ mod tests {
         // don't bubble their pending to the enclosing scope.
         let ast = crate::parser::Parser::new("function(){ % }".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let result = resolve_ancestry(ast).unwrap();
         match result {
@@ -2746,7 +2850,7 @@ mod tests {
     fn test_real_parser_focus_bind_after_predicate_is_s0215() {
         let ast = crate::parser::Parser::new("Account.Order[1]@$o.Product".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         let err = resolve_ancestry(ast).unwrap_err();
         assert!(err.to_string().starts_with("S0215"), "got: {}", err);
@@ -2759,7 +2863,7 @@ mod tests {
                 .to_string(),
         )
         .unwrap()
-        .parse()
+        .parse_raw()
         .unwrap();
         let err = resolve_ancestry(ast).unwrap_err();
         assert!(err.to_string().starts_with("S0216"), "got: {}", err);
@@ -2774,7 +2878,7 @@ mod tests {
         // correctly only fires for Focus, not Index.
         let ast = crate::parser::Parser::new("Account.Order[1]#$o.Product".to_string())
             .unwrap()
-            .parse()
+            .parse_raw()
             .unwrap();
         assert!(resolve_ancestry(ast).is_ok());
     }
