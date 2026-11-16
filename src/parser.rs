@@ -870,25 +870,26 @@ impl Parser {
     /// evaluated, as in jsonata-js.
     fn call_node(lhs: AstNode, args: Vec<AstNode>) -> AstNode {
         match lhs {
-            AstNode::Path { steps }
-                if matches!(
-                    steps.as_slice(),
+            AstNode::Path { steps } => match <[PathStep; 1]>::try_from(steps) {
+                Ok(
                     [PathStep {
-                        node: AstNode::Name(_),
+                        node: AstNode::Name(name),
                         ..
-                    }]
-                ) =>
-            {
-                let name = match steps.into_iter().next().map(|step| step.node) {
-                    Some(AstNode::Name(name)) => name,
-                    _ => String::new(), // the guard above makes this a name
-                };
-                AstNode::Function {
+                    }],
+                ) => AstNode::Function {
                     name,
                     args,
                     is_builtin: false,
-                }
-            }
+                },
+                Ok([step]) => AstNode::Call {
+                    procedure: Box::new(AstNode::Path { steps: vec![step] }),
+                    args,
+                },
+                Err(steps) => AstNode::Call {
+                    procedure: Box::new(AstNode::Path { steps }),
+                    args,
+                },
+            },
             AstNode::Variable(name) => AstNode::Function {
                 name,
                 args,

@@ -4995,6 +4995,11 @@ fn test_path_transform_third_review_cases() {
         (r#"[1]($error("x"))"#, "D3137"),
         (r#"1("s"(?))"#, "T1008"),
         ("1($count(1,2))", "T0410"),
+        // A call by a bare name too.
+        (r#"b($error("x"))"#, "D3137"),
+        (r#"a.b($error("x"))"#, "D3137"),
+        (r#"x ~> b($error("x"))"#, "D3137"),
+        ("string(1)", "T1005"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);

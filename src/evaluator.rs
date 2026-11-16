@@ -8471,18 +8471,21 @@ impl Evaluator {
             }
             // Reached only for a call written WITHOUT the `$`. jsonata-js
             // separates the two cases: a name that is a builtin was almost
-            // certainly missing its sigil, and gets T1005 with the suggestion;
-            // anything else is T1006.
-            return Err(if self.is_builtin_function(name) {
-                EvaluatorError::ReferenceError(format!(
+            // certainly missing its sigil, and gets T1005 with the suggestion
+            // before the arguments are evaluated; anything else is T1006,
+            // which jsonata-js's `apply` raises after them.
+            if self.is_builtin_function(name) {
+                return Err(EvaluatorError::ReferenceError(format!(
                     "T1005: Attempted to invoke a non-function. Did you mean ${}?",
                     name
-                ))
-            } else {
-                EvaluatorError::ReferenceError(
-                    "T1006: Attempted to invoke a non-function".to_string(),
-                )
-            });
+                )));
+            }
+            for arg in args {
+                self.evaluate_internal(arg, data)?;
+            }
+            return Err(EvaluatorError::ReferenceError(
+                "T1006: Attempted to invoke a non-function".to_string(),
+            ));
         }
 
         self.evaluate_builtin_call(name, args, data)

@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking for Rust users of the AST:** `parser::Parser::parse` now returns the finished
-  tree, with ancestry resolved, as `parser::parse` does. `ast_transform::resolve_ancestry` takes
-  only the parser's raw tree, and rejects a path that didn't come from it. `BinaryOp` has the
+  tree, with ancestry resolved, as `parser::parse` does, and `ast_transform::resolve_ancestry`
+  is no longer public. `BinaryOp` has the
   raw path operators `Map`, `Filter` and `KeepArray`, and `AstTransformError` has `Syntax`, so an
   exhaustive match on either needs the new arms.
 
@@ -40,7 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve is still S0217 when a `.` follows (`(%.x).y`), where jsonata-js gives undefined; `#`
   after `[]` adds an index rather than replacing one (`x[]#$i#$j` keeps `$i`); and the members
   of an array or object constructor run in order, so the first member's error is reported,
-  where jsonata-js runs them concurrently.
+  where jsonata-js runs them concurrently. Older differences this change leaves as they were,
+  for the next stages of #219: a predicate's `%` that jsonata-js leaves on its step is resolved
+  here (`acct.(o[%.%.x].id)`, `x[%.%.o]`); a `[]` after `#` keeps a singleton array that
+  jsonata-js unwraps (`acct.o[0]#$i[].id`); and an `@` on a grouped literal (`"n"@$x{n: v}.a`).
 - **Filters on a missing step run as jsonata-js runs them**
   ([#260](https://github.com/txjmb/jsonata-core/issues/260)). jsonata-js evaluates the filters
   of a step that gives nothing against `[undefined]`. A computed index of 0 now keeps that

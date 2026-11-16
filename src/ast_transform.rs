@@ -444,12 +444,14 @@ impl Transformed {
 }
 
 /// Entry point: resolve all ancestor references in a freshly-parsed AST.
+/// Crate-private: only the parser's raw tree (`Parser::parse_raw`) can be
+/// passed in.
 ///
 /// It takes the parser's raw tree, before paths are built: `.`, `[`, `{`,
 /// `^`, `@` and `#` as raw operators, and a name as a one-step path.
 /// `Parser::parse` and `parser::parse` already call it; a tree they
 /// return can't be passed in again.
-pub fn resolve_ancestry(ast: AstNode) -> Result<AstNode, AstTransformError> {
+pub(crate) fn resolve_ancestry(ast: AstNode) -> Result<AstNode, AstTransformError> {
     let mut state = AncestryState::new();
     // Depth 0: the root of cycle 1+3's shared counter.
     let transformed = transform_node(ast, &mut state, 0)?;
@@ -723,15 +725,6 @@ impl Proc {
         self.steps.last_mut().expect("a processed node has a step")
     }
 
-    /// This node as a path, as jsonata-js's `.`, `^` and `#` make one of a
-    /// node that isn't: the node becomes its one step. A slot it still
-    /// seeks finds no step before it, so it seeks on from the path.
-    ///
-    /// Deviation from jsonata-js (kept from before #219): jsonata-js builds
-    /// the new path with an empty `seekingParent`, so the node's unresolved
-    /// slots are forgotten and evaluate to undefined (`(%.x).y`). Here they
-    /// keep seeking and end as S0217, the error the same `%` gives without
-    /// the `.y`.
     /// `#` and `^` on a bare `%` (`%#$i`, `%^(x)`): jsonata-js gives a
     /// parent node no `seekingParent` of its own (only `.` carries its
     /// slot on, and `pushAncestry` gives it to what holds it), so these
@@ -750,6 +743,15 @@ impl Proc {
         }
     }
 
+    /// This node as a path, as jsonata-js's `.`, `^` and `#` make one of a
+    /// node that isn't: the node becomes its one step. A slot it still
+    /// seeks finds no step before it, so it seeks on from the path.
+    ///
+    /// Deviation from jsonata-js (kept from before #219): jsonata-js builds
+    /// the new path with an empty `seekingParent`, so the node's unresolved
+    /// slots are forgotten and evaluate to undefined (`(%.x).y`). Here they
+    /// keep seeking and end as S0217, the error the same `%` gives without
+    /// the `.y`.
     fn make_path(&mut self) {
         if !self.is_path {
             self.is_path = true;
