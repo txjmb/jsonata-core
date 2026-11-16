@@ -50,31 +50,25 @@ This directory contains automated CI/CD workflows for jsonatapy. All workflows f
 **Required Secrets:**
 - `PYPI_API_TOKEN` - PyPI API token for publishing
 
-### 3. Benchmark (`benchmark.yml`)
-**Triggers:** PR, Push to main, Weekly schedule, Manual
-**Purpose:** Performance testing and regression detection
+### 3. Benchmarks
 
-**Features:**
-- ✅ Full benchmark suite (30+ tests)
-- ✅ Comparison with baseline (main branch)
-- ✅ Regression detection (>10% slower = fail)
-- ✅ Automatic PR comments with results
-- ✅ Performance charts generation
-- ✅ Historical results tracking
-- ✅ GitHub Pages publishing
+PR benchmarks run on the self-hosted Mac Mini, because GitHub-hosted runners vary by 15-50%
+from run to run.
 
-**Usage:**
-```bash
-# Automatically runs on PR
-# Manual run with full iterations:
-# Actions → Benchmark → Run workflow → Enable "full_benchmark"
-```
+**`benchmark-compare.yml` (PR check, Mac Mini)**
+**Triggers:** PRs from this repository touching code or benchmarks (opened, pushed, reopened,
+ready for review; drafts skipped), the `benchmark-mac` label, Manual
+- Builds the PR's base and head on the same machine and times them in alternating rounds
+- Keeps one PR comment with the latest comparison table
+- PRs from forks never run on the self-hosted runner
 
-**Outputs:**
-- JSON results files
-- Performance charts (speedup_comparison.png, category_comparison.png)
-- PR comments with benchmark summary
-- Historical data on the `benchmark-data` branch (one `results/v<version>.json` per release, plus `results/latest.json`)
+**`benchmark.yml` (main tracking, ubuntu-latest)**
+**Triggers:** Push to main, Weekly schedule, Manual
+- Full benchmark suite against jsonata-js, jsonata-rs
+- Results recorded under `results/ubuntu-latest/` on the `benchmark-data` branch
+- Manual run with full iterations: Actions → Performance Benchmarks → Run workflow → "full_benchmark"
+
+**`benchmark-manual.yml` (Mac Mini)** runs the release benchmark suite without cutting a release.
 
 ### 4. Documentation (`docs.yml`)
 **Triggers:** Push to main, Manual

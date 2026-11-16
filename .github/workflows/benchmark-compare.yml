@@ -1,23 +1,37 @@
 name: Compare Benchmarks (Mac Mini)
 
-# Same-machine A/B check of two refs on the self-hosted Mac Mini runner.
-# The PR benchmark job (benchmark.yml) compares a PR against the last `main`
-# run, which ran on a different GitHub-hosted runner, so runner speed alone
-# can move every test 15-50% in one direction. This builds both refs here
-# and times them in alternating rounds (benchmarks/python/ab_compare.py), so
-# only the code differs. It touches nothing in git.
+# The PR benchmark check: a same-machine A/B test of two refs on the
+# self-hosted Mac Mini runner. GitHub-hosted runners vary by 15-50% from run
+# to run, so comparing a PR against a `main` run from another runner flagged
+# changes on every test. This builds both refs here and times them in
+# alternating rounds (benchmarks/python/ab_compare.py), so only the code
+# differs. It touches nothing in git.
 #
-# Two ways to start it:
+# Three ways to start it:
+# - Automatically, when a PR from this repository that touches the code or
+#   the benchmarks is opened, pushed to, reopened or marked ready for review.
+#   Draft PRs are skipped until they are ready. A new push cancels the
+#   PR's run that is still going.
+# - Add the `benchmark-mac` label to a PR from this repository, to run it
+#   again or to run it on a draft. The label is removed when the run starts,
+#   so adding it again runs it again. Labels need triage access.
 # - Run it from the Actions tab with any two refs.
-# - Add the `benchmark-mac` label to a PR from this repository. It compares
-#   the PR's base and head commits, posts the table as a PR comment and
-#   removes the label, so adding it again runs it again. Labels need triage
-#   access, and PRs from forks are skipped, so outside code never runs on
-#   the self-hosted runner.
+#
+# PRs from forks never run here, whatever the trigger, so outside code never
+# executes on the self-hosted runner. The PR comment is updated in place, so
+# each PR has one comparison comment showing the latest run.
 
 on:
   pull_request:
-    types: [labeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    paths:
+      - 'src/**'
+      - 'python/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'pyproject.toml'
+      - 'benchmarks/**'
+      - '.github/workflows/benchmark-compare.yml'
   workflow_dispatch:
     inputs:
       base_ref:
@@ -40,19 +54,22 @@ permissions:
 jobs:
   compare:
     name: Compare Benchmarks (Mac Mini)
+    # The fork check covers every pull_request event, labeled or not.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.label.name == 'benchmark-mac' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       ((github.event.action == 'labeled' && github.event.label.name == 'benchmark-mac') ||
+        (github.event.action != 'labeled' && !github.event.pull_request.draft)))
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 45
-    # One comparison per PR at a time. Runs for different PRs still queue on
-    # the runner itself. A single shared group would keep only the newest
-    # pending run and cancel the others before they removed their label.
-    # At job level, so a skipped run (another label) holds no slot.
+    # One comparison per PR at a time, and a new push replaces the PR's
+    # running comparison, since only the latest head matters. Runs for
+    # different PRs still queue on the runner itself. A single shared group
+    # would keep only the newest pending run and cancel the others. At job
+    # level, so a skipped run (another label, a draft) holds no slot.
     concurrency:
       group: mac-mini-benchmark-compare-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: false
+      cancel-in-progress: true
     env:
       BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || inputs.base_ref }}
       HEAD_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || inputs.head_ref }}
@@ -82,7 +99,7 @@ jobs:
         run: uv pip install --upgrade maturin
 
       - name: Remove the trigger label
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.event.action == 'labeled'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -128,6 +145,7 @@ jobs:
           python benchmarks/python/ab_compare.py --rounds "$ROUNDS" --markdown \
             "$RUNNER_TEMP/ab/pkg-base" "$RUNNER_TEMP/ab/pkg-head" > "$RUNNER_TEMP/ab/table.md"
           {
+            echo "<!-- mac-mini-benchmark-compare -->"
             echo "## Benchmark comparison (Mac Mini)"
             echo
             echo "Base \`${base_sha:0:7}\`, head \`${head_sha:0:7}\`, measured on the same machine."
@@ -141,46 +159,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-        run: |
-          python - <<'EOF'
-          import json, os, urllib.request
-          body = open(os.path.join(os.environ["RUNNER_TEMP"], "ab", "report.md")).read()
-          url = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR']}/comments"
-          request = urllib.request.Request(
-              url,
-              data=json.dumps({"body": body}).encode(),
-              headers={
-                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
-                  "Accept": "application/vnd.github+json",
-              },
-              method="POST",
-          )
-          urllib.request.urlopen(request).read()
-          EOF
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/upsert_benchmark_comment.py" "$RUNNER_TEMP/ab/report.md"
 
-      # The label is already gone, so say on the PR that the run failed.
+      # Say on the PR that the run failed, replacing any older table, so a
+      # stale result doesn't read as the latest one.
       - name: Report a failed run on the PR
         if: failure() && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          python - <<'EOF'
-          import json, os, urllib.request
-          run = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          body = f"The Mac Mini benchmark comparison failed. See the [run log]({run}). Add the `benchmark-mac` label again to retry."
-          url = f"{os.environ['GITHUB_API_URL']}/repos/{os.environ['GITHUB_REPOSITORY']}/issues/{os.environ['PR']}/comments"
-          request = urllib.request.Request(
-              url,
-              data=json.dumps({"body": body}).encode(),
-              headers={
-                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
-                  "Accept": "application/vnd.github+json",
-              },
-              method="POST",
-          )
-          urllib.request.urlopen(request).read()
-          EOF
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          {
+            echo "<!-- mac-mini-benchmark-compare -->"
+            echo "## Benchmark comparison (Mac Mini)"
+            echo
+            echo "The comparison for \`${HEAD_REF:0:7}\` failed. See the [run log]($run). Push again or add the \`benchmark-mac\` label to retry."
+          } > "$RUNNER_TEMP/failure.md"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/upsert_benchmark_comment.py" "$RUNNER_TEMP/failure.md"
 
       - name: Clean up
         if: always()

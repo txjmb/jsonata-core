@@ -367,9 +367,9 @@ for r in results:
 
 ### Comparing two builds
 
-The PR benchmark check compares a PR against the last `main` run, which ran on a different
-GitHub-hosted runner, so every test can move 15-50% together just from runner speed.
-`python/ab_compare.py` times two builds in alternating rounds on one machine instead:
+GitHub-hosted runners vary by 15-50% from run to run, so a PR is never compared against a
+`main` run from another machine. `python/ab_compare.py` times two builds in alternating rounds
+on one machine instead:
 
 ```bash
 # Each argument is an unpacked jsonatapy wheel (the directory holding jsonatapy/)
@@ -377,9 +377,15 @@ python benchmarks/python/ab_compare.py --rounds 12 BASE_DIR HEAD_DIR
 ```
 
 The **Compare Benchmarks (Mac Mini)** workflow (`.github/workflows/benchmark-compare.yml`)
-runs the same comparison on the self-hosted Mac Mini. Run it from the Actions tab with any
-two refs, or add the `benchmark-mac` label to a PR from this repository to compare its base
-and head; the table goes to the job summary and, for a label, a PR comment.
+is the PR benchmark check. It runs this comparison on the self-hosted Mac Mini whenever a
+non-draft PR from this repository that touches the code or benchmarks is opened or pushed to,
+and keeps one PR comment with the latest table. Add the `benchmark-mac` label to run it again
+or to run it on a draft, or run it from the Actions tab with any two refs. PRs from forks never
+run on the Mac Mini, so outside code never executes there.
+
+The **Performance Benchmarks** workflow (`benchmark.yml`) no longer runs on PRs. It runs on
+pushes to `main`, weekly and on demand on a GitHub-hosted runner, comparing jsonatapy with
+jsonata-js and keeping a history on the `benchmark-data` branch.
 
 ## Contributing
 
