@@ -403,6 +403,14 @@ pub enum BinaryOp {
     // ast.rs -- see Task 4's ast_transform.rs migrate_binding_markers.
     IndexBind,
 
+    // Raw parse-time path operators, as jsonata-js's parser leaves them for
+    // `processAST`: `lhs.rhs` (Map), `lhs[rhs]` (Filter) and `lhs[]`
+    // (KeepArray, whose rhs is `Undefined`). ast_transform turns them into
+    // `Path` steps and stages; the evaluator never sees them.
+    Map,
+    Filter,
+    KeepArray,
+
     // Coalescing
     Coalesce, // ??
 

@@ -8172,6 +8172,12 @@ impl Evaluator {
                 "Index binding operator (#) must be resolved by ast_transform pass".to_string(),
             )),
 
+            BinaryOp::Map | BinaryOp::Filter | BinaryOp::KeepArray => {
+                Err(EvaluatorError::EvaluationError(
+                    "A path operator must be resolved by ast_transform pass".to_string(),
+                ))
+            }
+
             // These operators are all handled as special cases earlier in evaluate_binary_op
             BinaryOp::ColonEqual | BinaryOp::Coalesce | BinaryOp::Default | BinaryOp::ChainPipe => {
                 unreachable!()
