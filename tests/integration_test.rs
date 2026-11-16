@@ -5028,3 +5028,73 @@ fn test_path_transform_third_review_cases() {
         assert_eq!(default, "undefined", "default: {expr}");
     }
 }
+
+/// A group-by on a node that isn't a path applies inside the step, as
+/// jsonata-js evaluates it: after the node's predicates, before the step
+/// binds its focus, index or ancestor (#219). `#` and a `.` before the node
+/// make its predicates stages, applied after the group. A `%` slot left on
+/// a step that a later step follows is never resolved, so it evaluates to
+/// nothing rather than failing with S0217. Every result is jsonata-js's.
+#[test]
+fn test_group_by_on_node_that_is_not_a_path() {
+    let input = r#"{"objs":[{"p":1},{"p":2}],"a":{"b":1},"acct":{"Order":[{"id":"o1","P":[{"N":"A"},{"N":"B"}]},{"id":"o2","P":[{"N":"C"}]}]}}"#;
+    let data = JValue::from_json_str(input).unwrap();
+    let root = format!("Ok({})", data.to_json_string().unwrap());
+    let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
+    let root = root.as_str();
+    for (expr, expected) in [
+        // A focus binding binds the grouped object.
+        (r#"(objs)@$v{"k": $v.p}.$v"#, r#"Ok({})"#),
+        (r#"(objs)@$v{"k": $v.p}#$j"#, root),
+        (r#"(objs)@$v{"k": p}^(k)"#, root),
+        (
+            r#"(acct.Order.P)@$v{N: N}.$v"#,
+            r#"Ok({"A":"A","B":"B","C":"C"})"#,
+        ),
+        // Predicates come before the group, unless `#` or a `.` before the
+        // node makes them stages.
+        (r#"(objs)[false]{"k": 1}"#, r#"Ok({"k":1})"#),
+        (r#"(objs)[false]{"k": 1}#$j"#, "undefined"),
+        (r#"(objs)[0]{"k": p}#$j"#, r#"Ok({"k":[1,2]})"#),
+        (r#"(objs)[false]{"k": 1}^(k)"#, r#"Ok({"k":1})"#),
+        (r#"a.(objs)[false]{"k": 1}"#, r#"Ok({"k":1})"#),
+        (
+            r#"(acct.Order.P)[%.id = "o1"]{N: N}^(N)"#,
+            r#"Ok({"A":"A","B":"B"})"#,
+        ),
+        (r#"(acct.Order.P)[%.id = "o1"]{N: N}#$j"#, "undefined"),
+        // A slot the step keeps when another step follows it is never
+        // resolved.
+        (r#"(objs)[%.%.x]{"k": 1}#$j"#, "undefined"),
+        (r#"(objs)[%.%.x]{"k": 1}^(k)"#, r#"Ok({})"#),
+        (r#"(objs)[%.%.x].p"#, "undefined"),
+        (r#"a#$i[%.%.x]"#, "undefined"),
+        (r#"a#$i[%.%.x].b"#, "undefined"),
+        // The step binds its ancestor after the group.
+        (r#"*[%.x]{"k": 1}.%"#, root),
+        (r#"*[false]{"k": 1}.%"#, root),
+        // A `.` still seeks the slots of the step it ends on.
+        (r#"a.%[%.x]#$j"#, "S0217"),
+        (r#"a.%[%.x]#$i.b"#, "S0217"),
+        (r#"%{"k": 1}.b"#, "S0217"),
+        (r#"(objs)[%.%.x]{"k": 1}"#, "S0217"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        let expected = if expected == "undefined" {
+            undefined.as_str()
+        } else {
+            expected
+        };
+        if expected.starts_with("Ok(") {
+            assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+            assert_eq!(default, expected, "default: {expr}");
+        } else {
+            assert!(
+                tree_walker.contains(expected),
+                "tree-walker: {expr} => {tree_walker}"
+            );
+            assert!(default.contains(expected), "default: {expr} => {default}");
+        }
+    }
+}
