@@ -4323,12 +4323,25 @@ fn test_function_argument_runs_with_a_null_input() {
     }
     // A wrapped function's context parameter reads the null input: T0411,
     // as for any value of the wrong type in its place.
-    let (tree_walker, default) = eval_both_engines_on(
+    for expr in [
         r#"($h := function($f){ $f() }; $h(function($x)<s-:s>{ $x }))"#,
+        // The same through a tail call.
+        r#"($h := function($f){ $f() }; $h(function($x)<s-:s>{ $uppercase($x) }))"#,
+    ] {
+        let (tree_walker, default) = eval_both_engines_on(expr, json!("str"));
+        assert!(
+            tree_walker.contains("T0411"),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains("T0411"), "default: {expr} => {default}");
+    }
+    // A composition passed as an argument runs with the null input too.
+    let (tree_walker, default) = eval_both_engines_on(
+        r#"($h := function($f){ $f("x") }; $h($uppercase ~> function($s){ $string() }))"#,
         json!("str"),
     );
-    assert!(tree_walker.contains("T0411"), "tree-walker: {tree_walker}");
-    assert!(default.contains("T0411"), "default: {default}");
+    assert_eq!(tree_walker, r#""null""#);
+    assert_eq!(default, r#""null""#);
 }
 
 #[test]
@@ -4538,6 +4551,21 @@ fn test_call_of_bound_literal_and_filter_on_nothing() {
 // its operator's type check. Each case was checked against jsonata-js 2.2.2.
 
 #[test]
+fn test_filter_on_nothing_analysis_is_linear_in_nesting() {
+    // Deeply parenthesized predicates are analysed once per node, not once
+    // per level of nesting (which took seconds at 28 levels).
+    let depth = 200;
+    let expr = format!("arr.nope[{}x{}]", "(".repeat(depth), ")".repeat(depth));
+    let data = JValue::from_json_str(r##"{"arr":[{"a":1}]}"##).unwrap();
+    let started = std::time::Instant::now();
+    let (tree_walker, default) = eval_both_engines_with(&expr, EvaluatorOptions::default(), &data);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
+    assert_eq!(tree_walker, undefined);
+    assert_eq!(default, undefined);
+}
+
+#[test]
 fn test_filter_on_nothing_index_zero_and_raising_operators() {
     let data = JValue::from_json_str(r##"{"a":5,"arr":[{"x":1}],"s":"str"}"##).unwrap();
     for (expr, code) in [
@@ -4564,6 +4592,10 @@ fn test_filter_on_nothing_index_zero_and_raising_operators() {
         ("nope[{true:2}]", "T1003"),
         ("nope[{\"a\":1,\"a\":2}]", "D1009"),
         ("arr[x+'a']", "T2002"),
+        // A variable operand counts, compiled or not.
+        ("$map(['s'], function($v){ arr.nope[$v + 1] })", "T2001"),
+        ("$map(['s'], function($v){ arr.nope[-$v] })", "D1002"),
+        ("$map(['s'], function($v){ arr.nope[$v < 1] })", "T2009"),
         // `$eval` reports its expression's errors as D3121.
         ("nope[$eval('1+\"a\"')]", "D3121"),
         ("$eval('1+\"a\"')", "D3121"),
