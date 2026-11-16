@@ -5079,6 +5079,16 @@ fn test_group_by_on_node_that_is_not_a_path() {
             r#"acct.Order.P{"k": N}[%.id = "o1"]"#,
             r#"Ok({"k":["A","B"]})"#,
         ),
+        // A block whose tail binds nothing gives the group plain values.
+        (r#"(%)[%.x = 3]{"k": 1}.k"#, "Ok(1)"),
+        (r#"(%)@$o[%.x = 3]{"k": 1}.$o"#, r#"Ok({"k":1})"#),
+        (r#"(*)[%.%.%.x]{"k": $count($)}^(k)"#, r#"Ok({"k":0})"#),
+        (r#"(%;%)[%.%.x = 2]{"k": 1}^(k)"#, r#"Ok({"k":1})"#),
+        (r#"(%.%)[%.x]{"k": $count($)}.k"#, "Ok(0)"),
+        // `#` after predicates is an index stage: a tuple stream all the
+        // same, so an empty one groups to `{}`.
+        (r#"%[%.x]#$i{"k": 1}"#, "Ok({})"),
+        (r#"(%)[0]#$i{"k": 1}"#, "Ok({})"),
         // The step binds its ancestor after the group.
         (r#"*[%.x]{"k": 1}.%"#, root),
         (r#"*[false]{"k": 1}.%"#, root),

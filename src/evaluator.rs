@@ -7293,7 +7293,12 @@ impl Evaluator {
         match node {
             AstNode::Path { steps } if Self::is_non_path(steps) => {
                 let step = &steps[0];
-                step.index_var.is_some() || step.ancestor_label.is_some() || step.inner_tuple
+                step.index_var.is_some()
+                    || step.ancestor_label.is_some()
+                    || step.inner_tuple
+                    // `#` on a node with predicates is an index stage after
+                    // them (`%[0]#$i{...}`), still a tuple stream.
+                    || step.stages.iter().any(|stage| matches!(stage, Stage::Index(_)))
             }
             AstNode::Sort { input, .. } => Self::groups_tuple_stream(input),
             _ => Self::is_tuple_path_node(node),

@@ -30,7 +30,7 @@
 //
 // Functions are referenced by NAME throughout this file — line numbers rot.
 
-use crate::ast::{AstNode, BinaryOp, PathStep, Stage};
+use crate::ast::{AstNode, BinaryOp, PathStep, Stage, StepId};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -819,6 +819,32 @@ fn split_filters(stages: Vec<Stage>) -> (Vec<Stage>, Vec<Stage>) {
         .partition(|stage| matches!(stage, Stage::Filter(_)))
 }
 
+/// Whether evaluating `node` as a step that a `%` sought through can give
+/// a tuple stream: its tail is a path with a step that binds something.
+/// A tail made only of `%`s or a bare `*` binds nothing (jsonata-js's
+/// `seekParent` only counts levels through them).
+fn yields_tuples(mut node: &AstNode) -> bool {
+    loop {
+        node = match node {
+            AstNode::Block(exprs) => match exprs.last() {
+                Some(last) => last,
+                None => return false,
+            },
+            AstNode::FunctionApplication(inner) => inner,
+            AstNode::ObjectTransform { input, .. } => input,
+            AstNode::Path { steps } => {
+                return steps.iter().any(|step| {
+                    step.is_tuple
+                        || step.ancestor_label.is_some()
+                        || step.focus.is_some()
+                        || step.index_var.is_some()
+                })
+            }
+            _ => return false,
+        };
+    }
+}
+
 /// jsonata-js's `#` turns a node's `predicate` into its `stages`, which
 /// `evaluateTupleStep` applies after the node is evaluated, group-by and
 /// all. On a node with a group-by that moves its filters from before the
@@ -1447,35 +1473,26 @@ fn apply_group(
         // ancestor (`evaluateTupleStep`) or keeps a singleton array. So the
         // group's input is the node with its filters, and the step around
         // the group keeps the rest (#219).
-        let step = proc.steps.pop().expect("one step");
-        let PathStep {
-            node,
-            stages,
-            focus,
-            index_var,
-            ancestor_label,
-            is_tuple,
-            inner_tuple,
-            id: _,
-        } = step;
-        let (filters, rest) = split_filters(stages);
+        let step = proc.target_step();
+        let (filters, rest) = split_filters(std::mem::take(&mut step.stages));
+        step.stages = rest;
+        let node = std::mem::replace(&mut step.node, AstNode::Undefined);
         let mut inner = PathStep::with_stages(node, filters);
-        // A block whose tail a `%` resolves through gives a tuple stream,
-        // which its filters and the group read as tuples.
-        inner.inner_tuple = inner_tuple;
-        inner.is_tuple = inner_tuple && is_tuple;
-        let mut outer = PathStep::with_stages(
-            AstNode::ObjectTransform {
-                input: Box::new(step_as_node(inner)),
-                pattern: pairs,
-            },
-            rest,
-        );
-        outer.focus = focus;
-        outer.index_var = index_var;
-        outer.ancestor_label = ancestor_label;
-        outer.is_tuple = is_tuple;
-        proc.steps.push(outer);
+        // A block whose tail a `%` resolves through, at a step it tags,
+        // gives a tuple stream, which its filters and the group read as
+        // tuples. A tail that tags nothing (`(%)`, `(*)`, `(%.%)`) gives
+        // plain values, which jsonata-js groups as such.
+        if step.inner_tuple && yields_tuples(&inner.node) {
+            inner.inner_tuple = true;
+            inner.is_tuple = step.is_tuple;
+        }
+        step.inner_tuple = false;
+        step.node = AstNode::ObjectTransform {
+            input: Box::new(step_as_node(inner)),
+            pattern: pairs,
+        };
+        // A step with a new node is a new step (see `PathStep::id`).
+        step.id = StepId::default();
     }
     Ok(())
 }

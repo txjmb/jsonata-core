@@ -34,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   step follows, or put on a path's last step by a predicate, is never resolved and evaluates to
   nothing, as in jsonata-js, rather than failing with S0217 or resolving against an earlier step
   (`(objs)[%.%.x].p`, `a#$i[%.%.x]`, `a.b{"k": 1}[%.%.a]`). This removes the remaining pinned
-  path-semantics divergences.
+  path-semantics divergences. A block whose tail binds nothing (`(%)`, `(*)`, `(%.%)`) gives the
+  group plain values, and `#` after predicates on a non-path node still groups as a tuple stream
+  (`%[%.x]#$i{"k": 1}` is `{}`).
 
 - **Paths are built the way jsonata-js builds them** (stage 2 of
   [#219](https://github.com/txjmb/jsonata-core/issues/219)). The parser uses jsonata-js's binding
