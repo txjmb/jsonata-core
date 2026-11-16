@@ -1,14 +1,12 @@
 name: Performance Benchmarks
 
+# Pull requests are benchmarked on the self-hosted Mac Mini instead
+# (benchmark-compare.yml), which builds the PR and its base on one machine.
+# Cloud runners vary by 15-50% from run to run, so comparing a PR run here
+# against a main run from another runner flagged changes on every test,
+# including ones the PR never touched. This job still tracks main against
+# jsonata-js and keeps its history on the benchmark-data branch.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'benchmarks/**'
-      - '.github/workflows/benchmark.yml'
   push:
     branches: [main]
     paths:
@@ -33,7 +31,6 @@ concurrency:
 
 permissions:
   contents: write
-  pull-requests: write
   id-token: write
 
 jobs:
@@ -44,7 +41,6 @@ jobs:
 
     outputs:
       results_file: ${{ steps.run_benchmark.outputs.results_file }}
-      regression_detected: ${{ steps.compare.outputs.regression_detected }}
 
     steps:
       - name: Checkout
@@ -129,49 +125,6 @@ jobs:
           cd benchmarks
           python python/enhanced_report.py
 
-      - name: Download baseline (previous main-branch run)
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        run: |
-          mkdir -p benchmarks/baseline
-
-          # Try to download from the benchmark-data branch. Read via FETCH_HEAD,
-          # not origin/benchmark-data - a plain `git fetch` always updates
-          # FETCH_HEAD, but whether it also updates the origin/benchmark-data
-          # remote-tracking ref depends on actions/checkout's configured fetch
-          # refspec, which isn't guaranteed.
-          #
-          # Reads results/ubuntu-latest/latest.json - this job's OWN baseline,
-          # updated by this same workflow's "Record results" step below on
-          # every push to main, NOT release.yml's baseline (which moved to
-          # results/macos-arm64/ when the release benchmark job migrated to
-          # the self-hosted Mac Mini runner - comparing a ubuntu-latest PR run
-          # against a macOS-Mini release baseline would be exactly the kind of
-          # apples-to-oranges mismatch that migration was meant to eliminate).
-          git fetch origin benchmark-data
-
-          if git show FETCH_HEAD:results/ubuntu-latest/latest.json > benchmarks/baseline/baseline.json.tmp; then
-            mv benchmarks/baseline/baseline.json.tmp benchmarks/baseline/baseline.json
-            # Capture provenance for the PR comment: the recording commit's
-            # subject names the main commit these numbers were measured for
-            # ("chore: record benchmark results for <sha> (ubuntu-latest)").
-            PROV_SUBJECT=$(git log -1 --format='%s' FETCH_HEAD -- results/ubuntu-latest/latest.json)
-            PROV_DATE=$(git log -1 --format='%cs' FETCH_HEAD -- results/ubuntu-latest/latest.json)
-            PROV_COMMIT=$(echo "$PROV_SUBJECT" | sed -n 's/.*for \([0-9a-f]\{7,40\}\).*/\1/p')
-            echo "last \`main\` benchmark run (main commit \`${PROV_COMMIT:-unknown}\`, recorded ${PROV_DATE}, ubuntu-latest runner)" > benchmarks/baseline/provenance.txt
-            echo "Baseline results downloaded from benchmark-data"
-          else
-            rm -f benchmarks/baseline/baseline.json.tmp
-            echo "No baseline results found"
-          fi
-
-      - name: Compare with baseline
-        id: compare
-        if: github.event_name == 'pull_request' && hashFiles('benchmarks/baseline/baseline.json') != ''
-        run: |
-          cd benchmarks
-          python python/compare.py baseline/baseline.json "${{ steps.run_benchmark.outputs.results_file }}"
-
       - name: Upload benchmark results
         uses: actions/upload-artifact@v7
         with:
@@ -179,16 +132,13 @@ jobs:
           path: |
             benchmarks/results/*.json
             benchmarks/results/*.png
-            benchmarks/comparison.json
           retention-days: 90
 
       - name: Record results to benchmark-data
-        # Only on a real push to main, not every PR attempt (PRs only READ
-        # this baseline above, they don't write it) - keeps this workflow's
-        # own ubuntu-latest baseline current for future PR comparisons,
-        # decoupled from release.yml's baseline (which moved to
-        # results/macos-arm64/ - see the "Download baseline" step above for
-        # why these must stay separate namespaces).
+        # Only on a real push to main. Keeps a history of main's
+        # ubuntu-latest numbers, in a separate namespace from release.yml's
+        # Mac Mini baseline (results/macos-arm64/), since numbers from the
+        # two machines can't be compared with each other.
         if: github.event_name == 'push'
         run: |
           RESULTS_FILE="$(pwd)/benchmarks/${{ steps.run_benchmark.outputs.results_file }}"
@@ -215,141 +165,6 @@ jobs:
             git push origin HEAD:benchmark-data
           fi
 
-      - name: Comment on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            // steps.run_benchmark.outputs.results_file is relative to the
-            // benchmarks/ directory (that step runs after `cd benchmarks`).
-            // This step does not cd, so resolve it from the workspace root.
-            const resultsFile = path.join('benchmarks', '${{ steps.run_benchmark.outputs.results_file }}');
-            const results = JSON.parse(fs.readFileSync(resultsFile, 'utf8'));
-
-            // Calculate summary statistics
-            const jsImplemented = results.implementations.javascript || false;
-            const allResults = results.results.filter(r => r.jsonatapy_speedup !== null);
-            const fasterCount = allResults.filter(r => r.jsonatapy_speedup > 1.0).length;
-            const slowerCount = allResults.filter(r => r.jsonatapy_speedup < 1.0).length;
-            const avgSpeedup = allResults.reduce((sum, r) => sum + r.jsonatapy_speedup, 0) / allResults.length;
-
-            // Load comparison if available
-            let comparisonText = '';
-            try {
-              const comparison = JSON.parse(fs.readFileSync('benchmarks/comparison.json', 'utf8'));
-              // Baseline provenance written by the "Download baseline" step;
-              // fall back to a generic label if it's missing.
-              let provenance = 'last `main` benchmark run (see the benchmark-data branch)';
-              try {
-                provenance = fs.readFileSync('benchmarks/baseline/provenance.txt', 'utf8').trim();
-              } catch (e) { /* keep generic label */ }
-
-              comparisonText = '\n## 📊 Comparison with Baseline\n\n';
-              comparisonText += `**Baseline:** ${provenance}. This is the regression check for this PR; the vs-JavaScript numbers above compare against the jsonata-js reference implementation instead, not against this baseline.\n\n`;
-
-              if (comparison.regressions.length > 0) {
-                comparisonText += '### ⚠️ Performance Regressions (>10% slower than baseline)\n\n';
-                comparisonText += '| Test | Baseline | Current | Change |\n';
-                comparisonText += '|------|----------|---------|--------|\n';
-                for (const r of comparison.regressions) {
-                  comparisonText += `| ${r.name} | ${r.baseline_ms.toFixed(2)}ms | ${r.current_ms.toFixed(2)}ms | **${r.change_pct.toFixed(1)}%** |\n`;
-                }
-                comparisonText += '\n';
-              } else {
-                comparisonText += '✅ No regressions (>10% slower) vs baseline.\n\n';
-              }
-
-              if (comparison.improvements.length > 0) {
-                comparisonText += '### ✅ Performance Improvements (>10% faster than baseline)\n\n';
-                comparisonText += '| Test | Baseline | Current | Change |\n';
-                comparisonText += '|------|----------|---------|--------|\n';
-                for (const i of comparison.improvements) {
-                  comparisonText += `| ${i.name} | ${i.baseline_ms.toFixed(2)}ms | ${i.current_ms.toFixed(2)}ms | **${i.change_pct.toFixed(1)}%** |\n`;
-                }
-              }
-            } catch (e) {
-              // No comparison file
-            }
-
-            // Get top performers
-            const topFastest = allResults
-              .filter(r => r.jsonatapy_speedup > 1.0)
-              .sort((a, b) => b.jsonatapy_speedup - a.jsonatapy_speedup)
-              .slice(0, 5);
-
-            const topSlowest = allResults
-              .filter(r => r.jsonatapy_speedup < 1.0)
-              .sort((a, b) => a.jsonatapy_speedup - b.jsonatapy_speedup)
-              .slice(0, 5);
-
-            const body = `## ⚡ Benchmark Results
-
-            **Overall Performance:** ${avgSpeedup.toFixed(2)}x average speedup vs JavaScript
-
-            - ✅ **Faster than jsonata-js:** ${fasterCount}/${allResults.length} tests
-            - ⚠️ **Slower than jsonata-js:** ${slowerCount}/${allResults.length} tests
-
-            ${comparisonText}
-
-            ### 🏆 Top 5 Fastest Operations
-
-            | Test | Category | Speedup |
-            |------|----------|---------|
-            ${topFastest.map(r => `| ${r.name} | ${r.category} | **${r.jsonatapy_speedup.toFixed(2)}x** |`).join('\n')}
-
-            ### 🐌 Top 5 Areas for Optimization
-
-            | Test | Category | Speedup |
-            |------|----------|---------|
-            ${topSlowest.map(r => `| ${r.name} | ${r.category} | ${r.jsonatapy_speedup.toFixed(2)}x |`).join('\n')}
-
-            <details>
-            <summary>📈 View all results</summary>
-
-            | Test | Category | jsonatapy | JavaScript | Speedup |
-            |------|----------|-----------|------------|---------|
-            ${allResults.map(r =>
-              `| ${r.name} | ${r.category} | ${r.jsonatapy_ms.toFixed(2)}ms | ${r.js_ms.toFixed(2)}ms | ${r.jsonatapy_speedup.toFixed(2)}x |`
-            ).join('\n')}
-
-            </details>
-
-            ---
-            *Benchmark results are automatically posted on every PR. Charts and detailed analysis available in workflow artifacts.*`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' && comment.body.includes('Benchmark Results')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body
-              });
-            }
-
-      - name: Warn on regression
-        if: steps.compare.outputs.regression_detected == 'true'
-        run: |
-          echo "::warning::Performance regression detected (>10% slower on some tests) - see the PR comment for details. This does not fail the check: microbenchmark noise on shared CI runners can trigger false positives, so regressions are reported, not enforced, at PR time."
-
       - name: Add job summary
         if: always()
         run: |
@@ -366,7 +181,7 @@ jobs:
           ## Next Steps
 
           - Review the benchmark results in the artifacts
-          - For PRs, check the automated comment for performance comparison
+          - For PRs, see the Mac Mini comparison comment (benchmark-compare.yml)
           - Charts are available for visual analysis
 
           EOF
