@@ -24,14 +24,6 @@ name: Compare Benchmarks (Mac Mini)
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
-    paths:
-      - 'src/**'
-      - 'python/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'pyproject.toml'
-      - 'benchmarks/**'
-      - '.github/workflows/benchmark-compare.yml'
   workflow_dispatch:
     inputs:
       base_ref:
@@ -52,14 +44,47 @@ permissions:
   issues: write
 
 jobs:
+  # Decides, on a GitHub-hosted runner, whether an automatic PR run is worth
+  # the Mac Mini's time: only when the PR touches the code or the benchmarks.
+  # This isn't a `paths:` filter on the trigger, because that would also drop
+  # `benchmark-mac` label events on other PRs. A label always runs.
+  changes:
+    name: Check changed files
+    if: github.event_name == 'pull_request' && github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      relevant: ${{ steps.check.outputs.relevant }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename')
+          if printf '%s\n' "$files" | grep -qE '^(src/|python/|benchmarks/|Cargo\.toml$|Cargo\.lock$|pyproject\.toml$|\.github/workflows/benchmark-compare\.yml$|\.github/scripts/upsert_benchmark_comment\.py$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No code or benchmark changes, so the Mac Mini comparison is skipped."
+          fi
+
   compare:
     name: Compare Benchmarks (Mac Mini)
+    needs: changes
     # The fork check covers every pull_request event, labeled or not.
+    # always() lets this run when `changes` was skipped (labels, manual runs).
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-       ((github.event.action == 'labeled' && github.event.label.name == 'benchmark-mac') ||
-        (github.event.action != 'labeled' && !github.event.pull_request.draft)))
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        ((github.event.action == 'labeled' && github.event.label.name == 'benchmark-mac') ||
+         (github.event.action != 'labeled' && !github.event.pull_request.draft &&
+          needs.changes.outputs.relevant == 'true'))))
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 45
     # One comparison per PR at a time, and a new push replaces the PR's
