@@ -17,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Filters on a missing step run as jsonata-js runs them**
+  ([#260](https://github.com/txjmb/jsonata-core/issues/260)). jsonata-js evaluates the filters
+  of a step that gives nothing against `[undefined]`. A computed index of 0 now keeps that
+  undefined item, so the next filter runs: `nope[$count([])][$error('E')]` is D3137 and
+  `arr.nope[$count([])][$string(1,2,3)]` is T0410 (both were undefined). A predicate that makes
+  no call now runs there too when an operator in it can fail its type check without the context:
+  `nope[1+'a']` is T2002, `nope[-'a']` D1002, `nope['a'<1]` T2009, `nope[true<1]` T2010,
+  `nope[[1..'a']]` T2004 and `nope[$$.s+1]` T2001 (all were undefined). Predicates whose
+  operands are all paths from the context, such as `nope[price > 5]`, are still skipped and
+  still compile; one that can raise there is left to the tree-walker.
+- **`$eval` reports an error its expression raises as D3121**, with the inner message, as
+  jsonata-js does: `$eval('1+"a"')` was T2002. Only unknown functions were wrapped before. The
+  engine's own guardrails (timeout D1012, cancellation U1003, depth U1001, sequence length
+  D2015) keep their codes.
+
 ### Security
 
 - `uv.lock`: `dnspython` 2.9.0 → 2.9.2 (CVE-2026-128089) and `opentelemetry-api` 1.45.1 → 1.45.2

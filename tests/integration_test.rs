@@ -4467,6 +4467,71 @@ fn test_call_of_bound_literal_and_filter_on_nothing() {
     }
 }
 
+// ── Filters on nothing: computed index 0 and operators that raise (#260) ─────
+//
+// jsonata-js filters `[undefined]` when a step gives nothing. A computed
+// index of 0 selects that undefined item and keeps it, so the next filter
+// runs; only a numeric literal drops it. A predicate raises there without
+// making a call when an operand that has a value without the context fails
+// its operator's type check. Each case was checked against jsonata-js 2.2.2.
+
+#[test]
+fn test_filter_on_nothing_index_zero_and_raising_operators() {
+    let data = JValue::from_json_str(r##"{"a":5,"arr":[{"x":1}],"s":"str"}"##).unwrap();
+    for (expr, code) in [
+        // A computed index of 0 keeps the undefined item.
+        ("nope[$count([])][$error('E')]", "D3137"),
+        ("nope[[0]][$error('E')]", "D3137"),
+        ("nope[[1,0]][$error('E')]", "D3137"),
+        ("(nope)[$count([])][$error('E')]", "D3137"),
+        ("arr.nope[$count([])][$string(1,2,3)]", "T0410"),
+        // An operator fails its type check without a call.
+        ("nope[1+'a']", "T2002"),
+        ("nope[-'a']", "D1002"),
+        ("nope['a'<1]", "T2009"),
+        ("nope[true < 1]", "T2010"),
+        ("($v := true; nope[price < $v])", "T2010"),
+        ("nope[[1..'a']]", "T2004"),
+        ("nope[[1..1.5]]", "T2004"),
+        ("nope[$$.s+1]", "T2001"),
+        ("nope[[price]+1]", "T2001"),
+        ("arr[x+'a']", "T2002"),
+        // `$eval` reports its expression's errors as D3121.
+        ("nope[$eval('1+\"a\"')]", "D3121"),
+        ("$eval('1+\"a\"')", "D3121"),
+        ("$eval('$foo()')", "D3121"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(code),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains(code), "default: {expr} => {default}");
+    }
+    // Undefined operands raise nothing, and a filter on a field that is
+    // there is unchanged.
+    let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
+    for (expr, expected) in [
+        ("nope[price > 5]", undefined.as_str()),
+        ("nope[price + 1 > 5]", undefined.as_str()),
+        ("nope[(price > 5) + 1]", undefined.as_str()),
+        ("nope[$v > 5]", undefined.as_str()),
+        ("nope[-price]", undefined.as_str()),
+        ("nope['a' & 1]", undefined.as_str()),
+        ("nope[$$.a+1]", undefined.as_str()),
+        ("nope[[]]", undefined.as_str()),
+        ("nope[$count([1])][$error('E')]", undefined.as_str()),
+        ("arr[x > 0]", r##"Ok({"x":1})"##),
+        ("arr[$$.a > 1]", r##"Ok({"x":1})"##),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
+
 // ── No filter on nothing after a sort or a `~>` call ─────────────────────────
 //
 // jsonata-js's evaluatePath stops at a step that gives nothing, so a sort

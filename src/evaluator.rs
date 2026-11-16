@@ -1999,6 +1999,12 @@ fn try_compile_path(
         if numeric_literal(node).is_some() {
             return None;
         }
+        // A filter that can raise on a missing field runs on it in the
+        // tree-walker (`filters_run_on_nothing`); the compiled step would
+        // drop the item without running it.
+        if Evaluator::may_raise_on_nothing(node) {
+            return None;
+        }
         try_compile_expr_inner(node, allowed_vars)
     };
 
@@ -4262,6 +4268,130 @@ fn keep_singleton(result: JValue) -> JValue {
 fn keep_if_sequence(value: &mut JValue) {
     if matches!(value, JValue::Array(arr) if arr.sequence) {
         value.mark_keep_singleton();
+    }
+}
+
+/// What a predicate evaluates to with nothing (undefined) as its context,
+/// as far as the operators' type checks in jsonata-js care: a path from the
+/// context gives undefined, a literal its own kind, and anything that may
+/// hold a value regardless of the context (a variable, `$$`, the root, a
+/// call) is unknown. Feeds `binary_may_raise_on_nothing`.
+#[derive(Clone, Copy, PartialEq)]
+enum KindOnNothing {
+    Undefined,
+    Number {
+        integer: bool,
+    },
+    String,
+    /// A defined value of any other kind: boolean, null, array, object,
+    /// function, regex.
+    Other,
+    Unknown,
+}
+
+fn kind_on_nothing(node: &AstNode) -> KindOnNothing {
+    use KindOnNothing as K;
+    match node {
+        AstNode::Undefined
+        | AstNode::Name(_)
+        | AstNode::Wildcard
+        | AstNode::Descendant
+        | AstNode::Parent(_) => K::Undefined,
+        AstNode::Variable(name) if name.is_empty() => K::Undefined,
+        AstNode::Number(n) => K::Number {
+            integer: n.fract() == 0.0,
+        },
+        AstNode::String(_) => K::String,
+        AstNode::Boolean(_)
+        | AstNode::Null
+        | AstNode::Regex { .. }
+        | AstNode::Array(_)
+        | AstNode::ArrayGroup(_)
+        | AstNode::Object(_)
+        | AstNode::Lambda { .. } => K::Other,
+        // A path from the context stays undefined; one from `$$`, a
+        // variable or a constructor may not.
+        AstNode::Path { steps } => match steps.first() {
+            Some(first) if kind_on_nothing(&first.node) == K::Undefined => K::Undefined,
+            _ => K::Unknown,
+        },
+        AstNode::Unary {
+            op: crate::ast::UnaryOp::Negate,
+            operand,
+        } => match kind_on_nothing(operand) {
+            K::Undefined => K::Undefined,
+            K::Number { integer } => K::Number { integer },
+            _ => K::Unknown,
+        },
+        AstNode::Binary { op, lhs, rhs } => match op {
+            BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Modulo => match (kind_on_nothing(lhs), kind_on_nothing(rhs)) {
+                (K::Undefined, _) | (_, K::Undefined) => K::Undefined,
+                (K::Number { .. }, K::Number { .. }) => K::Number { integer: false },
+                _ => K::Unknown,
+            },
+            BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::LessThan
+            | BinaryOp::LessThanOrEqual
+            | BinaryOp::GreaterThan
+            | BinaryOp::GreaterThanOrEqual
+            | BinaryOp::And
+            | BinaryOp::Or
+            | BinaryOp::In
+            | BinaryOp::Range => K::Other,
+            BinaryOp::Concatenate => K::String,
+            _ => K::Unknown,
+        },
+        _ => K::Unknown,
+    }
+}
+
+/// Whether jsonata-js's type check for `op` can raise with nothing as the
+/// context, from what its operands give there (`kind_on_nothing`). An
+/// undefined operand never fails a check by itself, so `x[price > 5]` and
+/// `x[price + 1]` don't raise on a missing `x`, while `x[1+'a']` (T2002),
+/// `x['a'<1]` (T2009), `x[true<1]` (T2010) and `x[[1..'a']]` (T2004) do.
+/// Unknown operands count as raising.
+fn binary_may_raise_on_nothing(op: BinaryOp, lhs: &AstNode, rhs: &AstNode) -> bool {
+    use KindOnNothing as K;
+    let (l, r) = (kind_on_nothing(lhs), kind_on_nothing(rhs));
+    match op {
+        // evaluateNumericExpression: T2001/T2002 for a defined non-number.
+        BinaryOp::Add
+        | BinaryOp::Subtract
+        | BinaryOp::Multiply
+        | BinaryOp::Divide
+        | BinaryOp::Modulo => [l, r]
+            .iter()
+            .any(|k| !matches!(k, K::Undefined | K::Number { .. })),
+        // evaluateComparisonExpression: T2010 for a defined value that is
+        // neither a number nor a string, T2009 when both are defined and
+        // of different types.
+        BinaryOp::LessThan
+        | BinaryOp::LessThanOrEqual
+        | BinaryOp::GreaterThan
+        | BinaryOp::GreaterThanOrEqual => {
+            let comparable = |k: &K| matches!(k, K::Undefined | K::Number { .. } | K::String);
+            !comparable(&l)
+                || !comparable(&r)
+                || matches!(
+                    (l, r),
+                    (K::Number { .. }, K::String) | (K::String, K::Number { .. })
+                )
+        }
+        // evaluateRangeExpression: T2003/T2004 for a defined non-integer,
+        // and D2014 for a range too large, possible once both are numbers.
+        BinaryOp::Range => !matches!(
+            (l, r),
+            (K::Undefined, K::Undefined)
+                | (K::Undefined, K::Number { integer: true })
+                | (K::Number { integer: true }, K::Undefined)
+        ),
+        _ => false,
     }
 }
 
@@ -6680,10 +6810,12 @@ impl Evaluator {
             )
     }
 
-    /// False when `node` makes no call (of a function, lambda or `~>`), the
-    /// only way a filter evaluated with nothing as its context raises an
-    /// error that matters here: operators on undefined give undefined.
-    /// Unknown kinds of node count as calling.
+    /// False when `node` makes no call (of a function, lambda or `~>`) and
+    /// no operator in it can fail its type check with nothing as the
+    /// context: operators on undefined give undefined, but an operand that
+    /// has a value without the context (a literal, a variable, `$$`) can
+    /// still raise, as in `x[1+'a']` (T2002) or `x[-'a']` (D1002); see
+    /// `binary_may_raise_on_nothing`. Unknown kinds of node count as calling.
     fn may_raise_on_nothing(node: &AstNode) -> bool {
         match node {
             AstNode::String(_)
@@ -6707,10 +6839,18 @@ impl Evaluator {
             }),
             AstNode::Binary { op, lhs, rhs } => {
                 *op == BinaryOp::ChainPipe
+                    || binary_may_raise_on_nothing(*op, lhs, rhs)
                     || Self::may_raise_on_nothing(lhs)
                     || Self::may_raise_on_nothing(rhs)
             }
-            AstNode::Unary { operand, .. } => Self::may_raise_on_nothing(operand),
+            AstNode::Unary { op, operand } => {
+                (*op == crate::ast::UnaryOp::Negate
+                    && !matches!(
+                        kind_on_nothing(operand),
+                        KindOnNothing::Undefined | KindOnNothing::Number { .. }
+                    ))
+                    || Self::may_raise_on_nothing(operand)
+            }
             AstNode::Array(items) | AstNode::ArrayGroup(items) | AstNode::Block(items) => {
                 items.iter().any(Self::may_raise_on_nothing)
             }
@@ -6921,7 +7061,14 @@ impl Evaluator {
         let undefined = JValue::Undefined;
         let selector =
             self.with_dollar_bound(&undefined, |ev| ev.evaluate_internal(predicate, &undefined))?;
-        Ok(predicate_index_match(&selector, 0, 1).is_none() && self.is_truthy(&selector))
+        // A computed index selects by position: 0 picks the undefined item
+        // and keeps it, so the next filter runs (`x[$count([])][$error()]`
+        // raises in jsonata-js). Only a numeric literal drops it, and
+        // `filters_run_on_nothing` never runs those.
+        Ok(match predicate_index_match(&selector, 0, 1) {
+            Some(n) => n > 0,
+            None => self.is_truthy(&selector),
+        })
     }
 
     /// Apply a filter predicate to a value, following jsonata-js
@@ -10912,24 +11059,22 @@ impl Evaluator {
         match evaluated {
             Ok(result) => Ok(result),
             Err(e) => {
-                // D3121 is the error code for evaluation errors in $eval
-                let err_msg = e.to_string();
-                // An unknown function inside $eval is D3121, not the T100x the
-                // inner evaluation produced. Matched on the codes rather than
-                // on the prose it used to say ("Unknown function: x"), which
-                // is exactly the coupling that broke when those messages
-                // gained their JSONata codes.
-                if err_msg.starts_with("D3121")
-                    || err_msg.contains("T1005")
-                    || err_msg.contains("T1006")
-                {
-                    Err(EvaluatorError::EvaluationError(format!(
-                        "D3121: {}",
-                        err_msg
-                    )))
-                } else {
-                    Err(e)
+                // jsonata-js's `$eval` reports every error its expression
+                // raises as D3121, carrying the inner message. The engine's
+                // own guardrails (timeout D1012, cancel U1003, depth U1001,
+                // sequence length D2015) stop the whole evaluation and keep
+                // their codes; jsonata-js has no such errors to wrap.
+                if matches!(e.code(), Some("D1012" | "U1001" | "U1003" | "D2015")) {
+                    return Err(e);
                 }
+                #[cfg(feature = "python")]
+                if matches!(e, EvaluatorError::PyConversionError(_)) {
+                    return Err(e);
+                }
+                Err(EvaluatorError::EvaluationError(format!(
+                    "D3121: Dynamic error evaluating the expression passed to function eval: {}",
+                    e.message()
+                )))
             }
         }
     }
