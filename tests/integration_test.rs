@@ -5117,3 +5117,64 @@ fn test_group_by_on_node_that_is_not_a_path() {
         }
     }
 }
+
+/// A predicate whose first step gives nothing still runs that step's own
+/// filters on nothing, so an error in them is raised, as in jsonata-js and
+/// 2.2.14 (#260).
+#[test]
+fn test_nested_filter_on_missing_step_raises() {
+    let data = JValue::from_json_str(r#"{"a":[1,2,3]}"#).unwrap();
+    for (expr, code) in [
+        (r#"nope[x[$error("E")]]"#, "D3137"),
+        (r#"nope[x[1+"a"]]"#, "T2002"),
+        (r#"nope[$[1+"a"]]"#, "T2002"),
+        (r#"nope[(x)[1+"a"]]"#, "T2002"),
+        (r#"nope[%[1+"a"]]"#, "T2002"),
+        (r#"nope[x[-"a"]]"#, "D1002"),
+        (r#"nope[x[{1:2}]]"#, "T1003"),
+        (r#"nope[x[1+"a"] = 1]"#, "T2002"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(code),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains(code), "default: {expr} => {default}");
+    }
+    let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
+    for expr in ["nope[x[0]]", "nope[x[y]]"] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
+        assert_eq!(default, undefined, "default: {expr}");
+    }
+}
+
+/// `$` in an `$eval` expression is the eval's input, even inside a path
+/// step, which binds `$` to its item (#254). A D3121 carries the inner
+/// error's message without its code, as in jsonata-js.
+#[test]
+fn test_eval_input_inside_path_step() {
+    let data = JValue::from_json_str(r#"{"a":[1,2,3]}"#).unwrap();
+    for (expr, expected) in [
+        (r#"a.$eval("$", 7)"#, "Ok([7,7,7])"),
+        (r#"a.$eval("$ * 2")"#, "Ok([2,4,6])"),
+        (
+            r#"a.($h := function($f){ $f("$") }; $h($eval))"#,
+            "Ok([null,null,null])",
+        ),
+        (r#"a.($x := 5; $eval("$x + $"))"#, "Ok([6,7,8])"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+    let (tree_walker, _) =
+        eval_both_engines_with(r#"$eval('1+"a"')"#, EvaluatorOptions::default(), &data);
+    assert!(
+        tree_walker.contains("D3121: Dynamic error evaluating the expression passed to function eval: The right side"),
+        "{tree_walker}"
+    );
+}

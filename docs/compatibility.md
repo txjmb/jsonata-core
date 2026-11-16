@@ -33,6 +33,18 @@ Live frames would make every named recursive function an `Rc` reference cycle, a
 leak in a long-lived Python process. See
 [#159](https://github.com/txjmb/jsonata-core/issues/159) for the designs considered.
 
+Some path and evaluation-order shapes differ too:
+
+| Expression | jsonatapy | jsonata-js | Why |
+|---|---|---|---|
+| `x[]#$i#$j.$i` | `[0,1]` | undefined | `#` after `[]` adds an index stage rather than replacing the step's index |
+| `acct.o[0]#$i[].id` | `[1]` | `1` | a `[]` after `#` keeps a singleton array |
+| `[$string(1,2,3), "f"@$v()]` | T0410 | T1006 | constructor members run in order, so the first member's error is reported; jsonata-js runs them concurrently |
+| `a ~> $map(function($v){$v.b})[1]` | `"y"` | `["x","y"]` | a filter on the call after `~>` is applied; jsonata-js ignores it ([#286](https://github.com/txjmb/jsonata-core/issues/286)) |
+| `(%.b)[%.x]{"k":1}.k` | undefined | `1` | a block whose path starts with a `%` nothing can bind groups as tuples ([#285](https://github.com/txjmb/jsonata-core/issues/285)) |
+
+(Data for these rows: `{"x":[1,2],"acct":{"o":[{"id":1}]},"a":[{"b":"x"},{"b":"y"}]}`.)
+
 ## Current Compatibility Status
 
 ```bash

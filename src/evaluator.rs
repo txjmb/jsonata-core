@@ -4388,6 +4388,14 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
             };
             let (kind, mut raises) = analyze_on_nothing(&first.node, from_nothing);
             if kind == K::Undefined {
+                // The first step's own filters still run, on nothing, as
+                // they do for any step that gives nothing (#260):
+                // `nope[x[$error("E")]]` raises.
+                for stage in &first.stages {
+                    if let Stage::Filter(expr) = stage {
+                        raises |= analyze_on_nothing(expr, true).1;
+                    }
+                }
                 return (K::Undefined, raises);
             }
             for (i, step) in steps.iter().enumerate() {
@@ -11231,12 +11239,29 @@ impl Evaluator {
         // in a frame that looks past them, whose bindings then go to the
         // caller's frame, or nowhere when one of those frames stands for a
         // jsonata-js call frame of its own (a composition's first function).
+        //
+        // `$` in the expression is the eval's input. Where a binding of `$`
+        // is in scope (a path step binds its item), it would win over that
+        // input, so the input is bound over it while the expression runs:
+        // `a.$eval("$", 7)` is 7 for each item, as in jsonata-js.
         let (at, opaque) = self.context.frame_below_internal(from);
+        let rebind_input = self.context.lookup("$").is_some();
         let evaluated = if at == self.context.scope_stack.len() - 1 {
-            self.evaluate_internal(&parsed_ast, eval_context)
+            let previous = rebind_input.then(|| self.context.bind_top("$", eval_context.clone()));
+            let evaluated = self.evaluate_internal(&parsed_ast, eval_context);
+            if let Some(previous) = previous {
+                self.context.restore_top("$", previous);
+            }
+            evaluated
         } else {
             self.context.push_scope_at(at);
+            if rebind_input {
+                self.context.bind_top("$", eval_context.clone());
+            }
             let evaluated = self.evaluate_internal(&parsed_ast, eval_context);
+            if rebind_input {
+                self.context.unbind("$");
+            }
             if opaque {
                 self.context.pop_scope();
             } else {
@@ -11262,9 +11287,18 @@ impl Evaluator {
                 if matches!(e, EvaluatorError::PyConversionError(_)) {
                     return Err(e);
                 }
+                // The value is the inner error's message, without its code.
+                let message = e.message();
+                let message = match e.code() {
+                    Some(code) => message
+                        .strip_prefix(code)
+                        .and_then(|rest| rest.strip_prefix(": "))
+                        .unwrap_or(message),
+                    None => message,
+                };
                 Err(EvaluatorError::EvaluationError(format!(
                     "D3121: Dynamic error evaluating the expression passed to function eval: {}",
-                    e.message()
+                    message
                 )))
             }
         }
