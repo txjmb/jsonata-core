@@ -323,6 +323,9 @@ pub(crate) struct CompiledStep {
     /// Optional predicate filter (a `Stage::Filter`), applied to the value
     /// looked up in each input item, as jsonata-js applies a step's stages.
     pub filter: Option<CompiledExpr>,
+    /// The filter is run on an item without the field, for its errors, as
+    /// the tree-walker runs it (`Evaluator::filters_run_on_nothing`, #260).
+    pub run_on_nothing: bool,
 }
 
 /// Try to compile an AstNode subtree into a CompiledExpr.
@@ -2025,6 +2028,8 @@ fn try_compile_path(
                 };
                 compiled_steps.push(CompiledStep {
                     field: name.clone(),
+                    run_on_nothing: filter.is_some()
+                        && Evaluator::filters_run_on_nothing(&step.stages),
                     filter,
                 });
             }
@@ -2080,6 +2085,7 @@ fn field_chain_by_path_rules(
         .map(|field| CompiledStep {
             field: (*field).clone(),
             filter: None,
+            run_on_nothing: false,
         })
         .collect();
     compiled_eval_field_path(&steps, false, data, vars, ctx, options, start_time)
@@ -2122,7 +2128,11 @@ fn compiled_eval_field_path(
                 single => std::slice::from_ref(single),
             }
         };
-        let mut values = field_values(&step.field, items, options)?;
+        let mut values = if step.run_on_nothing {
+            field_values_of::<true>(&step.field, items, options)?
+        } else {
+            field_values(&step.field, items, options)?
+        };
         if let Some(filter) = &step.filter {
             // One shape cache for the step, from its first object: the
             // filtered values usually hold objects of one shape.
@@ -2135,7 +2145,19 @@ fn compiled_eval_field_path(
                 })
                 .and_then(build_shape_cache);
             let mut filtered = Vec::with_capacity(values.len());
+            let mut ran_on_nothing = false;
             for value in values {
+                if value.is_undefined() {
+                    // An item without the field: its one filter runs for
+                    // its errors and selects nothing (see `run_on_nothing`).
+                    // It reads nothing that differs between such items, so
+                    // once per step gives every error it can.
+                    if !ran_on_nothing {
+                        ran_on_nothing = true;
+                        eval_compiled_inner(filter, &value, vars, ctx, None, options, start_time)?;
+                    }
+                    continue;
+                }
                 let value = compiled_apply_filter(
                     filter,
                     &value,
@@ -2730,6 +2752,33 @@ fn is_hof_builtin(name: &str) -> bool {
     )
 }
 
+/// The lambda a tail call of `value` continues the trampoline with: a thunk
+/// lambda itself, or the thunk lambda an argument closure wraps (#254), which
+/// then runs with a null input (the `bool`). A wrapper is not a thunk, so
+/// without this a recursion through a function argument would nest on the
+/// native stack instead of looping.
+fn tail_call_target(value: &JValue) -> Option<(Rc<StoredLambda>, bool)> {
+    let JValue::Lambda(rc) = value else {
+        return None;
+    };
+    if rc.thunk {
+        return Some((Rc::clone(rc), false));
+    }
+    match rc.partial.as_deref() {
+        Some(PartialApplication {
+            argument_closure: true,
+            target: PartialTarget::Lambda(target),
+            ..
+        // A composition's tail call runs its f here (`tail_call_composition`)
+        // with this trampoline's input; through a wrapper it is applied
+        // as a callback instead, off the trampoline.
+        }) if target.thunk && Evaluator::composition_parts(target).is_none() => {
+            Some((Rc::clone(target), true))
+        }
+        _ => None,
+    }
+}
+
 /// The address of a function value's closure, to recognize it by.
 fn lambda_ptr(value: &JValue) -> Option<usize> {
     match value {
@@ -2747,6 +2796,10 @@ enum LambdaResult {
     TailCall {
         /// The lambda to call (shared handle; cloning is a refcount bump)
         lambda: Rc<StoredLambda>,
+        /// Called through an argument closure (#254): from here on the
+        /// trampoline's input is null, as jsonata-js's closure starts its
+        /// own `apply` with a null input.
+        null_input: bool,
         /// Arguments for the call
         args: Vec<JValue>,
         /// Data context for the call
@@ -2840,6 +2893,12 @@ pub(crate) struct PartialApplication {
     pub placeholder_positions: Vec<usize>,
     /// Argument count of the underlying call (bound + placeholders).
     pub total_args: usize,
+    /// The closure jsonata-js's `evaluateFunction` wraps a function argument
+    /// in (#254): `function(...params){ return apply(arg, params, null, env) }`.
+    /// It passes every argument through unchanged and applies the target
+    /// with a null input; nothing is bound and there are no placeholders.
+    /// See `Evaluator::wrap_function_argument`.
+    pub argument_closure: bool,
 }
 
 /// Lambda storage
@@ -4265,6 +4324,221 @@ fn keep_if_sequence(value: &mut JValue) {
     }
 }
 
+/// What a predicate evaluates to with nothing (undefined) as its context,
+/// as far as the operators' type checks in jsonata-js care: a path from the
+/// context gives undefined, a literal its own kind, and anything that may
+/// hold a value regardless of the context (a variable, `$$`, a call) is
+/// unknown. See `analyze_on_nothing`.
+#[derive(Clone, Copy, PartialEq)]
+enum KindOnNothing {
+    Undefined,
+    Number {
+        integer: bool,
+    },
+    String,
+    /// A defined value of any other kind: boolean, null, array, object,
+    /// function, regex.
+    Other,
+    Unknown,
+}
+
+/// What `node` gives with nothing as the context, and whether evaluating it
+/// there may raise, in one pass. `from_nothing` is whether a name or `$` in
+/// it reads that nothing: true for the predicate itself, false inside a later
+/// path step or a nested filter, where they read an item (`[1,"a"][$ > 1]`).
+fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, bool) {
+    use KindOnNothing as K;
+    let context = if from_nothing {
+        K::Undefined
+    } else {
+        K::Unknown
+    };
+    fn any<'a>(nodes: impl IntoIterator<Item = &'a AstNode>, from_nothing: bool) -> bool {
+        nodes
+            .into_iter()
+            .any(|n| analyze_on_nothing(n, from_nothing).1)
+    }
+    match node {
+        AstNode::Undefined => (K::Undefined, false),
+        AstNode::Name(_) | AstNode::Wildcard | AstNode::Descendant | AstNode::Parent(_) => {
+            (context, false)
+        }
+        AstNode::Variable(name) if name.is_empty() => (context, false),
+        AstNode::Variable(_) | AstNode::ParentVariable(_) => (K::Unknown, false),
+        AstNode::Number(n) => (
+            K::Number {
+                integer: n.fract() == 0.0,
+            },
+            false,
+        ),
+        AstNode::String(_) => (K::String, false),
+        AstNode::Boolean(_) | AstNode::Null | AstNode::Regex { .. } => (K::Other, false),
+        AstNode::Lambda { .. } => (K::Other, false),
+        // A path from the context stays undefined, its later steps and
+        // filters never run; one from `$$`, a variable or a constructor may
+        // go on, with each later step reading the items before it.
+        AstNode::Path { steps } => {
+            let Some(first) = steps.first() else {
+                return (K::Undefined, false);
+            };
+            let (kind, mut raises) = analyze_on_nothing(&first.node, from_nothing);
+            if kind == K::Undefined {
+                return (K::Undefined, raises);
+            }
+            for (i, step) in steps.iter().enumerate() {
+                if i > 0 {
+                    raises |= analyze_on_nothing(&step.node, false).1;
+                }
+                for stage in &step.stages {
+                    if let Stage::Filter(expr) = stage {
+                        raises |= analyze_on_nothing(expr, false).1;
+                    }
+                }
+            }
+            (K::Unknown, raises)
+        }
+        AstNode::Unary { op, operand } => {
+            let (kind, raises) = analyze_on_nothing(operand, from_nothing);
+            match op {
+                // evaluateUnary: D1002 for a defined non-number.
+                crate::ast::UnaryOp::Negate => {
+                    let fails = !matches!(kind, K::Undefined | K::Number { .. });
+                    let kind = match kind {
+                        K::Undefined | K::Number { .. } => kind,
+                        _ => K::Unknown,
+                    };
+                    (kind, raises || fails)
+                }
+                crate::ast::UnaryOp::Not => (K::Other, raises),
+            }
+        }
+        AstNode::Binary { op, lhs, rhs } => {
+            let (l, lr) = analyze_on_nothing(lhs, from_nothing);
+            let (r, rr) = analyze_on_nothing(rhs, from_nothing);
+            let raises = lr || rr;
+            match op {
+                BinaryOp::ChainPipe => (K::Unknown, true),
+                BinaryOp::Add
+                | BinaryOp::Subtract
+                | BinaryOp::Multiply
+                | BinaryOp::Divide
+                | BinaryOp::Modulo => {
+                    let kind = match (l, r) {
+                        (K::Undefined, _) | (_, K::Undefined) => K::Undefined,
+                        // Possibly not finite (`1/0`, an overflow).
+                        _ => K::Unknown,
+                    };
+                    (kind, raises || binary_may_raise_on_nothing(*op, l, r))
+                }
+                BinaryOp::LessThan
+                | BinaryOp::LessThanOrEqual
+                | BinaryOp::GreaterThan
+                | BinaryOp::GreaterThanOrEqual
+                | BinaryOp::Range => (K::Other, raises || binary_may_raise_on_nothing(*op, l, r)),
+                BinaryOp::Equal
+                | BinaryOp::NotEqual
+                | BinaryOp::And
+                | BinaryOp::Or
+                | BinaryOp::In => (K::Other, raises),
+                // `&` makes strings of its operands: D3001 for a number
+                // that isn't finite.
+                BinaryOp::Concatenate => (K::String, raises || l == K::Unknown || r == K::Unknown),
+                _ => (K::Unknown, true),
+            }
+        }
+        AstNode::Array(items) | AstNode::ArrayGroup(items) => {
+            (K::Other, any(items.iter(), from_nothing))
+        }
+        AstNode::Block(items) => match items.split_last() {
+            None => (K::Undefined, false),
+            Some((last, rest)) => {
+                let (kind, raises) = analyze_on_nothing(last, from_nothing);
+                (kind, raises || any(rest, from_nothing))
+            }
+        },
+        // evaluateGroupExpression: T1003 for a key that is defined and not a
+        // string, D1009 for a key given twice.
+        AstNode::Object(pairs) => {
+            let mut raises = false;
+            for (i, (key, value)) in pairs.iter().enumerate() {
+                let (kind, key_raises) = analyze_on_nothing(key, from_nothing);
+                raises |= key_raises || analyze_on_nothing(value, from_nothing).1;
+                raises |= !matches!(kind, K::Undefined | K::String);
+                if let AstNode::String(k) = key {
+                    raises |= pairs[..i]
+                        .iter()
+                        .any(|(earlier, _)| matches!(earlier, AstNode::String(e) if e == k));
+                }
+            }
+            (K::Other, raises)
+        }
+        AstNode::Conditional {
+            condition,
+            then_branch,
+            else_branch,
+        } => (
+            K::Unknown,
+            any(
+                std::iter::once(&**condition)
+                    .chain(std::iter::once(&**then_branch))
+                    .chain(else_branch.as_deref()),
+                from_nothing,
+            ),
+        ),
+        AstNode::Function { .. } | AstNode::Call { .. } => (K::Unknown, true),
+        // Unknown kinds of node count as calling.
+        _ => (K::Unknown, true),
+    }
+}
+
+/// Whether jsonata-js's type check for `op` can raise with nothing as the
+/// context, from what its operands give there (`analyze_on_nothing`). An
+/// undefined operand never fails a check by itself, so `x[price > 5]` and
+/// `x[price + 1]` don't raise on a missing `x`, while `x[1+'a']` (T2002),
+/// `x['a'<1]` (T2009), `x[true<1]` (T2010) and `x[[1..'a']]` (T2004) do.
+/// An unknown operand counts as raising.
+fn binary_may_raise_on_nothing(op: BinaryOp, l: KindOnNothing, r: KindOnNothing) -> bool {
+    use KindOnNothing as K;
+    match op {
+        // evaluateNumericExpression: T2001/T2002 for a defined non-number,
+        // and D1001 once both are numbers (`1/0`, an overflow).
+        BinaryOp::Add
+        | BinaryOp::Subtract
+        | BinaryOp::Multiply
+        | BinaryOp::Divide
+        | BinaryOp::Modulo => {
+            [l, r]
+                .iter()
+                .any(|k| !matches!(k, K::Undefined | K::Number { .. }))
+                || matches!((l, r), (K::Number { .. }, K::Number { .. }))
+        }
+        // evaluateComparisonExpression: T2010 for a defined value that is
+        // neither a number nor a string, T2009 when both are defined and
+        // of different types.
+        BinaryOp::LessThan
+        | BinaryOp::LessThanOrEqual
+        | BinaryOp::GreaterThan
+        | BinaryOp::GreaterThanOrEqual => {
+            let comparable = |k: &K| matches!(k, K::Undefined | K::Number { .. } | K::String);
+            !comparable(&l)
+                || !comparable(&r)
+                || matches!(
+                    (l, r),
+                    (K::Number { .. }, K::String) | (K::String, K::Number { .. })
+                )
+        }
+        // evaluateRangeExpression: T2003/T2004 for a defined non-integer,
+        // and D2014 for a range too large, possible once both are numbers.
+        BinaryOp::Range => !matches!(
+            (l, r),
+            (K::Undefined, K::Undefined)
+                | (K::Undefined, K::Number { integer: true })
+                | (K::Number { integer: true }, K::Undefined)
+        ),
+        _ => false,
+    }
+}
+
 /// The value of a numeric-literal predicate (`[2]`, `[-1]`), which selects
 /// by position; jsonata-js folds `-1` into a number literal.
 fn numeric_literal(predicate: &AstNode) -> Option<f64> {
@@ -4467,6 +4741,11 @@ pub struct Evaluator {
     /// directly (see `ApplyMode`). The function entry points take it, so it
     /// marks only that one application.
     callback_apply: ApplyMode,
+    /// Set by a function's tail call just before it is evaluated as a call:
+    /// jsonata-js's trampoline evaluates a tail call's arguments itself and
+    /// so does not wrap a function argument the way `evaluateFunction` does
+    /// (see `wrap_function_argument`). Taken by the call it marks.
+    tail_call_args: bool,
     /// Set while a builtin runs as a function's tail call: the callbacks it
     /// applies itself are applied raw (`ApplyMode::Raw`), not as callbacks.
     raw_hof: Option<RawHof>,
@@ -4561,6 +4840,7 @@ impl Evaluator {
             tuple_stream_created: false,
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
+            tail_call_args: false,
             raw_hof: None,
             tail_apply_input: None,
             options: EvaluatorOptions::default(),
@@ -4577,6 +4857,7 @@ impl Evaluator {
             tuple_stream_created: false,
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
+            tail_call_args: false,
             raw_hof: None,
             tail_apply_input: None,
             options: EvaluatorOptions::default(),
@@ -4595,6 +4876,7 @@ impl Evaluator {
             tuple_stream_created: false,
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
+            tail_call_args: false,
             raw_hof: None,
             tail_apply_input: None,
             options,
@@ -5603,7 +5885,7 @@ impl Evaluator {
                 name,
                 args,
                 is_builtin,
-            } => self.evaluate_function_call(name, args, *is_builtin, data),
+            } => self.evaluate_function_call(name, args, *is_builtin, false, data),
 
             // Call: invoke an arbitrary expression as a function
             // Used for IIFE patterns like (function($x){...})(5) or chained calls
@@ -5838,7 +6120,8 @@ impl Evaluator {
                 let mut all_args = Vec::with_capacity(args.len() + 1);
                 all_args.push(lhs.clone());
                 all_args.extend_from_slice(args);
-                let result = self.evaluate_function_call(name, &all_args, *is_builtin, data)?;
+                let result =
+                    self.evaluate_function_call(name, &all_args, *is_builtin, true, data)?;
                 return match path_steps {
                     Some(steps) => self.finish_chained_path(steps, result),
                     None => Ok(result.unwrap_sequence()),
@@ -5855,8 +6138,15 @@ impl Evaluator {
                 self.check_callable(&callable, procedure)?;
                 let mut values = Vec::with_capacity(args.len() + 1);
                 values.push(lhs_value);
+                // The other arguments are wrapped as in any call (#254).
+                let wrap = matches!(callable, JValue::Lambda(_));
                 for arg in args {
-                    values.push(self.evaluate_internal(arg, data)?);
+                    let arg = self.evaluate_internal(arg, data)?;
+                    values.push(if wrap {
+                        Self::wrap_function_argument(arg)
+                    } else {
+                        arg
+                    });
                 }
                 let result = self.call_function_value(&callable, &values, data)?;
                 return match path_steps {
@@ -5957,6 +6247,7 @@ impl Evaluator {
                 JValue::Lambda(lambda) if lambda.thunk => {
                     return Ok(LambdaResult::TailCall {
                         lambda,
+                        null_input: false,
                         args: vec![value],
                         data: data.clone(),
                     });
@@ -6663,8 +6954,9 @@ impl Evaluator {
     /// Whether a field step's filter `stages` are run on an item without
     /// the field (see `apply_filter_stages`): not when the first is a
     /// position, which selects nothing there and stops the rest (`x[0]`),
-    /// or when none calls anything (`x[$ > 5]`). Those keep the faster
-    /// lookup that drops such items, as the compiled path does.
+    /// or when none can raise there (`x[$ > 5]`): none calls anything and
+    /// no operator's type check can fail (`may_raise_on_nothing`). Those
+    /// keep the faster lookup that drops such items.
     #[inline(never)]
     fn filters_run_on_nothing(stages: &[Stage]) -> bool {
         let first_selects = stages
@@ -6680,56 +6972,14 @@ impl Evaluator {
             )
     }
 
-    /// False when `node` makes no call (of a function, lambda or `~>`), the
-    /// only way a filter evaluated with nothing as its context raises an
-    /// error that matters here: operators on undefined give undefined.
-    /// Unknown kinds of node count as calling.
+    /// False when `node` makes no call (of a function, lambda or `~>`) and
+    /// no check in it can fail with nothing as the context: operators on
+    /// undefined give undefined, but an operand that has a value without the
+    /// context (a literal, a variable, `$$`) can still raise, as in
+    /// `x[1+'a']` (T2002), `x[-'a']` (D1002) or `x[{1: 2}]` (T1003); see
+    /// `analyze_on_nothing`. Unknown kinds of node count as calling.
     fn may_raise_on_nothing(node: &AstNode) -> bool {
-        match node {
-            AstNode::String(_)
-            | AstNode::Name(_)
-            | AstNode::Number(_)
-            | AstNode::Boolean(_)
-            | AstNode::Null
-            | AstNode::Undefined
-            | AstNode::Regex { .. }
-            | AstNode::ParentVariable(_)
-            | AstNode::Parent(_)
-            | AstNode::Wildcard
-            | AstNode::Descendant
-            | AstNode::Variable(_) => false,
-            AstNode::Path { steps } => steps.iter().any(|step| {
-                Self::may_raise_on_nothing(&step.node)
-                    || step.stages.iter().any(|stage| match stage {
-                        Stage::Filter(expr) => Self::may_raise_on_nothing(expr),
-                        _ => false,
-                    })
-            }),
-            AstNode::Binary { op, lhs, rhs } => {
-                *op == BinaryOp::ChainPipe
-                    || Self::may_raise_on_nothing(lhs)
-                    || Self::may_raise_on_nothing(rhs)
-            }
-            AstNode::Unary { operand, .. } => Self::may_raise_on_nothing(operand),
-            AstNode::Array(items) | AstNode::ArrayGroup(items) | AstNode::Block(items) => {
-                items.iter().any(Self::may_raise_on_nothing)
-            }
-            AstNode::Object(pairs) => pairs.iter().any(|(key, value)| {
-                Self::may_raise_on_nothing(key) || Self::may_raise_on_nothing(value)
-            }),
-            AstNode::Conditional {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                Self::may_raise_on_nothing(condition)
-                    || Self::may_raise_on_nothing(then_branch)
-                    || else_branch
-                        .as_deref()
-                        .is_some_and(Self::may_raise_on_nothing)
-            }
-            _ => true,
-        }
+        analyze_on_nothing(node, true).1
     }
 
     /// False when evaluating `node` cannot read the `$` binding, so an
@@ -6911,9 +7161,10 @@ impl Evaluator {
     }
 
     /// Whether jsonata-js's `evaluateFilter` keeps the item of its input
-    /// `[undefined]`: a numeric literal or a numeric selector picks the
-    /// undefined item, which it drops; any other selector keeps it when
-    /// truthy. The predicate is evaluated (not a literal) for its errors.
+    /// `[undefined]`: a numeric literal drops it (and is never run here, see
+    /// `filters_run_on_nothing`); a computed index keeps it when it selects
+    /// position 0; any other selector keeps it when truthy. The predicate is
+    /// evaluated for its errors.
     fn filter_selects_undefined(&mut self, predicate: &AstNode) -> Result<bool, EvaluatorError> {
         if numeric_literal(predicate).is_some() {
             return Ok(false);
@@ -6921,7 +7172,14 @@ impl Evaluator {
         let undefined = JValue::Undefined;
         let selector =
             self.with_dollar_bound(&undefined, |ev| ev.evaluate_internal(predicate, &undefined))?;
-        Ok(predicate_index_match(&selector, 0, 1).is_none() && self.is_truthy(&selector))
+        // A computed index selects by position: 0 picks the undefined item
+        // and keeps it, so the next filter runs (`x[$count([])][$error()]`
+        // raises in jsonata-js). Only a numeric literal drops it, and
+        // `filters_run_on_nothing` never runs those.
+        Ok(match predicate_index_match(&selector, 0, 1) {
+            Some(n) => n > 0,
+            None => self.is_truthy(&selector),
+        })
     }
 
     /// Apply a filter predicate to a value, following jsonata-js
@@ -8094,13 +8352,19 @@ impl Evaluator {
     }
 
     /// Evaluate a function call
+    /// `chain_first` is set for `lhs ~> $f(args)`, whose first argument is
+    /// the left side: jsonata-js pushes that value (`applyto.context`) as it
+    /// is, without the wrapping the other function arguments get.
     fn evaluate_function_call(
         &mut self,
         name: &str,
         args: &[AstNode],
         is_builtin: bool,
+        chain_first: bool,
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        // Whether this is a function's tail call (see `tail_call_args`).
+        let tail_call = std::mem::take(&mut self.tail_call_args);
         // Check for partial application (any argument is a Placeholder)
         let has_placeholder = args.iter().any(|arg| matches!(arg, AstNode::Placeholder));
         if has_placeholder {
@@ -8116,9 +8380,15 @@ impl Evaluator {
         // function values too.
         if let Some(value) = self.context.lookup(name).cloned() {
             if value.is_function() {
+                let wrap = !tail_call && matches!(value, JValue::Lambda(_));
                 let mut evaluated_args = Vec::with_capacity(args.len());
-                for arg in args {
-                    evaluated_args.push(self.evaluate_internal(arg, data)?);
+                for (i, arg) in args.iter().enumerate() {
+                    let arg = self.evaluate_internal(arg, data)?;
+                    evaluated_args.push(if wrap && !(chain_first && i == 0) {
+                        Self::wrap_function_argument(arg)
+                    } else {
+                        arg
+                    });
                 }
                 // A composition's `$f($x)`: jsonata-js's chain function, and
                 // so that call, has a null input.
@@ -9137,8 +9407,8 @@ impl Evaluator {
                 let ptr = value.and_then(lambda_ptr);
                 let listed = in_args || ptr.is_some_and(|p| raw.fns.contains(&p));
                 // A function that came in wrapped (jsonata-js wraps one
-                // passed as an argument of a direct call) would be applied
-                // with a null input; it is not told apart yet (#254).
+                // passed as an argument of a direct call) applies itself
+                // with a null input, whatever the mode (#254).
                 match (value, ptr) {
                     _ if !listed => ApplyMode::Callback,
                     (None, _) | (Some(_), Some(_)) => ApplyMode::Raw,
@@ -9617,11 +9887,21 @@ impl Evaluator {
 
             match result {
                 LambdaResult::JValue(v) => break v,
-                LambdaResult::TailCall { lambda, args, data } => {
+                LambdaResult::TailCall {
+                    lambda,
+                    null_input,
+                    args,
+                    data,
+                } => {
                     // Continue with the tail call - no stack growth
                     current_lambda = lambda;
                     current_args = args;
                     current_data = data;
+                    if null_input {
+                        // A `-` parameter of its signature reads it too.
+                        self.tail_apply_input = Some(JValue::Null);
+                        current_data = JValue::Null;
+                    }
                 }
             }
         };
@@ -9796,13 +10076,13 @@ impl Evaluator {
                     (None, false)
                 } else {
                     match self.context.lookup(name) {
-                        Some(JValue::Lambda(rc)) if rc.thunk => (Some(Rc::clone(rc)), false),
+                        Some(value @ JValue::Lambda(_)) => (tail_call_target(value), false),
                         Some(JValue::Builtin { name: b }) => (None, &**b == "eval"),
                         None => (None, name == "eval"),
                         Some(_) => (None, false),
                     }
                 };
-                if let Some(stored_lambda) = tail_lambda {
+                if let Some((stored_lambda, null_input)) = tail_lambda {
                     let mut evaluated_args = Vec::with_capacity(args.len());
                     for arg in args {
                         evaluated_args.push(self.evaluate_internal(arg, data)?);
@@ -9814,6 +10094,7 @@ impl Evaluator {
                     }
                     return Ok(LambdaResult::TailCall {
                         lambda: stored_lambda,
+                        null_input,
                         args: evaluated_args,
                         data: data.clone(),
                     });
@@ -9901,7 +10182,12 @@ impl Evaluator {
                 {
                     self.as_raw_hof(args, &[], |ev| ev.evaluate_unwrapped_later(node, data))?
                 } else {
-                    self.evaluate_unwrapped_later(node, data)?
+                    // The trampoline evaluates a tail call's arguments, so a
+                    // function among them is not wrapped (#254).
+                    self.tail_call_args = true;
+                    let result = self.evaluate_unwrapped_later(node, data);
+                    self.tail_call_args = false;
+                    result?
                 };
                 Ok(LambdaResult::JValue(result))
             }
@@ -9918,24 +10204,22 @@ impl Evaluator {
                 let callable = self.evaluate_internal(procedure, data)?;
 
                 // Check if it's a lambda with TCO
-                if let JValue::Lambda(stored_lambda) = &callable {
-                    if stored_lambda.thunk {
-                        let stored_lambda = Rc::clone(stored_lambda);
-                        let mut evaluated_args = Vec::with_capacity(args.len());
-                        for arg in args {
-                            evaluated_args.push(self.evaluate_internal(arg, data)?);
-                        }
-                        if Self::composition_parts(&stored_lambda).is_some() {
-                            return self.with_checkpoint(|ev| {
-                                ev.tail_call_composition(stored_lambda, evaluated_args, data)
-                            });
-                        }
-                        return Ok(LambdaResult::TailCall {
-                            lambda: stored_lambda,
-                            args: evaluated_args,
-                            data: data.clone(),
+                if let Some((stored_lambda, null_input)) = tail_call_target(&callable) {
+                    let mut evaluated_args = Vec::with_capacity(args.len());
+                    for arg in args {
+                        evaluated_args.push(self.evaluate_internal(arg, data)?);
+                    }
+                    if Self::composition_parts(&stored_lambda).is_some() {
+                        return self.with_checkpoint(|ev| {
+                            ev.tail_call_composition(stored_lambda, evaluated_args, data)
                         });
                     }
+                    return Ok(LambdaResult::TailCall {
+                        lambda: stored_lambda,
+                        null_input,
+                        args: evaluated_args,
+                        data: data.clone(),
+                    });
                 }
                 // `($eval)(...)` as a tail call, as `$eval(...)` above.
                 if matches!(&callable, JValue::Builtin { name } if &**name == "eval")
@@ -9973,7 +10257,11 @@ impl Evaluator {
                             ev.call_function_value(&callable, &evaluated_args, &input)
                         }
                     } else {
-                        ev.apply_call_value(callable, procedure, args, data)
+                        // Not wrapped, as above (#254).
+                        ev.tail_call_args = true;
+                        let result = ev.apply_call_value(callable, procedure, args, data);
+                        ev.tail_call_args = false;
+                        result
                     }
                 })?;
                 Ok(LambdaResult::JValue(result))
@@ -10004,6 +10292,7 @@ impl Evaluator {
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
         if args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
+            self.tail_call_args = false;
             let target = match &callable {
                 JValue::Lambda(stored) => PartialTarget::Lambda(Rc::clone(stored)),
                 JValue::Builtin { name } => PartialTarget::Builtin(name.to_string()),
@@ -10015,10 +10304,17 @@ impl Evaluator {
             };
             return self.build_partial_application(target, args, data);
         }
+        let tail_call = std::mem::take(&mut self.tail_call_args);
         self.check_callable(&callable, procedure)?;
+        let wrap = !tail_call && matches!(callable, JValue::Lambda(_));
         let mut evaluated_args = Vec::with_capacity(args.len());
         for arg in args.iter() {
-            evaluated_args.push(self.evaluate_internal(arg, data)?);
+            let arg = self.evaluate_internal(arg, data)?;
+            evaluated_args.push(if wrap {
+                Self::wrap_function_argument(arg)
+            } else {
+                arg
+            });
         }
         self.call_function_value(&callable, &evaluated_args, data)
     }
@@ -10912,24 +11208,25 @@ impl Evaluator {
         match evaluated {
             Ok(result) => Ok(result),
             Err(e) => {
-                // D3121 is the error code for evaluation errors in $eval
-                let err_msg = e.to_string();
-                // An unknown function inside $eval is D3121, not the T100x the
-                // inner evaluation produced. Matched on the codes rather than
-                // on the prose it used to say ("Unknown function: x"), which
-                // is exactly the coupling that broke when those messages
-                // gained their JSONata codes.
-                if err_msg.starts_with("D3121")
-                    || err_msg.contains("T1005")
-                    || err_msg.contains("T1006")
-                {
-                    Err(EvaluatorError::EvaluationError(format!(
-                        "D3121: {}",
-                        err_msg
-                    )))
-                } else {
-                    Err(e)
+                // jsonata-js's `$eval` reports every error its expression
+                // raises as D3121, carrying the inner message. The engine's
+                // own guardrails (timeout D1012, cancel U1003, depth D1011
+                // and U1001, sequence length D2015) stop the whole evaluation and keep
+                // their codes; jsonata-js has no such errors to wrap.
+                if matches!(
+                    e.code(),
+                    Some("D1011" | "D1012" | "U1001" | "U1003" | "D2015")
+                ) {
+                    return Err(e);
                 }
+                #[cfg(feature = "python")]
+                if matches!(e, EvaluatorError::PyConversionError(_)) {
+                    return Err(e);
+                }
+                Err(EvaluatorError::EvaluationError(format!(
+                    "D3121: Dynamic error evaluating the expression passed to function eval: {}",
+                    e.message()
+                )))
             }
         }
     }
@@ -11567,6 +11864,7 @@ impl Evaluator {
                 bound_args,
                 placeholder_positions,
                 total_args: args.len(),
+                argument_closure: false,
             })),
             live_token: LiveLambdaToken::new(),
             // Its target is resolved already; the scope is never consulted.
@@ -11574,6 +11872,58 @@ impl Evaluator {
         };
 
         Ok(JValue::Lambda(Rc::new(stored_lambda)))
+    }
+
+    /// A function passed as an argument of a call to a function value, as
+    /// jsonata-js's `evaluateFunction` passes it: wrapped in a closure that
+    /// applies it with a null input (#254). Only a builtin the function
+    /// calls in tail position sees that input (`$eval` without a focus,
+    /// `$string()`), so the wrapper changes nothing else. It is a partial
+    /// application marked `argument_closure`, with the target's parameters
+    /// so its arity is the target's. A lambda is wrapped once: wrapping the
+    /// wrapper again would apply the same function the same way. A builtin
+    /// is wrapped only when its arity is known, so that a higher-order
+    /// function passes it as many arguments as before; any other value is
+    /// returned as it is.
+    fn wrap_function_argument(value: JValue) -> JValue {
+        let (target, params) = match &value {
+            JValue::Lambda(stored) => {
+                if stored.partial.as_ref().is_some_and(|p| p.argument_closure) {
+                    return value;
+                }
+                (
+                    PartialTarget::Lambda(Rc::clone(stored)),
+                    stored.params.clone(),
+                )
+            }
+            JValue::Builtin { name } => match crate::builtins::builtin_arity(name) {
+                Some(arity) if arity < 16 => (
+                    PartialTarget::Builtin(name.to_string()),
+                    (0..arity).map(|i| format!("__arg{i}")).collect(),
+                ),
+                _ => return value,
+            },
+            _ => return value,
+        };
+        JValue::Lambda(Rc::new(StoredLambda {
+            params,
+            body: AstNode::Null, // Inert: invocation dispatches on `partial`
+            compiled_body: None,
+            signature: None,
+            captured_env: HashMap::new(),
+            captured_data: None,
+            thunk: false,
+            self_name: None,
+            partial: Some(Rc::new(PartialApplication {
+                target,
+                bound_args: Vec::new(),
+                placeholder_positions: Vec::new(),
+                total_args: 0,
+                argument_closure: true,
+            })),
+            live_token: LiveLambdaToken::new(),
+            def_scope: DefScope::ROOT,
+        }))
     }
 
     /// Invoke a partial application: rebuild the full argument list (bound
@@ -11586,6 +11936,23 @@ impl Evaluator {
         values: &[JValue],
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        if partial.argument_closure {
+            let target = match &partial.target {
+                PartialTarget::Lambda(stored) => JValue::Lambda(Rc::clone(stored)),
+                PartialTarget::Builtin(name) => JValue::Builtin {
+                    name: Rc::from(name.as_str()),
+                },
+                // `wrap_function_argument` wraps only lambdas and builtins.
+                PartialTarget::Host(_) => {
+                    return Err(EvaluatorError::EvaluationError(
+                        "an argument closure never wraps a host function".to_string(),
+                    ))
+                }
+            };
+            // `apply(arg, params, null, environment)`: a null input, which a
+            // `-` parameter of the target's signature reads too.
+            return self.as_callback(|ev| ev.call_function_value(&target, values, &JValue::Null));
+        }
         // As in jsonata-js, a placeholder left without an argument is
         // undefined.
         let mut full_args: Vec<JValue> = vec![JValue::Undefined; partial.total_args];

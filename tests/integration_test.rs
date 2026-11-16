@@ -4265,9 +4265,84 @@ fn test_filtered_constructor_member_keeps_its_nesting() {
 //
 // A builtin that is a function's tail call gets its function arguments
 // unwrapped (jsonata-js's trampoline evaluates them directly), and applies
-// each with the input it was defined with. (A function that came in as an
-// argument of a direct call is wrapped in jsonata-js and gets a null input;
-// that is not told apart yet, #254.)
+// each with the input it was defined with. A function that came in as an
+// argument of a direct call is wrapped, and gets a null input (#254, see
+// `test_function_argument_runs_with_a_null_input`).
+
+// ── A function argument of a call runs with a null input (#254) ─────────────
+//
+// jsonata-js's `evaluateFunction` wraps each function argument of a call in a
+// closure that applies it with a null input. Only a builtin the function
+// calls in tail position reads that input (`$eval` without a focus, a `-`
+// parameter left without an argument). A tail call's arguments are evaluated
+// by the trampoline and not wrapped. Each case was checked against
+// jsonata-js 2.2.2.
+
+#[test]
+fn test_function_argument_runs_with_a_null_input() {
+    let h = r#"$h := function($f){ $f("x") }"#;
+    for (expr, expected) in [
+        // Wrapped: the tail-position builtin sees a null input.
+        (format!(r#"({h}; $h(function($e){{ $eval("a") }}))"#), "undefined"),
+        (format!(r#"({h}; $h(function($e){{ $eval("a", $nope) }}))"#), "undefined"),
+        (format!(r#"({h}; $h(function($e){{ $keys() }}))"#), "undefined"),
+        (format!(r#"({h}; $h(function($e){{ $string() }}))"#), r#""null""#),
+        (r#"($h := function($f){ $f() }; $h($string))"#.to_string(), r#""null""#),
+        (format!(r#"({h}; $g := function($e){{ $eval("a") }}; $h($g))"#), "undefined"),
+        (format!(r#"({h}; $k := $h; $k(function($e){{ $eval("a") }}))"#), "undefined"),
+        (r#"($h := function($f){ ($f)("x") }; $h(function($e){ $eval("a") }))"#.to_string(), "undefined"),
+        (r#"($h := function($f){ $f }; $h(function($e){ $eval("a") })("x"))"#.to_string(), "undefined"),
+        (r#"($h := function($f){ $map(["x"], $f) }; $h(function($e){ $eval("a") }))"#.to_string(), "undefined"),
+        (r#"($h := function($f, $g){ $f("x") }; $h(function($e){ $eval("a") }, 1))"#.to_string(), "undefined"),
+        (format!(r#"({h}; $h($h(function($e){{ function($z){{ $eval("a") }} }})))"#), "undefined"),
+        (format!(r#"({h}; $o := function(){{ [$h(function($e){{ $eval("a") }})] }}; $o())"#), "[]"),
+        // Not a tail call in the function, or not reading the input.
+        (format!(r#"({h}; $h(function($e){{ ($r := $eval("a"); $r) }}))"#), "5"),
+        (format!(r#"({h}; $h(function($e){{ a }}))"#), "5"),
+        // A tail call's arguments are not wrapped.
+        (format!(r#"({h}; $o := function(){{ $h(function($e){{ $eval("a") }}) }}; $o())"#), "5"),
+        // The wrapper keeps the function's arity and recursion.
+        (r#"($h := function($f){ $map([1,2], $f) }; $h(function($v,$i){ $i }))"#.to_string(), "[0,1]"),
+        (r#"($h := function($f){ $map([1,2], $f) }; $h($string))"#.to_string(), r#"["1","2"]"#),
+        (r#"($h := function($f){ $sort([3,1,2], $f) }; $h(function($a,$b){ $a > $b }))"#.to_string(), "[1,2,3]"),
+        (r#"($h := function($f, $n){ $n = 0 ? "done" : $f($f, $n-1) }; $h($h, 100000))"#.to_string(), r#""done""#),
+        (r#"($h := function($f, $n){ $n = 0 ? $eval("a") : $f($f, $n-1) }; $h($h, 3))"#.to_string(), "undefined"),
+        // The left side of `~>` is the call's context, not wrapped; the
+        // other arguments are.
+        (format!(r#"({h}; $g := function($e){{ $eval("a") }}; $g ~> $h())"#), "5"),
+        (r#"($h := function($f, $y){ $f("x") }; $g := function($e){ $eval("a") }; $g ~> $h(1))"#.to_string(), "5"),
+        (r#"($h := function($y, $f){ $f("x") }; 1 ~> $h(function($e){ $eval("a") }))"#.to_string(), "undefined"),
+        (
+            r#"($Y := function($f){ (function($x){ $x($x) })(function($x){ $f(function($y){ $x($x)($y) }) }) }; $fact := $Y(function($self){ function($n){ $n <= 1 ? 1 : $n * $self($n - 1) } }); $fact(10))"#.to_string(),
+            "3628800",
+        ),
+    ] {
+        let (tree_walker, default) = eval_both_engines_on(&expr, json!({"a": 5}));
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+    // A wrapped function's context parameter reads the null input: T0411,
+    // as for any value of the wrong type in its place.
+    for expr in [
+        r#"($h := function($f){ $f() }; $h(function($x)<s-:s>{ $x }))"#,
+        // The same through a tail call.
+        r#"($h := function($f){ $f() }; $h(function($x)<s-:s>{ $uppercase($x) }))"#,
+    ] {
+        let (tree_walker, default) = eval_both_engines_on(expr, json!("str"));
+        assert!(
+            tree_walker.contains("T0411"),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains("T0411"), "default: {expr} => {default}");
+    }
+    // A composition passed as an argument runs with the null input too.
+    let (tree_walker, default) = eval_both_engines_on(
+        r#"($h := function($f){ $f("x") }; $h($uppercase ~> function($s){ $string() }))"#,
+        json!("str"),
+    );
+    assert_eq!(tree_walker, r#""null""#);
+    assert_eq!(default, r#""null""#);
+}
 
 #[test]
 fn test_tail_builtin_applies_its_functions_raw() {
@@ -4465,6 +4540,137 @@ fn test_call_of_bound_literal_and_filter_on_nothing() {
         assert_eq!(tree_walker, expected, "tree-walker: {expr}");
         assert_eq!(default, expected, "default: {expr}");
     }
+}
+
+// ── Filters on nothing: computed index 0 and operators that raise (#260) ─────
+//
+// jsonata-js filters `[undefined]` when a step gives nothing. A computed
+// index of 0 selects that undefined item and keeps it, so the next filter
+// runs; only a numeric literal drops it. A predicate raises there without
+// making a call when an operand that has a value without the context fails
+// its operator's type check. Each case was checked against jsonata-js 2.2.2.
+
+#[test]
+fn test_filter_on_nothing_analysis_is_linear_in_nesting() {
+    // Deeply parenthesized predicates are analysed once per node, not once
+    // per level of nesting (which took seconds at 28 levels).
+    let depth = 200;
+    let expr = format!("arr.nope[{}x{}]", "(".repeat(depth), ")".repeat(depth));
+    let data = JValue::from_json_str(r##"{"arr":[{"a":1}]}"##).unwrap();
+    let started = std::time::Instant::now();
+    let (tree_walker, default) = eval_both_engines_with(&expr, EvaluatorOptions::default(), &data);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
+    assert_eq!(tree_walker, undefined);
+    assert_eq!(default, undefined);
+}
+
+#[test]
+fn test_filter_on_nothing_index_zero_and_raising_operators() {
+    let data = JValue::from_json_str(r##"{"a":5,"arr":[{"x":1}],"s":"str"}"##).unwrap();
+    for (expr, code) in [
+        // A computed index of 0 keeps the undefined item.
+        ("nope[$count([])][$error('E')]", "D3137"),
+        ("nope[[0]][$error('E')]", "D3137"),
+        ("nope[[1,0]][$error('E')]", "D3137"),
+        ("(nope)[$count([])][$error('E')]", "D3137"),
+        ("arr.nope[$count([])][$string(1,2,3)]", "T0410"),
+        // An operator fails its type check without a call.
+        ("nope[1+'a']", "T2002"),
+        ("nope[-'a']", "D1002"),
+        ("nope['a'<1]", "T2009"),
+        ("nope[true < 1]", "T2010"),
+        ("($v := true; nope[price < $v])", "T2010"),
+        ("nope[[1..'a']]", "T2004"),
+        ("nope[[1..1.5]]", "T2004"),
+        ("nope[$$.s+1]", "T2001"),
+        ("nope[[price]+1]", "T2001"),
+        // `$` inside a nested filter reads that filter's items.
+        ("nope[[1,\"a\"][$ > 1]]", "T2009"),
+        // An object constructor's own checks.
+        ("nope[{1:2}]", "T1003"),
+        ("nope[{true:2}]", "T1003"),
+        ("nope[{\"a\":1,\"a\":2}]", "D1009"),
+        ("arr[x+'a']", "T2002"),
+        // Two numbers can still fail: `1/0` is not finite (D1001).
+        ("nope[(1/0) + 1]", "D1001"),
+        ("arr.nope[(1/0) + 1]", "D1001"),
+        // A variable operand counts, compiled or not.
+        ("$map(['s'], function($v){ arr.nope[$v + 1] })", "T2001"),
+        ("$map(['s'], function($v){ arr.nope[-$v] })", "D1002"),
+        ("$map(['s'], function($v){ arr.nope[$v < 1] })", "T2009"),
+        // A call's result counts too, on the compiled path as well.
+        (
+            "$map(['s'], function($v){ arr.nope[$string($v) + 1] })",
+            "T2001",
+        ),
+        ("arr.nope[$count([]) < 'a']", "T2009"),
+        ("arr.nope[$string(1) + 1]", "T2001"),
+        ("$map([true], function($v){ arr.nope[x >= $v] })", "T2010"),
+        // `$eval` reports its expression's errors as D3121.
+        ("nope[$eval('1+\"a\"')]", "D3121"),
+        ("$eval('1+\"a\"')", "D3121"),
+        ("$eval('$foo()')", "D3121"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(code),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains(code), "default: {expr} => {default}");
+    }
+    // Undefined operands raise nothing, and a filter on a field that is
+    // there is unchanged.
+    let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
+    for (expr, expected) in [
+        ("nope[price > 5]", undefined.as_str()),
+        ("nope[price + 1 > 5]", undefined.as_str()),
+        ("nope[(price > 5) + 1]", undefined.as_str()),
+        ("nope[$v > 5]", undefined.as_str()),
+        ("nope[-price]", undefined.as_str()),
+        ("nope['a' & 1]", undefined.as_str()),
+        ("nope[$$.a+1]", undefined.as_str()),
+        ("nope[[]]", undefined.as_str()),
+        ("nope[$count([1])][$error('E')]", undefined.as_str()),
+        ("nope[{\"a\":1,\"b\":2}]", undefined.as_str()),
+        ("nope[{k: 1}]", undefined.as_str()),
+        ("arr[x > 0]", r##"Ok({"x":1})"##),
+        (
+            "$map([1], function($v){ arr[x >= $v] })",
+            r##"Ok({"x":1})"##,
+        ),
+        (
+            "$map([1], function($v){ arr.nope[x >= $v] })",
+            undefined.as_str(),
+        ),
+        ("arr.nope[$contains('x','A') and x > 5]", undefined.as_str()),
+        ("arr.nope[1+1]", undefined.as_str()),
+        ("nope[1+1]", undefined.as_str()),
+        ("arr[$$.a > 1]", r##"Ok({"x":1})"##),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
+
+// `$eval` keeps the codes of the engine's own guardrails rather than
+// reporting them as D3121: a depth limit set in the options is D1011.
+#[test]
+fn test_eval_keeps_guardrail_codes() {
+    let data = JValue::from_json_str("{}").unwrap();
+    let options = EvaluatorOptions {
+        max_stack_depth: Some(100),
+        ..EvaluatorOptions::default()
+    };
+    let expr = "$eval('($f := function($n){ $n = 0 ? 0 : 1 + $f($n-1) }; $f(1000))')";
+    let (tree_walker, default) = eval_both_engines_with(expr, options, &data);
+    assert!(tree_walker.contains("D1011"), "tree-walker: {tree_walker}");
+    assert!(!tree_walker.contains("D3121"), "tree-walker: {tree_walker}");
+    assert!(default.contains("D1011"), "default: {default}");
+    assert!(!default.contains("D3121"), "default: {default}");
 }
 
 // ── No filter on nothing after a sort or a `~>` call ─────────────────────────

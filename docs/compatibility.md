@@ -10,8 +10,28 @@ jsonatapy includes a comprehensive test adapter that runs the complete reference
 
 - **Total Tests**: 1686
 - **Passing**: 1686 (100%)
-- **Known divergences**: none. `KNOWN_DIVERGENCES` in `tests/python/test_reference_suite.py` is the registry; entries there are strict `xfail`, so one that starts passing fails the suite until it is removed
+- **Known divergences**: none in the suite (see [Known differences outside the reference suite](#known-differences-outside-the-reference-suite) for closure shapes it does not cover). `KNOWN_DIVERGENCES` in `tests/python/test_reference_suite.py` is the registry; entries there are strict `xfail`, so one that starts passing fails the suite until it is removed
 - **Source**: Official jsonata-js repository (v2.2.2) at `tests/jsonata-js/`
+
+### Known differences outside the reference suite
+
+These shapes appear in neither the reference suite nor the differential corpora, and are kept
+on purpose. Each is pinned in `tests/lambda_closure_suite.rs::divergent_from_reference`.
+
+A function captures the variables it uses when it is defined, by value. jsonata-js closures
+hold their defining frame by reference, so they see a variable rebound after they were made:
+
+| Expression | jsonatapy | jsonata-js |
+|---|---|---|
+| `$x := 1; $g := function(){$x}; $x := 2; $g()` | `1` | `2` |
+| `$esc := ( $f := function(){$g()}; $g := function(){"m"}; $f ); $esc()` | T1006 | `"m"` |
+| `$f := A; $g := function(){$f()}; $f := B; $g()` | `"A"` | `"B"` |
+| `$f := A; $g := function(){$f()}; $f := 42; $g()` | `"A"` | error (calls 42) |
+| a recursive `$f` aliased, then `$f` rebound, then the alias called | recurses into itself | recurses into the rebound `$f` |
+
+Live frames would make every named recursive function an `Rc` reference cycle, and so a memory
+leak in a long-lived Python process. See
+[#159](https://github.com/txjmb/jsonata-core/issues/159) for the designs considered.
 
 ## Current Compatibility Status
 

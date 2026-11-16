@@ -17,6 +17,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Filters on a missing step run as jsonata-js runs them**
+  ([#260](https://github.com/txjmb/jsonata-core/issues/260)). jsonata-js evaluates the filters
+  of a step that gives nothing against `[undefined]`. A computed index of 0 now keeps that
+  undefined item, so the next filter runs: `nope[$count([])][$error('E')]` is D3137 and
+  `arr.nope[$count([])][$string(1,2,3)]` is T0410 (both were undefined). A predicate that makes
+  no call now runs there too when an operator in it can fail its type check without the context:
+  `nope[1+'a']` is T2002, `nope[-'a']` D1002, `nope['a'<1]` T2009, `nope[true<1]` T2010,
+  `nope[[1..'a']]` T2004, `nope[$$.s+1]` T2001, `nope[{1:2}]` T1003 and
+  `nope[{"a":1,"a":2}]` D1009 (all were undefined). Predicates whose operands are all paths from
+  the context, such as `nope[price > 5]`, are still skipped. A compiled path step does the same:
+  it runs such a filter once on a missing field, so both engines agree. Such a step leaves the
+  VM's single-step shortcut for the general compiled path, with no measurable cost
+  (`items[$contains(sku,'A')]` over 300,000 items times the same as before).
+- **`$eval` reports an error its expression raises as D3121**, with the inner message, as
+  jsonata-js does: `$eval('1+"a"')` was T2002. Only unknown functions were wrapped before. The
+  engine's own guardrails (timeout D1012, cancellation U1003, depth D1011 and U1001, sequence
+  length D2015) keep their codes.
+- **A function passed as an argument of a call runs with a null input**
+  ([#254](https://github.com/txjmb/jsonata-core/issues/254)). jsonata-js wraps each function
+  argument of a call in a closure that applies it with a null input, which a builtin the function
+  calls in tail position reads: `($h := function($f){ $f("x") }; $h(function($e){ $eval("a") }))`
+  is now undefined (it was 5, the known gap noted under 2.2.12), and
+  `($h := function($f){ $f() }; $h($string))` is `"null"`. The wrapper is a partial application
+  marked as an argument closure, so the function keeps its arity, and a tail call through one
+  still runs in constant stack. A tail call's arguments and the left side of `~>` are not
+  wrapped, as in jsonata-js.
+
 ### Security
 
 - `uv.lock`: `dnspython` 2.9.0 → 2.9.2 (CVE-2026-128089) and `opentelemetry-api` 1.45.1 → 1.45.2
