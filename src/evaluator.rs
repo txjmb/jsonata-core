@@ -2846,6 +2846,12 @@ pub(crate) struct PartialApplication {
     pub placeholder_positions: Vec<usize>,
     /// Argument count of the underlying call (bound + placeholders).
     pub total_args: usize,
+    /// The closure jsonata-js's `evaluateFunction` wraps a function argument
+    /// in (#254): `function(...params){ return apply(arg, params, null, env) }`.
+    /// It passes every argument through unchanged and applies the target
+    /// with a null input; nothing is bound and there are no placeholders.
+    /// See `Evaluator::wrap_function_argument`.
+    pub argument_closure: bool,
 }
 
 /// Lambda storage
@@ -4597,6 +4603,11 @@ pub struct Evaluator {
     /// directly (see `ApplyMode`). The function entry points take it, so it
     /// marks only that one application.
     callback_apply: ApplyMode,
+    /// Set by a function's tail call just before it is evaluated as a call:
+    /// jsonata-js's trampoline evaluates a tail call's arguments itself and
+    /// so does not wrap a function argument the way `evaluateFunction` does
+    /// (see `wrap_function_argument`). Taken by the call it marks.
+    tail_call_args: bool,
     /// Set while a builtin runs as a function's tail call: the callbacks it
     /// applies itself are applied raw (`ApplyMode::Raw`), not as callbacks.
     raw_hof: Option<RawHof>,
@@ -4691,6 +4702,7 @@ impl Evaluator {
             tuple_stream_created: false,
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
+            tail_call_args: false,
             raw_hof: None,
             tail_apply_input: None,
             options: EvaluatorOptions::default(),
@@ -4707,6 +4719,7 @@ impl Evaluator {
             tuple_stream_created: false,
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
+            tail_call_args: false,
             raw_hof: None,
             tail_apply_input: None,
             options: EvaluatorOptions::default(),
@@ -4725,6 +4738,7 @@ impl Evaluator {
             tuple_stream_created: false,
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
+            tail_call_args: false,
             raw_hof: None,
             tail_apply_input: None,
             options,
@@ -8248,6 +8262,8 @@ impl Evaluator {
         is_builtin: bool,
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        // Whether this is a function's tail call (see `tail_call_args`).
+        let tail_call = std::mem::take(&mut self.tail_call_args);
         // Check for partial application (any argument is a Placeholder)
         let has_placeholder = args.iter().any(|arg| matches!(arg, AstNode::Placeholder));
         if has_placeholder {
@@ -8263,9 +8279,15 @@ impl Evaluator {
         // function values too.
         if let Some(value) = self.context.lookup(name).cloned() {
             if value.is_function() {
+                let wrap = !tail_call && matches!(value, JValue::Lambda(_));
                 let mut evaluated_args = Vec::with_capacity(args.len());
                 for arg in args {
-                    evaluated_args.push(self.evaluate_internal(arg, data)?);
+                    let arg = self.evaluate_internal(arg, data)?;
+                    evaluated_args.push(if wrap {
+                        Self::wrap_function_argument(arg)
+                    } else {
+                        arg
+                    });
                 }
                 // A composition's `$f($x)`: jsonata-js's chain function, and
                 // so that call, has a null input.
@@ -9284,8 +9306,8 @@ impl Evaluator {
                 let ptr = value.and_then(lambda_ptr);
                 let listed = in_args || ptr.is_some_and(|p| raw.fns.contains(&p));
                 // A function that came in wrapped (jsonata-js wraps one
-                // passed as an argument of a direct call) would be applied
-                // with a null input; it is not told apart yet (#254).
+                // passed as an argument of a direct call) applies itself
+                // with a null input, whatever the mode (#254).
                 match (value, ptr) {
                     _ if !listed => ApplyMode::Callback,
                     (None, _) | (Some(_), Some(_)) => ApplyMode::Raw,
@@ -10048,7 +10070,12 @@ impl Evaluator {
                 {
                     self.as_raw_hof(args, &[], |ev| ev.evaluate_unwrapped_later(node, data))?
                 } else {
-                    self.evaluate_unwrapped_later(node, data)?
+                    // The trampoline evaluates a tail call's arguments, so a
+                    // function among them is not wrapped (#254).
+                    self.tail_call_args = true;
+                    let result = self.evaluate_unwrapped_later(node, data);
+                    self.tail_call_args = false;
+                    result?
                 };
                 Ok(LambdaResult::JValue(result))
             }
@@ -10120,7 +10147,11 @@ impl Evaluator {
                             ev.call_function_value(&callable, &evaluated_args, &input)
                         }
                     } else {
-                        ev.apply_call_value(callable, procedure, args, data)
+                        // Not wrapped, as above (#254).
+                        ev.tail_call_args = true;
+                        let result = ev.apply_call_value(callable, procedure, args, data);
+                        ev.tail_call_args = false;
+                        result
                     }
                 })?;
                 Ok(LambdaResult::JValue(result))
@@ -10151,6 +10182,7 @@ impl Evaluator {
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
         if args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
+            self.tail_call_args = false;
             let target = match &callable {
                 JValue::Lambda(stored) => PartialTarget::Lambda(Rc::clone(stored)),
                 JValue::Builtin { name } => PartialTarget::Builtin(name.to_string()),
@@ -10162,10 +10194,17 @@ impl Evaluator {
             };
             return self.build_partial_application(target, args, data);
         }
+        let tail_call = std::mem::take(&mut self.tail_call_args);
         self.check_callable(&callable, procedure)?;
+        let wrap = !tail_call && matches!(callable, JValue::Lambda(_));
         let mut evaluated_args = Vec::with_capacity(args.len());
         for arg in args.iter() {
-            evaluated_args.push(self.evaluate_internal(arg, data)?);
+            let arg = self.evaluate_internal(arg, data)?;
+            evaluated_args.push(if wrap {
+                Self::wrap_function_argument(arg)
+            } else {
+                arg
+            });
         }
         self.call_function_value(&callable, &evaluated_args, data)
     }
@@ -11712,6 +11751,7 @@ impl Evaluator {
                 bound_args,
                 placeholder_positions,
                 total_args: args.len(),
+                argument_closure: false,
             })),
             live_token: LiveLambdaToken::new(),
             // Its target is resolved already; the scope is never consulted.
@@ -11719,6 +11759,58 @@ impl Evaluator {
         };
 
         Ok(JValue::Lambda(Rc::new(stored_lambda)))
+    }
+
+    /// A function passed as an argument of a call to a function value, as
+    /// jsonata-js's `evaluateFunction` passes it: wrapped in a closure that
+    /// applies it with a null input (#254). Only a builtin the function
+    /// calls in tail position sees that input (`$eval` without a focus,
+    /// `$string()`), so the wrapper changes nothing else. It is a partial
+    /// application marked `argument_closure`, with the target's parameters
+    /// so its arity is the target's. A lambda is wrapped once: wrapping the
+    /// wrapper again would apply the same function the same way. A builtin
+    /// is wrapped only when its arity is known, so that a higher-order
+    /// function passes it as many arguments as before; any other value is
+    /// returned as it is.
+    fn wrap_function_argument(value: JValue) -> JValue {
+        let (target, params) = match &value {
+            JValue::Lambda(stored) => {
+                if stored.partial.as_ref().is_some_and(|p| p.argument_closure) {
+                    return value;
+                }
+                (
+                    PartialTarget::Lambda(Rc::clone(stored)),
+                    stored.params.clone(),
+                )
+            }
+            JValue::Builtin { name } => match crate::builtins::builtin_arity(name) {
+                Some(arity) if arity < 16 => (
+                    PartialTarget::Builtin(name.to_string()),
+                    (0..arity).map(|i| format!("__arg{i}")).collect(),
+                ),
+                _ => return value,
+            },
+            _ => return value,
+        };
+        JValue::Lambda(Rc::new(StoredLambda {
+            params,
+            body: AstNode::Null, // Inert: invocation dispatches on `partial`
+            compiled_body: None,
+            signature: None,
+            captured_env: HashMap::new(),
+            captured_data: None,
+            thunk: false,
+            self_name: None,
+            partial: Some(Rc::new(PartialApplication {
+                target,
+                bound_args: Vec::new(),
+                placeholder_positions: Vec::new(),
+                total_args: 0,
+                argument_closure: true,
+            })),
+            live_token: LiveLambdaToken::new(),
+            def_scope: DefScope::ROOT,
+        }))
     }
 
     /// Invoke a partial application: rebuild the full argument list (bound
@@ -11731,6 +11823,20 @@ impl Evaluator {
         values: &[JValue],
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        if partial.argument_closure {
+            let target = match &partial.target {
+                PartialTarget::Lambda(stored) => JValue::Lambda(Rc::clone(stored)),
+                PartialTarget::Builtin(name) => JValue::Builtin {
+                    name: Rc::from(name.as_str()),
+                },
+                PartialTarget::Host(HostTarget(f)) => {
+                    let f = Rc::clone(f);
+                    let mut ctx = HostCtx::new();
+                    return f.call(values, &mut ctx);
+                }
+            };
+            return self.as_callback(|ev| ev.call_function_value(&target, values, data));
+        }
         // As in jsonata-js, a placeholder left without an argument is
         // undefined.
         let mut full_args: Vec<JValue> = vec![JValue::Undefined; partial.total_args];

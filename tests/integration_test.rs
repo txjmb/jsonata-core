@@ -4265,9 +4265,57 @@ fn test_filtered_constructor_member_keeps_its_nesting() {
 //
 // A builtin that is a function's tail call gets its function arguments
 // unwrapped (jsonata-js's trampoline evaluates them directly), and applies
-// each with the input it was defined with. (A function that came in as an
-// argument of a direct call is wrapped in jsonata-js and gets a null input;
-// that is not told apart yet, #254.)
+// each with the input it was defined with. A function that came in as an
+// argument of a direct call is wrapped, and gets a null input (#254, see
+// `test_function_argument_runs_with_a_null_input`).
+
+// ── A function argument of a call runs with a null input (#254) ─────────────
+//
+// jsonata-js's `evaluateFunction` wraps each function argument of a call in a
+// closure that applies it with a null input. Only a builtin the function
+// calls in tail position reads that input (`$eval` without a focus, a `-`
+// parameter left without an argument). A tail call's arguments are evaluated
+// by the trampoline and not wrapped. Each case was checked against
+// jsonata-js 2.2.2.
+
+#[test]
+fn test_function_argument_runs_with_a_null_input() {
+    let h = r#"$h := function($f){ $f("x") }"#;
+    for (expr, expected) in [
+        // Wrapped: the tail-position builtin sees a null input.
+        (format!(r#"({h}; $h(function($e){{ $eval("a") }}))"#), "undefined"),
+        (format!(r#"({h}; $h(function($e){{ $eval("a", $nope) }}))"#), "undefined"),
+        (format!(r#"({h}; $h(function($e){{ $keys() }}))"#), "undefined"),
+        (format!(r#"({h}; $h(function($e){{ $string() }}))"#), r#""null""#),
+        (r#"($h := function($f){ $f() }; $h($string))"#.to_string(), r#""null""#),
+        (format!(r#"({h}; $g := function($e){{ $eval("a") }}; $h($g))"#), "undefined"),
+        (format!(r#"({h}; $k := $h; $k(function($e){{ $eval("a") }}))"#), "undefined"),
+        (r#"($h := function($f){ ($f)("x") }; $h(function($e){ $eval("a") }))"#.to_string(), "undefined"),
+        (r#"($h := function($f){ $f }; $h(function($e){ $eval("a") })("x"))"#.to_string(), "undefined"),
+        (r#"($h := function($f){ $map(["x"], $f) }; $h(function($e){ $eval("a") }))"#.to_string(), "undefined"),
+        (r#"($h := function($f, $g){ $f("x") }; $h(function($e){ $eval("a") }, 1))"#.to_string(), "undefined"),
+        (format!(r#"({h}; $h($h(function($e){{ function($z){{ $eval("a") }} }})))"#), "undefined"),
+        (format!(r#"({h}; $o := function(){{ [$h(function($e){{ $eval("a") }})] }}; $o())"#), "[]"),
+        // Not a tail call in the function, or not reading the input.
+        (format!(r#"({h}; $h(function($e){{ ($r := $eval("a"); $r) }}))"#), "5"),
+        (format!(r#"({h}; $h(function($e){{ a }}))"#), "5"),
+        // A tail call's arguments are not wrapped.
+        (format!(r#"({h}; $o := function(){{ $h(function($e){{ $eval("a") }}) }}; $o())"#), "5"),
+        // The wrapper keeps the function's arity and recursion.
+        (r#"($h := function($f){ $map([1,2], $f) }; $h(function($v,$i){ $i }))"#.to_string(), "[0,1]"),
+        (r#"($h := function($f){ $map([1,2], $f) }; $h($string))"#.to_string(), r#"["1","2"]"#),
+        (r#"($h := function($f){ $sort([3,1,2], $f) }; $h(function($a,$b){ $a > $b }))"#.to_string(), "[1,2,3]"),
+        (r#"($h := function($f, $n){ $n = 0 ? "done" : $f($f, $n-1) }; $h($h, 20000))"#.to_string(), r#""done""#),
+        (
+            r#"($Y := function($f){ (function($x){ $x($x) })(function($x){ $f(function($y){ $x($x)($y) }) }) }; $fact := $Y(function($self){ function($n){ $n <= 1 ? 1 : $n * $self($n - 1) } }); $fact(10))"#.to_string(),
+            "3628800",
+        ),
+    ] {
+        let (tree_walker, default) = eval_both_engines_on(&expr, json!({"a": 5}));
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
 
 #[test]
 fn test_tail_builtin_applies_its_functions_raw() {

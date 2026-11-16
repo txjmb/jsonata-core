@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jsonata-js does: `$eval('1+"a"')` was T2002. Only unknown functions were wrapped before. The
   engine's own guardrails (timeout D1012, cancellation U1003, depth U1001, sequence length
   D2015) keep their codes.
+- **A function passed as an argument of a call runs with a null input**
+  ([#254](https://github.com/txjmb/jsonata-core/issues/254)). jsonata-js wraps each function
+  argument of a call in a closure that applies it with a null input, which a builtin the function
+  calls in tail position reads: `($h := function($f){ $f("x") }; $h(function($e){ $eval("a") }))`
+  is now undefined (it was 5, the known gap noted under 2.2.12), and
+  `($h := function($f){ $f() }; $h($string))` is `"null"`. The wrapper is a partial application
+  marked as an argument closure, so the function keeps its arity; a tail call's arguments are not
+  wrapped, as jsonata-js's trampoline evaluates them itself.
 
 ### Security
 
