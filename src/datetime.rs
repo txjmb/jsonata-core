@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::value::JValue;
-use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
 use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
@@ -49,7 +48,7 @@ fn coded(code: &'static str, message: impl Into<String>) -> DateTimeError {
 /// Supports: YYYY, YYYY-MM, YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, etc.
 pub fn parse_iso8601_partial(s: &str) -> Result<i64, DateTimeError> {
     if let Some(caps) = iso8601_regex().captures(s) {
-        let year: i32 = caps.get(1).unwrap().as_str().parse().unwrap();
+        let year: i64 = caps.get(1).unwrap().as_str().parse().unwrap();
         let month: u32 = caps.get(2).map_or(1, |m| m.as_str().parse().unwrap());
         let day: u32 = caps.get(3).map_or(1, |m| m.as_str().parse().unwrap());
         let hour: u32 = caps.get(4).map_or(0, |m| m.as_str().parse().unwrap());
@@ -85,12 +84,10 @@ pub fn parse_iso8601_partial(s: &str) -> Result<i64, DateTimeError> {
         });
 
         // Create UTC datetime
-        let naive = NaiveDate::from_ymd_opt(year, month, day)
-            .and_then(|d| d.and_hms_milli_opt(hour, minute, second, millis))
+        let utc_millis = CivilDate::from_ymd(year, month as i64, day as i64)
+            .and_then(|date| date.at_time(hour as i64, minute as i64, second as i64, millis as i64))
             .ok_or_else(|| DateTimeError::ParseError(format!("Invalid date components: {}", s)))?;
-
-        let utc_dt = Utc.from_utc_datetime(&naive);
-        let millis = utc_dt.timestamp_millis() - (tz_offset_minutes as i64 * 60 * 1000);
+        let millis = utc_millis - (tz_offset_minutes as i64 * 60 * 1000);
 
         Ok(millis)
     } else {
@@ -100,16 +97,144 @@ pub fn parse_iso8601_partial(s: &str) -> Result<i64, DateTimeError> {
     }
 }
 
-/// Format a datetime as ISO 8601 string
-/// Uses 'Z' suffix for UTC timezone (not '+00:00') to match JavaScript behavior
-pub fn format_iso8601(dt: &DateTime<Utc>) -> String {
-    use chrono::SecondsFormat;
-    dt.to_rfc3339_opts(SecondsFormat::Millis, true)
-}
-
 /// The clock as milliseconds since the Unix epoch.
 fn clock_millis() -> i64 {
-    Utc::now().timestamp_millis()
+    // `SystemTime` before the epoch is an error; its distance back is the
+    // (negative) answer.
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(after) => after.as_millis() as i64,
+        Err(before) => -(before.duration().as_millis() as i64),
+    }
+}
+
+/// The milliseconds in a day.
+const MILLIS_PER_DAY: i64 = 86_400_000;
+
+/// The furthest a JavaScript `Date` reaches either side of the epoch, in
+/// milliseconds (ECMAScript's TimeClip): 100,000,000 days.
+const MAX_DATE_MILLIS: i64 = 8_640_000_000_000_000;
+
+/// The furthest year `CivilDate::from_ymd` builds.
+const MAX_CIVIL_YEAR: i64 = 1_000_000;
+
+/// A day in the proleptic Gregorian calendar, the calendar JavaScript's `Date`
+/// uses, held as its distance in days from 1970-01-01. The conversions to and
+/// from year, month and day are Howard Hinnant's `days_from_civil` and
+/// `civil_from_days` (<https://howardhinnant.github.io/date_algorithms.html>),
+/// exact for every `i64` day this code can produce.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct CivilDate {
+    days: i64,
+}
+
+impl CivilDate {
+    /// The date `year`-`month`-`day`, or `None` if there is no such day
+    /// (month outside 1-12, day past the end of the month).
+    fn from_ymd(year: i64, month: i64, day: i64) -> Option<Self> {
+        // Past JavaScript's dates (about 275,760 years either way), with room
+        // to spare, so the arithmetic below cannot overflow.
+        if !(-MAX_CIVIL_YEAR..=MAX_CIVIL_YEAR).contains(&year)
+            || !(1..=12).contains(&month)
+            || day < 1
+            || day > days_in_month(year, month)
+        {
+            return None;
+        }
+        let y = if month <= 2 { year - 1 } else { year };
+        let era = y.div_euclid(400);
+        let year_of_era = y - era * 400;
+        let month_from_march = (month + 9) % 12;
+        let day_of_year = (153 * month_from_march + 2) / 5 + day - 1;
+        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+        Some(Self {
+            days: era * 146_097 + day_of_era - 719_468,
+        })
+    }
+
+    /// The date `millis` falls on, counting from the epoch in UTC.
+    fn from_millis(millis: i64) -> Self {
+        Self {
+            days: millis.div_euclid(MILLIS_PER_DAY),
+        }
+    }
+
+    /// (year, month 1-12, day 1-31).
+    fn ymd(self) -> (i64, i64, i64) {
+        let z = self.days + 719_468;
+        let era = z.div_euclid(146_097);
+        let day_of_era = z - era * 146_097;
+        let year_of_era =
+            (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let month_from_march = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * month_from_march + 2) / 5 + 1;
+        let month = if month_from_march < 10 {
+            month_from_march + 3
+        } else {
+            month_from_march - 9
+        };
+        let year = year_of_era + era * 400 + i64::from(month <= 2);
+        (year, month, day)
+    }
+
+    fn year(self) -> i64 {
+        self.ymd().0
+    }
+
+    /// The month, 0-11.
+    fn month0(self) -> i64 {
+        self.ymd().1 - 1
+    }
+
+    /// The day of the year, 1-366.
+    fn ordinal(self) -> i64 {
+        let start = Self::from_ymd(self.year(), 1, 1).expect("1 January exists");
+        self.days - start.days + 1
+    }
+
+    /// The day of the week, Monday 1 to Sunday 7. 1970-01-01 was a Thursday.
+    fn weekday_from_monday(self) -> i64 {
+        (self.days + 3).rem_euclid(7) + 1
+    }
+
+    fn plus_days(self, days: i64) -> Self {
+        Self {
+            days: self.days + days,
+        }
+    }
+
+    /// Milliseconds since the epoch at the given time of day on this date, or
+    /// `None` if the time is not one (hour 0-23, minute and second 0-59,
+    /// millisecond 0-999) or the result is beyond JavaScript's dates.
+    fn at_time(self, hour: i64, minute: i64, second: i64, millis: i64) -> Option<i64> {
+        if !(0..24).contains(&hour)
+            || !(0..60).contains(&minute)
+            || !(0..60).contains(&second)
+            || !(0..1000).contains(&millis)
+        {
+            return None;
+        }
+        let total = self
+            .days
+            .checked_mul(MILLIS_PER_DAY)?
+            .checked_add(((hour * 60 + minute) * 60 + second) * 1000 + millis)?;
+        (-MAX_DATE_MILLIS..=MAX_DATE_MILLIS)
+            .contains(&total)
+            .then_some(total)
+    }
+}
+
+fn is_leap_year(year: i64) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
 }
 
 thread_local! {
@@ -160,12 +285,9 @@ pub(crate) fn evaluation_millis() -> i64 {
 
 /// $now() - The evaluation's timestamp, as an ISO 8601 string
 pub fn now() -> JValue {
-    let millis = evaluation_millis();
-    let now = Utc
-        .timestamp_millis_opt(millis)
-        .single()
-        .expect("the clock is within chrono's range");
-    JValue::string(format_iso8601(&now))
+    // `$now()` is `$fromMillis()` of the timestamp, whose default picture is
+    // ISO 8601; a clock beyond JavaScript's dates is the only way it fails.
+    from_millis_with_picture(evaluation_millis(), None, None).unwrap_or(JValue::Undefined)
 }
 
 /// $millis() - The evaluation's timestamp, in milliseconds since the epoch
@@ -192,7 +314,7 @@ pub fn to_millis(timestamp: &str) -> Result<JValue, DateTimeError> {
 
 /// $toMillis(timestamp, picture) - Convert formatted timestamp to milliseconds since epoch
 pub fn to_millis_with_picture(timestamp: &str, picture: &str) -> Result<JValue, DateTimeError> {
-    match parse_date_time(timestamp, picture, Utc::now())? {
+    match parse_date_time(timestamp, picture, clock_millis())? {
         Some(millis) => Ok(JValue::Number(millis as f64)),
         None => Ok(JValue::Undefined),
     }
@@ -1074,7 +1196,7 @@ const MONTHS: [&str; 12] = [
     "December",
 ];
 
-fn next_month(year: i32, month0: u32) -> (i32, u32) {
+fn next_month(year: i64, month0: i64) -> (i64, i64) {
     if month0 == 11 {
         (year + 1, 0)
     } else {
@@ -1082,7 +1204,7 @@ fn next_month(year: i32, month0: u32) -> (i32, u32) {
     }
 }
 
-fn prev_month(year: i32, month0: u32) -> (i32, u32) {
+fn prev_month(year: i64, month0: i64) -> (i64, i64) {
     if month0 == 0 {
         (year - 1, 11)
     } else {
@@ -1092,21 +1214,21 @@ fn prev_month(year: i32, month0: u32) -> (i32, u32) {
 
 /// ISO 8601 defines the first week of the year (or, by extension, of the month) to be
 /// the week containing the first Thursday. Weeks start on Monday.
-fn start_of_first_week(year: i32, month0: u32) -> NaiveDate {
-    let first = NaiveDate::from_ymd_opt(year, month0 + 1, 1).expect("valid year/month");
-    let day_of_first = first.weekday().number_from_monday(); // Mon=1 .. Sun=7
+fn start_of_first_week(year: i64, month0: i64) -> CivilDate {
+    let first = CivilDate::from_ymd(year, month0 + 1, 1).expect("valid year/month");
+    let day_of_first = first.weekday_from_monday(); // Mon=1 .. Sun=7
     if day_of_first > 4 {
-        first + Duration::days((8 - day_of_first) as i64)
+        first.plus_days(8 - day_of_first)
     } else {
-        first - Duration::days((day_of_first - 1) as i64)
+        first.plus_days(-(day_of_first - 1))
     }
 }
 
-fn delta_weeks(start: NaiveDate, end: NaiveDate) -> f64 {
-    (end - start).num_days() as f64 / 7.0 + 1.0
+fn delta_weeks(start: CivilDate, end: CivilDate) -> f64 {
+    (end.days - start.days) as f64 / 7.0 + 1.0
 }
 
-fn week_in_year(date: NaiveDate) -> i64 {
+fn week_in_year(date: CivilDate) -> i64 {
     let year = date.year();
     let start_of_week1 = start_of_first_week(year, 0);
     let mut week = delta_weeks(start_of_week1, date);
@@ -1122,7 +1244,7 @@ fn week_in_year(date: NaiveDate) -> i64 {
     week.floor() as i64
 }
 
-fn week_in_month(date: NaiveDate) -> i64 {
+fn week_in_month(date: CivilDate) -> i64 {
     let year = date.year();
     let month0 = date.month0();
     let start_of_week1 = start_of_first_week(year, month0);
@@ -1143,7 +1265,7 @@ fn week_in_month(date: NaiveDate) -> i64 {
 
 /// Extension: ISO week-numbering year -- the year associated with the ISO week (e.g.
 /// Sat 1 Jan 2005 is in the 53rd week of 2004).
-fn iso_week_year(date: NaiveDate) -> i64 {
+fn iso_week_year(date: CivilDate) -> i64 {
     let year = date.year();
     let start_of_iso_year = start_of_first_week(year, 0);
     let end_of_iso_year = start_of_first_week(year + 1, 0);
@@ -1159,7 +1281,7 @@ fn iso_week_year(date: NaiveDate) -> i64 {
 /// Extension: the "week-numbering" month, i.e. the month associated with the
 /// week-of-the-month (e.g. Sat 1 Jan 2005 is in the 5th week of December 2004).
 /// Returns a 1-indexed month number.
-fn iso_week_month(date: NaiveDate) -> i64 {
+fn iso_week_month(date: CivilDate) -> i64 {
     let year = date.year();
     let month0 = date.month0();
     let start_of_iso_month = start_of_first_week(year, month0);
@@ -1178,37 +1300,39 @@ fn iso_week_month(date: NaiveDate) -> i64 {
 /// Extracts a single date/time component's raw numeric value (day/week/hour/etc). `P`
 /// (am/pm) is returned as 0/1; `C`/`E` (calendar/era, always "ISO") and `Z`/`z`
 /// (timezone, formatted separately from the offset) are not meaningful here and return 0.
-fn get_date_time_fragment(dt: &DateTime<Utc>, component: char) -> i64 {
-    let date = dt.date_naive();
+fn get_date_time_fragment(millis: i64, component: char) -> i64 {
+    let date = CivilDate::from_millis(millis);
+    let time_of_day = millis.rem_euclid(MILLIS_PER_DAY);
+    let hour = time_of_day / 3_600_000;
     match component {
-        'Y' => date.year() as i64,
-        'M' => date.month() as i64,
-        'D' => date.day() as i64,
-        'd' => date.ordinal() as i64,
-        'F' => date.weekday().number_from_monday() as i64,
+        'Y' => date.year(),
+        'M' => date.month0() + 1,
+        'D' => date.ymd().2,
+        'd' => date.ordinal(),
+        'F' => date.weekday_from_monday(),
         'W' => week_in_year(date),
         'w' => week_in_month(date),
         'X' => iso_week_year(date),
         'x' => iso_week_month(date),
-        'H' => dt.hour() as i64,
+        'H' => hour,
         'h' => {
-            let h = dt.hour() % 12;
+            let h = hour % 12;
             if h == 0 {
                 12
             } else {
-                h as i64
+                h
             }
         }
         'P' => {
-            if dt.hour() >= 12 {
+            if hour >= 12 {
                 1
             } else {
                 0
             }
         }
-        'm' => dt.minute() as i64,
-        's' => dt.second() as i64,
-        'f' => dt.timestamp_subsec_millis() as i64,
+        'm' => time_of_day / 60_000 % 60,
+        's' => time_of_day / 1000 % 60,
+        'f' => time_of_day % 1000,
         _ => 0,
     }
 }
@@ -1267,7 +1391,7 @@ fn format_timezone_component(
 }
 
 fn format_component(
-    dt: &DateTime<Utc>,
+    dt: i64,
     offset_hours: i64,
     offset_minutes: i64,
     marker: &MarkerSpec,
@@ -1389,17 +1513,19 @@ fn format_date_time(
 
     let offset_millis = (60 * offset_hours + offset_minutes) * 60 * 1000;
     let shifted = millis + offset_millis;
-    let dt = Utc
-        .timestamp_millis_opt(shifted)
-        .single()
-        .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {millis}")))?;
+    if !(-MAX_DATE_MILLIS..=MAX_DATE_MILLIS).contains(&shifted) {
+        return Err(DateTimeError::FormatError(format!(
+            "Invalid timestamp: {millis}"
+        )));
+    }
+    let dt = shifted;
 
     let mut result = String::new();
     for item in spec {
         match item {
             PictureItem::Literal(s) => result.push_str(s),
             PictureItem::Marker(m) => {
-                result.push_str(&format_component(&dt, offset_hours, offset_minutes, m)?);
+                result.push_str(&format_component(dt, offset_hours, offset_minutes, m)?);
             }
         }
     }
@@ -1699,11 +1825,7 @@ fn parse_component_value(
 /// Parses a string containing a timestamp as specified by a date/time picture string
 /// (mirrors datetime.js's `parseDateTime`). Returns `Ok(None)` (meaning "undefined") if
 /// the timestamp doesn't match the picture, or if the picture has no markers at all.
-fn parse_date_time(
-    timestamp: &str,
-    picture: &str,
-    now: DateTime<Utc>,
-) -> Result<Option<i64>, DateTimeError> {
+fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i64>, DateTimeError> {
     let spec = analyse_date_time_picture(picture)?;
     let parts = build_matcher_parts(&spec)?;
 
@@ -1794,13 +1916,13 @@ fn parse_date_time(
                     e.insert(if "MDd".contains(part) { 1 } else { 0 });
                     end_specified = true;
                 } else {
-                    e.insert(get_date_time_fragment(&now, part));
+                    e.insert(get_date_time_fragment(now, part));
                 }
             }
         }
     }
 
-    let year = components[&'Y'] as i32;
+    let year = components[&'Y'];
 
     let hour_val = if time_b {
         let h = components[&'h'];
@@ -1815,10 +1937,14 @@ fn parse_date_time(
 
     let date = if date_b {
         let day_of_year = components[&'d'];
-        NaiveDate::from_yo_opt(year, 1)
-            .and_then(|d| d.checked_add_signed(Duration::days(day_of_year - 1)))
+        CivilDate::from_ymd(year, 1, 1).and_then(|first| {
+            first
+                .days
+                .checked_add(day_of_year - 1)
+                .map(|days| CivilDate { days })
+        })
     } else {
-        NaiveDate::from_ymd_opt(year, components[&'M'] as u32, components[&'D'] as u32)
+        CivilDate::from_ymd(year, components[&'M'], components[&'D'])
     };
     let date = date.ok_or_else(|| coded("D3136", "invalid date components"))?;
 
@@ -1826,16 +1952,9 @@ fn parse_date_time(
     let second = components[&'s'];
     let millis_frac = components.get(&'f').copied().unwrap_or(0);
 
-    let time = chrono::NaiveTime::from_hms_milli_opt(
-        hour_val as u32,
-        minute as u32,
-        second as u32,
-        millis_frac as u32,
-    )
-    .ok_or_else(|| coded("D3136", "invalid time components"))?;
-
-    let naive = chrono::NaiveDateTime::new(date, time);
-    let mut millis_val = Utc.from_utc_datetime(&naive).timestamp_millis();
+    let mut millis_val = date
+        .at_time(hour_val, minute, second, millis_frac)
+        .ok_or_else(|| coded("D3136", "invalid time components"))?;
 
     if let Some(offset) = components.get(&'Z').or_else(|| components.get(&'z')) {
         millis_val -= offset * 60 * 1000;
@@ -1847,6 +1966,83 @@ fn parse_date_time(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `CivilDate` against dates whose day numbers and weekdays are fixed
+    /// facts, and a round trip through every day of ±1,000 years around the
+    /// epoch plus a stretch at either end of JavaScript's dates.
+    #[test]
+    fn civil_date_matches_the_gregorian_calendar() {
+        for (y, m, d, days, weekday) in [
+            (1970, 1, 1, 0, 4),       // Thursday
+            (2000, 2, 29, 11_016, 2), // Tuesday
+            (2000, 3, 1, 11_017, 3),  // Wednesday
+            (1969, 12, 31, -1, 3),    // Wednesday
+            (1, 1, 1, -719_162, 1),   // Monday
+            (0, 2, 29, -719_469, 2),  // year 0 is a leap year
+            (275_760, 9, 13, 100_000_000, 6),
+            (-271_821, 4, 20, -100_000_000, 2),
+        ] {
+            let date = CivilDate::from_ymd(y, m, d).expect("a real date");
+            assert_eq!(date.days, days, "{y}-{m}-{d}");
+            assert_eq!(date.ymd(), (y, m, d));
+            assert_eq!(date.weekday_from_monday(), weekday, "{y}-{m}-{d}");
+        }
+        for (y, m, d) in [
+            (2001, 2, 29),
+            (1900, 2, 29),
+            (2018, 13, 1),
+            (2018, 0, 1),
+            (2018, 4, 31),
+            (2018, 1, 0),
+        ] {
+            assert!(CivilDate::from_ymd(y, m, d).is_none(), "{y}-{m}-{d}");
+        }
+        assert_eq!(CivilDate::from_ymd(2016, 12, 31).unwrap().ordinal(), 366);
+        assert_eq!(CivilDate::from_ymd(2018, 3, 1).unwrap().ordinal(), 60);
+
+        let ranges = [
+            (-366_000, 366_000),
+            (99_999_000, 100_000_000),
+            (-100_000_000, -99_999_000),
+        ];
+        for (from, to) in ranges {
+            let mut expected = CivilDate { days: from }.ymd();
+            for days in from..=to {
+                let date = CivilDate { days };
+                let (y, m, d) = date.ymd();
+                assert_eq!(CivilDate::from_ymd(y, m, d), Some(date));
+                if days > from {
+                    // The day after the previous one.
+                    let (py, pm, pd) = expected;
+                    let next = if pd < days_in_month(py, pm) {
+                        (py, pm, pd + 1)
+                    } else if pm < 12 {
+                        (py, pm + 1, 1)
+                    } else {
+                        (py + 1, 1, 1)
+                    };
+                    assert_eq!((y, m, d), next, "day {days}");
+                }
+                expected = (y, m, d);
+            }
+        }
+    }
+
+    #[test]
+    fn at_time_stays_within_javascript_dates() {
+        let last = CivilDate::from_ymd(275_760, 9, 13).unwrap();
+        assert_eq!(last.at_time(0, 0, 0, 0), Some(MAX_DATE_MILLIS));
+        assert_eq!(last.at_time(0, 0, 0, 1), None);
+        let first = CivilDate::from_ymd(-271_821, 4, 20).unwrap();
+        assert_eq!(first.at_time(0, 0, 0, 0), Some(-MAX_DATE_MILLIS));
+        assert_eq!(first.plus_days(-1).at_time(23, 59, 59, 999), None);
+        let epoch = CivilDate { days: 0 };
+        assert_eq!(epoch.at_time(24, 0, 0, 0), None);
+        assert_eq!(epoch.at_time(0, 60, 0, 0), None);
+        assert_eq!(epoch.at_time(0, 0, 0, 1000), None);
+        assert_eq!(epoch.at_time(-1, 0, 0, 0), None);
+        assert!(CivilDate::from_ymd(MAX_CIVIL_YEAR + 1, 1, 1).is_none());
+    }
 
     #[test]
     fn test_now() {

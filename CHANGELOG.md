@@ -28,8 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The `chrono` dependency.** RUSTSEC-2026-0543 marks it unmaintained, with no fixed
+  release. The date arithmetic `$fromMillis`, `$toMillis` and `$now` need (UTC calendar
+  dates, weekdays, ISO week numbers) is now a small calendar type in `src/datetime.rs`,
+  computing on the proleptic Gregorian calendar as JavaScript's `Date` does. Output is
+  unchanged except at the edge below.
+
 ### Fixed
 
+- **`$now()` and `$millis()` report one timestamp per evaluation, as in jsonata-js**
+  ([#294](https://github.com/txjmb/jsonata-core/issues/294)). The clock was read on every
+  call, so two calls in one expression could disagree.
+- **`$fromMillis` takes the whole range of a JavaScript date**, ±8.64e15 milliseconds
+  (years -271821 to 275760). It stopped at chrono's ±262143 years.
 - **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and
   `encodeURIComponent` do.** `$encodeUrl("a b")` is `"a%20b"`, where it was `"a b"`: only
   control characters were encoded. `$encodeUrlComponent` no longer encodes `-_.!~*'()`.

@@ -5578,3 +5578,34 @@ fn test_now_and_millis_share_one_timestamp_per_evaluation() {
         "each evaluation reads the clock: {first:?} then {second:?}"
     );
 }
+
+/// `$fromMillis` covers every JavaScript date, ±8.64e15 milliseconds, and
+/// formats its edges as jsonata-js does (expected values from jsonata-js).
+#[test]
+fn test_from_millis_spans_javascript_dates() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, expected) in [
+        (
+            "$fromMillis(8640000000000000)",
+            r#""5760-09-13T00:00:00.000Z""#,
+        ),
+        (
+            r#"$fromMillis(-8640000000000000, "[Y0001]-[M01]-[D01]")"#,
+            r#""-1821-04-20""#,
+        ),
+        (
+            r#"$fromMillis(8640000000000000, "[W] [w] [X] [x] [F] [d]")"#,
+            r#""37 2 275760 9 saturday 257""#,
+        ),
+        (
+            r#"$fromMillis(951782400000, "[FNn] [d] [W]")"#,
+            r#""Tuesday 60 9""#,
+        ),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
