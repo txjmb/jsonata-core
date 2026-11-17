@@ -6118,27 +6118,15 @@ impl Evaluator {
         rhs: &AstNode,
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
-        // The call on the right, and the one-step path it heads when it has
-        // a filter or `[]` (`x ~> $map($f)[0]`). jsonata-js parses a call
-        // with a `?` argument as a partial application, not a call, so that
-        // is applied like any function value below.
-        // A `#` or `@` on the call makes it a path in jsonata-js, which
-        // isn't a call (`x ~> $string()#$i` is T2006).
-        let (call, path_steps) = match rhs {
-            AstNode::Path { steps }
-                if steps.len() == 1
-                    && steps[0].index_var.is_none()
-                    && steps[0].focus.is_none()
-                    && steps[0].ancestor_label.is_none()
-                    && steps[0]
-                        .stages
-                        .iter()
-                        .all(|stage| matches!(stage, Stage::Filter(_) | Stage::KeepArray)) =>
-            {
-                (&steps[0].node, Some(steps))
-            }
-            _ => (rhs, None),
-        };
+        // The call on the right. jsonata-js's `evaluateApplyExpression`
+        // passes a call to `evaluateFunction`, which never reads the call's
+        // filters or group-by, so they are not applied (#286): only `[]`
+        // carries over, through the apply node. A `#` or `@` on the call
+        // makes it a path, which isn't a call (`x ~> $string()#$i` is T2006).
+        // jsonata-js parses a call with a `?` argument as a partial
+        // application, not a call, so that is applied like any function
+        // value below.
+        let (call, keep_array) = Self::apply_rhs_call(rhs).unwrap_or((rhs, false));
         if let AstNode::Function {
             name,
             args,
@@ -6151,10 +6139,7 @@ impl Evaluator {
                 all_args.extend_from_slice(args);
                 let result =
                     self.evaluate_function_call(name, &all_args, *is_builtin, true, data)?;
-                return match path_steps {
-                    Some(steps) => self.finish_chained_path(steps, result),
-                    None => Ok(result.unwrap_sequence()),
-                };
+                return Ok(Self::finish_apply(result, keep_array));
             }
         }
         // A call of an expression's value, such as `$uppercase[0]()` or
@@ -6181,10 +6166,7 @@ impl Evaluator {
                     return Err(not_a_function());
                 }
                 let result = self.call_function_value(&callable, &values, data)?;
-                return match path_steps {
-                    Some(steps) => self.finish_chained_path(steps, result),
-                    None => Ok(result.unwrap_sequence()),
-                };
+                return Ok(Self::finish_apply(result, keep_array));
             }
         }
 
@@ -6356,20 +6338,44 @@ impl Evaluator {
         )
     }
 
-    /// Finish a `~>` whose right side is a call with a filter or `[]`
-    /// (`x ~> $f()[0]`), given that call's result: the call step's filter
-    /// stages, then `[]`, as for any path. jsonata-js does not filter the
-    /// call's result at all, so an undefined one is not filtered either.
-    fn finish_chained_path(
-        &mut self,
-        steps: &[PathStep],
-        call_result: JValue,
-    ) -> Result<JValue, EvaluatorError> {
-        let mut result = self.apply_filter_stages(call_result, &steps[0].stages)?;
-        if Self::path_keeps_singleton_array(steps) {
-            keep_if_sequence(&mut result);
+    /// The call a `~>`'s right side `rhs` holds, with whether `[]` follows
+    /// it, when it is a call with no `?` argument, perhaps under filters,
+    /// `[]` or a group-by, none of which jsonata-js applies there (see
+    /// `evaluate_apply_expression`).
+    fn apply_rhs_call(rhs: &AstNode) -> Option<(&AstNode, bool)> {
+        match rhs {
+            AstNode::Function { args, .. } | AstNode::Call { args, .. }
+                if !args.iter().any(|a| matches!(a, AstNode::Placeholder)) =>
+            {
+                Some((rhs, false))
+            }
+            AstNode::Path { steps }
+                if steps.len() == 1
+                    && steps[0].index_var.is_none()
+                    && steps[0].focus.is_none()
+                    && steps[0].ancestor_label.is_none()
+                    && steps[0]
+                        .stages
+                        .iter()
+                        .all(|stage| matches!(stage, Stage::Filter(_) | Stage::KeepArray)) =>
+            {
+                let (call, keep) = Self::apply_rhs_call(&steps[0].node)?;
+                Some((call, keep || Self::path_keeps_singleton_array(steps)))
+            }
+            AstNode::ObjectTransform { input, .. } => Self::apply_rhs_call(input),
+            _ => None,
         }
-        Ok(result)
+    }
+
+    /// The value of a `~>` from its call's `result`, kept as an array when
+    /// `[]` followed the call.
+    fn finish_apply(mut result: JValue, keep_array: bool) -> JValue {
+        if keep_array {
+            keep_if_sequence(&mut result);
+            result
+        } else {
+            result.unwrap_sequence()
+        }
     }
 
     /// Evaluate a path expression, following jsonata-js `evaluatePath`.

@@ -4680,7 +4680,7 @@ fn test_eval_keeps_guardrail_codes() {
 //
 // jsonata-js's evaluatePath stops at a step that gives nothing, so a sort
 // step's filters do not run when the sort's input is undefined; and `~>`
-// never filters its call's result, so an undefined one is not filtered.
+// never filters or groups its call's result (#286).
 
 #[test]
 fn test_no_filter_on_nothing_after_sort_or_chain() {
@@ -4698,8 +4698,21 @@ fn test_no_filter_on_nothing_after_sort_or_chain() {
             undefined.as_str(),
         ),
         (r##"x ~> $string()[$error("e")]"##, undefined.as_str()),
-        // The documented divergence: a defined call result is filtered.
-        (r##""z" ~> $append([1])[0]"##, r##"Ok("z")"##),
+        // A defined call result isn't filtered or grouped either (#286);
+        // only `[]` applies.
+        (r##""z" ~> $append([1])[0]"##, r##"Ok(["z",1])"##),
+        (r##"a.b ~> $map(function($v){$v})[1]"##, "Ok([1,2])"),
+        (
+            r##"a.b ~> $map(function($v){$v})[$error("e")]"##,
+            "Ok([1,2])",
+        ),
+        (r##"a.b ~> $map(function($v){$v}){"k": $}"##, "Ok([1,2])"),
+        (r##"a.b ~> $count()[1]"##, "Ok(2)"),
+        (r##"a.b ~> function($x){$x}()[5]"##, "Ok([1,2])"),
+        (r##"x#$i ~> $count(){"k": $count($)}"##, "Ok(0)"),
+        (r##"a.b[0] ~> $map(function($v){$v})[0]"##, "Ok(1)"),
+        (r##"a.b[0] ~> $map(function($v){$v})[5][]"##, "Ok([1])"),
+        (r##"a.b[0] ~> $map(function($v){$v}){"k": $}[]"##, "Ok([1])"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);

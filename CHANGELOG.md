@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A filter or group-by on the call after `~>` is ignored, as in jsonata-js**
+  ([#286](https://github.com/txjmb/jsonata-core/issues/286)). jsonata-js applies the call and
+  never reads its filters or group-by; only `[]` carries over. With `a` holding `[{"b":"x"},
+  {"b":"y"}]`, `a ~> $map(function($v){$v.b})[1]` is now `["x","y"]` (it was `"y"`), `"z" ~>
+  $append([1])[0]` is `["z",1]` (it was `"z"`), and `x#$i ~> $count(){"k": $count($)}` is 0 (it
+  was T0410). This changes the result of expressions that relied on the filter; to filter the
+  result, wrap the chain in parentheses: `(a ~> $map(...))[1]`.
+
 - **A `**` step on a missing value runs its filters on nothing, as jsonata-js does**
   ([#290](https://github.com/txjmb/jsonata-core/issues/290)). `nope[**[$error("E")]]` is D3137
   and `nope[x[**[1+"a"]]]` is T2002, where both were undefined. A `*` there still runs none.
