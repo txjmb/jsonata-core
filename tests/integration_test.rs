@@ -5426,6 +5426,17 @@ fn test_chain_keeps_array_after_group_by() {
         (r#"o.b{"k":$}[].k"#, "{}"),
         (r#"o.b{"k":$}[]@$v"#, r#"{"k":{"b":1}}"#),
         (r#"$map(o.b{"k":$}[], function($v){$v})"#, r#"{"k":1}"#),
+        // Operators after the `[]` leave it on the path.
+        (r#"o.b{"k":$}[].k ~> $map(function($v){$v})"#, "[{}]"),
+        (
+            r#"o.b{"k":$}[]#$i ~> $map(function($v){$v})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (
+            r#"o.b{"k":$}[]^(k) ~> $map(function($v){$v})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (r#"o.b{"k":$}[]^(k)"#, r#"{"k":1}"#),
         // `$filter` of a single value gives a one-item sequence, which the
         // `[]` keeps there; alone it is the value.
         (

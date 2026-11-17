@@ -5724,9 +5724,8 @@ impl Evaluator {
                 // stream, when only running it tells (see the empty-input
                 // case below).
                 // Only an input that can be a tuple stream needs one.
-                let probe = Self::groups_tuple_stream(input)
-                    .then(|| Self::block_tuple_step(input))
-                    .flatten();
+                let tuple_input = Self::groups_tuple_stream(input);
+                let probe = tuple_input.then(|| Self::block_tuple_step(input)).flatten();
                 if let Some(step) = probe {
                     self.tuple_probes.push((step, false));
                 }
@@ -5771,7 +5770,7 @@ impl Evaluator {
                 // tuple mode only on reaching its tuple step, so one that
                 // stops before it (`(nope.b)[%.x]`, `nope` missing) gives a
                 // plain empty result, which groups like any other (#285).
-                if items.is_empty() && reached_tuples && Self::groups_tuple_stream(input) {
+                if items.is_empty() && reached_tuples && tuple_input {
                     return Ok(JValue::object(IndexMap::new()));
                 }
                 let items = if items.is_empty() {
