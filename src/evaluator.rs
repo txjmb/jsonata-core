@@ -2029,7 +2029,7 @@ fn try_compile_path(
                 compiled_steps.push(CompiledStep {
                     field: name.clone(),
                     run_on_nothing: filter.is_some()
-                        && Evaluator::step_filters_run_on_nothing(step),
+                        && Evaluator::step_filters_run_on_nothing(step, false),
                     filter,
                 });
             }
@@ -4398,8 +4398,8 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
                 // The first step's own filters still run, on nothing, as
                 // they do for any step that gives nothing (#260):
                 // `nope[x[$error("E")]]` raises.
-                // A `*` step runs none there (`step_filters_run_on_nothing`).
-                raises |= Evaluator::step_filters_run_on_nothing(first);
+                // A first `*` step runs none there (`step_filters_run_on_nothing`).
+                raises |= Evaluator::step_filters_run_on_nothing(first, true);
                 return (K::Undefined, raises);
             }
             for (i, step) in steps.iter().enumerate() {
@@ -6513,11 +6513,12 @@ impl Evaluator {
         if Self::is_non_path(steps) && !Self::step_creates_tuple(first) && !first.is_tuple {
             let value = self.evaluate_unwrapped_later(&first.node, data)?;
             // jsonata-js filters an undefined value too (`$x[$f()]`).
-            let mut value = if value.is_undefined() && Self::step_filters_run_on_nothing(first) {
-                self.filter_undefined(&first.stages)?
-            } else {
-                self.apply_filter_stages(value, &first.stages)?
-            };
+            let mut value =
+                if value.is_undefined() && Self::step_filters_run_on_nothing(first, true) {
+                    self.filter_undefined(&first.stages)?
+                } else {
+                    self.apply_filter_stages(value, &first.stages)?
+                };
             if Self::path_keeps_singleton_array(steps) {
                 keep_if_sequence(&mut value);
             }
@@ -6639,8 +6640,13 @@ impl Evaluator {
                 if matches!(step.node, AstNode::Sort { .. }) {
                     self.keep_tuple_stream = true;
                 }
-                let value =
-                    self.evaluate_step(step, items, previous.as_ref(), index + 1 == steps.len());
+                let value = self.evaluate_step(
+                    step,
+                    items,
+                    previous.as_ref(),
+                    index == 0,
+                    index + 1 == steps.len(),
+                );
                 self.keep_tuple_stream = saved;
                 value?
             };
@@ -6830,6 +6836,7 @@ impl Evaluator {
         step: &PathStep,
         items: &[JValue],
         source: Option<&JArray>,
+        first_step: bool,
         last_step: bool,
     ) -> Result<JValue, EvaluatorError> {
         // A `$` step without stages yields its input items again; unless one
@@ -6851,12 +6858,14 @@ impl Evaluator {
                 (AstNode::Name(field), JValue::Object(obj)) if !is_tuple_object(obj) => {
                     obj.get(field).cloned().unwrap_or(JValue::Undefined)
                 }
-                (AstNode::Name(_), _) => return self.evaluate_step_items(step, items, last_step),
+                (AstNode::Name(_), _) => {
+                    return self.evaluate_step_items(step, items, first_step, last_step)
+                }
                 (node, item) => self.evaluate_step_node(node, item)?,
             };
             return Ok(collect_single_step_result(value, last_step));
         }
-        self.evaluate_step_items(step, items, last_step)
+        self.evaluate_step_items(step, items, first_step, last_step)
     }
 
     /// `evaluate_step` over any number of items.
@@ -6864,9 +6873,10 @@ impl Evaluator {
         &mut self,
         step: &PathStep,
         items: &[JValue],
+        first_step: bool,
         last_step: bool,
     ) -> Result<JValue, EvaluatorError> {
-        let run_on_nothing = Self::step_filters_run_on_nothing(step);
+        let run_on_nothing = Self::step_filters_run_on_nothing(step, first_step);
         let values = match &step.node {
             // A field step looks the field up in each item, reusing its
             // position across a homogeneous array.
@@ -7041,11 +7051,15 @@ impl Evaluator {
 
     /// `filters_run_on_nothing` for `step`'s stages, worked out the first
     /// time the step runs and kept on the step (#288).
-    fn step_filters_run_on_nothing(step: &PathStep) -> bool {
-        // A `*` with nothing to read gives an empty sequence in jsonata-js,
-        // not nothing, so its filters never run there (`*[$error("E")]` on
-        // a string is undefined); here it gives undefined.
-        !matches!(step.node, AstNode::Wildcard)
+    fn step_filters_run_on_nothing(step: &PathStep, first_step: bool) -> bool {
+        // jsonata-js keeps a first step's filters as its `predicate`, which
+        // runs on the step's raw result. A `*` with nothing to read gives an
+        // empty sequence there, so its filters never run (`*[$error("E")]`
+        // on a string is undefined). A later step's filters are `stages`,
+        // which run on the result after an empty sequence has become
+        // undefined, so they do run (`e.*[$error("E")]` with `{"e":{}}`
+        // raises). Here a `*` gives undefined either way.
+        !(first_step && matches!(step.node, AstNode::Wildcard))
             && step
                 .runs_on_nothing
                 .get_or_init(|| Self::filters_run_on_nothing(&step.stages))

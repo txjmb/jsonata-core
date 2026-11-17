@@ -5234,6 +5234,18 @@ fn test_nested_filter_on_missing_step_raises() {
         assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
         assert_eq!(default, undefined, "default: {expr}");
     }
+    // A later `*` step's filters are stages, which do run on nothing, as
+    // in jsonata-js.
+    let data = JValue::from_json_str(r#"{"e":{},"x":"s"}"#).unwrap();
+    for expr in [r#"e.*[$error("E")]"#, r#"x.*[$error("E")]"#] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains("D3137"),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains("D3137"), "default: {expr} => {default}");
+    }
 }
 
 /// `$` in an `$eval` expression is the eval's input, even inside a path
