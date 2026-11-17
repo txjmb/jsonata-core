@@ -11163,13 +11163,16 @@ impl Evaluator {
     /// `call_builtin_with_values`, with `context` `None` for a builtin's
     /// partial application (#287). jsonata-js applies that through a lambda
     /// with no input, which declares every parameter of the builtin and
-    /// passes each explicitly. So the context is undefined, a required
-    /// parameter the partial doesn't write is passed, undefined
-    /// (`$substringBefore(?)` given "hello" is "hello"), and no argument is
-    /// taken from the context: one of another type in a context parameter's
-    /// place (`$substring(?, 1)` given a number) is a mismatch, not shifted
-    /// behind it. (jsonata-js doesn't check these arguments at all; see
-    /// `docs/compatibility.md`.)
+    /// passes each explicitly. So the context is undefined, and no argument
+    /// is taken from the context: one of another type in a context
+    /// parameter's place (`$substring(?, 1)` given a number) is a mismatch,
+    /// not shifted behind it. A required parameter a pure builtin's partial
+    /// doesn't write is passed, undefined (`$substringBefore(?)` given
+    /// "hello" is "hello"). The other builtins check their arguments
+    /// strictly, so a missing one is T0410 (`$replace(?, "l")` given
+    /// "hello"), where jsonata-js passes undefined and goes on with it. That
+    /// and the checking itself are documented divergences
+    /// (`docs/compatibility.md`).
     fn call_builtin_with_values_in(
         &mut self,
         name: &str,
@@ -11200,23 +11203,21 @@ impl Evaluator {
             }
         }
 
-        let padded;
-        let values = match context
-            .is_none()
-            .then(|| crate::signature::builtin_signature(name))
-        {
-            Some(Some(sig))
-                if crate::builtins::is_pure_builtin(name)
-                    && values.len() < sig.strict_required_len() =>
-            {
-                padded = {
-                    let mut padded = values.to_vec();
-                    padded.resize(sig.strict_required_len(), JValue::Undefined);
-                    padded
-                };
-                &padded[..]
+        let mut padded = Vec::new();
+        let pure = crate::builtins::is_pure_builtin(name);
+        if context.is_none() && pure {
+            if let Some(sig) = crate::signature::builtin_signature(name) {
+                let required = sig.strict_required_len();
+                if values.len() < required {
+                    padded = values.to_vec();
+                    padded.resize(required, JValue::Undefined);
+                }
             }
-            _ => values,
+        }
+        let values = if padded.is_empty() {
+            values
+        } else {
+            &padded[..]
         };
 
         // Every builtin that needs nothing but its arguments, the context,
@@ -11228,7 +11229,7 @@ impl Evaluator {
         // insertion for a zero-arg call like bare `$string`), and gating on
         // "at least 1 argument" first would wrongly reject `$zip`/`$millis`
         // (arity 0) reached by reference.
-        if crate::builtins::is_pure_builtin(name) {
+        if pure {
             return crate::builtins::dispatch_pure_with(
                 name,
                 values,
