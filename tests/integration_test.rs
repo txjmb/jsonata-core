@@ -5133,6 +5133,12 @@ fn test_nested_filter_on_missing_step_raises() {
         (r#"nope[x[-"a"]]"#, "D1002"),
         (r#"nope[x[{1:2}]]"#, "T1003"),
         (r#"nope[x[1+"a"] = 1]"#, "T2002"),
+        // A `**` on nothing gives nothing, so its filters run there (#290).
+        (r#"nope[**[$error("E")]]"#, "D3137"),
+        (r#"nope[x[**[1+"a"]]]"#, "T2002"),
+        (r#"a[q[**[1+"a"]]]"#, "T2002"),
+        (r#"$x[**[1+"a"]]"#, "T2002"),
+        (r#"a.(nope[**[1+"a"]])"#, "T2002"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5151,6 +5157,9 @@ fn test_nested_filter_on_missing_step_raises() {
         r#"nope[*[1+"a"]]"#,
         r#"nope[x[*[$error("E")]]]"#,
         r#"nope[x[0][$error("E")]]"#,
+        r#"nope[**[0][1+"a"]]"#,
+        r#"nope.**[1+"a"]"#,
+        r#"nope[**.x[1+"a"]]"#,
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);

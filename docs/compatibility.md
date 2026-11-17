@@ -41,7 +41,6 @@ Some path and evaluation-order shapes differ too:
 | `acct.o[0]#$i[].id` | `[1]` | `1` | a `[]` after `#` keeps a singleton array |
 | `[$string(1,2,3), "f"@$v()]` | T0410 | T1006 | constructor members run in order, so the first member's error is reported; jsonata-js runs them concurrently |
 | `a ~> $map(function($v){$v.b})[1]` | `"y"` | `["x","y"]` | a filter on the call after `~>` is applied; jsonata-js ignores it ([#286](https://github.com/txjmb/jsonata-core/issues/286)) |
-| `nope[**[$error("E")]]` | undefined | D3137 | a `**` on a missing value runs no filters; jsonata-js runs them on nothing ([#290](https://github.com/txjmb/jsonata-core/issues/290)) |
 | `(%.b)[%.x]{"k":1}.k` | undefined | `1` | a block whose path starts with a `%` nothing can bind groups as tuples ([#285](https://github.com/txjmb/jsonata-core/issues/285)) |
 
 (Data for these rows: `{"x":[1,2],"acct":{"o":[{"id":1}]},"a":[{"b":"x"},{"b":"y"}]}`.)

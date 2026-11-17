@@ -4391,8 +4391,9 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
                 // The first step's own filters still run, on nothing, as
                 // they do for any step that gives nothing (#260):
                 // `nope[x[$error("E")]]` raises.
-                // A `*` or `**` step runs none there.
-                if !matches!(first.node, AstNode::Wildcard | AstNode::Descendant) {
+                // A `*` step runs none there (its input gives an empty
+                // sequence, not nothing).
+                if !matches!(first.node, AstNode::Wildcard) {
                     raises |= Evaluator::filters_run_on_nothing(&first.stages);
                 }
                 return (K::Undefined, raises);
@@ -5975,6 +5976,9 @@ impl Evaluator {
             // `**`: every value at or below the input, following jsonata-js
             // `evaluateDescendants`, which returns a single descendant itself
             // rather than as a one-item sequence (so `**[]` does not keep it).
+            // Nothing as the input gives nothing (not an empty sequence), so
+            // the step's filters still run on it, as jsonata-js does (#290).
+            AstNode::Descendant if data.is_undefined() => Ok(JValue::Undefined),
             AstNode::Descendant => {
                 let mut descendants = self.collect_descendants(data)?;
                 check_sequence_length(descendants.len(), &self.options)?;

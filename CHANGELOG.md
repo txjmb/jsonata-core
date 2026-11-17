@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `**` step on a missing value runs its filters on nothing, as jsonata-js does**
+  ([#290](https://github.com/txjmb/jsonata-core/issues/290)). `nope[**[$error("E")]]` is D3137
+  and `nope[x[**[1+"a"]]]` is T2002, where both were undefined. A `*` there still runs none.
+
 - **A group-by on a step that isn't a path applies where jsonata-js applies it** (stage 3 of
   [#219](https://github.com/txjmb/jsonata-core/issues/219)). On a block, `*` or other node, the
   group now runs inside the step, after the node's predicates and before the step binds its
