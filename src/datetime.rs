@@ -140,14 +140,8 @@ impl CivilDate {
         {
             return None;
         }
-        let y = if month <= 2 { year - 1 } else { year };
-        let era = y.div_euclid(400);
-        let year_of_era = y - era * 400;
-        let month_from_march = (month + 9) % 12;
-        let day_of_year = (153 * month_from_march + 2) / 5 + day - 1;
-        let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
         Some(Self {
-            days: era * 146_097 + day_of_era - 719_468,
+            days: days_from_civil(year, month, day),
         })
     }
 
@@ -188,8 +182,7 @@ impl CivilDate {
 
     /// The day of the year, 1-366.
     fn ordinal(self) -> i64 {
-        let start = Self::from_ymd(self.year(), 1, 1).expect("1 January exists");
-        self.days - start.days + 1
+        self.days - days_from_civil(self.year(), 1, 1) + 1
     }
 
     /// The day of the week, Monday 1 to Sunday 7. 1970-01-01 was a Thursday.
@@ -204,14 +197,10 @@ impl CivilDate {
     }
 
     /// Milliseconds since the epoch at the given time of day on this date, or
-    /// `None` if the time is not one (hour 0-23, minute and second 0-59,
-    /// millisecond 0-999) or the result is beyond JavaScript's dates.
+    /// `None` if the time is not one (see `is_time_of_day`) or the result is
+    /// beyond JavaScript's dates.
     fn at_time(self, hour: i64, minute: i64, second: i64, millis: i64) -> Option<i64> {
-        if !(0..24).contains(&hour)
-            || !(0..60).contains(&minute)
-            || !(0..60).contains(&second)
-            || !(0..1000).contains(&millis)
-        {
+        if !is_time_of_day(hour, minute, second, millis) {
             return None;
         }
         let total = self
@@ -222,6 +211,26 @@ impl CivilDate {
             .contains(&total)
             .then_some(total)
     }
+}
+
+/// Days from 1970-01-01 to `year`-`month`-`day` (Hinnant's
+/// `days_from_civil`), for a month 1-12 and a year within `MAX_CIVIL_YEAR`.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let year_of_era = y - era * 400;
+    let month_from_march = (month + 9) % 12;
+    let day_of_year = (153 * month_from_march + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// Hour 0-23, minute and second 0-59, millisecond 0-999.
+fn is_time_of_day(hour: i64, minute: i64, second: i64, millis: i64) -> bool {
+    (0..24).contains(&hour)
+        && (0..60).contains(&minute)
+        && (0..60).contains(&second)
+        && (0..1000).contains(&millis)
 }
 
 fn is_leap_year(year: i64) -> bool {
@@ -1954,9 +1963,13 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
     let second = components[&'s'];
     let millis_frac = components.get(&'f').copied().unwrap_or(0);
 
+    if !is_time_of_day(hour_val, minute, second, millis_frac) {
+        return Err(coded("D3136", "invalid time components"));
+    }
+    // A real date and time can still be past JavaScript's dates.
     let mut millis_val = date
         .at_time(hour_val, minute, second, millis_frac)
-        .ok_or_else(|| coded("D3136", "invalid time components"))?;
+        .ok_or_else(|| coded("D3136", "invalid date components"))?;
 
     if let Some(offset) = components.get(&'Z').or_else(|| components.get(&'z')) {
         millis_val -= offset * 60 * 1000;
@@ -2044,6 +2057,17 @@ mod tests {
         assert_eq!(epoch.at_time(0, 0, 0, 1000), None);
         assert_eq!(epoch.at_time(-1, 0, 0, 0), None);
         assert!(CivilDate::from_ymd(MAX_CIVIL_YEAR + 1, 1, 1).is_none());
+    }
+
+    /// A year past JavaScript's dates is a bad date, not a bad time.
+    #[test]
+    fn parse_date_time_names_the_bad_component() {
+        let err = parse_date_time("280000", "[Y]", 0).unwrap_err().to_string();
+        assert_eq!(err, "D3136: invalid date components");
+        let err = parse_date_time("2018-01-01 24", "[Y]-[M]-[D] [H]", 0)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(err, "D3136: invalid time components");
     }
 
     #[test]

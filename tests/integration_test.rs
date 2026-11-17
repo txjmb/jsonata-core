@@ -995,7 +995,7 @@ fn test_percent_in_two_sort_terms() {
 #[test]
 fn test_timeout_raises_d1012() {
     let data = JValue::Null;
-    let expr_str = "$map([1..50000], function($x){$x*2})";
+    let expr_str = "$map([1..200000], function($x){$x*2})";
     let ast = parse(expr_str).unwrap();
     let options = jsonata_core::evaluator::EvaluatorOptions {
         timeout_ms: Some(1), // 1ms — must expire before 200k lambda invocations finish
@@ -1015,7 +1015,7 @@ fn test_timeout_raises_d1012() {
 #[test]
 fn test_no_timeout_configured_never_raises_d1012() {
     let data = JValue::Null;
-    let expr_str = "$map([1..50000], function($x){$x*2})";
+    let expr_str = "$map([1..200000], function($x){$x*2})";
     let ast = parse(expr_str).unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data);
