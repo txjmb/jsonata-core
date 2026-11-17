@@ -5363,6 +5363,31 @@ fn test_group_by_on_block_that_stops_before_its_tuple_step() {
         assert_eq!(tree_walker, expected, "tree-walker: {expr}");
         assert_eq!(default, expected, "default: {expr}");
     }
+    // A path is a tuple stream once it reaches its first tuple step, a block
+    // as a later step included, and stops with a plain result before it. A
+    // tuple path elsewhere in the input, in a predicate, doesn't count.
+    let data =
+        JValue::from_json_str(r#"{"x":[1,2],"c":[{"d":1},{"d":2}],"acct":{"o":[{"id":1}]}}"#)
+            .unwrap();
+    for (expr, expected) in [
+        (r#"c.(nope.b)[%.x]{"k":1}"#, "{}"),
+        (r#"acct.(nope.b)[%.x]{"k":1}"#, "{}"),
+        (r#"c.d.(nope.b)[%.x]{"k":1}"#, "{}"),
+        (r#"c.(nope.b@$q)[%.x]{"k":1}"#, "{}"),
+        (r#"c[d=9].(nope.b)[%.x]{"k":1}"#, r#"{"k":1}"#),
+        (r#"(x[$count($$.c#$i.d)=9].b)[%.x]{"k":1}.k"#, "1"),
+        (r#"nope.b#$i{"k":1}"#, r#"{"k":1}"#),
+        (r#"c.nope#$i{"k":1}"#, "{}"),
+        (r#"nope^(d)#$i{"k":1}"#, r#"{"k":1}"#),
+        (r#"c^(d).nope#$i{"k":1}"#, "{}"),
+        (r#"c.d^($)#$i[$i>5]{"k":1}"#, "{}"),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
 }
 
 /// A `[]` after a group-by on a path is jsonata-js's `keepArray` on the
@@ -5392,6 +5417,21 @@ fn test_chain_keeps_array_after_group_by() {
         (r#"o.b{"k":$}[].k"#, "{}"),
         (r#"o.b{"k":$}[]@$v"#, r#"{"k":{"b":1}}"#),
         (r#"$map(o.b{"k":$}[], function($v){$v})"#, r#"{"k":1}"#),
+        // `$filter` of a single value gives a one-item sequence, which the
+        // `[]` keeps there; alone it is the value.
+        (
+            r#"o.b{"k":$}[] ~> $filter(function($v){true})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (
+            r#"{"a":1}{"k":a}[] ~> $filter(function($v){true})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (r#"$filter({"a":1}, function($v){true})"#, r#"{"a":1}"#),
+        (
+            r#"$type($filter({"a":1}, function($v){true}))"#,
+            r#""object""#,
+        ),
     ] {
         let expected = format!("Ok({expected})");
         let (tree_walker, default) =
@@ -5427,6 +5467,14 @@ fn test_builtin_partial_takes_declared_parameters() {
         assert_eq!(tree_walker, expected, "tree-walker: {expr}");
         assert_eq!(default, expected, "default: {expr}");
     }
+    // jsonata-js evaluates the arguments first, so an error in one wins.
+    let (tree_walker, default) = eval_both_engines_with(
+        r#"$string(?, $error("boom"))"#,
+        EvaluatorOptions::default(),
+        &data,
+    );
+    assert!(tree_walker.contains("D3137"), "tree-walker: {tree_walker}");
+    assert!(default.contains("D3137"), "default: {default}");
     for expr in [
         r#"$string(?)"#,
         r#"$string(5, ?)"#,

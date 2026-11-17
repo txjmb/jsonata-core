@@ -33,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A `[]` after a group-by on a path keeps the `~>` result an array, as in jsonata-js**
   ([#292](https://github.com/txjmb/jsonata-core/issues/292)). `o.b{"k":$}[] ~> $map(f)` is
   `[{"k":1}]`, where it was `{"k":1}`; a `[]` before the group-by (`o.b[]{"k":$}`) still keeps
-  nothing there. In the Rust AST, such a `[]` is now a `KeepArray` stage on a one-step path
+  nothing there. `$filter` of a single value gives a one-item sequence, as in jsonata-js, so
+  `o.b{"k":$}[] ~> $filter(f)` keeps the array too. In the Rust AST, such a `[]` is now a `KeepArray` stage on a one-step path
   around the `ObjectTransform`, not a stage of the path's last step.
 - **A builtin's partial application takes the parameters jsonata-js's function declares**
   ([#292](https://github.com/txjmb/jsonata-core/issues/292)). An argument past the builtin's
@@ -45,7 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A group-by over a block whose path stops before its tuple step groups once, as in
   jsonata-js** ([#285](https://github.com/txjmb/jsonata-core/issues/285)). jsonata-js enters
   tuple mode only when a path reaches a tuple step, so `(%.b)[%.x]{"k":1}.k` and
-  `(nope.b)[%.x]{"k":1}.k` are `1`, where they were undefined. A path that starts with a sort
+  `(nope.b)[%.x]{"k":1}.k` are `1`, where they were undefined, and `nope^(d)#$i{"k":1}` and
+  `c[d=9].(nope.b)[%.x]{"k":1}` are `{"k":1}`, where they were `{}`. A path that starts with a sort
   of such a block is a tuple stream, since the sort is a tuple step itself:
   `(nope.b)[%.x]^(x){"k":1}.k` is `{}`, where it was `{"k":1}`.
 

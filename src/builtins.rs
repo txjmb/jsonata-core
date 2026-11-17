@@ -167,6 +167,92 @@ pub(crate) fn is_compilable_builtin(name: &str) -> bool {
     builtin_spec(name).is_some_and(|s| s.compilable)
 }
 
+/// The parameters each jsonata-js native function declares in its
+/// JavaScript source, as `getNativeFunctionArguments` reads them from
+/// `Function.prototype.toString`. jsonata-js builds a builtin's partial
+/// application from this list, not from the signature: it parses
+/// `function($p1, $p2, ...){ _ }`, so a function declared with no
+/// parameters (`zip()`, which reads `arguments`) gets one parameter named
+/// `$`, and one with a default (`string`'s `prettify = false`) doesn't
+/// parse (S0208). `tests::js_native_params_match_jsonata_js` checks this
+/// table against the jsonata-js sources.
+pub(crate) const JS_NATIVE_PARAMS: &[(&str, &[&str])] = &[
+    ("sum", &["args"]),
+    ("count", &["args"]),
+    ("max", &["args"]),
+    ("min", &["args"]),
+    ("average", &["args"]),
+    ("string", &["arg", "prettify = false"]),
+    ("substring", &["str", "start", "length"]),
+    ("substringBefore", &["str", "chars"]),
+    ("substringAfter", &["str", "chars"]),
+    ("lowercase", &["str"]),
+    ("uppercase", &["str"]),
+    ("length", &["str"]),
+    ("trim", &["str"]),
+    ("pad", &["str", "width", "char"]),
+    ("match", &["str", "regex", "limit"]),
+    ("contains", &["str", "token"]),
+    ("replace", &["str", "pattern", "replacement", "limit"]),
+    ("split", &["str", "separator", "limit"]),
+    ("join", &["strs", "separator"]),
+    ("formatNumber", &["value", "picture", "options"]),
+    ("formatBase", &["value", "radix"]),
+    ("formatInteger", &["value", "picture"]),
+    ("parseInteger", &["value", "picture"]),
+    ("number", &["arg"]),
+    ("floor", &["arg"]),
+    ("ceil", &["arg"]),
+    ("round", &["arg", "precision"]),
+    ("abs", &["arg"]),
+    ("sqrt", &["arg"]),
+    ("power", &["arg", "exp"]),
+    ("random", &[""]),
+    ("boolean", &["arg"]),
+    ("not", &["arg"]),
+    ("map", &["arr", "func"]),
+    ("zip", &[""]),
+    ("filter", &["arr", "func"]),
+    ("single", &["arr", "func"]),
+    ("reduce", &["sequence", "func", "init"]),
+    ("sift", &["arg", "func"]),
+    ("keys", &["arg"]),
+    ("lookup", &["input", "key"]),
+    ("append", &["arg1", "arg2"]),
+    ("exists", &["arg"]),
+    ("spread", &["arg"]),
+    ("merge", &["arg"]),
+    ("reverse", &["arr"]),
+    ("each", &["obj", "func"]),
+    ("error", &["message"]),
+    ("assert", &["condition", "message"]),
+    ("type", &["value"]),
+    ("sort", &["arr", "comparator"]),
+    ("shuffle", &["arr"]),
+    ("distinct", &["arr"]),
+    ("base64encode", &["str"]),
+    ("base64decode", &["str"]),
+    ("encodeUrlComponent", &["str"]),
+    ("encodeUrl", &["str"]),
+    ("decodeUrlComponent", &["str"]),
+    ("decodeUrl", &["str"]),
+    ("eval", &["expr", "focus"]),
+    ("toMillis", &["timestamp", "picture"]),
+    ("fromMillis", &["millis", "picture", "timezone"]),
+    ("clone", &["arg"]),
+    ("now", &["picture", "timezone"]),
+    ("millis", &[""]),
+];
+
+/// The parameters jsonata-js's native function `name` declares
+/// (`JS_NATIVE_PARAMS`), or `None` for a function jsonata-js doesn't have.
+pub(crate) fn js_native_params(name: &str) -> Option<&'static [&'static str]> {
+    JS_NATIVE_PARAMS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, params)| *params)
+}
+
 /// Arity of a builtin, for the purpose of truncating the arguments a
 /// higher-order function hands its callback (`$map(arr, $uppercase)`).
 ///
@@ -1708,5 +1794,52 @@ mod tests {
                 "{name}: expected D1012, got {err}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod js_native_params_tests {
+    /// `JS_NATIVE_PARAMS` lists every native function jsonata-js binds,
+    /// with the parameters its JavaScript source declares.
+    #[test]
+    fn js_native_params_match_jsonata_js() {
+        let jsonata = include_str!("../tests/jsonata-js/src/jsonata.js");
+        let functions = include_str!("../tests/jsonata-js/src/functions.js");
+        let datetime = include_str!("../tests/jsonata-js/src/datetime.js");
+        let declared = |source: &str, function: &str| -> Option<Vec<String>> {
+            let re = regex::Regex::new(&format!(r"function {function}\(([^)]*)\)")).unwrap();
+            re.captures(source)
+                .map(|c| c[1].split(',').map(|p| p.trim().to_string()).collect())
+        };
+        let bind = regex::Regex::new(
+            r"staticFrame\.bind\('(\w+)', defineFunction\((fn|datetime)?\.?(\w+),",
+        )
+        .unwrap();
+        let inline =
+            regex::Regex::new(r"environment\.bind\('(\w+)', defineFunction\(function\(([^)]*)\)")
+                .unwrap();
+        let mut expected: Vec<(String, Vec<String>)> = bind
+            .captures_iter(jsonata)
+            .map(|c| {
+                let source = match c.get(2).map(|m| m.as_str()) {
+                    Some("fn") => functions,
+                    Some(_) => datetime,
+                    None => jsonata,
+                };
+                let params = declared(source, &c[3])
+                    .unwrap_or_else(|| panic!("no function {} in jsonata-js", &c[3]));
+                (c[1].to_string(), params)
+            })
+            .collect();
+        expected.extend(inline.captures_iter(jsonata).map(|c| {
+            let params = c[2].split(',').map(|p| p.trim().to_string()).collect();
+            (c[1].to_string(), params)
+        }));
+        for (name, params) in &expected {
+            let ours = super::js_native_params(name)
+                .unwrap_or_else(|| panic!("{name} is missing from JS_NATIVE_PARAMS"));
+            assert_eq!(ours, params.as_slice(), "{name}");
+        }
+        assert_eq!(super::JS_NATIVE_PARAMS.len(), expected.len());
     }
 }

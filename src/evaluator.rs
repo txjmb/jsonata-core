@@ -4745,6 +4745,11 @@ pub struct Evaluator {
     /// caller — keeps the vast majority of evaluations, which never touch
     /// `%`/`@`/`#`, at zero added cost.
     tuple_stream_created: bool,
+    /// For each group-by whose input is a block standing alone, the address
+    /// of the step that makes the block a tuple stream, and whether
+    /// `create_tuple_stream` has run it (`block_tuple_step`). Only
+    /// compared, never dereferenced.
+    tuple_probes: Vec<(usize, bool)>,
     /// When true, `evaluate_path` skips its end-of-path `@`-projection and returns
     /// the raw `{@, $var, !label, __tuple__}` tuple wrappers. Set (saved/restored)
     /// by the two consumers that read those carried bindings directly from the
@@ -4855,6 +4860,7 @@ impl Evaluator {
             context: Context::new(),
             recursion_depth: 0,
             tuple_stream_created: false,
+            tuple_probes: Vec::new(),
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
@@ -4872,6 +4878,7 @@ impl Evaluator {
             context,
             recursion_depth: 0,
             tuple_stream_created: false,
+            tuple_probes: Vec::new(),
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
@@ -4891,6 +4898,7 @@ impl Evaluator {
             context,
             recursion_depth: 0,
             tuple_stream_created: false,
+            tuple_probes: Vec::new(),
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
@@ -5697,14 +5705,20 @@ impl Evaluator {
                 let saved_keep = self.keep_tuple_stream;
                 self.keep_tuple_stream =
                     Self::is_tuple_path_node(input) || Self::sorts_tuples(input);
-                // Whether the input actually reached a step that builds a
-                // tuple stream (see the empty-input case below).
-                let saved_created = std::mem::take(&mut self.tuple_stream_created);
+                // Whether the input reaches the step that makes it a tuple
+                // stream, when only running it tells (see the empty-input
+                // case below).
+                let probe = Self::block_tuple_step(input);
+                if let Some(step) = probe {
+                    self.tuple_probes.push((step, false));
+                }
                 // jsonata-js groups the input's result before the generic
                 // unwrap, so a one-item sequence holding an array is one item.
                 let input_value = self.evaluate_unwrapped_later(input, data);
-                let built_tuples = self.tuple_stream_created;
-                self.tuple_stream_created |= saved_created;
+                let reached_tuples = match probe {
+                    Some(_) => self.tuple_probes.pop().is_some_and(|(_, reached)| reached),
+                    None => true,
+                };
                 self.keep_tuple_stream = saved_keep;
                 let input_value = input_value?;
 
@@ -5734,16 +5748,12 @@ impl Evaluator {
                 // If array is empty, add undefined to enable literal JSON object
                 // generation. An empty tuple stream gets no such item: jsonata-js
                 // reduces it tuple by tuple, so it makes no group and gives `{}`
-                // (#215). jsonata-js decides that at run time: a path enters
-                // tuple mode only on reaching a tuple step, so one that stops
-                // before it (`(nope.b)[%.x]`, `nope` missing) gives a plain
-                // empty result, which groups like any other (#285).
-                // A sort step is a tuple step itself, so a sort of such a block
-                // is a tuple stream whether or not the block's path got there.
-                if items.is_empty()
-                    && Self::groups_tuple_stream(input)
-                    && (built_tuples || Self::leading_sort(input).is_some())
-                {
+                // (#215). For a block whose tail a `%` resolves through,
+                // jsonata-js decides that at run time: the block's path enters
+                // tuple mode only on reaching its tuple step, so one that
+                // stops before it (`(nope.b)[%.x]`, `nope` missing) gives a
+                // plain empty result, which groups like any other (#285).
+                if items.is_empty() && reached_tuples && Self::groups_tuple_stream(input) {
                     return Ok(JValue::object(IndexMap::new()));
                 }
                 let items = if items.is_empty() {
@@ -7415,6 +7425,70 @@ impl Evaluator {
         }
     }
 
+    /// The step that makes a group-by's input a tuple stream, when only
+    /// running the input tells whether it gets there. jsonata-js's path
+    /// enters tuple mode on reaching its first tuple step, and stops at an
+    /// empty step before it with a plain empty result (#285):
+    /// - for a block standing alone as the input, whose tail a `%` resolves
+    ///   through (`(nope.b)[%.x]`), that is the tail's first tuple step;
+    /// - for a path, its first tuple step, when steps come before it
+    ///   (`c[d=9].(nope.b)[%.x]`).
+    ///
+    /// `None` when the input is a tuple stream from its first step, or a
+    /// sort makes it one (a sort is a tuple step in jsonata-js).
+    fn block_tuple_step(input: &AstNode) -> Option<usize> {
+        let AstNode::Path { steps } = input else {
+            return None;
+        };
+        let address = |step: &PathStep| step as *const PathStep as usize;
+        if let [step @ PathStep {
+            node: AstNode::Block(exprs),
+            inner_tuple: true,
+            ..
+        }] = steps.as_slice()
+        {
+            let own_tuple = Self::step_creates_tuple(step)
+                || step
+                    .stages
+                    .iter()
+                    .any(|stage| matches!(stage, Stage::Index(_)));
+            if own_tuple {
+                return None;
+            }
+            let AstNode::Path { steps: tail } = exprs.last()? else {
+                return None;
+            };
+            return Self::block_tuple_step(exprs.last()?)
+                .or_else(|| tail.iter().find(|s| s.is_tuple).map(address));
+        }
+        // A sort of a tuple stream is a tuple step however it is reached.
+        let sorts_tuple_stream = |s: &PathStep| {
+            matches!(&s.node, AstNode::Sort { input, .. }
+                if Self::is_tuple_path_node(input)
+                    || Self::sorts_tuples(input)
+                    || Self::groups_tuple_stream(input))
+        };
+        let first = steps
+            .iter()
+            .position(|s| s.is_tuple || Self::step_creates_tuple(s) || sorts_tuple_stream(s))?;
+        let step = &steps[first];
+        // A first step is reached, unless it is a sort, whose input path
+        // comes before it in jsonata-js.
+        let reached = first == 0 && !matches!(step.node, AstNode::Sort { .. });
+        (!reached && !sorts_tuple_stream(step)).then(|| address(step))
+    }
+
+    /// Record that `step` ran, for a group-by waiting on it
+    /// (`block_tuple_step`).
+    fn mark_tuple_probe(&mut self, step: &PathStep) {
+        let address = step as *const PathStep as usize;
+        for (probe, reached) in &mut self.tuple_probes {
+            if *probe == address {
+                *reached = true;
+            }
+        }
+    }
+
     /// The sort a path starts with, or the node itself if it is a sort.
     fn leading_sort(node: &AstNode) -> Option<&AstNode> {
         match node {
@@ -7849,19 +7923,13 @@ impl Evaluator {
         use std::rc::Rc;
 
         // Mark that this evaluate() call produced tuple wrappers, so the
-        // top-level `evaluate()` knows to run the output-unwrap pass. A block
-        // step that is a tuple step only through its inner path is one only
-        // if that path reaches its tuple step, as jsonata-js decides at run
-        // time; the inner path sets the flag then, and an empty result here
-        // holds no wrappers (#285).
-        if !step.inner_tuple
-            || Self::step_creates_tuple(step)
-            || step
-                .stages
-                .iter()
-                .any(|stage| matches!(stage, Stage::Index(_)))
-        {
-            self.tuple_stream_created = true;
+        // top-level `evaluate()` knows to run the output-unwrap pass.
+        self.tuple_stream_created = true;
+        // A group-by waiting to learn whether its input reached this step
+        // (see `block_tuple_step`). A sort step is reached only when its
+        // input gives it something, marked below.
+        if !matches!(step.node, AstNode::Sort { .. }) {
+            self.mark_tuple_probe(step);
         }
 
         // Gather the incoming tuple bindings.
@@ -7973,6 +8041,13 @@ impl Evaluator {
                 self.keep_tuple_stream = saved;
                 value?
             };
+            // jsonata-js's path reaches the sort only if its input gives it
+            // something: `nope^(d)#$i` stops at `nope`.
+            let reached = is_tuple_input
+                || !(sorted.is_undefined() || matches!(&sorted, JValue::Array(a) if a.is_empty()));
+            if reached {
+                self.mark_tuple_probe(step);
+            }
             // A sort of more than one tuple leaves them unmarked (#214).
             let sorted_tuples = match &sorted {
                 JValue::Array(a) => a.sorted_tuples || (is_tuple_input && a.len() > 1),
@@ -9161,12 +9236,10 @@ impl Evaluator {
                                     result.push(item.clone());
                                 }
                             }
-                            if was_single_value {
-                                if result.len() == 1 {
-                                    return Ok(result.remove(0));
-                                } else if result.is_empty() {
-                                    return Ok(JValue::Undefined);
-                                }
+                            // One match of a single value is a one-item sequence, as in
+                            // jsonata-js, which a `[]` before a `~>` keeps (#292).
+                            if was_single_value && result.is_empty() {
+                                return Ok(JValue::Undefined);
                             }
                             return hof_result_sequence(result, &self.options);
                         }
@@ -9192,12 +9265,10 @@ impl Evaluator {
                                         result.push(item.clone());
                                     }
                                 }
-                                if was_single_value {
-                                    if result.len() == 1 {
-                                        return Ok(result.remove(0));
-                                    } else if result.is_empty() {
-                                        return Ok(JValue::Undefined);
-                                    }
+                                // One match of a single value is a one-item sequence, as in
+                                // jsonata-js, which a `[]` before a `~>` keeps (#292).
+                                if was_single_value && result.is_empty() {
+                                    return Ok(JValue::Undefined);
                                 }
                                 return hof_result_sequence(result, &self.options);
                             }
@@ -9228,12 +9299,10 @@ impl Evaluator {
 
                 // If input was a single value, return the single matching item
                 // (or undefined if no match)
-                if was_single_value {
-                    if result.len() == 1 {
-                        return Ok(result.remove(0));
-                    } else if result.is_empty() {
-                        return Ok(JValue::Undefined);
-                    }
+                // One match of a single value is a one-item sequence, as in
+                // jsonata-js, which a `[]` before a `~>` keeps (#292).
+                if was_single_value && result.is_empty() {
+                    return Ok(JValue::Undefined);
                 }
 
                 hof_result_sequence(result, &self.options)
@@ -12072,16 +12141,6 @@ impl Evaluator {
         args: &[AstNode],
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
-        // jsonata-js builds a builtin's partial application from the
-        // parameter list of its JavaScript function, parsed as a JSONata
-        // function definition. `$string`'s is `(arg, prettify = false)`, and
-        // `$prettify = false` isn't a parameter name.
-        if matches!(&target, PartialTarget::Builtin(name) if name == "string") {
-            return Err(EvaluatorError::EvaluationError(
-                "S0208: Parameter 2 of function definition must be a variable name (start with $)"
-                    .to_string(),
-            ));
-        }
         // Evaluate non-placeholder arguments and track placeholder positions
         let mut bound_args: Vec<(usize, JValue)> = Vec::new();
         let mut placeholder_positions: Vec<usize> = Vec::new();
@@ -12092,6 +12151,21 @@ impl Evaluator {
             } else {
                 let value = self.evaluate_internal(arg, data)?;
                 bound_args.push((i, value));
+            }
+        }
+
+        // jsonata-js then builds a builtin's partial application from the
+        // parameter list of its JavaScript function, parsed as a JSONata
+        // function definition. `$string`'s is `(arg, prettify = false)`, and
+        // `$prettify = false` isn't a parameter name.
+        if let PartialTarget::Builtin(name) = &target {
+            let declared = crate::builtins::js_native_params(name).unwrap_or_default();
+            let is_name = |p: &&str| p.chars().all(|c| c.is_alphanumeric() || c == '_');
+            if let Some(bad) = declared.iter().position(|p| !is_name(p)) {
+                return Err(EvaluatorError::EvaluationError(format!(
+                    "S0208: Parameter {} of function definition must be a variable name (start with $)",
+                    bad + 1
+                )));
             }
         }
 
@@ -12180,23 +12254,26 @@ impl Evaluator {
 
     /// The arguments jsonata-js passes a builtin's partial application:
     /// one for each parameter its JavaScript function declares
-    /// (`getNativeFunctionArguments`), which is one for each parameter of
-    /// its signature, so an argument past them is dropped (`$sum(?, 1)`
-    /// given `[1,2]` is 3, and `$zip(?, [1])` given `[2]` is `[[2]]`). An
-    /// undefined one is an argument JavaScript doesn't distinguish from a
-    /// missing one, so a trailing undefined past the required ones isn't
-    /// passed (`$now(?)()` is the time).
+    /// (`builtins::JS_NATIVE_PARAMS`), so an argument past them is dropped
+    /// (`$sum(?, 1)` given `[1,2]` is 3). A function declared with none has
+    /// one, `$`, which `$zip` reads (`$zip(?, [1])` given `[2]` is `[[2]]`)
+    /// and `$millis` ignores. An undefined argument is one JavaScript
+    /// doesn't tell from a missing one, so a trailing undefined past the
+    /// signature's required parameters isn't passed (`$now(?)()` is the
+    /// time). A builtin jsonata-js doesn't have gets its arguments as given.
     fn native_partial_args(name: &str, mut args: Vec<JValue>) -> Vec<JValue> {
-        // `$eval`, `$now` and `$millis` have no signature here; their arity
-        // is their parameter count, none of them required.
-        let (declared, required) = match crate::signature::builtin_signature(name) {
-            Some(sig) => (sig.params.len(), sig.strict_required_len()),
-            None => match crate::builtins::builtin_arity(name) {
-                Some(arity) => (arity, 0),
-                None => return args,
-            },
+        let Some(declared) = crate::builtins::js_native_params(name) else {
+            return args;
+        };
+        let sig = crate::signature::builtin_signature(name);
+        let declared = match declared {
+            // `function()`: its one parameter, `$`, reaches the builtin only
+            // as an argument its signature takes.
+            [""] => sig.map_or(0, |sig| sig.params.len().min(1)),
+            params => params.len(),
         };
         args.truncate(declared);
+        let required = sig.map_or(0, |sig| sig.strict_required_len());
         while args.len() > required && args.last().is_some_and(JValue::is_undefined) {
             args.pop();
         }
