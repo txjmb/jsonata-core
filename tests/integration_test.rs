@@ -5143,7 +5143,15 @@ fn test_nested_filter_on_missing_step_raises() {
         assert!(default.contains(code), "default: {expr} => {default}");
     }
     let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
-    for expr in ["nope[x[0]]", "nope[x[y]]"] {
+    // A `*` step runs no filters on nothing, and a positional first filter
+    // stops the rest.
+    for expr in [
+        "nope[x[0]]",
+        "nope[x[y]]",
+        r#"nope[*[1+"a"]]"#,
+        r#"nope[x[*[$error("E")]]]"#,
+        r#"nope[x[0][$error("E")]]"#,
+    ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
         assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
@@ -5171,10 +5179,14 @@ fn test_eval_input_inside_path_step() {
         assert_eq!(tree_walker, expected, "tree-walker: {expr}");
         assert_eq!(default, expected, "default: {expr}");
     }
-    let (tree_walker, _) =
+    let (tree_walker, default) =
         eval_both_engines_with(r#"$eval('1+"a"')"#, EvaluatorOptions::default(), &data);
-    assert!(
-        tree_walker.contains("D3121: Dynamic error evaluating the expression passed to function eval: The right side"),
-        "{tree_walker}"
-    );
+    for result in [tree_walker, default] {
+        assert!(
+            result.contains(
+                "D3121: Dynamic error evaluating the expression passed to function eval: The right side"
+            ),
+            "{result}"
+        );
+    }
 }
