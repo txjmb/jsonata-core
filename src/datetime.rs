@@ -1958,14 +1958,18 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
     };
     let mut day = components.get(&'D').copied().unwrap_or(1);
     if date_b {
-        // The month and day that many days on from 1 January (`Date.UTC`
-        // carries the day over). jsonata-js keeps the parsed year with them,
-        // so a day past the year's end lands in the same year, not the next.
-        // Where jsonata-js gets NaN (1 January or the derived date past
-        // JavaScript's range), this is D3136.
-        date_utc(year, 0, 1, 0, 0, 0, 0)
-            .ok_or_else(|| coded("D3136", "invalid date components"))?;
-        let derived = date_utc(year, 0, components[&'d'], 0, 0, 0, 0)
+        // As jsonata-js: the month and day `d - 1` days on from 1 January,
+        // kept with the parsed year, so a day past the year's end lands in
+        // the same year, not the next. Where jsonata-js gets NaN (1 January
+        // or the derived date past JavaScript's range), this is D3136.
+        let derived = date_utc(year, 0, 1, 0, 0, 0, 0)
+            .and_then(|first_jan| {
+                let offset_millis = components[&'d']
+                    .checked_sub(1)?
+                    .checked_mul(MILLIS_PER_DAY)?;
+                first_jan.checked_add(offset_millis)
+            })
+            .filter(|derived| (-MAX_DATE_MILLIS..=MAX_DATE_MILLIS).contains(derived))
             .ok_or_else(|| coded("D3136", "invalid date components"))?;
         let (_, m, d) = CivilDate::from_millis(derived).ymd();
         month0 = m - 1;
@@ -2128,8 +2132,10 @@ mod tests {
     }
 
     /// Fields past their range carry into the next, as `Date.UTC` does in
-    /// jsonata-js (expected values from jsonata-js); a result past
-    /// JavaScript's dates, or an offset too large to apply, is D3136.
+    /// jsonata-js (expected values from jsonata-js). A date past JavaScript's
+    /// range (NaN in jsonata-js), or an offset too large to subtract, is
+    /// D3136; a result only the offset moves past the range is returned, as
+    /// in jsonata-js.
     #[test]
     fn parse_date_time_carries_like_date_utc() {
         for (timestamp, picture, expected) in [
