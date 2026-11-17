@@ -70,8 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it runs such a filter once on a missing field, so both engines agree. Such a step leaves the
   VM's single-step shortcut for the general compiled path, with no measurable cost
   (`items[$contains(sku,'A')]` over 300,000 items times the same as before).
-- **`$eval` reports an error its expression raises as D3121**, with the inner message (without
-  its code), as jsonata-js does: `$eval('1+"a"')` was T2002. Only unknown functions were wrapped before. The
+- **`$eval` reports an error its expression raises as D3121**, with the inner message (quoted,
+  without its code), as jsonata-js does: `$eval('1+"a"')` was T2002. Only unknown functions were wrapped before. The
   engine's own guardrails (timeout D1012, cancellation U1003, depth D1011 and U1001, sequence
   length D2015) keep their codes.
 - **A function passed as an argument of a call runs with a null input**

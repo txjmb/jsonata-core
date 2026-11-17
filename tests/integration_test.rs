@@ -5184,7 +5184,7 @@ fn test_eval_input_inside_path_step() {
     for result in [tree_walker, default] {
         assert!(
             result.contains(
-                "D3121: Dynamic error evaluating the expression passed to function eval: The right side"
+                "D3121: Dynamic error evaluating the expression passed to function eval: \"The right side"
             ),
             "{result}"
         );

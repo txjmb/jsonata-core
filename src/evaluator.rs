@@ -11249,15 +11249,10 @@ impl Evaluator {
                 ev.evaluate_internal(&parsed_ast, eval_context)
             })
         } else {
-            let rebind_input = self.context.lookup_from(at, "$").is_some();
             self.context.push_scope_at(at);
-            if rebind_input {
-                self.context.bind_top("$", eval_context.clone());
-            }
-            let evaluated = self.evaluate_internal(&parsed_ast, eval_context);
-            if rebind_input {
-                self.context.unbind("$");
-            }
+            let evaluated = self.with_dollar_bound(eval_context, |ev| {
+                ev.evaluate_internal(&parsed_ast, eval_context)
+            });
             if opaque {
                 self.context.pop_scope();
             } else {
@@ -11283,7 +11278,8 @@ impl Evaluator {
                 if matches!(e, EvaluatorError::PyConversionError(_)) {
                     return Err(e);
                 }
-                // The value is the inner error's message, without its code.
+                // The value is the inner error's message, without its code,
+                // quoted as jsonata-js's `{{value}}` (JSON.stringify) does.
                 let message = e.message();
                 let message = match e.code() {
                     Some(code) => message
@@ -11294,7 +11290,7 @@ impl Evaluator {
                 };
                 Err(EvaluatorError::EvaluationError(format!(
                     "D3121: Dynamic error evaluating the expression passed to function eval: {}",
-                    message
+                    serde_json::Value::String(message.to_string())
                 )))
             }
         }
