@@ -1392,12 +1392,34 @@ pub(crate) fn dispatch_pure_with(
 
         // ── Date/time functions ─────────────────────────────────────────
         "now" => {
-            if !args.is_empty() {
-                return Err(EvaluatorError::EvaluationError(
-                    "T0410: now() takes no arguments".to_string(),
+            // `$now(picture?, timezone?)`: the time, formatted as
+            // `$fromMillis` formats it, as in jsonata-js.
+            let text = |i: usize, which: &str| {
+                match args.get(i) {
+                None | Some(JValue::Undefined) => Ok(None),
+                Some(JValue::String(s)) => Ok(Some(s.to_string())),
+                Some(_) => Err(EvaluatorError::TypeError(format!(
+                    "T0410: Argument {} of function \"now\" does not match function signature ({which})",
+                    i + 1
+                ))),
+            }
+            };
+            if args.len() > 2 {
+                return Err(EvaluatorError::TypeError(
+                    "T0410: Argument 3 of function \"now\" does not match function signature"
+                        .to_string(),
                 ));
             }
-            Ok(crate::datetime::now())
+            let picture = text(0, "picture")?;
+            let timezone = text(1, "timezone")?;
+            if picture.is_none() && timezone.is_none() {
+                return Ok(crate::datetime::now());
+            }
+            Ok(crate::datetime::from_millis_with_picture(
+                chrono::Utc::now().timestamp_millis(),
+                picture.as_deref(),
+                timezone.as_deref(),
+            )?)
         }
         "millis" => {
             if !args.is_empty() {

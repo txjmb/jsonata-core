@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and
+  `encodeURIComponent` do.** `$encodeUrl("a b")` is `"a%20b"`, where it was `"a b"`: only
+  control characters were encoded. `$encodeUrlComponent` no longer encodes `-_.!~*'()`.
+- **`$now(picture, timezone)` formats the time as `$fromMillis` does, as in jsonata-js.** It
+  was T0410.
+
 - **A `[]` after a group-by on a path keeps the `~>` result an array, as in jsonata-js**
   ([#292](https://github.com/txjmb/jsonata-core/issues/292)). `o.b{"k":$}[] ~> $map(f)` is
   `[{"k":1}]`, where it was `{"k":1}`; a `[]` before the group-by (`o.b[]{"k":$}`) still keeps

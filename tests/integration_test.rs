@@ -5499,3 +5499,40 @@ fn test_builtin_partial_takes_declared_parameters() {
         assert!(default.contains("S0208"), "default: {expr} => {default}");
     }
 }
+
+/// `$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's
+/// `encodeURI` and `encodeURIComponent` do, and `$now` formats the time
+/// with a picture and timezone, as in jsonata-js. Expected values are from
+/// jsonata-js.
+#[test]
+fn test_url_encoding_and_now_picture() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, expected) in [
+        (r#"$encodeUrl("a b")"#, r#""a%20b""#),
+        (
+            r#"$encodeUrl("https://x.org/a b?q=1&r=[2]#f")"#,
+            r#""https://x.org/a%20b?q=1&r=%5B2%5D#f""#,
+        ),
+        (
+            r#"$encodeUrl("!#$&'()*+,-./:;=?@_~<>\"{}|^`")"#,
+            r#""!#$&'()*+,-./:;=?@_~%3C%3E%22%7B%7D%7C%5E%60""#,
+        ),
+        (
+            r#"$encodeUrlComponent("!#$&'()*+,-./:;=?@_~")"#,
+            r#""!%23%24%26'()*%2B%2C-.%2F%3A%3B%3D%3F%40_~""#,
+        ),
+        (r#"$type($now("[Y]"))"#, r#""string""#),
+        (r#"$length($now("[H01]:[m01]", "-0500"))"#, "5"),
+        (r#"$type($now(?)("[Y]"))"#, r#""string""#),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+    let (tree_walker, default) =
+        eval_both_engines_with("$now(5)", EvaluatorOptions::default(), &data);
+    assert!(tree_walker.contains("T0410"), "tree-walker: {tree_walker}");
+    assert!(default.contains("T0410"), "default: {default}");
+}
