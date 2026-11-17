@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call, so two calls in one expression could disagree.
 - **`$fromMillis` takes the whole range of a JavaScript date**, ±8.64e15 milliseconds
   (years -271821 to 275760). It stopped at chrono's ±262143 years.
+- **`$toMillis(timestamp, picture)` carries fields past their range into the next one, as
+  `Date.UTC` does in jsonata-js.** `"2018-02-30"` with `"[Y]-[M]-[D]"` is 2 March, month 13 is
+  January of the next year, hour 24 is midnight of the next day, and a two-digit year is in
+  the 1900s; these were D3136. A day of the year past the year's end keeps the parsed year, as
+  in jsonata-js, where it moved to the next year. Components the picture leaves out come from
+  the evaluation's timestamp, and an offset too large to apply is D3136 rather than an
+  overflow.
 - **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and
   `encodeURIComponent` do.** `$encodeUrl("a b")` is `"a%20b"`, where it was `"a b"`: only
   control characters were encoded. `$encodeUrlComponent` no longer encodes `-_.!~*'()`.
