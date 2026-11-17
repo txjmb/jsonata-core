@@ -498,16 +498,15 @@ impl Signature {
             .map(|(coerced, _)| coerced)
     }
 
-    /// As `validate_and_coerce`, but also reports how many parameters were
-    /// filled from the context by the '-' modifier.
-    ///
-    /// Callers need that number to tell two kinds of extra entry apart. The
-    /// returned vector has one entry per *parameter*, so it can be longer than
-    /// `args` for two unrelated reasons: an absent optional parameter padded
-    /// with Undefined, which should be trimmed back off, and a '-' parameter
-    /// filled from the context, which must be kept. `$lookup(missing.x)`
-    /// produces both shapes at once -- `[context, Undefined]` from one
-    /// argument -- and trimming on length alone throws away the supplied key.
+    /// How many arguments a call that takes none from the context must
+    /// supply: up to the last parameter that is required or a context one.
+    pub(crate) fn strict_required_len(&self) -> usize {
+        self.params
+            .iter()
+            .rposition(|p| !p.optional || p.context)
+            .map_or(0, |last| last + 1)
+    }
+
     /// As `validate_and_coerce_counted`, taking no argument from the context:
     /// a context parameter (`-`) is required, so an argument of another type
     /// in its place is a mismatch, not shifted behind the context. For a
@@ -529,6 +528,16 @@ impl Signature {
         self.validate_and_coerce_counted(args, &JValue::Undefined)
     }
 
+    /// As `validate_and_coerce`, but also reports how many parameters were
+    /// filled from the context by the '-' modifier.
+    ///
+    /// Callers need that number to tell two kinds of extra entry apart. The
+    /// returned vector has one entry per *parameter*, so it can be longer than
+    /// `args` for two unrelated reasons: an absent optional parameter padded
+    /// with Undefined, which should be trimmed back off, and a '-' parameter
+    /// filled from the context, which must be kept. `$lookup(missing.x)`
+    /// produces both shapes at once -- `[context, Undefined]` from one
+    /// argument -- and trimming on length alone throws away the supplied key.
     pub fn validate_and_coerce_counted(
         &self,
         args: &[JValue],

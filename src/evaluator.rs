@@ -12117,9 +12117,21 @@ impl Evaluator {
                 // ever taken from the context: an argument of another type
                 // in a context parameter's place (`$substring(?, 1)` given a
                 // number) is a mismatch, not shifted behind it.
-                if crate::builtins::is_pure_builtin(name)
-                    && !self.host_fns.contains_key(name.as_str())
-                {
+                // It declares every parameter of the builtin, so a required
+                // one the partial doesn't write is passed, undefined
+                // (`$substringBefore(?)` given "hello" is "hello"). An
+                // optional one is left out, as here it stands for none.
+                let mut full_args = full_args;
+                if let Some(sig) = crate::signature::builtin_signature(name) {
+                    let required = sig.strict_required_len();
+                    if full_args.len() < required {
+                        full_args.resize(required, JValue::Undefined);
+                    }
+                }
+                if self.host_fns.contains_key(name.as_str()) {
+                    return self.call_builtin_with_values(name, &full_args, &JValue::Undefined);
+                }
+                if crate::builtins::is_pure_builtin(name) {
                     return crate::builtins::dispatch_pure_with(
                         name,
                         &full_args,
@@ -12128,6 +12140,10 @@ impl Evaluator {
                         self.start_time,
                     );
                 }
+                // Any other builtin validates against the context in its
+                // own call; checking without it first means that can't
+                // shift an argument either ($match, $replace, $each, $sift).
+                validate_builtin_args(name, &full_args, None)?;
                 self.call_builtin_with_values(name, &full_args, &JValue::Undefined)
             }
             PartialTarget::Host(HostTarget(f)) => {

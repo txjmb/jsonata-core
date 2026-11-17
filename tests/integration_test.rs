@@ -5241,6 +5241,15 @@ fn test_eval_input_inside_path_step() {
         (r#"($f := $eval(?, 5); $f("$"))"#, "Ok(5)"),
         (r#"($f := $eval("$$.a", ?); $f(9))"#, "Ok([1,2,3])"),
         (r#"($f := $substring(?, 1); $f("abc"))"#, r#"Ok("bc")"#),
+        // A required parameter the partial leaves out is passed, undefined.
+        (
+            r#"($f := $substringBefore(?); "hello" ~> $f)"#,
+            r#"Ok("hello")"#,
+        ),
+        (
+            r#"($f := $replace(?, "l", "L"); $f("hello"))"#,
+            r#"Ok("heLLo")"#,
+        ),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5264,6 +5273,7 @@ fn test_eval_input_inside_path_step() {
         r#"a.($f := $eval(?); $f("$"))"#,
         r#"$map(["$"], $eval(?))"#,
         r#""x".($f := $uppercase(?); $f())"#,
+        r#"($f := $contains(?); $f("abc"))"#,
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5278,6 +5288,8 @@ fn test_eval_input_inside_path_step() {
         r#"($f := $substring(?, 1); $f(5))"#,
         r#"($f := $substring(?, 1); $f(true))"#,
         r#"($f := $fromMillis(?, "[Y]", ?); $f("x"))"#,
+        r#"($f := $match(?, ?); $f(/l/))"#,
+        r#"($f := $replace(?, ?, ?); $f(/l/, "x"))"#,
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
