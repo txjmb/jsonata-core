@@ -4713,6 +4713,37 @@ fn test_no_filter_on_nothing_after_sort_or_chain() {
         (r##"a.b[0] ~> $map(function($v){$v})[0]"##, "Ok(1)"),
         (r##"a.b[0] ~> $map(function($v){$v})[5][]"##, "Ok([1])"),
         (r##"a.b[0] ~> $map(function($v){$v}){"k": $}[]"##, "Ok([1])"),
+        // A `[]` on the left side, or on a function value on the right,
+        // keeps the result's singleton array too, as jsonata-js's apply
+        // node's keepArray does; one on a later step of the left doesn't.
+        (r##"(a.b[0])[] ~> $map(function($v){$v})"##, "Ok([1])"),
+        (
+            r##"($x := a.b[0]; $x[] ~> $map(function($v){$v}))"##,
+            "Ok([1])",
+        ),
+        (
+            r##"($x := a.b[0]; $x[]^($) ~> $map(function($v){$v}))"##,
+            "Ok(1)",
+        ),
+        (
+            r##"{"c":[1]}.c^($)[] ~> $map(function($v){$v})"##,
+            "Ok([1])",
+        ),
+        (
+            r##"($x := a.b[0]; $x[]{"k": $} ~> $map(function($v){$v}))"##,
+            r##"Ok([{"k":1}])"##,
+        ),
+        (
+            r##"(a.b[0])[] ~> $map(function($v){$v}) ~> $map(function($v){$v})"##,
+            "Ok([1])",
+        ),
+        (
+            r##"($f := $map(?, function($v){$v}); [7] ~> $f[])"##,
+            "Ok([7])",
+        ),
+        (r##"[7] ~> $map(?, function($v){$v})[]"##, "Ok([7])"),
+        (r##"a.b[0][] ~> $map(function($v){$v})"##, "Ok(1)"),
+        (r##"{"c":[1]}.c[] ~> $map(function($v){$v})"##, "Ok(1)"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5227,5 +5258,19 @@ fn test_eval_input_inside_path_step() {
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
         assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
         assert_eq!(default, undefined, "default: {expr}");
+    }
+    // No argument is taken from the context, so a mismatched first argument
+    // is an error rather than shifted behind a missing context.
+    for expr in [
+        r#"($f := $substring(?, 1); $f(5))"#,
+        r#"($f := $substring(?, 1); $f(true))"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains("T0410"),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains("T0410"), "default: {expr} => {default}");
     }
 }

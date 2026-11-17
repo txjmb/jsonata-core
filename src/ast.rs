@@ -67,6 +67,37 @@ pub struct PathStep {
     /// old step may be evaluated by the same evaluator.
     #[serde(skip)]
     pub id: StepId,
+    /// Whether the evaluator runs this step's filters on nothing (#260),
+    /// worked out from `stages` the first time the step runs, rather than
+    /// each time (#288). A cache, not part of the step's meaning: ignored by
+    /// equality and serialization. A clone keeps it, having the same stages;
+    /// code that changes the `stages` of a step that has run must give it a
+    /// new one (`StepCache::default()`).
+    #[serde(skip)]
+    pub runs_on_nothing: StepCache,
+}
+
+/// A value the evaluator works out once from a `PathStep` and keeps on it;
+/// see `PathStep::runs_on_nothing`. Equal to any other, like `StepId`.
+#[derive(Clone, Default)]
+pub struct StepCache(std::sync::OnceLock<bool>);
+
+impl StepCache {
+    pub(crate) fn get_or_init(&self, init: impl FnOnce() -> bool) -> bool {
+        *self.0.get_or_init(init)
+    }
+}
+
+impl PartialEq for StepCache {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for StepCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StepCache")
+    }
 }
 
 /// The identity of a path step; see `PathStep::id`. `StepId::default()` is
@@ -443,6 +474,7 @@ impl PathStep {
             is_tuple: false,
             inner_tuple: false,
             id: StepId::default(),
+            runs_on_nothing: StepCache::default(),
         }
     }
 
@@ -457,6 +489,7 @@ impl PathStep {
             is_tuple: false,
             inner_tuple: false,
             id: StepId::default(),
+            runs_on_nothing: StepCache::default(),
         }
     }
 }

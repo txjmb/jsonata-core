@@ -24,7 +24,7 @@ const FAILING: &[&str] = &[
     // Sort comparator scope.
     r#"$sort([2, 1], function($v, $w) { $error("e") })"#,
     // Partial application temporaries.
-    r#"($f := $substring(?, 1, $error("e")); $f("abc"))"#,
+    r#"($f := $substring(?, 1); $f(true))"#,
     // Group-by key over a tuple stream, binding `$x`.
     r#"a@$x{$error("e"): 1}"#,
     // Group-by key binding `$`.

@@ -4780,19 +4780,7 @@ pub struct Evaluator {
     /// evaluator has run, by `PathStep::id` (`None`: does not compile), so a
     /// step compiles once per evaluator rather than each time it runs (#197).
     step_bodies: StepBodies,
-    /// `filters_run_on_nothing` for the filtered steps this evaluator has
-    /// run, by `PathStep::id`, so the analysis runs once per step rather
-    /// than each time the step does (#288).
-    on_nothing: OnNothingCache,
 }
-
-/// Each entry holds the address and length of the stages it was worked out
-/// for, so a step that shares its id with another (a clone) and has other
-/// stages is never given the other's answer.
-#[derive(Default)]
-struct OnNothingCache(
-    HashMap<u64, (usize, usize, bool), std::hash::BuildHasherDefault<StepIdHasher>>,
-);
 
 /// The compiled-step cache: the step looked up last, which is the one asked
 /// for again in the common case of one such step run over and over, and a
@@ -4872,7 +4860,6 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
-            on_nothing: OnNothingCache::default(),
         }
     }
 
@@ -4890,7 +4877,6 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
-            on_nothing: OnNothingCache::default(),
         }
     }
 
@@ -4910,7 +4896,6 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
-            on_nothing: OnNothingCache::default(),
         }
     }
 
@@ -6141,7 +6126,11 @@ impl Evaluator {
         // jsonata-js parses a call with a `?` argument as a partial
         // application, not a call, so that is applied like any function
         // value below.
-        let (call, keep_array) = Self::apply_rhs_call(rhs).unwrap_or((rhs, false));
+        let (call, keep_call) = Self::apply_rhs_call(rhs).unwrap_or((rhs, false));
+        // jsonata-js's apply node keeps a singleton array when either side
+        // was written with `[]` (`result.keepArray = lhs.keepArray ||
+        // rhs.keepArray`).
+        let keep_array = keep_call || Self::keeps_array(lhs) || Self::keeps_array(rhs);
         if let AstNode::Function {
             name,
             args,
@@ -6207,7 +6196,7 @@ impl Evaluator {
                             *thunk,
                         )
                     })
-                    .map(JValue::unwrap_sequence);
+                    .map(|result| Self::finish_apply(result, keep_array));
             }
         }
         let func = self.evaluate_internal(rhs, data)?;
@@ -6222,7 +6211,7 @@ impl Evaluator {
             return Ok(Self::compose_functions(lhs_value, func, def));
         }
         self.as_callback(|ev| ev.call_function_value(&func, &[lhs_value], data))
-            .map(JValue::unwrap_sequence)
+            .map(|result| Self::finish_apply(result, keep_array))
     }
 
     /// Whether an argument is a function with tail calls (written inline,
@@ -6382,8 +6371,43 @@ impl Evaluator {
         }
     }
 
+    /// Whether jsonata-js's processed `node` carries `keepArray`, as a side
+    /// of `~>` reads it: a `[]` on a path's first step (`x[]`, `x[0][]`,
+    /// `(o.b)[]`, `o[].b`), not on a later one (`o.b[]`); the input of a
+    /// group-by, or of a sort when that input is a path (`x[]^($)`, not
+    /// `$x[]^($)`); and either side of a nested `~>`.
+    fn keeps_array(node: &AstNode) -> bool {
+        match node {
+            AstNode::Path { steps } => steps.first().is_some_and(|first| {
+                first
+                    .stages
+                    .iter()
+                    .any(|stage| matches!(stage, Stage::KeepArray))
+                    || matches!(
+                        first.node,
+                        AstNode::Sort { .. } | AstNode::ObjectTransform { .. }
+                    ) && Self::keeps_array(&first.node)
+            }),
+            // jsonata-js appends a sort to its input path, keeping that
+            // path's flag, but wraps any other input (`$x[]^($)`) in a new
+            // path, which has none.
+            AstNode::Sort { input, .. } => match &**input {
+                AstNode::Path { steps } if !Self::is_non_path(steps) => Self::keeps_array(input),
+                AstNode::Sort { .. } => Self::keeps_array(input),
+                _ => false,
+            },
+            AstNode::ObjectTransform { input, .. } => Self::keeps_array(input),
+            AstNode::Binary {
+                op: BinaryOp::ChainPipe,
+                lhs,
+                rhs,
+            } => Self::keeps_array(lhs) || Self::keeps_array(rhs),
+            _ => false,
+        }
+    }
+
     /// The value of a `~>` from its call's `result`, kept as an array when
-    /// `[]` followed the call.
+    /// `[]` was written on either side (`keeps_array`).
     fn finish_apply(mut result: JValue, keep_array: bool) -> JValue {
         if keep_array {
             keep_if_sequence(&mut result);
@@ -6478,7 +6502,7 @@ impl Evaluator {
         if Self::is_non_path(steps) && !Self::step_creates_tuple(first) && !first.is_tuple {
             let value = self.evaluate_unwrapped_later(&first.node, data)?;
             // jsonata-js filters an undefined value too (`$x[$f()]`).
-            let mut value = if value.is_undefined() && self.step_filters_run_on_nothing(first) {
+            let mut value = if value.is_undefined() && Self::step_filters_run_on_nothing(first) {
                 self.filter_undefined(&first.stages)?
             } else {
                 self.apply_filter_stages(value, &first.stages)?
@@ -6831,7 +6855,7 @@ impl Evaluator {
         items: &[JValue],
         last_step: bool,
     ) -> Result<JValue, EvaluatorError> {
-        let run_on_nothing = self.step_filters_run_on_nothing(step);
+        let run_on_nothing = Self::step_filters_run_on_nothing(step);
         let values = match &step.node {
             // A field step looks the field up in each item, reusing its
             // position across a homogeneous array.
@@ -7004,31 +7028,11 @@ impl Evaluator {
         Ok(JValue::object(result))
     }
 
-    /// `filters_run_on_nothing` for `step`'s stages, worked out once per step
-    /// (see `OnNothingCache`). A step without filters, or whose first is a
-    /// position, needs no analysis.
-    fn step_filters_run_on_nothing(&mut self, step: &PathStep) -> bool {
-        let first_selects = step.stages.iter().find_map(|stage| match stage {
-            Stage::Filter(predicate) => Some(numeric_literal(predicate).is_none()),
-            _ => None,
-        });
-        if first_selects != Some(true) {
-            return false;
-        }
-        let key = (step.stages.as_ptr() as usize, step.stages.len());
-        if let Some(&(ptr, len, runs)) = self.on_nothing.0.get(&step.id.get()) {
-            if (ptr, len) == key {
-                return runs;
-            }
-        }
-        let runs = Self::filters_run_on_nothing(&step.stages);
-        if self.on_nothing.0.len() >= MAX_STEP_BODIES {
-            self.on_nothing.0.clear();
-        }
-        self.on_nothing
-            .0
-            .insert(step.id.get(), (key.0, key.1, runs));
-        runs
+    /// `filters_run_on_nothing` for `step`'s stages, worked out the first
+    /// time the step runs and kept on the step (#288).
+    fn step_filters_run_on_nothing(step: &PathStep) -> bool {
+        step.runs_on_nothing
+            .get_or_init(|| Self::filters_run_on_nothing(&step.stages))
     }
 
     /// Whether a field step's filter `stages` are run on an item without
@@ -12095,6 +12099,21 @@ impl Evaluator {
             // callback application, which is that lambda's (#287).
             PartialTarget::Builtin(name) => {
                 self.callback_apply = ApplyMode::Direct;
+                // That lambda passes every argument explicitly, so none is
+                // ever taken from the context: an argument the signature
+                // would shift behind a missing context (`$substring(?, 1)`
+                // given a number) is a mismatch, not an undefined result.
+                if let Some(sig) = crate::signature::builtin_signature(name) {
+                    if let Ok((_, substituted)) =
+                        sig.validate_and_coerce_counted(&full_args, &JValue::Undefined)
+                    {
+                        if substituted > 0 {
+                            return Err(EvaluatorError::TypeError(format!(
+                                "T0410: Argument 1 of function {name} does not match function signature"
+                            )));
+                        }
+                    }
+                }
                 self.call_builtin_with_values(name, &full_args, &JValue::Undefined)
             }
             PartialTarget::Host(HostTarget(f)) => {
