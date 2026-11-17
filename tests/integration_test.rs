@@ -5547,3 +5547,34 @@ fn test_url_encoding_and_now_picture() {
     assert!(tree_walker.contains("T0410"), "tree-walker: {tree_walker}");
     assert!(default.contains("T0410"), "default: {default}");
 }
+
+/// `$now()` and `$millis()` report one timestamp for the whole evaluation,
+/// read when it starts, as jsonata-js does (#294): repeated calls agree even
+/// when the evaluation spans many milliseconds, and `$now()` is `$millis()`
+/// formatted. A later evaluation reads the clock again.
+#[test]
+fn test_now_and_millis_share_one_timestamp_per_evaluation() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for expr in [
+        "$count($distinct($map([1..200000], function($i) { $millis() }))) = 1",
+        "$count($distinct($map([1..200000], function($i) { $now() }))) = 1",
+        "$millis() ~> $fromMillis() = $now()",
+        "$now() = $fromMillis($millis())",
+        r#"$now("[H01]:[m01]:[s01].[f001]") = $fromMillis($millis(), "[H01]:[m01]:[s01].[f001]")"#,
+        r#"$eval("$millis()") = $millis()"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, "Ok(true)", "tree-walker: {expr}");
+        assert_eq!(default, "Ok(true)", "default: {expr}");
+    }
+
+    let ast = parse("$millis()").unwrap();
+    let first = Evaluator::new().evaluate(&ast, &data).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let second = Evaluator::new().evaluate(&ast, &data).unwrap();
+    assert!(
+        second.as_f64() > first.as_f64(),
+        "each evaluation reads the clock: {first:?} then {second:?}"
+    );
+}

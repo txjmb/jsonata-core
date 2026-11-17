@@ -1416,7 +1416,7 @@ pub(crate) fn dispatch_pure_with(
                 return Ok(crate::datetime::now());
             }
             Ok(crate::datetime::from_millis_with_picture(
-                chrono::Utc::now().timestamp_millis(),
+                crate::datetime::evaluation_millis(),
                 picture.as_deref(),
                 timezone.as_deref(),
             )?)

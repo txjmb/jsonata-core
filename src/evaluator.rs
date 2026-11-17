@@ -5383,6 +5383,7 @@ impl Evaluator {
     pub fn evaluate(&mut self, node: &AstNode, data: &JValue) -> Result<JValue, EvaluatorError> {
         let entry_depth = self.context.scope_stack.len();
         let caller_parent = self.context.get_parent().is_some();
+        let _timestamp = crate::datetime::EvaluationTimestamp::enter();
         self.context.push_scope();
         let result = self.evaluate_from_entry(node, data);
         debug_assert!(

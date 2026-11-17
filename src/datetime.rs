@@ -107,16 +107,70 @@ pub fn format_iso8601(dt: &DateTime<Utc>) -> String {
     dt.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
-/// $now() - Get current timestamp
+/// The clock as milliseconds since the Unix epoch.
+fn clock_millis() -> i64 {
+    Utc::now().timestamp_millis()
+}
+
+thread_local! {
+    /// The evaluation in progress on this thread: how many are nested, and the
+    /// timestamp its `$now()`/`$millis()` report, read from the clock on first
+    /// use so an evaluation that never asks pays nothing for it.
+    static EVALUATION_TIMESTAMP: std::cell::Cell<(u32, Option<i64>)> =
+        const { std::cell::Cell::new((0, None)) };
+}
+
+/// One evaluation's timestamp, held for as long as the scope lives.
+///
+/// jsonata-js reads the clock once per `evaluate()` call
+/// (`environment.timestamp = new Date()`) and every `$now()` and `$millis()`
+/// in that evaluation reports it, so they agree with each other (#294). An
+/// evaluation nested inside another (a host function evaluating an expression
+/// of its own) gets its own timestamp, and the outer one's comes back when it
+/// ends.
+pub(crate) struct EvaluationTimestamp {
+    outer: (u32, Option<i64>),
+}
+
+impl EvaluationTimestamp {
+    pub(crate) fn enter() -> Self {
+        let outer = EVALUATION_TIMESTAMP.with(|t| t.replace((t.get().0 + 1, None)));
+        Self { outer }
+    }
+}
+
+impl Drop for EvaluationTimestamp {
+    fn drop(&mut self) {
+        EVALUATION_TIMESTAMP.with(|t| t.set(self.outer));
+    }
+}
+
+/// The timestamp of the evaluation in progress, or the clock outside one.
+pub(crate) fn evaluation_millis() -> i64 {
+    EVALUATION_TIMESTAMP.with(|t| match t.get() {
+        (_, Some(millis)) => millis,
+        (0, None) => clock_millis(),
+        (depth, None) => {
+            let millis = clock_millis();
+            t.set((depth, Some(millis)));
+            millis
+        }
+    })
+}
+
+/// $now() - The evaluation's timestamp, as an ISO 8601 string
 pub fn now() -> JValue {
-    let now = Utc::now();
+    let millis = evaluation_millis();
+    let now = Utc
+        .timestamp_millis_opt(millis)
+        .single()
+        .expect("the clock is within chrono's range");
     JValue::string(format_iso8601(&now))
 }
 
-/// $millis() - Get milliseconds since epoch
+/// $millis() - The evaluation's timestamp, in milliseconds since the epoch
 pub fn millis() -> JValue {
-    let now = Utc::now();
-    JValue::Number(now.timestamp_millis() as f64)
+    JValue::Number(evaluation_millis() as f64)
 }
 
 /// $toMillis(timestamp) - Convert ISO 8601 timestamp to milliseconds since epoch
