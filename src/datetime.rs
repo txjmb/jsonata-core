@@ -114,7 +114,7 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 /// milliseconds (ECMAScript's TimeClip): 100,000,000 days.
 const MAX_DATE_MILLIS: i64 = 8_640_000_000_000_000;
 
-/// The furthest year `CivilDate::from_ymd` builds.
+/// The furthest year `CivilDate::from_ymd` and `date_utc` build.
 const MAX_CIVIL_YEAR: i64 = 1_000_000;
 
 /// A day in the proleptic Gregorian calendar, the calendar JavaScript's `Date`
@@ -1937,11 +1937,13 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
 
     let hour_val = if time_b {
         let h = components[&'h'];
-        let mut hh = if h == 12 { 0 } else { h };
+        let hh = if h == 12 { 0 } else { h };
         if components.get(&'P').copied() == Some(1) {
-            hh += 12;
+            hh.checked_add(12)
+                .ok_or_else(|| coded("D3136", "invalid time components"))?
+        } else {
+            hh
         }
-        hh
     } else {
         components[&'H']
     };
@@ -1950,20 +1952,22 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
     // past its range into the next one: month 13 is January of the next year,
     // 30 February is 1 or 2 March, hour 24 is midnight of the next day. A
     // month of 0 is January.
-    let mut month0 = (components.get(&'M').copied().unwrap_or(0) - 1).max(0);
+    let mut month0 = (components.get(&'M').copied().unwrap_or(0).saturating_sub(1)).max(0);
     let mut day = components.get(&'D').copied().unwrap_or(1);
     if date_b {
         // The month and day that many days on from 1 January; jsonata-js
         // keeps the parsed year, so a day past the year's end lands in the
         // same year, not the next.
-        let first_jan = date_utc(year, 0, 1, 0, 0, 0, 0)
+        // A derived date past JavaScript's is an Invalid Date there, and the
+        // result NaN.
+        let derived = date_utc(year, 0, 1, 0, 0, 0, 0)
+            .and_then(|first_jan| {
+                (first_jan / MILLIS_PER_DAY).checked_add(components[&'d'].checked_sub(1)?)
+            })
+            .map(|days| CivilDate { days })
+            .filter(|date| date.days.unsigned_abs() <= (MAX_DATE_MILLIS / MILLIS_PER_DAY) as u64)
             .ok_or_else(|| coded("D3136", "invalid date components"))?;
-        let derived = components[&'d']
-            .checked_sub(1)
-            .and_then(|days| days.checked_mul(MILLIS_PER_DAY))
-            .and_then(|offset| first_jan.checked_add(offset))
-            .ok_or_else(|| coded("D3136", "invalid date components"))?;
-        let (_, m, d) = CivilDate::from_millis(derived).ymd();
+        let (_, m, d) = derived.ymd();
         month0 = m - 1;
         day = d;
     }
@@ -1977,7 +1981,12 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
         components.get(&'f').copied().unwrap_or(0),
     )
     .and_then(
-        |millis| match components.get(&'Z').or_else(|| components.get(&'z')) {
+        // `components.Z || components.z`: a zero Z falls through to z.
+        |millis| match components
+            .get(&'Z')
+            .filter(|offset| **offset != 0)
+            .or_else(|| components.get(&'z'))
+        {
             Some(offset) => offset
                 .checked_mul(60 * 1000)
                 .and_then(|offset_millis| millis.checked_sub(offset_millis)),
@@ -2130,6 +2139,11 @@ mod tests {
                 949_024_920_000,
             ),
             (
+                "2018-01-01 +00:00 GMT+05:00",
+                "[Y]-[M]-[D] [Z] [z]",
+                1_514_746_800_000,
+            ),
+            (
                 "275760-09-13T00:00:00-05:00",
                 "[Y]-[M]-[D]T[H]:[m]:[s][Z01:01]",
                 8_640_000_018_000_000,
@@ -2143,6 +2157,8 @@ mod tests {
         }
         for (timestamp, picture) in [
             ("280000", "[Y]"),
+            ("2018-100000000", "[Y]-[d]"),
+            ("99999999999999999999 pm", "[h] [P]"),
             (
                 "2018-01-01T00:00:00+0099999999999999999",
                 "[Y]-[M]-[D]T[H]:[m]:[s][Z0000]",
