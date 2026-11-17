@@ -47,8 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the 1900s; these were D3136. A day of the year past the year's end now keeps the parsed
   year with the derived month and day, as jsonata-js does; it used to move to the next year.
   Components the picture leaves out come from the evaluation's timestamp. Where jsonata-js
-  returns NaN (a result past JavaScript's dates, or an offset too large to apply), this is
-  D3136, as before.
+  returns NaN (a date past JavaScript's range), this is D3136, as before; an offset too large
+  to subtract is D3136 too, where it was an integer overflow.
 - **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and
   `encodeURIComponent` do.** `$encodeUrl("a b")` is `"a%20b"`, where it was `"a b"`: only
   control characters were encoded. `$encodeUrlComponent` no longer encodes `-_.!~*'()`.

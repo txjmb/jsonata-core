@@ -1961,8 +1961,10 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
         // The month and day that many days on from 1 January (`Date.UTC`
         // carries the day over). jsonata-js keeps the parsed year with them,
         // so a day past the year's end lands in the same year, not the next.
-        // Where jsonata-js gets NaN (a date past JavaScript's range), this is
-        // D3136, as below.
+        // Where jsonata-js gets NaN (1 January or the derived date past
+        // JavaScript's range), this is D3136.
+        date_utc(year, 0, 1, 0, 0, 0, 0)
+            .ok_or_else(|| coded("D3136", "invalid date components"))?;
         let derived = date_utc(year, 0, components[&'d'], 0, 0, 0, 0)
             .ok_or_else(|| coded("D3136", "invalid date components"))?;
         let (_, m, d) = CivilDate::from_millis(derived).ymd();
@@ -1991,8 +1993,10 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
             None => Some(millis),
         },
     )
-    // jsonata-js returns NaN for a timestamp past JavaScript's dates; a
-    // number that is not one is reported as D3136 here instead.
+    // Where `Date.UTC` gives NaN (a date past JavaScript's range), jsonata-js
+    // returns NaN; this is D3136. An offset too large to subtract in i64 is
+    // D3136 too, where jsonata-js returns a huge finite number. A result the
+    // offset moves past JavaScript's range is returned as is, as there.
     .ok_or_else(|| coded("D3136", "invalid date components"))?;
 
     Ok(Some(millis_val))
