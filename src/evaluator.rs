@@ -2029,7 +2029,7 @@ fn try_compile_path(
                 compiled_steps.push(CompiledStep {
                     field: name.clone(),
                     run_on_nothing: filter.is_some()
-                        && Evaluator::filters_run_on_nothing(&step.stages),
+                        && Evaluator::step_filters_run_on_nothing(step, false),
                     filter,
                 });
             }
@@ -2392,10 +2392,13 @@ pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
 /// answer differs per function ($count is 0, $exists is false, $abs is
 /// undefined), so the caller's arm decides. A genuine type error is returned as
 /// an error.
+///
+/// `context` is `None` for a call that takes no argument from the context
+/// (`Signature::validate_and_coerce_strict`).
 pub(crate) fn validate_builtin_args(
     name: &str,
     args: &[JValue],
-    context: &JValue,
+    context: Option<&JValue>,
 ) -> Result<Option<Vec<JValue>>, EvaluatorError> {
     let Some(sig) = crate::signature::builtin_signature(name) else {
         return Ok(None);
@@ -2421,7 +2424,11 @@ pub(crate) fn validate_builtin_args(
         }
     }
     let args = &args[..end];
-    match sig.validate_and_coerce_counted(args, context) {
+    let validated = match context {
+        Some(context) => sig.validate_and_coerce_counted(args, context),
+        None => sig.validate_and_coerce_strict(args),
+    };
+    match validated {
         Ok((mut coerced, context_substitutions)) => {
             // Validation returns one entry per *parameter*, padding absent
             // optional ones with Undefined. The arms decide whether an optional
@@ -4391,10 +4398,8 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
                 // The first step's own filters still run, on nothing, as
                 // they do for any step that gives nothing (#260):
                 // `nope[x[$error("E")]]` raises.
-                // A `*` or `**` step runs none there.
-                if !matches!(first.node, AstNode::Wildcard | AstNode::Descendant) {
-                    raises |= Evaluator::filters_run_on_nothing(&first.stages);
-                }
+                // A first `*` step runs none there (`step_filters_run_on_nothing`).
+                raises |= Evaluator::step_filters_run_on_nothing(first, true);
                 return (K::Undefined, raises);
             }
             for (i, step) in steps.iter().enumerate() {
@@ -5975,6 +5980,9 @@ impl Evaluator {
             // `**`: every value at or below the input, following jsonata-js
             // `evaluateDescendants`, which returns a single descendant itself
             // rather than as a one-item sequence (so `**[]` does not keep it).
+            // Nothing as the input gives nothing (not an empty sequence), so
+            // the step's filters still run on it, as jsonata-js does (#290).
+            AstNode::Descendant if data.is_undefined() => Ok(JValue::Undefined),
             AstNode::Descendant => {
                 let mut descendants = self.collect_descendants(data)?;
                 check_sequence_length(descendants.len(), &self.options)?;
@@ -6114,50 +6122,35 @@ impl Evaluator {
         rhs: &AstNode,
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
-        // The call on the right, and the one-step path it heads when it has
-        // a filter or `[]` (`x ~> $map($f)[0]`). jsonata-js parses a call
-        // with a `?` argument as a partial application, not a call, so that
-        // is applied like any function value below.
-        // A `#` or `@` on the call makes it a path in jsonata-js, which
-        // isn't a call (`x ~> $string()#$i` is T2006).
-        let (call, path_steps) = match rhs {
-            AstNode::Path { steps }
-                if steps.len() == 1
-                    && steps[0].index_var.is_none()
-                    && steps[0].focus.is_none()
-                    && steps[0].ancestor_label.is_none()
-                    && steps[0]
-                        .stages
-                        .iter()
-                        .all(|stage| matches!(stage, Stage::Filter(_) | Stage::KeepArray)) =>
-            {
-                (&steps[0].node, Some(steps))
-            }
-            _ => (rhs, None),
-        };
-        if let AstNode::Function {
-            name,
-            args,
-            is_builtin,
-        } = call
-        {
-            if !args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
+        // The call on the right. jsonata-js's `evaluateApplyExpression`
+        // passes a call to `evaluateFunction`, which never reads the call's
+        // filters or group-by, so they are not applied (#286): only `[]`
+        // carries over, through the apply node. A `#` or `@` on the call
+        // makes it a path, which isn't a call (`x ~> $string()#$i` is T2006).
+        // jsonata-js parses a call with a `?` argument as a partial
+        // application, not a call, so that is applied like any function
+        // value below.
+        // jsonata-js's apply node keeps a singleton array when either side
+        // was written with `[]` (`result.keepArray = lhs.keepArray ||
+        // rhs.keepArray`). Only a single result needs the answer.
+        let keep_array = || Self::keeps_array(lhs) || Self::keeps_array(rhs);
+        match Self::apply_rhs_call(rhs) {
+            Some(AstNode::Function {
+                name,
+                args,
+                is_builtin,
+            }) => {
                 let mut all_args = Vec::with_capacity(args.len() + 1);
                 all_args.push(lhs.clone());
                 all_args.extend_from_slice(args);
                 let result =
                     self.evaluate_function_call(name, &all_args, *is_builtin, true, data)?;
-                return match path_steps {
-                    Some(steps) => self.finish_chained_path(steps, result),
-                    None => Ok(result.unwrap_sequence()),
-                };
+                return Ok(Self::finish_apply(result, keep_array));
             }
-        }
-        // A call of an expression's value, such as `$uppercase[0]()` or
-        // `$o[1]()`: as jsonata-js `evaluateFunction` with the left side as
-        // its context, which goes first among the arguments.
-        if let AstNode::Call { procedure, args } = call {
-            if !args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
+            // A call of an expression's value, such as `$uppercase[0]()` or
+            // `$o[1]()`: as jsonata-js `evaluateFunction` with the left side
+            // as its context, which goes first among the arguments.
+            Some(AstNode::Call { procedure, args }) => {
                 let lhs_value = self.evaluate_internal(lhs, data)?;
                 let callable = self.evaluate_internal(procedure, data)?;
                 self.check_missing_sigil(&callable, procedure)?;
@@ -6177,11 +6170,9 @@ impl Evaluator {
                     return Err(not_a_function());
                 }
                 let result = self.call_function_value(&callable, &values, data)?;
-                return match path_steps {
-                    Some(steps) => self.finish_chained_path(steps, result),
-                    None => Ok(result.unwrap_sequence()),
-                };
+                return Ok(Self::finish_apply(result, keep_array));
             }
+            _ => {}
         }
 
         let lhs_value = self.evaluate_internal(lhs, data)?;
@@ -6206,7 +6197,7 @@ impl Evaluator {
                             *thunk,
                         )
                     })
-                    .map(JValue::unwrap_sequence);
+                    .map(|result| Self::finish_apply(result, keep_array));
             }
         }
         let func = self.evaluate_internal(rhs, data)?;
@@ -6221,7 +6212,7 @@ impl Evaluator {
             return Ok(Self::compose_functions(lhs_value, func, def));
         }
         self.as_callback(|ev| ev.call_function_value(&func, &[lhs_value], data))
-            .map(JValue::unwrap_sequence)
+            .map(|result| Self::finish_apply(result, keep_array))
     }
 
     /// Whether an argument is a function with tail calls (written inline,
@@ -6352,20 +6343,89 @@ impl Evaluator {
         )
     }
 
-    /// Finish a `~>` whose right side is a call with a filter or `[]`
-    /// (`x ~> $f()[0]`), given that call's result: the call step's filter
-    /// stages, then `[]`, as for any path. jsonata-js does not filter the
-    /// call's result at all, so an undefined one is not filtered either.
-    fn finish_chained_path(
-        &mut self,
-        steps: &[PathStep],
-        call_result: JValue,
-    ) -> Result<JValue, EvaluatorError> {
-        let mut result = self.apply_filter_stages(call_result, &steps[0].stages)?;
-        if Self::path_keeps_singleton_array(steps) {
-            keep_if_sequence(&mut result);
+    /// The call a `~>`'s right side `rhs` holds, when it is a call with no
+    /// `?` argument, perhaps under filters, `[]` or a group-by, none of which
+    /// jsonata-js applies there (see `evaluate_apply_expression`).
+    fn apply_rhs_call(rhs: &AstNode) -> Option<&AstNode> {
+        match rhs {
+            AstNode::Function { args, .. } | AstNode::Call { args, .. }
+                if !args.iter().any(|a| matches!(a, AstNode::Placeholder)) =>
+            {
+                Some(rhs)
+            }
+            AstNode::Path { steps }
+                if steps.len() == 1
+                    && steps[0].index_var.is_none()
+                    && steps[0].focus.is_none()
+                    && steps[0].ancestor_label.is_none()
+                    && steps[0]
+                        .stages
+                        .iter()
+                        .all(|stage| matches!(stage, Stage::Filter(_) | Stage::KeepArray)) =>
+            {
+                Self::apply_rhs_call(&steps[0].node)
+            }
+            AstNode::ObjectTransform { input, .. } => Self::apply_rhs_call(input),
+            _ => None,
         }
-        Ok(result)
+    }
+
+    /// Whether jsonata-js's processed `node` carries `keepArray`, as a side
+    /// of `~>` reads it: the flag of the node a `[]` was written on, which a
+    /// path keeps only when it grew from that node (`x[]`, `x[0][]`, `o[].b`,
+    /// `(x)[]`, `$x[]`), not when `.` wrapped it in a new path (`$x[].b`,
+    /// `[x][].b`) or the `[]` is on a later step (`o.b[]`). A group-by keeps
+    /// its input's flag, a sort only that of an input path it extends
+    /// (`x[]^($)`, not `$x[]^($)`), and a `~>` that of either side. Not
+    /// `path_keeps_singleton_array`, which is jsonata-js's other flag,
+    /// `keepSingletonArray`.
+    fn keeps_array(node: &AstNode) -> bool {
+        match node {
+            AstNode::Path { steps } => {
+                let Some(first) = steps.first() else {
+                    return false;
+                };
+                (steps.len() == 1 || Self::yields_path(&first.node))
+                    && (first
+                        .stages
+                        .iter()
+                        .any(|stage| matches!(stage, Stage::KeepArray))
+                        || Self::keeps_array(&first.node))
+            }
+            AstNode::Sort { input, .. } => Self::yields_path(input) && Self::keeps_array(input),
+            AstNode::ObjectTransform { input, .. } => Self::keeps_array(input),
+            AstNode::Binary {
+                op: BinaryOp::ChainPipe,
+                lhs,
+                rhs,
+            } => Self::keeps_array(lhs) || Self::keeps_array(rhs),
+            _ => false,
+        }
+    }
+
+    /// Whether jsonata-js's processAST makes `node` a path object that a
+    /// following `.` or `^` extends (and so whose flags it keeps): a name, a
+    /// sort, a multi-step path, or a group-by on one of those.
+    fn yields_path(node: &AstNode) -> bool {
+        match node {
+            AstNode::Name(_) | AstNode::Sort { .. } => true,
+            AstNode::Path { steps } => {
+                steps.len() > 1 || steps.first().is_some_and(|s| Self::yields_path(&s.node))
+            }
+            AstNode::ObjectTransform { input, .. } => Self::yields_path(input),
+            _ => false,
+        }
+    }
+
+    /// The value of a `~>` from its call's `result`, kept as an array when
+    /// `[]` was written on either side (`keeps_array`).
+    fn finish_apply(mut result: JValue, keep_array: impl FnOnce() -> bool) -> JValue {
+        if matches!(&result, JValue::Array(arr) if arr.sequence && arr.len() == 1) && keep_array() {
+            keep_if_sequence(&mut result);
+            result
+        } else {
+            result.unwrap_sequence()
+        }
     }
 
     /// Evaluate a path expression, following jsonata-js `evaluatePath`.
@@ -6453,11 +6513,12 @@ impl Evaluator {
         if Self::is_non_path(steps) && !Self::step_creates_tuple(first) && !first.is_tuple {
             let value = self.evaluate_unwrapped_later(&first.node, data)?;
             // jsonata-js filters an undefined value too (`$x[$f()]`).
-            let mut value = if value.is_undefined() && Self::filters_run_on_nothing(&first.stages) {
-                self.filter_undefined(&first.stages)?
-            } else {
-                self.apply_filter_stages(value, &first.stages)?
-            };
+            let mut value =
+                if value.is_undefined() && Self::step_filters_run_on_nothing(first, true) {
+                    self.filter_undefined(&first.stages)?
+                } else {
+                    self.apply_filter_stages(value, &first.stages)?
+                };
             if Self::path_keeps_singleton_array(steps) {
                 keep_if_sequence(&mut value);
             }
@@ -6579,8 +6640,13 @@ impl Evaluator {
                 if matches!(step.node, AstNode::Sort { .. }) {
                     self.keep_tuple_stream = true;
                 }
-                let value =
-                    self.evaluate_step(step, items, previous.as_ref(), index + 1 == steps.len());
+                let value = self.evaluate_step(
+                    step,
+                    items,
+                    previous.as_ref(),
+                    index == 0,
+                    index + 1 == steps.len(),
+                );
                 self.keep_tuple_stream = saved;
                 value?
             };
@@ -6770,6 +6836,7 @@ impl Evaluator {
         step: &PathStep,
         items: &[JValue],
         source: Option<&JArray>,
+        first_step: bool,
         last_step: bool,
     ) -> Result<JValue, EvaluatorError> {
         // A `$` step without stages yields its input items again; unless one
@@ -6791,12 +6858,14 @@ impl Evaluator {
                 (AstNode::Name(field), JValue::Object(obj)) if !is_tuple_object(obj) => {
                     obj.get(field).cloned().unwrap_or(JValue::Undefined)
                 }
-                (AstNode::Name(_), _) => return self.evaluate_step_items(step, items, last_step),
+                (AstNode::Name(_), _) => {
+                    return self.evaluate_step_items(step, items, first_step, last_step)
+                }
                 (node, item) => self.evaluate_step_node(node, item)?,
             };
             return Ok(collect_single_step_result(value, last_step));
         }
-        self.evaluate_step_items(step, items, last_step)
+        self.evaluate_step_items(step, items, first_step, last_step)
     }
 
     /// `evaluate_step` over any number of items.
@@ -6804,9 +6873,10 @@ impl Evaluator {
         &mut self,
         step: &PathStep,
         items: &[JValue],
+        first_step: bool,
         last_step: bool,
     ) -> Result<JValue, EvaluatorError> {
-        let run_on_nothing = Self::filters_run_on_nothing(&step.stages);
+        let run_on_nothing = Self::step_filters_run_on_nothing(step, first_step);
         let values = match &step.node {
             // A field step looks the field up in each item, reusing its
             // position across a homogeneous array.
@@ -6977,6 +7047,22 @@ impl Evaluator {
             }
         }
         Ok(JValue::object(result))
+    }
+
+    /// `filters_run_on_nothing` for `step`'s stages, worked out the first
+    /// time the step runs and kept on the step (#288).
+    fn step_filters_run_on_nothing(step: &PathStep, first_step: bool) -> bool {
+        // jsonata-js keeps a first step's filters as its `predicate`, which
+        // runs on the step's raw result. A `*` with nothing to read gives an
+        // empty sequence there, so its filters never run (`*[$error("E")]`
+        // on a string is undefined). A later step's filters are `stages`,
+        // which run on the result after an empty sequence has become
+        // undefined, so they do run (`e.*[$error("E")]` with `{"e":{}}`
+        // raises). Here a `*` gives undefined either way.
+        !(first_step && matches!(step.node, AstNode::Wildcard))
+            && step
+                .runs_on_nothing
+                .get_or_init(|| Self::filters_run_on_nothing(&step.stages))
     }
 
     /// Whether a field step's filter `stages` are run on an item without
@@ -8593,7 +8679,7 @@ impl Evaluator {
 
         // Same signature validation the compiled path performs, so the two
         // engines cannot disagree about argument handling.
-        if let Some(coerced) = validate_builtin_args(name, &evaluated_args, data)? {
+        if let Some(coerced) = validate_builtin_args(name, &evaluated_args, Some(data))? {
             evaluated_args = coerced;
         }
 
@@ -11071,12 +11157,34 @@ impl Evaluator {
         values: &[JValue],
         context: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        self.call_builtin_with_values_in(name, values, Some(context))
+    }
+
+    /// `call_builtin_with_values`, with `context` `None` for a builtin's
+    /// partial application (#287). jsonata-js applies that through a lambda
+    /// with no input, which declares every parameter of the builtin and
+    /// passes each explicitly. So the context is undefined, and no argument
+    /// is taken from the context: one of another type in a context
+    /// parameter's place (`$substring(?, 1)` given a number) is a mismatch,
+    /// not shifted behind it. A required parameter a pure builtin's partial
+    /// doesn't write is passed, undefined (`$substringBefore(?)` given
+    /// "hello" is "hello"). The other builtins check their arguments
+    /// strictly, so a missing one is T0410 (`$replace(?, "l")` given
+    /// "hello"), where jsonata-js passes undefined and goes on with it. That
+    /// and the checking itself are documented divergences
+    /// (`docs/compatibility.md`).
+    fn call_builtin_with_values_in(
+        &mut self,
+        name: &str,
+        values: &[JValue],
+        context: Option<&JValue>,
+    ) -> Result<JValue, EvaluatorError> {
         // A builtin applied as a callback runs with a null input, as
         // jsonata-js's closure wrapper applies it.
-        let context = if std::mem::take(&mut self.callback_apply) == ApplyMode::Callback {
-            &JValue::Null
-        } else {
-            context
+        let callback = std::mem::take(&mut self.callback_apply) == ApplyMode::Callback;
+        let context = match context {
+            Some(_) if callback => Some(&JValue::Null),
+            context => context,
         };
         // Only a regex match's `next` holds this builtin (see `call_regex`).
         if name == REGEX_NEXT {
@@ -11095,6 +11203,23 @@ impl Evaluator {
             }
         }
 
+        let mut padded = Vec::new();
+        let pure = crate::builtins::is_pure_builtin(name);
+        if context.is_none() && pure {
+            if let Some(sig) = crate::signature::builtin_signature(name) {
+                let required = sig.strict_required_len();
+                if values.len() < required {
+                    padded = values.to_vec();
+                    padded.resize(required, JValue::Undefined);
+                }
+            }
+        }
+        let values = if padded.is_empty() {
+            values
+        } else {
+            &padded[..]
+        };
+
         // Every builtin that needs nothing but its arguments, the context,
         // and the evaluation options -- the full set this function used to
         // hand-implement 22 arms of -- is handled by the one shared
@@ -11104,8 +11229,8 @@ impl Evaluator {
         // insertion for a zero-arg call like bare `$string`), and gating on
         // "at least 1 argument" first would wrongly reject `$zip`/`$millis`
         // (arity 0) reached by reference.
-        if crate::builtins::is_pure_builtin(name) {
-            return crate::builtins::dispatch_pure(
+        if pure {
+            return crate::builtins::dispatch_pure_with(
                 name,
                 values,
                 context,
@@ -11119,8 +11244,19 @@ impl Evaluator {
         // from evaluated values like any other builtin. jsonata-js evaluates
         // it as a callback for the same reason: `$map(["1+1"], $eval)` is 2.
         if name == "eval" {
-            return self.eval_from_values(values, context);
+            return self.eval_from_values(values, context.unwrap_or(&JValue::Undefined));
         }
+
+        // The others validate against the context in their own call (with
+        // it undefined, below); checking without it first means that can't
+        // shift an argument either ($match, $replace, $each, $sift).
+        let context = match context {
+            Some(context) => context,
+            None => {
+                validate_builtin_args(name, values, None)?;
+                &JValue::Undefined
+            }
+        };
 
         // The other nine ($map, $filter, $reduce, $single, $sift, $each,
         // $sort, $match, $replace) take AST arguments and call back into
@@ -11951,27 +12087,27 @@ impl Evaluator {
     /// function passes it as many arguments as before; any other value is
     /// returned as it is.
     fn wrap_function_argument(value: JValue) -> JValue {
-        let (target, params) = match &value {
+        let (target, arity) = match &value {
             JValue::Lambda(stored) => {
                 if stored.partial.as_ref().is_some_and(|p| p.argument_closure) {
                     return value;
                 }
                 (
                     PartialTarget::Lambda(Rc::clone(stored)),
-                    stored.params.clone(),
+                    stored.params.len(),
                 )
             }
             JValue::Builtin { name } => match crate::builtins::builtin_arity(name) {
-                Some(arity) if arity < 16 => (
-                    PartialTarget::Builtin(name.to_string()),
-                    (0..arity).map(|i| format!("__arg{i}")).collect(),
-                ),
+                Some(arity) if arity < 16 => (PartialTarget::Builtin(name.to_string()), arity),
                 _ => return value,
             },
             _ => return value,
         };
+        // Only the number of parameters is read (the arity); invoking the
+        // wrapper dispatches on `partial`, never binding them, so they are
+        // left unnamed: an empty `String` allocates nothing (#288).
         JValue::Lambda(Rc::new(StoredLambda {
-            params,
+            params: vec![String::new(); arity],
             body: AstNode::Null, // Inert: invocation dispatches on `partial`
             compiled_body: None,
             signature: None,
@@ -12037,7 +12173,13 @@ impl Evaluator {
                 let stored = Rc::clone(stored);
                 self.invoke_stored_lambda(&stored, &full_args, data)
             }
-            PartialTarget::Builtin(name) => self.call_builtin_with_values(name, &full_args, data),
+            // jsonata-js applies a builtin's partial application through a
+            // lambda with no input (`partialApplyNativeFunction`), so the
+            // builtin never sees the caller's `$`, nor the null input of a
+            // callback application, which is that lambda's (#287).
+            PartialTarget::Builtin(name) => {
+                self.call_builtin_with_values_in(name, &full_args, None)
+            }
             PartialTarget::Host(HostTarget(f)) => {
                 let f = Rc::clone(f);
                 let mut ctx = HostCtx::new();

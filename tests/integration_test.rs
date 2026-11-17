@@ -4680,7 +4680,7 @@ fn test_eval_keeps_guardrail_codes() {
 //
 // jsonata-js's evaluatePath stops at a step that gives nothing, so a sort
 // step's filters do not run when the sort's input is undefined; and `~>`
-// never filters its call's result, so an undefined one is not filtered.
+// never filters or groups its call's result (#286).
 
 #[test]
 fn test_no_filter_on_nothing_after_sort_or_chain() {
@@ -4698,8 +4698,63 @@ fn test_no_filter_on_nothing_after_sort_or_chain() {
             undefined.as_str(),
         ),
         (r##"x ~> $string()[$error("e")]"##, undefined.as_str()),
-        // The documented divergence: a defined call result is filtered.
-        (r##""z" ~> $append([1])[0]"##, r##"Ok("z")"##),
+        // A defined call result isn't filtered or grouped either (#286);
+        // only `[]` applies.
+        (r##""z" ~> $append([1])[0]"##, r##"Ok(["z",1])"##),
+        (r##"a.b ~> $map(function($v){$v})[1]"##, "Ok([1,2])"),
+        (
+            r##"a.b ~> $map(function($v){$v})[$error("e")]"##,
+            "Ok([1,2])",
+        ),
+        (r##"a.b ~> $map(function($v){$v}){"k": $}"##, "Ok([1,2])"),
+        (r##"a.b ~> $count()[1]"##, "Ok(2)"),
+        (r##"a.b ~> function($x){$x}()[5]"##, "Ok([1,2])"),
+        (r##"x#$i ~> $count(){"k": $count($)}"##, "Ok(0)"),
+        (r##"a.b[0] ~> $map(function($v){$v})[0]"##, "Ok(1)"),
+        (r##"a.b[0] ~> $map(function($v){$v})[5][]"##, "Ok([1])"),
+        (r##"a.b[0] ~> $map(function($v){$v}){"k": $}[]"##, "Ok([1])"),
+        // A `[]` on the left side, or on a function value on the right,
+        // keeps the result's singleton array too, as jsonata-js's apply
+        // node's keepArray does; one on a later step of the left doesn't.
+        (r##"(a.b[0])[] ~> $map(function($v){$v})"##, "Ok([1])"),
+        (
+            r##"($x := a.b[0]; $x[] ~> $map(function($v){$v}))"##,
+            "Ok([1])",
+        ),
+        (
+            r##"($x := a.b[0]; $x[]^($) ~> $map(function($v){$v}))"##,
+            "Ok(1)",
+        ),
+        (
+            r##"{"c":[1]}.c^($)[] ~> $map(function($v){$v})"##,
+            "Ok([1])",
+        ),
+        (
+            r##"($x := a.b[0]; $x[]{"k": $} ~> $map(function($v){$v}))"##,
+            r##"Ok([{"k":1}])"##,
+        ),
+        (
+            r##"(a.b[0])[] ~> $map(function($v){$v}) ~> $map(function($v){$v})"##,
+            "Ok([1])",
+        ),
+        (
+            r##"($f := $map(?, function($v){$v}); [7] ~> $f[])"##,
+            "Ok([7])",
+        ),
+        (r##"[7] ~> $map(?, function($v){$v})[]"##, "Ok([7])"),
+        (r##"a.b[0][] ~> $map(function($v){$v})"##, "Ok(1)"),
+        // `.` after a non-name wraps it in a new path, without the flag.
+        (
+            r##"($v := [{"b":5}]; $v[].b ~> $map(function($v){$v}))"##,
+            "Ok(5)",
+        ),
+        (r##"[{"b":5}][].b ~> $map(function($v){$v})"##, "Ok(5)"),
+        (
+            r##"($v := [{"b":5}]; $v[].b^($) ~> $map(function($v){$v}))"##,
+            "Ok(5)",
+        ),
+        (r##"a[].b[0] ~> $map(function($v){$v})"##, "Ok([1])"),
+        (r##"{"c":[1]}.c[] ~> $map(function($v){$v})"##, "Ok(1)"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5133,6 +5188,12 @@ fn test_nested_filter_on_missing_step_raises() {
         (r#"nope[x[-"a"]]"#, "D1002"),
         (r#"nope[x[{1:2}]]"#, "T1003"),
         (r#"nope[x[1+"a"] = 1]"#, "T2002"),
+        // A `**` on nothing gives nothing, so its filters run there (#290).
+        (r#"nope[**[$error("E")]]"#, "D3137"),
+        (r#"nope[x[**[1+"a"]]]"#, "T2002"),
+        (r#"a[q[**[1+"a"]]]"#, "T2002"),
+        (r#"$x[**[1+"a"]]"#, "T2002"),
+        (r#"a.(nope[**[1+"a"]])"#, "T2002"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5151,11 +5212,39 @@ fn test_nested_filter_on_missing_step_raises() {
         r#"nope[*[1+"a"]]"#,
         r#"nope[x[*[$error("E")]]]"#,
         r#"nope[x[0][$error("E")]]"#,
+        r#"nope[**[0][1+"a"]]"#,
+        r#"nope.**[1+"a"]"#,
+        r#"nope[**.x[1+"a"]]"#,
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
         assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
         assert_eq!(default, undefined, "default: {expr}");
+    }
+    // A `*` with nothing to read runs no filters either, as a step or alone.
+    let text = JValue::from_json_str(r#""x""#).unwrap();
+    for expr in [
+        r#"*[$error("E")]"#,
+        r#"*[1+"a"]"#,
+        r#"*[$error("E")].x"#,
+        r#"*[1+"a"].x"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &text);
+        assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
+        assert_eq!(default, undefined, "default: {expr}");
+    }
+    // A later `*` step's filters are stages, which do run on nothing, as
+    // in jsonata-js.
+    let data = JValue::from_json_str(r#"{"e":{},"x":"s"}"#).unwrap();
+    for expr in [r#"e.*[$error("E")]"#, r#"x.*[$error("E")]"#] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains("D3137"),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains("D3137"), "default: {expr} => {default}");
     }
 }
 
@@ -5173,6 +5262,19 @@ fn test_eval_input_inside_path_step() {
             "Ok([null,null,null])",
         ),
         (r#"a.($x := 5; $eval("$x + $"))"#, "Ok([6,7,8])"),
+        // A builtin's partial application runs with no input (#287).
+        (r#"($f := $eval(?, 5); $f("$"))"#, "Ok(5)"),
+        (r#"($f := $eval("$$.a", ?); $f(9))"#, "Ok([1,2,3])"),
+        (r#"($f := $substring(?, 1); $f("abc"))"#, r#"Ok("bc")"#),
+        // A required parameter the partial leaves out is passed, undefined.
+        (
+            r#"($f := $substringBefore(?); "hello" ~> $f)"#,
+            r#"Ok("hello")"#,
+        ),
+        (
+            r#"($f := $replace(?, "l", "L"); $f("hello"))"#,
+            r#"Ok("heLLo")"#,
+        ),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5188,5 +5290,41 @@ fn test_eval_input_inside_path_step() {
             ),
             "{result}"
         );
+    }
+    let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
+    for expr in [
+        r#"($h := function($f){ $f("$") }; $h($eval(?)))"#,
+        r#"($f := $eval(?); $f("$"))"#,
+        r#"a.($f := $eval(?); $f("$"))"#,
+        r#"$map(["$"], $eval(?))"#,
+        r#""x".($f := $uppercase(?); $f())"#,
+        r#"($f := $contains(?); $f("abc"))"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
+        assert_eq!(default, undefined, "default: {expr}");
+    }
+    // No argument is taken from the context, so a mismatched first argument
+    // is an error rather than shifted behind a missing context. A documented
+    // divergence: jsonata-js doesn't check these arguments at all, and fails
+    // inside the function or gives "NaN" (`docs/compatibility.md`).
+    for expr in [
+        r#"($f := $substring(?, 1); $f(5))"#,
+        r#"($f := $substring(?, 1); $f(true))"#,
+        r#"($f := $fromMillis(?, "[Y]", ?); $f("x"))"#,
+        r#"($f := $match(?, ?); $f(/l/))"#,
+        r#"($f := $replace(?, ?, ?); $f(/l/, "x"))"#,
+        // A required argument left out of a non-pure builtin's partial isn't
+        // filled with undefined (jsonata-js inserts "undefined" text).
+        r#"($f := $replace(?, "l"); $f("hello"))"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains("T0410"),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains("T0410"), "default: {expr} => {default}");
     }
 }

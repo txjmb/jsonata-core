@@ -15,15 +15,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tree, with ancestry resolved, as `parser::parse` does, and `ast_transform::resolve_ancestry`
   is no longer public. `BinaryOp` has the raw path operators `Map`, `Filter` and `KeepArray`,
   and `AstTransformError` has `Syntax`, so an exhaustive match on either needs the new arms.
+  `PathStep` has a `runs_on_nothing` cache field (`StepCache::default()` in a struct literal).
   This doesn't call for a major version: the AST is an internal representation, not a
   supported API. `parse()`, `Expression::compile`, the C API and the Python package are
   unchanged, so the release stays on 2.x.
+- **Less per-call work from the #254 and #260 fixes**
+  ([#288](https://github.com/txjmb/jsonata-core/issues/288)). The closure that wraps a function
+  argument no longer copies the function's parameter names, and whether a step's filters run on
+  nothing is worked out the first time the step runs and kept on the step.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **A filter or group-by on the call after `~>` is ignored, as in jsonata-js**
+  ([#286](https://github.com/txjmb/jsonata-core/issues/286)). jsonata-js applies the call and
+  never reads its filters or group-by; only `[]` carries over, and a `[]` on the left side or on a
+  function value on the right (`$x[] ~> $f`, `x ~> $f[]`) now keeps a single result as an array
+  too. With `a` holding `[{"b":"x"},
+  {"b":"y"}]`, `a ~> $map(function($v){$v.b})[1]` is now `["x","y"]` (it was `"y"`), `"z" ~>
+  $append([1])[0]` is `["z",1]` (it was `"z"`), and `x#$i ~> $count(){"k": $count($)}` is 0 (it
+  was T0410). This changes the result of expressions that relied on the filter; to filter the
+  result, wrap the chain in parentheses: `(a ~> $map(...))[1]`.
+
+- **A `**` step on a missing value runs its filters on nothing, as jsonata-js does**
+  ([#290](https://github.com/txjmb/jsonata-core/issues/290)). `nope[**[$error("E")]]` is D3137
+  and `nope[x[**[1+"a"]]]` is T2002, where both were undefined. A `*` there still runs none.
+  A `*` that starts a path runs none on nothing either when more steps follow
+  (`*[$error("E")].x` on a string is undefined, where it was D3137).
 
 - **A group-by on a step that isn't a path applies where jsonata-js applies it** (stage 3 of
   [#219](https://github.com/txjmb/jsonata-core/issues/219)). On a block, `*` or other node, the
@@ -84,7 +105,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still runs in constant stack. A tail call's arguments and the left side of `~>` are not
   wrapped, as in jsonata-js. Inside a path step, `$` in an `$eval` expression is now the eval's
   input rather than the step's item, so this holds there too, and `a.$eval("$", 7)` is 7 for
-  each item (it was the item).
+  each item (it was the item). A partial application of a builtin runs with no input, as
+  jsonata-js's does, whether it is called directly or passed as an argument: `($f := $eval(?);
+  $f("$"))` and `($h := function($f){ $f("$") }; $h($eval(?)))` are undefined
+  ([#287](https://github.com/txjmb/jsonata-core/issues/287); they were the input and null). Its
+  arguments are checked against the builtin's signature without taking one from the context, so
+  `($f := $substring(?, 1); $f(5))` is T0410; jsonata-js doesn't check them at all, and fails
+  inside the function (see `docs/compatibility.md`).
 
 ### Security
 

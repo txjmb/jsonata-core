@@ -169,6 +169,14 @@ pub struct Parameter {
 }
 
 impl Parameter {
+    /// This parameter's fragment with a context parameter required.
+    fn strict_regex(&self) -> &str {
+        match (&self.context_regex, self.context) {
+            (Some(regex), true) => regex,
+            _ => &self.regex,
+        }
+    }
+
     /// The base (unquantified) regex character class for a parameter type,
     /// mirroring signature.js's per-symbol regex assignment.
     fn base_regex(param_type: &ParamType) -> String {
@@ -198,13 +206,23 @@ pub struct Signature {
     /// The compiled regex matching this signature's full parameter list
     /// against a "supplied signature" type-symbol string, e.g. "^([nm]+)([nm])$".
     full_regex: Regex,
+    /// `full_regex` with each context parameter (`-`) required, for a call
+    /// that takes no argument from the context; `None` without one.
+    /// Built the first time it is needed: only a builtin's partial
+    /// application uses it, and a lambda's signature is parsed per call.
+    strict_regex: std::sync::OnceLock<Option<Regex>>,
 }
 
 impl Signature {
     /// Build the anchored whole-signature regex from each parameter's fragment.
     fn compile_full_regex(params: &[Parameter]) -> Regex {
+        Self::compile_regex(params.iter().map(|p| p.regex.as_str()))
+    }
+
+    /// The anchored regex matching one group per parameter fragment.
+    fn compile_regex<'a>(fragments: impl Iterator<Item = &'a str>) -> Regex {
         let pattern: String = std::iter::once("^".to_string())
-            .chain(params.iter().map(|p| format!("({})", p.regex)))
+            .chain(fragments.map(|f| format!("({})", f)))
             .chain(std::iter::once("$".to_string()))
             .collect();
         Regex::new(&pattern)
@@ -248,8 +266,11 @@ impl Signature {
         };
 
         let full_regex = Self::compile_full_regex(&params);
-
-        Ok(Signature { params, full_regex })
+        Ok(Signature {
+            params,
+            full_regex,
+            strict_regex: std::sync::OnceLock::new(),
+        })
     }
 
     /// Find the separator colon that divides params from return type,
@@ -474,6 +495,42 @@ impl Signature {
             .map(|(coerced, _)| coerced)
     }
 
+    /// How many arguments a call that takes none from the context must
+    /// supply: up to the last parameter that is required or a context one.
+    pub(crate) fn strict_required_len(&self) -> usize {
+        self.params
+            .iter()
+            .rposition(|p| !p.optional || p.context)
+            .map_or(0, |last| last + 1)
+    }
+
+    /// As `validate_and_coerce_counted`, taking no argument from the context:
+    /// a context parameter (`-`) is required, so an argument of another type
+    /// in its place is a mismatch, not shifted behind the context. For a
+    /// builtin's partial application, which jsonata-js applies through a
+    /// lambda that passes every argument explicitly.
+    pub fn validate_and_coerce_strict(
+        &self,
+        args: &[JValue],
+    ) -> Result<(Vec<JValue>, usize), SignatureError> {
+        let strict = self.strict_regex.get_or_init(|| {
+            self.params
+                .iter()
+                .any(|p| p.context)
+                .then(|| Self::compile_regex(self.params.iter().map(Parameter::strict_regex)))
+        });
+        if let Some(strict) = strict {
+            self.validate_arg_count(args.len())?;
+            let supplied_sig: String = args.iter().map(type_symbol).collect();
+            if !strict.is_match(&supplied_sig) {
+                return Err(self.mismatch_error(&supplied_sig, Parameter::strict_regex));
+            }
+        }
+        // The arguments fill each context parameter, so the greedy match
+        // below takes no argument from the context.
+        self.validate_and_coerce_counted(args, &JValue::Undefined)
+    }
+
     /// As `validate_and_coerce`, but also reports how many parameters were
     /// filled from the context by the '-' modifier.
     ///
@@ -583,12 +640,22 @@ impl Signature {
     /// this is a best-effort diagnostic, not something any test asserts on
     /// precisely (the reference suite only checks error *codes*, not indices).
     fn arg_type_mismatch_error(&self, supplied_sig: &str) -> SignatureError {
+        self.mismatch_error(supplied_sig, |p| p.regex.as_str())
+    }
+
+    /// The mismatch error for `supplied_sig`, matching each parameter by the
+    /// fragment `regex` gives it.
+    fn mismatch_error(
+        &self,
+        supplied_sig: &str,
+        regex: impl Fn(&Parameter) -> &str,
+    ) -> SignatureError {
         let mut good_to = 0usize;
         let mut partial_pattern = String::from("^");
         let mut last_param_type = ParamType::Any;
 
         for param in &self.params {
-            partial_pattern.push_str(&param.regex);
+            partial_pattern.push_str(regex(param));
             last_param_type = param.param_type.clone();
             match Regex::new(&partial_pattern) {
                 Ok(re) => match re.find(supplied_sig) {

@@ -522,6 +522,7 @@ fn substitute_labels_impl(
                         // `node` changed: a new step as far as the
                         // evaluator's compiled-step cache is concerned.
                         id: crate::ast::StepId::default(),
+                        runs_on_nothing: crate::ast::StepCache::default(),
                         ..s
                     })
                 })

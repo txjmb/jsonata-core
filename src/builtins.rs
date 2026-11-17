@@ -253,6 +253,21 @@ pub(crate) fn dispatch_pure(
     options: &EvaluatorOptions,
     start_time: Option<std::time::Instant>,
 ) -> Result<JValue, EvaluatorError> {
+    dispatch_pure_with(name, args, Some(context), options, start_time)
+}
+
+/// `dispatch_pure`, with `context` `None` for a call that takes no argument
+/// from the context (a builtin's partial application, #287): it is then
+/// undefined, and no argument is shifted behind it.
+pub(crate) fn dispatch_pure_with(
+    name: &str,
+    args: &[JValue],
+    context: Option<&JValue>,
+    options: &EvaluatorOptions,
+    start_time: Option<std::time::Instant>,
+) -> Result<JValue, EvaluatorError> {
+    let validation_context = context;
+    let context = context.unwrap_or(&JValue::Undefined);
     // 1. Implicit context insertion. The union of what the two paths used to
     //    do separately: only the tree-walker had `fromMillis` here and
     //    `replace` below, which was invisible because neither compiles.
@@ -311,13 +326,14 @@ pub(crate) fn dispatch_pure(
 
     // 3. Validate and coerce against the jsonata-js signature.
     let sig_storage: Vec<JValue>;
-    let args: &[JValue] = match crate::evaluator::validate_builtin_args(name, args, context)? {
-        Some(coerced) => {
-            sig_storage = coerced;
-            &sig_storage
-        }
-        None => args,
-    };
+    let args: &[JValue] =
+        match crate::evaluator::validate_builtin_args(name, args, validation_context)? {
+            Some(coerced) => {
+                sig_storage = coerced;
+                &sig_storage
+            }
+            None => args,
+        };
 
     // 4. Undefined propagation -- deliberately AFTER validation, which is the
     //    order jsonata-js works in. See the note in `validate_builtin_args`.
