@@ -88,7 +88,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still runs in constant stack. A tail call's arguments and the left side of `~>` are not
   wrapped, as in jsonata-js. Inside a path step, `$` in an `$eval` expression is now the eval's
   input rather than the step's item, so this holds there too, and `a.$eval("$", 7)` is 7 for
-  each item (it was the item).
+  each item (it was the item). A partial application of a builtin runs with no input, as
+  jsonata-js's does, whether it is called directly or passed as an argument: `($f := $eval(?);
+  $f("$"))` and `($h := function($f){ $f("$") }; $h($eval(?)))` are undefined
+  ([#287](https://github.com/txjmb/jsonata-core/issues/287); they were the input and null).
 
 ### Security
 

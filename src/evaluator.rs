@@ -12041,7 +12041,14 @@ impl Evaluator {
                 let stored = Rc::clone(stored);
                 self.invoke_stored_lambda(&stored, &full_args, data)
             }
-            PartialTarget::Builtin(name) => self.call_builtin_with_values(name, &full_args, data),
+            // jsonata-js applies a builtin's partial application through a
+            // lambda with no input (`partialApplyNativeFunction`), so the
+            // builtin never sees the caller's `$`, nor the null input of a
+            // callback application, which is that lambda's (#287).
+            PartialTarget::Builtin(name) => {
+                self.callback_apply = ApplyMode::Direct;
+                self.call_builtin_with_values(name, &full_args, &JValue::Undefined)
+            }
             PartialTarget::Host(HostTarget(f)) => {
                 let f = Rc::clone(f);
                 let mut ctx = HostCtx::new();

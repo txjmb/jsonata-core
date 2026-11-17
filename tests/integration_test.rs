@@ -5182,6 +5182,10 @@ fn test_eval_input_inside_path_step() {
             "Ok([null,null,null])",
         ),
         (r#"a.($x := 5; $eval("$x + $"))"#, "Ok([6,7,8])"),
+        // A builtin's partial application runs with no input (#287).
+        (r#"($f := $eval(?, 5); $f("$"))"#, "Ok(5)"),
+        (r#"($f := $eval("$$.a", ?); $f(9))"#, "Ok([1,2,3])"),
+        (r#"($f := $substring(?, 1); $f("abc"))"#, r#"Ok("bc")"#),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5197,5 +5201,18 @@ fn test_eval_input_inside_path_step() {
             ),
             "{result}"
         );
+    }
+    let undefined = format!("Ok({})", JValue::Undefined.to_json_string().unwrap());
+    for expr in [
+        r#"($h := function($f){ $f("$") }; $h($eval(?)))"#,
+        r#"($f := $eval(?); $f("$"))"#,
+        r#"a.($f := $eval(?); $f("$"))"#,
+        r#"$map(["$"], $eval(?))"#,
+        r#""x".($f := $uppercase(?); $f())"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
+        assert_eq!(default, undefined, "default: {expr}");
     }
 }
