@@ -208,7 +208,9 @@ pub struct Signature {
     full_regex: Regex,
     /// `full_regex` with each context parameter (`-`) required, for a call
     /// that takes no argument from the context; `None` without one.
-    strict_regex: Option<Regex>,
+    /// Built the first time it is needed: only a builtin's partial
+    /// application uses it, and a lambda's signature is parsed per call.
+    strict_regex: std::sync::OnceLock<Option<Regex>>,
 }
 
 impl Signature {
@@ -264,15 +266,10 @@ impl Signature {
         };
 
         let full_regex = Self::compile_full_regex(&params);
-        let strict_regex = params
-            .iter()
-            .any(|p| p.context)
-            .then(|| Self::compile_regex(params.iter().map(Parameter::strict_regex)));
-
         Ok(Signature {
             params,
             full_regex,
-            strict_regex,
+            strict_regex: std::sync::OnceLock::new(),
         })
     }
 
@@ -516,7 +513,13 @@ impl Signature {
         &self,
         args: &[JValue],
     ) -> Result<(Vec<JValue>, usize), SignatureError> {
-        if let Some(strict) = &self.strict_regex {
+        let strict = self.strict_regex.get_or_init(|| {
+            self.params
+                .iter()
+                .any(|p| p.context)
+                .then(|| Self::compile_regex(self.params.iter().map(Parameter::strict_regex)))
+        });
+        if let Some(strict) = strict {
             self.validate_arg_count(args.len())?;
             let supplied_sig: String = args.iter().map(type_symbol).collect();
             if !strict.is_match(&supplied_sig) {

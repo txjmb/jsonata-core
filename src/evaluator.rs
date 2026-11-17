@@ -11141,12 +11141,31 @@ impl Evaluator {
         values: &[JValue],
         context: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        self.call_builtin_with_values_in(name, values, Some(context))
+    }
+
+    /// `call_builtin_with_values`, with `context` `None` for a builtin's
+    /// partial application (#287). jsonata-js applies that through a lambda
+    /// with no input, which declares every parameter of the builtin and
+    /// passes each explicitly. So the context is undefined, a required
+    /// parameter the partial doesn't write is passed, undefined
+    /// (`$substringBefore(?)` given "hello" is "hello"), and no argument is
+    /// taken from the context: one of another type in a context parameter's
+    /// place (`$substring(?, 1)` given a number) is a mismatch, not shifted
+    /// behind it. (jsonata-js doesn't check these arguments at all; see
+    /// `docs/compatibility.md`.)
+    fn call_builtin_with_values_in(
+        &mut self,
+        name: &str,
+        values: &[JValue],
+        context: Option<&JValue>,
+    ) -> Result<JValue, EvaluatorError> {
         // A builtin applied as a callback runs with a null input, as
         // jsonata-js's closure wrapper applies it.
-        let context = if std::mem::take(&mut self.callback_apply) == ApplyMode::Callback {
-            &JValue::Null
-        } else {
-            context
+        let callback = std::mem::take(&mut self.callback_apply) == ApplyMode::Callback;
+        let context = match context {
+            Some(_) if callback => Some(&JValue::Null),
+            context => context,
         };
         // Only a regex match's `next` holds this builtin (see `call_regex`).
         if name == REGEX_NEXT {
@@ -11165,6 +11184,19 @@ impl Evaluator {
             }
         }
 
+        let padded;
+        let values = match (context, crate::signature::builtin_signature(name)) {
+            (None, Some(sig)) if values.len() < sig.strict_required_len() => {
+                padded = {
+                    let mut padded = values.to_vec();
+                    padded.resize(sig.strict_required_len(), JValue::Undefined);
+                    padded
+                };
+                &padded[..]
+            }
+            _ => values,
+        };
+
         // Every builtin that needs nothing but its arguments, the context,
         // and the evaluation options -- the full set this function used to
         // hand-implement 22 arms of -- is handled by the one shared
@@ -11175,7 +11207,7 @@ impl Evaluator {
         // "at least 1 argument" first would wrongly reject `$zip`/`$millis`
         // (arity 0) reached by reference.
         if crate::builtins::is_pure_builtin(name) {
-            return crate::builtins::dispatch_pure(
+            return crate::builtins::dispatch_pure_with(
                 name,
                 values,
                 context,
@@ -11189,8 +11221,19 @@ impl Evaluator {
         // from evaluated values like any other builtin. jsonata-js evaluates
         // it as a callback for the same reason: `$map(["1+1"], $eval)` is 2.
         if name == "eval" {
-            return self.eval_from_values(values, context);
+            return self.eval_from_values(values, context.unwrap_or(&JValue::Undefined));
         }
+
+        // The others validate against the context in their own call (with
+        // it undefined, below); checking without it first means that can't
+        // shift an argument either ($match, $replace, $each, $sift).
+        let context = match context {
+            Some(context) => context,
+            None => {
+                validate_builtin_args(name, values, None)?;
+                &JValue::Undefined
+            }
+        };
 
         // The other nine ($map, $filter, $reduce, $single, $sift, $each,
         // $sort, $match, $replace) take AST arguments and call back into
@@ -12113,38 +12156,7 @@ impl Evaluator {
             // callback application, which is that lambda's (#287).
             PartialTarget::Builtin(name) => {
                 self.callback_apply = ApplyMode::Direct;
-                // That lambda passes every argument explicitly, so none is
-                // ever taken from the context: an argument of another type
-                // in a context parameter's place (`$substring(?, 1)` given a
-                // number) is a mismatch, not shifted behind it.
-                // It declares every parameter of the builtin, so a required
-                // one the partial doesn't write is passed, undefined
-                // (`$substringBefore(?)` given "hello" is "hello"). An
-                // optional one is left out, as here it stands for none.
-                let mut full_args = full_args;
-                if let Some(sig) = crate::signature::builtin_signature(name) {
-                    let required = sig.strict_required_len();
-                    if full_args.len() < required {
-                        full_args.resize(required, JValue::Undefined);
-                    }
-                }
-                if self.host_fns.contains_key(name.as_str()) {
-                    return self.call_builtin_with_values(name, &full_args, &JValue::Undefined);
-                }
-                if crate::builtins::is_pure_builtin(name) {
-                    return crate::builtins::dispatch_pure_with(
-                        name,
-                        &full_args,
-                        None,
-                        &self.options,
-                        self.start_time,
-                    );
-                }
-                // Any other builtin validates against the context in its
-                // own call; checking without it first means that can't
-                // shift an argument either ($match, $replace, $each, $sift).
-                validate_builtin_args(name, &full_args, None)?;
-                self.call_builtin_with_values(name, &full_args, &JValue::Undefined)
+                self.call_builtin_with_values_in(name, &full_args, None)
             }
             PartialTarget::Host(HostTarget(f)) => {
                 let f = Rc::clone(f);
