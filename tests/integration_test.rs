@@ -5221,6 +5221,14 @@ fn test_nested_filter_on_missing_step_raises() {
         assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
         assert_eq!(default, undefined, "default: {expr}");
     }
+    // A `*` with nothing to read runs no filters either, as a step or alone.
+    let text = JValue::from_json_str(r#""x""#).unwrap();
+    for expr in [r#"*[$error("E")]"#, r#"*[1+"a"]"#] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &text);
+        assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
+        assert_eq!(default, undefined, "default: {expr}");
+    }
 }
 
 /// `$` in an `$eval` expression is the eval's input, even inside a path

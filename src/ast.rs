@@ -70,24 +70,19 @@ pub struct PathStep {
     /// Whether the evaluator runs this step's filters on nothing (#260),
     /// worked out from `stages` the first time the step runs, rather than
     /// each time (#288). A cache, not part of the step's meaning: ignored by
-    /// equality and serialization. A clone starts without it, so changing
-    /// the stages of a clone is always safe; code that changes the `stages`
-    /// of a step that has already run must reset it (`StepCache::default()`).
+    /// equality and serialization. A clone keeps it, as it keeps `id`, so a
+    /// lambda body cloned for each closure doesn't work it out again; code
+    /// that changes the `stages` of a step, or of a clone of one, after it
+    /// may have run must reset it (`StepCache::default()`), as
+    /// `ast_transform` does where it rebuilds stages.
     #[serde(skip)]
     pub runs_on_nothing: StepCache,
 }
 
 /// A value the evaluator works out once from a `PathStep` and keeps on it;
-/// see `PathStep::runs_on_nothing`. Equal to any other, like `StepId`, and
-/// empty in a clone.
-#[derive(Default)]
+/// see `PathStep::runs_on_nothing`. Equal to any other, like `StepId`.
+#[derive(Clone, Default)]
 pub struct StepCache(std::sync::OnceLock<bool>);
-
-impl Clone for StepCache {
-    fn clone(&self) -> Self {
-        StepCache::default()
-    }
-}
 
 impl StepCache {
     pub(crate) fn get_or_init(&self, init: impl FnOnce() -> bool) -> bool {

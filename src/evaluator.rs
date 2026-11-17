@@ -2029,7 +2029,7 @@ fn try_compile_path(
                 compiled_steps.push(CompiledStep {
                     field: name.clone(),
                     run_on_nothing: filter.is_some()
-                        && Evaluator::filters_run_on_nothing(&step.stages),
+                        && Evaluator::step_filters_run_on_nothing(step),
                     filter,
                 });
             }
@@ -4401,7 +4401,7 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
                 // A `*` step runs none there (its input gives an empty
                 // sequence, not nothing).
                 if !matches!(first.node, AstNode::Wildcard) {
-                    raises |= Evaluator::filters_run_on_nothing(&first.stages);
+                    raises |= Evaluator::step_filters_run_on_nothing(first);
                 }
                 return (K::Undefined, raises);
             }
@@ -6516,7 +6516,12 @@ impl Evaluator {
         if Self::is_non_path(steps) && !Self::step_creates_tuple(first) && !first.is_tuple {
             let value = self.evaluate_unwrapped_later(&first.node, data)?;
             // jsonata-js filters an undefined value too (`$x[$f()]`).
-            let mut value = if value.is_undefined() && Self::step_filters_run_on_nothing(first) {
+            // A `*` with nothing to read gives an empty sequence there, which
+            // runs no filters (`*[$error("E")]` on a string is undefined).
+            let mut value = if value.is_undefined()
+                && !matches!(first.node, AstNode::Wildcard)
+                && Self::step_filters_run_on_nothing(first)
+            {
                 self.filter_undefined(&first.stages)?
             } else {
                 self.apply_filter_stages(value, &first.stages)?
@@ -12155,7 +12160,6 @@ impl Evaluator {
             // builtin never sees the caller's `$`, nor the null input of a
             // callback application, which is that lambda's (#287).
             PartialTarget::Builtin(name) => {
-                self.callback_apply = ApplyMode::Direct;
                 self.call_builtin_with_values_in(name, &full_args, None)
             }
             PartialTarget::Host(HostTarget(f)) => {
