@@ -41,8 +41,9 @@ Some path and evaluation-order shapes differ too:
 | `acct.o[0]#$i[].id` | `[1]` | `1` | a `[]` after `#` keeps a singleton array |
 | `[$string(1,2,3), "f"@$v()]` | T0410 | T1006 | constructor members run in order, so the first member's error is reported; jsonata-js runs them concurrently |
 | `(%.b)[%.x]{"k":1}.k` | undefined | `1` | a block whose path starts with a `%` nothing can bind groups as tuples ([#285](https://github.com/txjmb/jsonata-core/issues/285)) |
+| `($f := $substring(?, 1); $f(5))` | T0410 | a JavaScript `TypeError` with no code | jsonata-js doesn't check a builtin's partial application against the builtin's signature, so a wrong argument type fails inside the function or gives a meaningless value (`$fromMillis(?, "[Y]")` given `"x"` is `"NaN"`); here the arguments are checked, and none is taken from the context ([#287](https://github.com/txjmb/jsonata-core/issues/287)) |
 
-(Data for these rows: `{"x":[1,2],"acct":{"o":[{"id":1}]},"a":[{"b":"x"},{"b":"y"}]}`.)
+(Data for these rows: `{"x":[1,2],"acct":{"o":[{"id":1}]}}`.)
 
 ## Current Compatibility Status
 

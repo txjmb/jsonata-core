@@ -5271,7 +5271,9 @@ fn test_eval_input_inside_path_step() {
         assert_eq!(default, undefined, "default: {expr}");
     }
     // No argument is taken from the context, so a mismatched first argument
-    // is an error rather than shifted behind a missing context.
+    // is an error rather than shifted behind a missing context. A documented
+    // divergence: jsonata-js doesn't check these arguments at all, and fails
+    // inside the function or gives "NaN" (`docs/compatibility.md`).
     for expr in [
         r#"($f := $substring(?, 1); $f(5))"#,
         r#"($f := $substring(?, 1); $f(true))"#,

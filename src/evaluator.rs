@@ -2380,14 +2380,6 @@ pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
     Ok(value.clone())
 }
 
-thread_local! {
-    /// Set while a builtin's partial application calls it (#287). jsonata-js
-    /// applies that through a lambda which passes every argument explicitly,
-    /// so `validate_builtin_args` then takes none from the context: one the
-    /// signature would shift behind it is a type mismatch instead.
-    static NO_CONTEXT_ARGS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
 /// Validate and coerce a builtin's arguments against its jsonata-js signature.
 ///
 /// One copy shared by all three dispatch paths -- the compiled/VM path via
@@ -2400,15 +2392,14 @@ thread_local! {
 /// answer differs per function ($count is 0, $exists is false, $abs is
 /// undefined), so the caller's arm decides. A genuine type error is returned as
 /// an error.
+///
+/// `context` is `None` for a call that takes no argument from the context
+/// (`Signature::validate_and_coerce_strict`).
 pub(crate) fn validate_builtin_args(
     name: &str,
     args: &[JValue],
-    context: &JValue,
+    context: Option<&JValue>,
 ) -> Result<Option<Vec<JValue>>, EvaluatorError> {
-    // Read, and cleared, by the first validation after a builtin's partial
-    // application sets it, which is that builtin's own: it validates before
-    // it runs anything else.
-    let no_context = NO_CONTEXT_ARGS.with(|flag| flag.replace(false));
     let Some(sig) = crate::signature::builtin_signature(name) else {
         return Ok(None);
     };
@@ -2433,12 +2424,11 @@ pub(crate) fn validate_builtin_args(
         }
     }
     let args = &args[..end];
-    match sig.validate_and_coerce_counted(args, context) {
-        Ok((_, context_substitutions)) if no_context && context_substitutions > 0 => {
-            Err(EvaluatorError::TypeError(format!(
-                "T0410: Argument 1 of function {name} does not match function signature"
-            )))
-        }
+    let validated = match context {
+        Some(context) => sig.validate_and_coerce_counted(args, context),
+        None => sig.validate_and_coerce_strict(args),
+    };
+    match validated {
         Ok((mut coerced, context_substitutions)) => {
             // Validation returns one entry per *parameter*, padding absent
             // optional ones with Undefined. The arms decide whether an optional
@@ -6143,18 +6133,16 @@ impl Evaluator {
         // jsonata-js parses a call with a `?` argument as a partial
         // application, not a call, so that is applied like any function
         // value below.
-        let call = Self::apply_rhs_call(rhs).unwrap_or(rhs);
         // jsonata-js's apply node keeps a singleton array when either side
         // was written with `[]` (`result.keepArray = lhs.keepArray ||
         // rhs.keepArray`). Only a single result needs the answer.
         let keep_array = || Self::keeps_array(lhs) || Self::keeps_array(rhs);
-        if let AstNode::Function {
-            name,
-            args,
-            is_builtin,
-        } = call
-        {
-            if !args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
+        match Self::apply_rhs_call(rhs) {
+            Some(AstNode::Function {
+                name,
+                args,
+                is_builtin,
+            }) => {
                 let mut all_args = Vec::with_capacity(args.len() + 1);
                 all_args.push(lhs.clone());
                 all_args.extend_from_slice(args);
@@ -6162,12 +6150,10 @@ impl Evaluator {
                     self.evaluate_function_call(name, &all_args, *is_builtin, true, data)?;
                 return Ok(Self::finish_apply(result, keep_array));
             }
-        }
-        // A call of an expression's value, such as `$uppercase[0]()` or
-        // `$o[1]()`: as jsonata-js `evaluateFunction` with the left side as
-        // its context, which goes first among the arguments.
-        if let AstNode::Call { procedure, args } = call {
-            if !args.iter().any(|a| matches!(a, AstNode::Placeholder)) {
+            // A call of an expression's value, such as `$uppercase[0]()` or
+            // `$o[1]()`: as jsonata-js `evaluateFunction` with the left side
+            // as its context, which goes first among the arguments.
+            Some(AstNode::Call { procedure, args }) => {
                 let lhs_value = self.evaluate_internal(lhs, data)?;
                 let callable = self.evaluate_internal(procedure, data)?;
                 self.check_missing_sigil(&callable, procedure)?;
@@ -6189,6 +6175,7 @@ impl Evaluator {
                 let result = self.call_function_value(&callable, &values, data)?;
                 return Ok(Self::finish_apply(result, keep_array));
             }
+            _ => {}
         }
 
         let lhs_value = self.evaluate_internal(lhs, data)?;
@@ -8676,7 +8663,7 @@ impl Evaluator {
 
         // Same signature validation the compiled path performs, so the two
         // engines cannot disagree about argument handling.
-        if let Some(coerced) = validate_builtin_args(name, &evaluated_args, data)? {
+        if let Some(coerced) = validate_builtin_args(name, &evaluated_args, Some(data))? {
             evaluated_args = coerced;
         }
 
@@ -12127,19 +12114,21 @@ impl Evaluator {
             PartialTarget::Builtin(name) => {
                 self.callback_apply = ApplyMode::Direct;
                 // That lambda passes every argument explicitly, so none is
-                // ever taken from the context: an argument the signature
-                // would shift behind a missing context (`$substring(?, 1)`
-                // given a number) is a mismatch (see `NO_CONTEXT_ARGS`).
-                // Set only for a builtin with a context parameter, whose
-                // validation is the first thing its call does.
-                let flag = !self.host_fns.contains_key(name.as_str())
-                    && crate::builtins::builtin_spec(name)
-                        .and_then(|spec| spec.signature)
-                        .is_some_and(|sig| sig.contains('-'));
-                NO_CONTEXT_ARGS.with(|cell| cell.set(flag));
-                let result = self.call_builtin_with_values(name, &full_args, &JValue::Undefined);
-                NO_CONTEXT_ARGS.with(|cell| cell.set(false));
-                result
+                // ever taken from the context: an argument of another type
+                // in a context parameter's place (`$substring(?, 1)` given a
+                // number) is a mismatch, not shifted behind it.
+                if crate::builtins::is_pure_builtin(name)
+                    && !self.host_fns.contains_key(name.as_str())
+                {
+                    return crate::builtins::dispatch_pure_with(
+                        name,
+                        &full_args,
+                        None,
+                        &self.options,
+                        self.start_time,
+                    );
+                }
+                self.call_builtin_with_values(name, &full_args, &JValue::Undefined)
             }
             PartialTarget::Host(HostTarget(f)) => {
                 let f = Rc::clone(f);

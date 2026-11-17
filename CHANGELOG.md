@@ -106,8 +106,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each item (it was the item). A partial application of a builtin runs with no input, as
   jsonata-js's does, whether it is called directly or passed as an argument: `($f := $eval(?);
   $f("$"))` and `($h := function($f){ $f("$") }; $h($eval(?)))` are undefined
-  ([#287](https://github.com/txjmb/jsonata-core/issues/287); they were the input and null). No
-  argument of one is taken from the context, so `($f := $substring(?, 1); $f(5))` is T0410.
+  ([#287](https://github.com/txjmb/jsonata-core/issues/287); they were the input and null). Its
+  arguments are checked against the builtin's signature without taking one from the context, so
+  `($f := $substring(?, 1); $f(5))` is T0410; jsonata-js doesn't check them at all, and fails
+  inside the function (see `docs/compatibility.md`).
 
 ### Security
 
