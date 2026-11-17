@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This doesn't call for a major version: the AST is an internal representation, not a
   supported API. `parse()`, `Expression::compile`, the C API and the Python package are
   unchanged, so the release stays on 2.x.
+- **Less per-call work from the #254 and #260 fixes**
+  ([#288](https://github.com/txjmb/jsonata-core/issues/288)). The closure that wraps a function
+  argument no longer copies the function's parameter names, and whether a step's filters run on
+  nothing is worked out once per step rather than each time the step runs.
 
 ### Deprecated
 

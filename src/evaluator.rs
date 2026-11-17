@@ -4780,7 +4780,19 @@ pub struct Evaluator {
     /// evaluator has run, by `PathStep::id` (`None`: does not compile), so a
     /// step compiles once per evaluator rather than each time it runs (#197).
     step_bodies: StepBodies,
+    /// `filters_run_on_nothing` for the filtered steps this evaluator has
+    /// run, by `PathStep::id`, so the analysis runs once per step rather
+    /// than each time the step does (#288).
+    on_nothing: OnNothingCache,
 }
+
+/// Each entry holds the address and length of the stages it was worked out
+/// for, so a step that shares its id with another (a clone) and has other
+/// stages is never given the other's answer.
+#[derive(Default)]
+struct OnNothingCache(
+    HashMap<u64, (usize, usize, bool), std::hash::BuildHasherDefault<StepIdHasher>>,
+);
 
 /// The compiled-step cache: the step looked up last, which is the one asked
 /// for again in the common case of one such step run over and over, and a
@@ -4860,6 +4872,7 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
+            on_nothing: OnNothingCache::default(),
         }
     }
 
@@ -4877,6 +4890,7 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
+            on_nothing: OnNothingCache::default(),
         }
     }
 
@@ -4896,6 +4910,7 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
+            on_nothing: OnNothingCache::default(),
         }
     }
 
@@ -6463,7 +6478,7 @@ impl Evaluator {
         if Self::is_non_path(steps) && !Self::step_creates_tuple(first) && !first.is_tuple {
             let value = self.evaluate_unwrapped_later(&first.node, data)?;
             // jsonata-js filters an undefined value too (`$x[$f()]`).
-            let mut value = if value.is_undefined() && Self::filters_run_on_nothing(&first.stages) {
+            let mut value = if value.is_undefined() && self.step_filters_run_on_nothing(first) {
                 self.filter_undefined(&first.stages)?
             } else {
                 self.apply_filter_stages(value, &first.stages)?
@@ -6816,7 +6831,7 @@ impl Evaluator {
         items: &[JValue],
         last_step: bool,
     ) -> Result<JValue, EvaluatorError> {
-        let run_on_nothing = Self::filters_run_on_nothing(&step.stages);
+        let run_on_nothing = self.step_filters_run_on_nothing(step);
         let values = match &step.node {
             // A field step looks the field up in each item, reusing its
             // position across a homogeneous array.
@@ -6987,6 +7002,33 @@ impl Evaluator {
             }
         }
         Ok(JValue::object(result))
+    }
+
+    /// `filters_run_on_nothing` for `step`'s stages, worked out once per step
+    /// (see `OnNothingCache`). A step without filters, or whose first is a
+    /// position, needs no analysis.
+    fn step_filters_run_on_nothing(&mut self, step: &PathStep) -> bool {
+        let first_selects = step.stages.iter().find_map(|stage| match stage {
+            Stage::Filter(predicate) => Some(numeric_literal(predicate).is_none()),
+            _ => None,
+        });
+        if first_selects != Some(true) {
+            return false;
+        }
+        let key = (step.stages.as_ptr() as usize, step.stages.len());
+        if let Some(&(ptr, len, runs)) = self.on_nothing.0.get(&step.id.get()) {
+            if (ptr, len) == key {
+                return runs;
+            }
+        }
+        let runs = Self::filters_run_on_nothing(&step.stages);
+        if self.on_nothing.0.len() >= MAX_STEP_BODIES {
+            self.on_nothing.0.clear();
+        }
+        self.on_nothing
+            .0
+            .insert(step.id.get(), (key.0, key.1, runs));
+        runs
     }
 
     /// Whether a field step's filter `stages` are run on an item without
@@ -11961,27 +12003,27 @@ impl Evaluator {
     /// function passes it as many arguments as before; any other value is
     /// returned as it is.
     fn wrap_function_argument(value: JValue) -> JValue {
-        let (target, params) = match &value {
+        let (target, arity) = match &value {
             JValue::Lambda(stored) => {
                 if stored.partial.as_ref().is_some_and(|p| p.argument_closure) {
                     return value;
                 }
                 (
                     PartialTarget::Lambda(Rc::clone(stored)),
-                    stored.params.clone(),
+                    stored.params.len(),
                 )
             }
             JValue::Builtin { name } => match crate::builtins::builtin_arity(name) {
-                Some(arity) if arity < 16 => (
-                    PartialTarget::Builtin(name.to_string()),
-                    (0..arity).map(|i| format!("__arg{i}")).collect(),
-                ),
+                Some(arity) if arity < 16 => (PartialTarget::Builtin(name.to_string()), arity),
                 _ => return value,
             },
             _ => return value,
         };
+        // Only the number of parameters is read (the arity); invoking the
+        // wrapper dispatches on `partial`, never binding them, so they are
+        // left unnamed: an empty `String` allocates nothing (#288).
         JValue::Lambda(Rc::new(StoredLambda {
-            params,
+            params: vec![String::new(); arity],
             body: AstNode::Null, // Inert: invocation dispatches on `partial`
             compiled_body: None,
             signature: None,
