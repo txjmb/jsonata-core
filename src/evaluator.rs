@@ -5697,9 +5697,14 @@ impl Evaluator {
                 let saved_keep = self.keep_tuple_stream;
                 self.keep_tuple_stream =
                     Self::is_tuple_path_node(input) || Self::sorts_tuples(input);
+                // Whether the input actually reached a step that builds a
+                // tuple stream (see the empty-input case below).
+                let saved_created = std::mem::take(&mut self.tuple_stream_created);
                 // jsonata-js groups the input's result before the generic
                 // unwrap, so a one-item sequence holding an array is one item.
                 let input_value = self.evaluate_unwrapped_later(input, data);
+                let built_tuples = self.tuple_stream_created;
+                self.tuple_stream_created |= saved_created;
                 self.keep_tuple_stream = saved_keep;
                 let input_value = input_value?;
 
@@ -5729,8 +5734,16 @@ impl Evaluator {
                 // If array is empty, add undefined to enable literal JSON object
                 // generation. An empty tuple stream gets no such item: jsonata-js
                 // reduces it tuple by tuple, so it makes no group and gives `{}`
-                // (#215).
-                if items.is_empty() && Self::groups_tuple_stream(input) {
+                // (#215). jsonata-js decides that at run time: a path enters
+                // tuple mode only on reaching a tuple step, so one that stops
+                // before it (`(nope.b)[%.x]`, `nope` missing) gives a plain
+                // empty result, which groups like any other (#285).
+                // A sort step is a tuple step itself, so a sort of such a block
+                // is a tuple stream whether or not the block's path got there.
+                if items.is_empty()
+                    && Self::groups_tuple_stream(input)
+                    && (built_tuples || Self::leading_sort(input).is_some())
+                {
                     return Ok(JValue::object(IndexMap::new()));
                 }
                 let items = if items.is_empty() {
@@ -7394,7 +7407,23 @@ impl Evaluator {
                     || step.stages.iter().any(|stage| matches!(stage, Stage::Index(_)))
             }
             AstNode::Sort { input, .. } => Self::groups_tuple_stream(input),
+            // A path that starts with a sort of one, with steps after it:
+            // the sort is a tuple step in jsonata-js, so the rest of the path
+            // runs on its tuples (`(nope.b)[%.x]^(x){"k":1}.k` is `{}`).
+            _ if Self::leading_sort(node).is_some_and(Self::groups_tuple_stream) => true,
             _ => Self::is_tuple_path_node(node),
+        }
+    }
+
+    /// The sort a path starts with, or the node itself if it is a sort.
+    fn leading_sort(node: &AstNode) -> Option<&AstNode> {
+        match node {
+            AstNode::Sort { .. } => Some(node),
+            AstNode::Path { steps } => match steps.first().map(|step| &step.node) {
+                Some(sort @ AstNode::Sort { .. }) => Some(sort),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -7820,8 +7849,20 @@ impl Evaluator {
         use std::rc::Rc;
 
         // Mark that this evaluate() call produced tuple wrappers, so the
-        // top-level `evaluate()` knows to run the output-unwrap pass.
-        self.tuple_stream_created = true;
+        // top-level `evaluate()` knows to run the output-unwrap pass. A block
+        // step that is a tuple step only through its inner path is one only
+        // if that path reaches its tuple step, as jsonata-js decides at run
+        // time; the inner path sets the flag then, and an empty result here
+        // holds no wrappers (#285).
+        if !step.inner_tuple
+            || Self::step_creates_tuple(step)
+            || step
+                .stages
+                .iter()
+                .any(|stage| matches!(stage, Stage::Index(_)))
+        {
+            self.tuple_stream_created = true;
+        }
 
         // Gather the incoming tuple bindings.
         let is_tuple_input = matches!(

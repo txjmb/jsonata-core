@@ -40,7 +40,6 @@ Some path and evaluation-order shapes differ too:
 | `x[]#$i#$j.$i` | `[0,1]` | undefined | `#` after `[]` adds an index stage rather than replacing the step's index |
 | `acct.o[0]#$i[].id` | `[1]` | `1` | a `[]` after `#` keeps a singleton array |
 | `[$string(1,2,3), "f"@$v()]` | T0410 | T1006 | constructor members run in order, so the first member's error is reported; jsonata-js runs them concurrently |
-| `(%.b)[%.x]{"k":1}.k` | undefined | `1` | a block whose path starts with a `%` nothing can bind groups as tuples ([#285](https://github.com/txjmb/jsonata-core/issues/285)) |
 | `($f := $substring(?, 1); $f(5))` | T0410 | a JavaScript `TypeError` with no code | jsonata-js doesn't check a builtin's partial application against the builtin's signature, so a wrong argument type fails inside the function or gives a meaningless value (`$fromMillis(?, "[Y]")` given `"x"` is `"NaN"`); here the arguments are checked, and none is taken from the context. A required argument left out of the partial of a builtin that isn't pure is T0410 too (`$replace(?, "l")` given `"hello"`, where jsonata-js gives `"heundefinedundefinedo"`) ([#287](https://github.com/txjmb/jsonata-core/issues/287)) |
 | `acct.o{"k":$}[] ~> $map(function($v){$v})` | `{"k":{"id":1}}` | `[{"k":{"id":1}}]` | a `[]` after a group-by on a multi-step path isn't told apart from one before it, so `~>` doesn't keep the array ([#292](https://github.com/txjmb/jsonata-core/issues/292)) |
 

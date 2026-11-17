@@ -5328,3 +5328,39 @@ fn test_eval_input_inside_path_step() {
         assert!(default.contains("T0410"), "default: {expr} => {default}");
     }
 }
+
+/// A group-by over a block whose tail path a `%` resolves through reads a
+/// tuple stream only if that path reaches its tuple step, as jsonata-js
+/// decides at run time; one that stops before it (an unbound `%` or a
+/// missing field) gives a plain empty result, which groups once (#285). A
+/// sort is a tuple step itself, so a path led by a sort of one stays a
+/// tuple stream. Every expected value is from jsonata-js.
+#[test]
+fn test_group_by_on_block_that_stops_before_its_tuple_step() {
+    let data = JValue::from_json_str(r#"{"x":1,"a":{"x":2,"b":[{"x":3}]}}"#).unwrap();
+    for (expr, expected) in [
+        (r#"(%.b)[%.x]{"k":1}.k"#, "1"),
+        (r#"(%.*)[%.x]{"k":1}^(k)"#, r#"{"k":1}"#),
+        (r#"(%.b)@$o[%.x]{"k":1}.$o"#, r#"{"k":1}"#),
+        (r#"(nope.b)[%.x]{"k":1}.k"#, "1"),
+        (r#"($nope.b)[%.x]{"k":1}.k"#, "1"),
+        (r#"x.((%.b)[%.x]{"k":1}.k)"#, "1"),
+        // The path reaches its tuple step, so the stream is empty.
+        (r#"(a.nope)@$o[%.x]{"k":1}.$o"#, "{}"),
+        (r#"a.((%.b)[%.x=9]{"k":x})"#, "{}"),
+        // An index makes the block a tuple step itself.
+        (r#"(%.b)#$i[%.x]{"k":1}.k"#, "{}"),
+        (r#"(%)[%.x]#$i{"k":1}"#, "{}"),
+        // So does a sort, alone or leading a path.
+        (r#"(nope.b)[%.x]^(x){"k":1}"#, "{}"),
+        (r#"(nope.b)[%.x]^(x){"k":1}.k"#, "{}"),
+        (r#"(a.b)[%.x=9]^(x){"k":1}.k"#, "{}"),
+        (r#"(nope.b)^(x){"k":1}.k"#, r#"{"k":1}"#),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}

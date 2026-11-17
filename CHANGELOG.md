@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A group-by over a block whose path stops before its tuple step groups once, as in
+  jsonata-js** ([#285](https://github.com/txjmb/jsonata-core/issues/285)). jsonata-js enters
+  tuple mode only when a path reaches a tuple step, so `(%.b)[%.x]{"k":1}.k` and
+  `(nope.b)[%.x]{"k":1}.k` are `1`, where they were undefined. A path that starts with a sort
+  of such a block is a tuple stream, since the sort is a tuple step itself:
+  `(nope.b)[%.x]^(x){"k":1}.k` is `{}`, where it was `{"k":1}`.
+
 - **A filter or group-by on the call after `~>` is ignored, as in jsonata-js**
   ([#286](https://github.com/txjmb/jsonata-core/issues/286)). jsonata-js applies the call and
   never reads its filters or group-by; only `[]` carries over, and a `[]` on the left side or on a
