@@ -4587,6 +4587,20 @@ fn item_at(items: &[JValue], position: f64) -> Option<&JValue> {
 /// `createSequence()`): the generic unwrap at the expression boundary turns an
 /// empty one into undefined and a single result into that result, unless a
 /// `[]` keeps it, as in `$map(arr, $f)[]`.
+/// `$filter`'s result: its matches as a sequence. One match of a single
+/// value is a one-item sequence too, as in jsonata-js, which a `[]` before
+/// a `~>` keeps (#292); no match of one is undefined.
+fn filter_result(
+    result: Vec<JValue>,
+    was_single_value: bool,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
+    if was_single_value && result.is_empty() {
+        return Ok(JValue::Undefined);
+    }
+    hof_result_sequence(result, options)
+}
+
 pub(crate) fn hof_result_sequence(
     result: Vec<JValue>,
     options: &EvaluatorOptions,
@@ -7431,37 +7445,50 @@ impl Evaluator {
     /// empty step before it with a plain empty result (#285):
     /// - for a block standing alone as the input, whose tail a `%` resolves
     ///   through (`(nope.b)[%.x]`), that is the tail's first tuple step;
-    /// - for a path, its first tuple step, when steps come before it
-    ///   (`c[d=9].(nope.b)[%.x]`).
-    ///
-    /// `None` when the input is a tuple stream from its first step, or a
-    /// sort makes it one (a sort is a tuple step in jsonata-js).
+    /// - otherwise, the input path's (`path_tuple_step`).
     fn block_tuple_step(input: &AstNode) -> Option<usize> {
-        let AstNode::Path { steps } = input else {
-            return None;
-        };
-        let address = |step: &PathStep| step as *const PathStep as usize;
-        if let [step @ PathStep {
-            node: AstNode::Block(exprs),
-            inner_tuple: true,
-            ..
-        }] = steps.as_slice()
-        {
-            let own_tuple = Self::step_creates_tuple(step)
-                || step
-                    .stages
-                    .iter()
-                    .any(|stage| matches!(stage, Stage::Index(_)));
-            if own_tuple {
-                return None;
+        if let AstNode::Path { steps } = input {
+            if let [step @ PathStep {
+                node: AstNode::Block(exprs),
+                inner_tuple: true,
+                ..
+            }] = steps.as_slice()
+            {
+                let own_tuple = Self::step_creates_tuple(step)
+                    || step
+                        .stages
+                        .iter()
+                        .any(|stage| matches!(stage, Stage::Index(_)));
+                if own_tuple {
+                    return None;
+                }
+                let tail = exprs.last()?;
+                let AstNode::Path { steps: tail_steps } = tail else {
+                    return None;
+                };
+                return Self::path_tuple_step(tail).or_else(|| {
+                    tail_steps
+                        .iter()
+                        .find(|s| s.is_tuple)
+                        .map(|s| s as *const PathStep as usize)
+                });
             }
-            let AstNode::Path { steps: tail } = exprs.last()? else {
-                return None;
-            };
-            return Self::block_tuple_step(exprs.last()?)
-                .or_else(|| tail.iter().find(|s| s.is_tuple).map(address));
         }
-        // A sort of a tuple stream is a tuple step however it is reached.
+        Self::path_tuple_step(input)
+    }
+
+    /// The first tuple step of the path `node`, when steps come before it
+    /// (`c[d=9].(nope.b)[%.x]`), so that the path may stop before it. In
+    /// this AST a sort holds the steps before it as its input, so for a
+    /// path that starts with a sort that is the input's first tuple step
+    /// (`c[d=9].d#$i^($)`). `None` when the path is a tuple stream from its
+    /// first step.
+    fn path_tuple_step(node: &AstNode) -> Option<usize> {
+        let steps = match node {
+            AstNode::Path { steps } => steps.as_slice(),
+            AstNode::Sort { input, .. } => return Self::path_tuple_step(input),
+            _ => return None,
+        };
         let sorts_tuple_stream = |s: &PathStep| {
             matches!(&s.node, AstNode::Sort { input, .. }
                 if Self::is_tuple_path_node(input)
@@ -7472,27 +7499,34 @@ impl Evaluator {
             .iter()
             .position(|s| s.is_tuple || Self::step_creates_tuple(s) || sorts_tuple_stream(s))?;
         let step = &steps[first];
-        // A first step is reached, unless it is a sort, whose input path
-        // comes before it in jsonata-js.
-        let reached = first == 0 && !matches!(step.node, AstNode::Sort { .. });
-        (!reached && !sorts_tuple_stream(step)).then(|| address(step))
-    }
-
-    /// Record that `step` ran, for a group-by waiting on it
-    /// (`block_tuple_step`).
-    fn mark_tuple_probe(&mut self, step: &PathStep) {
-        let address = step as *const PathStep as usize;
-        for (probe, reached) in &mut self.tuple_probes {
-            if *probe == address {
-                *reached = true;
+        match (first, &step.node) {
+            (0, AstNode::Sort { input, .. }) if sorts_tuple_stream(step) => {
+                Self::path_tuple_step(input)
             }
+            (0, AstNode::Sort { .. }) => Some(step as *const PathStep as usize),
+            (0, _) => None,
+            _ => Some(step as *const PathStep as usize),
         }
     }
 
-    /// The sort a path starts with, or the node itself if it is a sort.
+    /// Record that `step` ran, for the innermost group-by waiting on it
+    /// (`block_tuple_step`): a recursive call of the same group-by reaching
+    /// it says nothing of the call that is waiting outside it.
+    fn mark_tuple_probe(&mut self, step: &PathStep) {
+        let address = step as *const PathStep as usize;
+        if let Some((_, reached)) = self
+            .tuple_probes
+            .iter_mut()
+            .rev()
+            .find(|(probe, _)| *probe == address)
+        {
+            *reached = true;
+        }
+    }
+
+    /// The sort a path starts with.
     fn leading_sort(node: &AstNode) -> Option<&AstNode> {
         match node {
-            AstNode::Sort { .. } => Some(node),
             AstNode::Path { steps } => match steps.first().map(|step| &step.node) {
                 Some(sort @ AstNode::Sort { .. }) => Some(sort),
                 _ => None,
@@ -9236,12 +9270,7 @@ impl Evaluator {
                                     result.push(item.clone());
                                 }
                             }
-                            // One match of a single value is a one-item sequence, as in
-                            // jsonata-js, which a `[]` before a `~>` keeps (#292).
-                            if was_single_value && result.is_empty() {
-                                return Ok(JValue::Undefined);
-                            }
-                            return hof_result_sequence(result, &self.options);
+                            return filter_result(result, was_single_value, &self.options);
                         }
                     }
                     // Stored lambda variable fast path: $var with pre-compiled body
@@ -9265,12 +9294,7 @@ impl Evaluator {
                                         result.push(item.clone());
                                     }
                                 }
-                                // One match of a single value is a one-item sequence, as in
-                                // jsonata-js, which a `[]` before a `~>` keeps (#292).
-                                if was_single_value && result.is_empty() {
-                                    return Ok(JValue::Undefined);
-                                }
-                                return hof_result_sequence(result, &self.options);
+                                return filter_result(result, was_single_value, &self.options);
                             }
                         }
                     }
@@ -9299,13 +9323,7 @@ impl Evaluator {
 
                 // If input was a single value, return the single matching item
                 // (or undefined if no match)
-                // One match of a single value is a one-item sequence, as in
-                // jsonata-js, which a `[]` before a `~>` keeps (#292).
-                if was_single_value && result.is_empty() {
-                    return Ok(JValue::Undefined);
-                }
-
-                hof_result_sequence(result, &self.options)
+                filter_result(result, was_single_value, &self.options)
             }
 
             "reduce" => {

@@ -5381,6 +5381,15 @@ fn test_group_by_on_block_that_stops_before_its_tuple_step() {
         (r#"nope^(d)#$i{"k":1}"#, r#"{"k":1}"#),
         (r#"c^(d).nope#$i{"k":1}"#, "{}"),
         (r#"c.d^($)#$i[$i>5]{"k":1}"#, "{}"),
+        // A sort holds the steps before it, which may stop first.
+        (r#"c[d=9].d#$i^($){"k":1}"#, r#"{"k":1}"#),
+        (r#"c[d=9].(nope.b)[%.x]^(x){"k":1}"#, r#"{"k":1}"#),
+        // A recursive call reaching the same step says nothing of the
+        // call waiting outside it.
+        (
+            r#"($f := function($n){ c[$n=1 or ($n=0 and $exists($f(1))=false)].(nope.b)[%.x]{"k":$n} }; $f(0))"#,
+            r#"{"k":0}"#,
+        ),
     ] {
         let expected = format!("Ok({expected})");
         let (tree_walker, default) =

@@ -247,10 +247,12 @@ pub(crate) const JS_NATIVE_PARAMS: &[(&str, &[&str])] = &[
 /// The parameters jsonata-js's native function `name` declares
 /// (`JS_NATIVE_PARAMS`), or `None` for a function jsonata-js doesn't have.
 pub(crate) fn js_native_params(name: &str) -> Option<&'static [&'static str]> {
-    JS_NATIVE_PARAMS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, params)| *params)
+    static MAP: std::sync::OnceLock<
+        std::collections::HashMap<&'static str, &'static [&'static str]>,
+    > = std::sync::OnceLock::new();
+    MAP.get_or_init(|| JS_NATIVE_PARAMS.iter().copied().collect())
+        .get(name)
+        .copied()
 }
 
 /// Arity of a builtin, for the purpose of truncating the arguments a

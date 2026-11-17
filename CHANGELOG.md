@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jsonata-js** ([#285](https://github.com/txjmb/jsonata-core/issues/285)). jsonata-js enters
   tuple mode only when a path reaches a tuple step, so `(%.b)[%.x]{"k":1}.k` and
   `(nope.b)[%.x]{"k":1}.k` are `1`, where they were undefined, and `nope^(d)#$i{"k":1}` and
-  `c[d=9].(nope.b)[%.x]{"k":1}` are `{"k":1}`, where they were `{}`. A path that starts with a sort
+  `c[d=9].(nope.b)[%.x]{"k":1}` and `c[d=9].d#$i^($){"k":1}` are `{"k":1}`, where they were `{}`. A path that starts with a sort
   of such a block is a tuple stream, since the sort is a tuple step itself:
   `(nope.b)[%.x]^(x){"k":1}.k` is `{}`, where it was `{"k":1}`.
 
