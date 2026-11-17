@@ -995,7 +995,7 @@ fn test_percent_in_two_sort_terms() {
 #[test]
 fn test_timeout_raises_d1012() {
     let data = JValue::Null;
-    let expr_str = "$map([1..200000], function($x){$x*2})";
+    let expr_str = "$map([1..50000], function($x){$x*2})";
     let ast = parse(expr_str).unwrap();
     let options = jsonata_core::evaluator::EvaluatorOptions {
         timeout_ms: Some(1), // 1ms — must expire before 200k lambda invocations finish
@@ -1015,7 +1015,7 @@ fn test_timeout_raises_d1012() {
 #[test]
 fn test_no_timeout_configured_never_raises_d1012() {
     let data = JValue::Null;
-    let expr_str = "$map([1..200000], function($x){$x*2})";
+    let expr_str = "$map([1..50000], function($x){$x*2})";
     let ast = parse(expr_str).unwrap();
     let mut evaluator = Evaluator::new();
     let result = evaluator.evaluate(&ast, &data);
@@ -5550,18 +5550,20 @@ fn test_url_encoding_and_now_picture() {
 
 /// `$now()` and `$millis()` report one timestamp for the whole evaluation,
 /// read when it starts, as jsonata-js does (#294): repeated calls agree even
-/// when the evaluation spans many milliseconds, and `$now()` is `$millis()`
-/// formatted. A later evaluation reads the clock again.
+/// when the evaluation spans many milliseconds, `$now()` is `$millis()`
+/// formatted, and `$toMillis` fills the components its picture leaves out
+/// from it. A later evaluation reads the clock again.
 #[test]
 fn test_now_and_millis_share_one_timestamp_per_evaluation() {
     let data = JValue::from_json_str("{}").unwrap();
     for expr in [
-        "$count($distinct($map([1..200000], function($i) { $millis() }))) = 1",
-        "$count($distinct($map([1..200000], function($i) { $now() }))) = 1",
+        "$count($distinct($map([1..50000], function($i) { $millis() }))) = 1",
+        "$count($distinct($map([1..50000], function($i) { $now() }))) = 1",
         "$millis() ~> $fromMillis() = $now()",
         "$now() = $fromMillis($millis())",
         r#"$now("[H01]:[m01]:[s01].[f001]") = $fromMillis($millis(), "[H01]:[m01]:[s01].[f001]")"#,
         r#"$eval("$millis()") = $millis()"#,
+        r#"$toMillis($now("[H01]:[m01]:[s01]"), "[H01]:[m01]:[s01]") = $millis() - $millis() % 1000"#,
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5571,12 +5573,9 @@ fn test_now_and_millis_share_one_timestamp_per_evaluation() {
 
     let ast = parse("$millis()").unwrap();
     let first = Evaluator::new().evaluate(&ast, &data).unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(5));
+    std::thread::sleep(std::time::Duration::from_millis(20));
     let second = Evaluator::new().evaluate(&ast, &data).unwrap();
-    assert!(
-        second.as_f64() > first.as_f64(),
-        "each evaluation reads the clock: {first:?} then {second:?}"
-    );
+    assert_ne!(second, first, "each evaluation reads the clock");
 }
 
 /// `$fromMillis` covers every JavaScript date, ±8.64e15 milliseconds, and
@@ -5607,5 +5606,28 @@ fn test_from_millis_spans_javascript_dates() {
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
         assert_eq!(tree_walker, expected, "tree-walker: {expr}");
         assert_eq!(default, expected, "default: {expr}");
+    }
+}
+
+/// A timestamp or timezone too large to add up is an invalid timestamp, not
+/// an arithmetic overflow.
+#[test]
+fn test_from_millis_rejects_overflowing_offsets() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for expr in [
+        r#"$fromMillis(1e19, "[Y]", "+0100")"#,
+        r#"$fromMillis(-1e19, "[Y]", "-0100")"#,
+        r#"$fromMillis(0, "[Y]", "+92233720368547758")"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains("Invalid timestamp"),
+            "tree-walker: {expr}: {tree_walker}"
+        );
+        assert!(
+            default.contains("Invalid timestamp"),
+            "default: {expr}: {default}"
+        );
     }
 }

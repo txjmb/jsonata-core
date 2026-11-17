@@ -238,28 +238,30 @@ fn days_in_month(year: i64, month: i64) -> i64 {
 }
 
 thread_local! {
-    /// The evaluation in progress on this thread: how many are nested, and the
-    /// timestamp its `$now()`/`$millis()` report, read from the clock on first
-    /// use so an evaluation that never asks pays nothing for it.
-    static EVALUATION_TIMESTAMP: std::cell::Cell<(u32, Option<i64>)> =
-        const { std::cell::Cell::new((0, None)) };
+    /// The timestamp of the evaluation in progress on this thread, if any.
+    static EVALUATION_TIMESTAMP: std::cell::Cell<Option<i64>> =
+        const { std::cell::Cell::new(None) };
 }
 
 /// One evaluation's timestamp, held for as long as the scope lives.
 ///
-/// jsonata-js reads the clock once per `evaluate()` call
-/// (`environment.timestamp = new Date()`) and every `$now()` and `$millis()`
-/// in that evaluation reports it, so they agree with each other (#294). An
-/// evaluation nested inside another (a host function evaluating an expression
-/// of its own) gets its own timestamp, and the outer one's comes back when it
-/// ends.
+/// jsonata-js reads the clock once when `evaluate()` starts
+/// (`environment.timestamp = new Date()`), and every `$now()` and `$millis()`
+/// in that evaluation reports it, as does `$toMillis` for the components a
+/// picture leaves out, so they agree with each other (#294). An evaluation
+/// nested inside another (a host function evaluating an expression of its
+/// own) gets its own timestamp, and the outer one's comes back when it ends.
+///
+/// jsonata-js keeps it in the evaluation's environment. It is a thread-local
+/// here because the builtins that read it are dispatched without the
+/// evaluator, and an evaluation runs on one thread from start to end.
 pub(crate) struct EvaluationTimestamp {
-    outer: (u32, Option<i64>),
+    outer: Option<i64>,
 }
 
 impl EvaluationTimestamp {
     pub(crate) fn enter() -> Self {
-        let outer = EVALUATION_TIMESTAMP.with(|t| t.replace((t.get().0 + 1, None)));
+        let outer = EVALUATION_TIMESTAMP.with(|t| t.replace(Some(clock_millis())));
         Self { outer }
     }
 }
@@ -272,15 +274,9 @@ impl Drop for EvaluationTimestamp {
 
 /// The timestamp of the evaluation in progress, or the clock outside one.
 pub(crate) fn evaluation_millis() -> i64 {
-    EVALUATION_TIMESTAMP.with(|t| match t.get() {
-        (_, Some(millis)) => millis,
-        (0, None) => clock_millis(),
-        (depth, None) => {
-            let millis = clock_millis();
-            t.set((depth, Some(millis)));
-            millis
-        }
-    })
+    EVALUATION_TIMESTAMP
+        .with(|t| t.get())
+        .unwrap_or_else(clock_millis)
 }
 
 /// $now() - The evaluation's timestamp, as an ISO 8601 string
@@ -314,7 +310,7 @@ pub fn to_millis(timestamp: &str) -> Result<JValue, DateTimeError> {
 
 /// $toMillis(timestamp, picture) - Convert formatted timestamp to milliseconds since epoch
 pub fn to_millis_with_picture(timestamp: &str, picture: &str) -> Result<JValue, DateTimeError> {
-    match parse_date_time(timestamp, picture, clock_millis())? {
+    match parse_date_time(timestamp, picture, evaluation_millis())? {
         Some(millis) => Ok(JValue::Number(millis as f64)),
         None => Ok(JValue::Undefined),
     }
@@ -1391,7 +1387,7 @@ fn format_timezone_component(
 }
 
 fn format_component(
-    dt: i64,
+    local_millis: i64,
     offset_hours: i64,
     offset_minutes: i64,
     marker: &MarkerSpec,
@@ -1402,7 +1398,7 @@ fn format_component(
 
     if marker.component == 'P' {
         // §9.8.4.7 am/pm marker
-        let mut s = if get_date_time_fragment(dt, 'P') == 1 {
+        let mut s = if get_date_time_fragment(local_millis, 'P') == 1 {
             "pm"
         } else {
             "am"
@@ -1416,7 +1412,7 @@ fn format_component(
 
     if "YMDdFWwXxHhms".contains(marker.component) {
         // §9.8.4.3 Formatting Integer-Valued Date/Time Components
-        let mut value = get_date_time_fragment(dt, marker.component);
+        let mut value = get_date_time_fragment(local_millis, marker.component);
         if marker.component == 'Y' {
             if let Some(n) = marker.n {
                 value %= 10i64.pow(n);
@@ -1450,7 +1446,7 @@ fn format_component(
         }
     } else if marker.component == 'f' {
         // §9.8.4.5 Formatting Fractional Seconds
-        let value = get_date_time_fragment(dt, 'f');
+        let value = get_date_time_fragment(local_millis, 'f');
         let fmt = marker
             .integer_format
             .as_ref()
@@ -1511,21 +1507,27 @@ fn format_date_time(
         None => iso_default_picture_spec(),
     };
 
-    let offset_millis = (60 * offset_hours + offset_minutes) * 60 * 1000;
-    let shifted = millis + offset_millis;
-    if !(-MAX_DATE_MILLIS..=MAX_DATE_MILLIS).contains(&shifted) {
-        return Err(DateTimeError::FormatError(format!(
-            "Invalid timestamp: {millis}"
-        )));
-    }
-    let dt = shifted;
+    // The time in the target timezone, if it is a JavaScript date. A
+    // timestamp or offset too large to add up is not one either.
+    let local_millis = offset_hours
+        .checked_mul(60)
+        .and_then(|minutes| minutes.checked_add(offset_minutes))
+        .and_then(|minutes| minutes.checked_mul(60 * 1000))
+        .and_then(|offset_millis| millis.checked_add(offset_millis))
+        .filter(|shifted| (-MAX_DATE_MILLIS..=MAX_DATE_MILLIS).contains(shifted))
+        .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {millis}")))?;
 
     let mut result = String::new();
     for item in spec {
         match item {
             PictureItem::Literal(s) => result.push_str(s),
             PictureItem::Marker(m) => {
-                result.push_str(&format_component(dt, offset_hours, offset_minutes, m)?);
+                result.push_str(&format_component(
+                    local_millis,
+                    offset_hours,
+                    offset_minutes,
+                    m,
+                )?);
             }
         }
     }
