@@ -2380,6 +2380,14 @@ pub(crate) fn normalize_lazy(value: &JValue) -> Result<JValue, EvaluatorError> {
     Ok(value.clone())
 }
 
+thread_local! {
+    /// Set while a builtin's partial application calls it (#287). jsonata-js
+    /// applies that through a lambda which passes every argument explicitly,
+    /// so `validate_builtin_args` then takes none from the context: one the
+    /// signature would shift behind it is a type mismatch instead.
+    static NO_CONTEXT_ARGS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Validate and coerce a builtin's arguments against its jsonata-js signature.
 ///
 /// One copy shared by all three dispatch paths -- the compiled/VM path via
@@ -2397,6 +2405,10 @@ pub(crate) fn validate_builtin_args(
     args: &[JValue],
     context: &JValue,
 ) -> Result<Option<Vec<JValue>>, EvaluatorError> {
+    // Read, and cleared, by the first validation after a builtin's partial
+    // application sets it, which is that builtin's own: it validates before
+    // it runs anything else.
+    let no_context = NO_CONTEXT_ARGS.with(|flag| flag.replace(false));
     let Some(sig) = crate::signature::builtin_signature(name) else {
         return Ok(None);
     };
@@ -2422,6 +2434,11 @@ pub(crate) fn validate_builtin_args(
     }
     let args = &args[..end];
     match sig.validate_and_coerce_counted(args, context) {
+        Ok((_, context_substitutions)) if no_context && context_substitutions > 0 => {
+            Err(EvaluatorError::TypeError(format!(
+                "T0410: Argument 1 of function {name} does not match function signature"
+            )))
+        }
         Ok((mut coerced, context_substitutions)) => {
             // Validation returns one entry per *parameter*, padding absent
             // optional ones with Undefined. The arms decide whether an optional
@@ -6126,11 +6143,11 @@ impl Evaluator {
         // jsonata-js parses a call with a `?` argument as a partial
         // application, not a call, so that is applied like any function
         // value below.
-        let (call, keep_call) = Self::apply_rhs_call(rhs).unwrap_or((rhs, false));
+        let call = Self::apply_rhs_call(rhs).unwrap_or(rhs);
         // jsonata-js's apply node keeps a singleton array when either side
         // was written with `[]` (`result.keepArray = lhs.keepArray ||
-        // rhs.keepArray`).
-        let keep_array = keep_call || Self::keeps_array(lhs) || Self::keeps_array(rhs);
+        // rhs.keepArray`). Only a single result needs the answer.
+        let keep_array = || Self::keeps_array(lhs) || Self::keeps_array(rhs);
         if let AstNode::Function {
             name,
             args,
@@ -6342,16 +6359,15 @@ impl Evaluator {
         )
     }
 
-    /// The call a `~>`'s right side `rhs` holds, with whether `[]` follows
-    /// it, when it is a call with no `?` argument, perhaps under filters,
-    /// `[]` or a group-by, none of which jsonata-js applies there (see
-    /// `evaluate_apply_expression`).
-    fn apply_rhs_call(rhs: &AstNode) -> Option<(&AstNode, bool)> {
+    /// The call a `~>`'s right side `rhs` holds, when it is a call with no
+    /// `?` argument, perhaps under filters, `[]` or a group-by, none of which
+    /// jsonata-js applies there (see `evaluate_apply_expression`).
+    fn apply_rhs_call(rhs: &AstNode) -> Option<&AstNode> {
         match rhs {
             AstNode::Function { args, .. } | AstNode::Call { args, .. }
                 if !args.iter().any(|a| matches!(a, AstNode::Placeholder)) =>
             {
-                Some((rhs, false))
+                Some(rhs)
             }
             AstNode::Path { steps }
                 if steps.len() == 1
@@ -6363,8 +6379,7 @@ impl Evaluator {
                         .iter()
                         .all(|stage| matches!(stage, Stage::Filter(_) | Stage::KeepArray)) =>
             {
-                let (call, keep) = Self::apply_rhs_call(&steps[0].node)?;
-                Some((call, keep || Self::path_keeps_singleton_array(steps)))
+                Self::apply_rhs_call(&steps[0].node)
             }
             AstNode::ObjectTransform { input, .. } => Self::apply_rhs_call(input),
             _ => None,
@@ -6372,30 +6387,28 @@ impl Evaluator {
     }
 
     /// Whether jsonata-js's processed `node` carries `keepArray`, as a side
-    /// of `~>` reads it: a `[]` on a path's first step (`x[]`, `x[0][]`,
-    /// `(o.b)[]`, `o[].b`), not on a later one (`o.b[]`); the input of a
-    /// group-by, or of a sort when that input is a path (`x[]^($)`, not
-    /// `$x[]^($)`); and either side of a nested `~>`.
+    /// of `~>` reads it: the flag of the node a `[]` was written on, which a
+    /// path keeps only when it grew from that node (`x[]`, `x[0][]`, `o[].b`,
+    /// `(x)[]`, `$x[]`), not when `.` wrapped it in a new path (`$x[].b`,
+    /// `[x][].b`) or the `[]` is on a later step (`o.b[]`). A group-by keeps
+    /// its input's flag, a sort only that of an input path it extends
+    /// (`x[]^($)`, not `$x[]^($)`), and a `~>` that of either side. Not
+    /// `path_keeps_singleton_array`, which is jsonata-js's other flag,
+    /// `keepSingletonArray`.
     fn keeps_array(node: &AstNode) -> bool {
         match node {
-            AstNode::Path { steps } => steps.first().is_some_and(|first| {
-                first
-                    .stages
-                    .iter()
-                    .any(|stage| matches!(stage, Stage::KeepArray))
-                    || matches!(
-                        first.node,
-                        AstNode::Sort { .. } | AstNode::ObjectTransform { .. }
-                    ) && Self::keeps_array(&first.node)
-            }),
-            // jsonata-js appends a sort to its input path, keeping that
-            // path's flag, but wraps any other input (`$x[]^($)`) in a new
-            // path, which has none.
-            AstNode::Sort { input, .. } => match &**input {
-                AstNode::Path { steps } if !Self::is_non_path(steps) => Self::keeps_array(input),
-                AstNode::Sort { .. } => Self::keeps_array(input),
-                _ => false,
-            },
+            AstNode::Path { steps } => {
+                let Some(first) = steps.first() else {
+                    return false;
+                };
+                (steps.len() == 1 || Self::yields_path(&first.node))
+                    && (first
+                        .stages
+                        .iter()
+                        .any(|stage| matches!(stage, Stage::KeepArray))
+                        || Self::keeps_array(&first.node))
+            }
+            AstNode::Sort { input, .. } => Self::yields_path(input) && Self::keeps_array(input),
             AstNode::ObjectTransform { input, .. } => Self::keeps_array(input),
             AstNode::Binary {
                 op: BinaryOp::ChainPipe,
@@ -6406,10 +6419,24 @@ impl Evaluator {
         }
     }
 
+    /// Whether jsonata-js's processAST makes `node` a path object that a
+    /// following `.` or `^` extends (and so whose flags it keeps): a name, a
+    /// sort, a multi-step path, or a group-by on one of those.
+    fn yields_path(node: &AstNode) -> bool {
+        match node {
+            AstNode::Name(_) | AstNode::Sort { .. } => true,
+            AstNode::Path { steps } => {
+                steps.len() > 1 || steps.first().is_some_and(|s| Self::yields_path(&s.node))
+            }
+            AstNode::ObjectTransform { input, .. } => Self::yields_path(input),
+            _ => false,
+        }
+    }
+
     /// The value of a `~>` from its call's `result`, kept as an array when
     /// `[]` was written on either side (`keeps_array`).
-    fn finish_apply(mut result: JValue, keep_array: bool) -> JValue {
-        if keep_array {
+    fn finish_apply(mut result: JValue, keep_array: impl FnOnce() -> bool) -> JValue {
+        if matches!(&result, JValue::Array(arr) if arr.sequence && arr.len() == 1) && keep_array() {
             keep_if_sequence(&mut result);
             result
         } else {
@@ -12102,19 +12129,17 @@ impl Evaluator {
                 // That lambda passes every argument explicitly, so none is
                 // ever taken from the context: an argument the signature
                 // would shift behind a missing context (`$substring(?, 1)`
-                // given a number) is a mismatch, not an undefined result.
-                if let Some(sig) = crate::signature::builtin_signature(name) {
-                    if let Ok((_, substituted)) =
-                        sig.validate_and_coerce_counted(&full_args, &JValue::Undefined)
-                    {
-                        if substituted > 0 {
-                            return Err(EvaluatorError::TypeError(format!(
-                                "T0410: Argument 1 of function {name} does not match function signature"
-                            )));
-                        }
-                    }
-                }
-                self.call_builtin_with_values(name, &full_args, &JValue::Undefined)
+                // given a number) is a mismatch (see `NO_CONTEXT_ARGS`).
+                // Set only for a builtin with a context parameter, whose
+                // validation is the first thing its call does.
+                let flag = !self.host_fns.contains_key(name.as_str())
+                    && crate::builtins::builtin_spec(name)
+                        .and_then(|spec| spec.signature)
+                        .is_some_and(|sig| sig.contains('-'));
+                NO_CONTEXT_ARGS.with(|cell| cell.set(flag));
+                let result = self.call_builtin_with_values(name, &full_args, &JValue::Undefined);
+                NO_CONTEXT_ARGS.with(|cell| cell.set(false));
+                result
             }
             PartialTarget::Host(HostTarget(f)) => {
                 let f = Rc::clone(f);

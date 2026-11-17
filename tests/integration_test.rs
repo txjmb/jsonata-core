@@ -4743,6 +4743,17 @@ fn test_no_filter_on_nothing_after_sort_or_chain() {
         ),
         (r##"[7] ~> $map(?, function($v){$v})[]"##, "Ok([7])"),
         (r##"a.b[0][] ~> $map(function($v){$v})"##, "Ok(1)"),
+        // `.` after a non-name wraps it in a new path, without the flag.
+        (
+            r##"($v := [{"b":5}]; $v[].b ~> $map(function($v){$v}))"##,
+            "Ok(5)",
+        ),
+        (r##"[{"b":5}][].b ~> $map(function($v){$v})"##, "Ok(5)"),
+        (
+            r##"($v := [{"b":5}]; $v[].b^($) ~> $map(function($v){$v}))"##,
+            "Ok(5)",
+        ),
+        (r##"a[].b[0] ~> $map(function($v){$v})"##, "Ok([1])"),
         (r##"{"c":[1]}.c[] ~> $map(function($v){$v})"##, "Ok(1)"),
     ] {
         let (tree_walker, default) =
@@ -5264,6 +5275,7 @@ fn test_eval_input_inside_path_step() {
     for expr in [
         r#"($f := $substring(?, 1); $f(5))"#,
         r#"($f := $substring(?, 1); $f(true))"#,
+        r#"($f := $fromMillis(?, "[Y]", ?); $f("x"))"#,
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
