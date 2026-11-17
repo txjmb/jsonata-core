@@ -12072,6 +12072,16 @@ impl Evaluator {
         args: &[AstNode],
         data: &JValue,
     ) -> Result<JValue, EvaluatorError> {
+        // jsonata-js builds a builtin's partial application from the
+        // parameter list of its JavaScript function, parsed as a JSONata
+        // function definition. `$string`'s is `(arg, prettify = false)`, and
+        // `$prettify = false` isn't a parameter name.
+        if matches!(&target, PartialTarget::Builtin(name) if name == "string") {
+            return Err(EvaluatorError::EvaluationError(
+                "S0208: Parameter 2 of function definition must be a variable name (start with $)"
+                    .to_string(),
+            ));
+        }
         // Evaluate non-placeholder arguments and track placeholder positions
         let mut bound_args: Vec<(usize, JValue)> = Vec::new();
         let mut placeholder_positions: Vec<usize> = Vec::new();
@@ -12168,6 +12178,31 @@ impl Evaluator {
         }))
     }
 
+    /// The arguments jsonata-js passes a builtin's partial application:
+    /// one for each parameter its JavaScript function declares
+    /// (`getNativeFunctionArguments`), which is one for each parameter of
+    /// its signature, so an argument past them is dropped (`$sum(?, 1)`
+    /// given `[1,2]` is 3, and `$zip(?, [1])` given `[2]` is `[[2]]`). An
+    /// undefined one is an argument JavaScript doesn't distinguish from a
+    /// missing one, so a trailing undefined past the required ones isn't
+    /// passed (`$now(?)()` is the time).
+    fn native_partial_args(name: &str, mut args: Vec<JValue>) -> Vec<JValue> {
+        // `$eval`, `$now` and `$millis` have no signature here; their arity
+        // is their parameter count, none of them required.
+        let (declared, required) = match crate::signature::builtin_signature(name) {
+            Some(sig) => (sig.params.len(), sig.strict_required_len()),
+            None => match crate::builtins::builtin_arity(name) {
+                Some(arity) => (arity, 0),
+                None => return args,
+            },
+        };
+        args.truncate(declared);
+        while args.len() > required && args.last().is_some_and(JValue::is_undefined) {
+            args.pop();
+        }
+        args
+    }
+
     /// Invoke a partial application: rebuild the full argument list (bound
     /// values in their creation-time positions, call arguments filling the
     /// placeholder positions in order, anything else Null) and apply the
@@ -12219,7 +12254,8 @@ impl Evaluator {
             // builtin never sees the caller's `$`, nor the null input of a
             // callback application, which is that lambda's (#287).
             PartialTarget::Builtin(name) => {
-                self.call_builtin_with_values_in(name, &full_args, None)
+                let args = Self::native_partial_args(name, full_args);
+                self.call_builtin_with_values_in(name, &args, None)
             }
             PartialTarget::Host(HostTarget(f)) => {
                 let f = Rc::clone(f);

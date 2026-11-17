@@ -30,6 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `[]` after a group-by on a path keeps the `~>` result an array, as in jsonata-js**
+  ([#292](https://github.com/txjmb/jsonata-core/issues/292)). `o.b{"k":$}[] ~> $map(f)` is
+  `[{"k":1}]`, where it was `{"k":1}`; a `[]` before the group-by (`o.b[]{"k":$}`) still keeps
+  nothing there. In the Rust AST, such a `[]` is now a `KeepArray` stage on a one-step path
+  around the `ObjectTransform`, not a stage of the path's last step.
+- **A builtin's partial application takes the parameters jsonata-js's function declares**
+  ([#292](https://github.com/txjmb/jsonata-core/issues/292)). An argument past the builtin's
+  parameters is dropped (`$sum(?, 1)` given `[1,2]` is 3, and `$zip(?, [1])` given `[2]` is
+  `[[2]]`), and a trailing undefined one isn't passed (`$millis(?)()` and `$now(?)()` give the
+  time, where they were T0410). `$string(?)` is S0208, as in jsonata-js, whose `$string`
+  declares `prettify = false`, which doesn't parse as a parameter name; it was a function.
+
 - **A group-by over a block whose path stops before its tuple step groups once, as in
   jsonata-js** ([#285](https://github.com/txjmb/jsonata-core/issues/285)). jsonata-js enters
   tuple mode only when a path reaches a tuple step, so `(%.b)[%.x]{"k":1}.k` and

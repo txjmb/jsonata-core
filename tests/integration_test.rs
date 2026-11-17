@@ -5364,3 +5364,81 @@ fn test_group_by_on_block_that_stops_before_its_tuple_step() {
         assert_eq!(default, expected, "default: {expr}");
     }
 }
+
+/// A `[]` after a group-by on a path is jsonata-js's `keepArray` on the
+/// path itself, which a `~>` keeps; one before the group-by, on the path's
+/// last step, isn't (#292). Every expected value is from jsonata-js.
+#[test]
+fn test_chain_keeps_array_after_group_by() {
+    let data = JValue::from_json_str(r#"{"o":[{"b":1}],"acct":{"o":[{"id":1}]}}"#).unwrap();
+    for (expr, expected) in [
+        (r#"o.b{"k":$}[] ~> $map(function($v){$v})"#, r#"[{"k":1}]"#),
+        (r#"o.b[]{"k":$} ~> $map(function($v){$v})"#, r#"{"k":1}"#),
+        (
+            r#"acct.o{"k":$}[] ~> $map(function($v){$v})"#,
+            r#"[{"k":{"id":1}}]"#,
+        ),
+        (
+            r#"$.o.b{"k":$}[] ~> $map(function($v){$v})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (
+            r#"($x:=[{"b":1}]; $x.b{"k":$}[] ~> $map(function($v){$v}))"#,
+            r#"[{"k":1}]"#,
+        ),
+        (r#"o{"k":b}[] ~> $map(function($v){$v})"#, r#"[{"k":1}]"#),
+        // Without a `~>` the `[]` keeps nothing: the group-by gives an object.
+        (r#"o.b{"k":$}[]"#, r#"{"k":1}"#),
+        (r#"o.b{"k":$}[].k"#, "{}"),
+        (r#"o.b{"k":$}[]@$v"#, r#"{"k":{"b":1}}"#),
+        (r#"$map(o.b{"k":$}[], function($v){$v})"#, r#"{"k":1}"#),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
+
+/// jsonata-js applies a builtin's partial application to the parameters
+/// its JavaScript function declares (#292): an argument past them is
+/// dropped, a trailing undefined one isn't passed, and `$string`'s
+/// `prettify = false` doesn't parse as a parameter, so its partial is
+/// S0208. Every expected value is from jsonata-js.
+#[test]
+fn test_builtin_partial_takes_declared_parameters() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, expected) in [
+        (r#"$substring(?, 1, 2, 3)("hello")"#, r#""el""#),
+        (r#"$uppercase(?, 5)("a")"#, r#""A""#),
+        (r#"$sum(?, 1)([1,2])"#, "3"),
+        (r#"$zip([1], ?)([2])"#, "[[1]]"),
+        (r#"$zip(?, [1])([2])"#, "[[2]]"),
+        (r#"$zip(?, ?)([1], [2])"#, "[[1]]"),
+        (r#"$length(?, ?)("ab", 1)"#, "2"),
+        (r#"$millis(?)() > 0"#, "true"),
+        (r#"$millis(?)(5) > 0"#, "true"),
+        (r#"$type($now(?)())"#, r#""string""#),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+    for expr in [
+        r#"$string(?)"#,
+        r#"$string(5, ?)"#,
+        r#"($f := $string(?); $f(5))"#,
+        r#"$map([1], $string(?))"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains("S0208"),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains("S0208"), "default: {expr} => {default}");
+    }
+}
