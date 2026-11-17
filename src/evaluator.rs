@@ -4398,11 +4398,8 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
                 // The first step's own filters still run, on nothing, as
                 // they do for any step that gives nothing (#260):
                 // `nope[x[$error("E")]]` raises.
-                // A `*` step runs none there (its input gives an empty
-                // sequence, not nothing).
-                if !matches!(first.node, AstNode::Wildcard) {
-                    raises |= Evaluator::step_filters_run_on_nothing(first);
-                }
+                // A `*` step runs none there (`step_filters_run_on_nothing`).
+                raises |= Evaluator::step_filters_run_on_nothing(first);
                 return (K::Undefined, raises);
             }
             for (i, step) in steps.iter().enumerate() {
@@ -6516,12 +6513,7 @@ impl Evaluator {
         if Self::is_non_path(steps) && !Self::step_creates_tuple(first) && !first.is_tuple {
             let value = self.evaluate_unwrapped_later(&first.node, data)?;
             // jsonata-js filters an undefined value too (`$x[$f()]`).
-            // A `*` with nothing to read gives an empty sequence there, which
-            // runs no filters (`*[$error("E")]` on a string is undefined).
-            let mut value = if value.is_undefined()
-                && !matches!(first.node, AstNode::Wildcard)
-                && Self::step_filters_run_on_nothing(first)
-            {
+            let mut value = if value.is_undefined() && Self::step_filters_run_on_nothing(first) {
                 self.filter_undefined(&first.stages)?
             } else {
                 self.apply_filter_stages(value, &first.stages)?
@@ -7050,8 +7042,13 @@ impl Evaluator {
     /// `filters_run_on_nothing` for `step`'s stages, worked out the first
     /// time the step runs and kept on the step (#288).
     fn step_filters_run_on_nothing(step: &PathStep) -> bool {
-        step.runs_on_nothing
-            .get_or_init(|| Self::filters_run_on_nothing(&step.stages))
+        // A `*` with nothing to read gives an empty sequence in jsonata-js,
+        // not nothing, so its filters never run there (`*[$error("E")]` on
+        // a string is undefined); here it gives undefined.
+        !matches!(step.node, AstNode::Wildcard)
+            && step
+                .runs_on_nothing
+                .get_or_init(|| Self::filters_run_on_nothing(&step.stages))
     }
 
     /// Whether a field step's filter `stages` are run on an item without
@@ -11190,8 +11187,14 @@ impl Evaluator {
         }
 
         let padded;
-        let values = match (context, crate::signature::builtin_signature(name)) {
-            (None, Some(sig)) if values.len() < sig.strict_required_len() => {
+        let values = match context
+            .is_none()
+            .then(|| crate::signature::builtin_signature(name))
+        {
+            Some(Some(sig))
+                if crate::builtins::is_pure_builtin(name)
+                    && values.len() < sig.strict_required_len() =>
+            {
                 padded = {
                     let mut padded = values.to_vec();
                     padded.resize(sig.strict_required_len(), JValue::Undefined);

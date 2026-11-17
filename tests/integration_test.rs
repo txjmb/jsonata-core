@@ -5223,7 +5223,12 @@ fn test_nested_filter_on_missing_step_raises() {
     }
     // A `*` with nothing to read runs no filters either, as a step or alone.
     let text = JValue::from_json_str(r#""x""#).unwrap();
-    for expr in [r#"*[$error("E")]"#, r#"*[1+"a"]"#] {
+    for expr in [
+        r#"*[$error("E")]"#,
+        r#"*[1+"a"]"#,
+        r#"*[$error("E")].x"#,
+        r#"*[1+"a"].x"#,
+    ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &text);
         assert_eq!(tree_walker, undefined, "tree-walker: {expr}");
@@ -5298,6 +5303,9 @@ fn test_eval_input_inside_path_step() {
         r#"($f := $fromMillis(?, "[Y]", ?); $f("x"))"#,
         r#"($f := $match(?, ?); $f(/l/))"#,
         r#"($f := $replace(?, ?, ?); $f(/l/, "x"))"#,
+        // A required argument left out of a non-pure builtin's partial isn't
+        // filled with undefined (jsonata-js inserts "undefined" text).
+        r#"($f := $replace(?, "l"); $f("hello"))"#,
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
