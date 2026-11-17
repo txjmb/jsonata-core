@@ -48,9 +48,7 @@ class TestRegister:
         assert expr.evaluate(None) == "xy"
 
     def test_in_expression_function_shadows_host_fn(self):
-        expr = jsonatapy.compile(
-            "($greet := function($n){ 'local ' & $n }; $greet('x'))"
-        )
+        expr = jsonatapy.compile("($greet := function($n){ 'local ' & $n }; $greet('x'))")
         expr.register("greet", lambda n: "HOST")
         assert expr.evaluate(None) == "local x"
 
