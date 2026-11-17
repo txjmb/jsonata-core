@@ -4581,12 +4581,6 @@ fn item_at(items: &[JValue], position: f64) -> Option<&JValue> {
     (index >= 0.0).then(|| items.get(index as usize)).flatten()
 }
 
-/// Wrap a higher-order function's results as a JSONata *sequence*.
-///
-/// `$map`/`$filter` do not return arrays, they return sequences (jsonata-js
-/// `createSequence()`): the generic unwrap at the expression boundary turns an
-/// empty one into undefined and a single result into that result, unless a
-/// `[]` keeps it, as in `$map(arr, $f)[]`.
 /// `$filter`'s result: its matches as a sequence. One match of a single
 /// value is a one-item sequence too, as in jsonata-js, which a `[]` before
 /// a `~>` keeps (#292); no match of one is undefined.
@@ -4601,6 +4595,12 @@ fn filter_result(
     hof_result_sequence(result, options)
 }
 
+/// Wrap a higher-order function's results as a JSONata *sequence*.
+///
+/// `$map`/`$filter` do not return arrays, they return sequences (jsonata-js
+/// `createSequence()`): the generic unwrap at the expression boundary turns an
+/// empty one into undefined and a single result into that result, unless a
+/// `[]` keeps it, as in `$map(arr, $f)[]`.
 pub(crate) fn hof_result_sequence(
     result: Vec<JValue>,
     options: &EvaluatorOptions,
@@ -4759,9 +4759,10 @@ pub struct Evaluator {
     /// caller — keeps the vast majority of evaluations, which never touch
     /// `%`/`@`/`#`, at zero added cost.
     tuple_stream_created: bool,
-    /// For each group-by whose input is a block standing alone, the address
-    /// of the step that makes the block a tuple stream, and whether
-    /// `create_tuple_stream` has run it (`block_tuple_step`). Only
+    /// For each group-by being evaluated whose input may stop before it is
+    /// a tuple stream (a block standing alone, or a path or sort with steps
+    /// before its first tuple step), the address of that tuple step, and
+    /// whether `create_tuple_stream` has run it (`block_tuple_step`). Only
     /// compared, never dereferenced.
     tuple_probes: Vec<(usize, bool)>,
     /// When true, `evaluate_path` skips its end-of-path `@`-projection and returns
@@ -5722,7 +5723,10 @@ impl Evaluator {
                 // Whether the input reaches the step that makes it a tuple
                 // stream, when only running it tells (see the empty-input
                 // case below).
-                let probe = Self::block_tuple_step(input);
+                // Only an input that can be a tuple stream needs one.
+                let probe = Self::groups_tuple_stream(input)
+                    .then(|| Self::block_tuple_step(input))
+                    .flatten();
                 if let Some(step) = probe {
                     self.tuple_probes.push((step, false));
                 }
