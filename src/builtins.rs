@@ -1459,10 +1459,6 @@ pub(crate) fn dispatch_pure_with(
             // `<n-s?s?:s>` bounds the arity and rejects a null in any slot.
             match &args[0] {
                 JValue::Number(n) => {
-                    // A fraction of a millisecond is dropped, as JavaScript's
-                    // `Date` drops it in jsonata-js.
-                    let millis = *n;
-
                     let picture = match args.get(1) {
                         None | Some(JValue::Undefined) => None,
                         Some(JValue::String(s)) => Some(s.to_string()),
@@ -1483,7 +1479,7 @@ pub(crate) fn dispatch_pure_with(
                     };
 
                     Ok(crate::datetime::from_millis_with_picture(
-                        millis,
+                        *n,
                         picture.as_deref(),
                         timezone.as_deref(),
                     )?)

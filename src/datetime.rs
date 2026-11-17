@@ -1527,7 +1527,8 @@ fn format_date_time(
         .map(|offset_millis| (millis + offset_millis as f64).trunc())
         .filter(|shifted| shifted.abs() <= MAX_DATE_MILLIS as f64)
         .map(|shifted| shifted as i64)
-        .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {millis}")))?;
+        // `{:?}` keeps a huge value short (1e300, not 301 digits).
+        .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {millis:?}")))?;
 
     let mut result = String::new();
     for item in spec {
