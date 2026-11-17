@@ -1952,22 +1952,20 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
     // past its range into the next one: month 13 is January of the next year,
     // 30 February is 1 or 2 March, hour 24 is midnight of the next day. A
     // month of 0 is January.
-    let mut month0 = (components.get(&'M').copied().unwrap_or(0).saturating_sub(1)).max(0);
+    let mut month0 = match components.get(&'M') {
+        Some(&m) if m > 0 => m - 1,
+        _ => 0,
+    };
     let mut day = components.get(&'D').copied().unwrap_or(1);
     if date_b {
-        // The month and day that many days on from 1 January; jsonata-js
-        // keeps the parsed year, so a day past the year's end lands in the
-        // same year, not the next.
-        // A derived date past JavaScript's is an Invalid Date there, and the
-        // result NaN.
-        let derived = date_utc(year, 0, 1, 0, 0, 0, 0)
-            .and_then(|first_jan| {
-                (first_jan / MILLIS_PER_DAY).checked_add(components[&'d'].checked_sub(1)?)
-            })
-            .map(|days| CivilDate { days })
-            .filter(|date| date.days.unsigned_abs() <= (MAX_DATE_MILLIS / MILLIS_PER_DAY) as u64)
+        // The month and day that many days on from 1 January (`Date.UTC`
+        // carries the day over). jsonata-js keeps the parsed year with them,
+        // so a day past the year's end lands in the same year, not the next.
+        // Where jsonata-js gets NaN (a date past JavaScript's range), this is
+        // D3136, as below.
+        let derived = date_utc(year, 0, components[&'d'], 0, 0, 0, 0)
             .ok_or_else(|| coded("D3136", "invalid date components"))?;
-        let (_, m, d) = derived.ymd();
+        let (_, m, d) = CivilDate::from_millis(derived).ymd();
         month0 = m - 1;
         day = d;
     }
@@ -1993,6 +1991,8 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
             None => Some(millis),
         },
     )
+    // jsonata-js returns NaN for a timestamp past JavaScript's dates; a
+    // number that is not one is reported as D3136 here instead.
     .ok_or_else(|| coded("D3136", "invalid date components"))?;
 
     Ok(Some(millis_val))

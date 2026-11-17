@@ -45,9 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Date.UTC` does in jsonata-js.** `"2018-02-30"` with `"[Y]-[M]-[D]"` is 2 March, month 13 is
   January of the next year, hour 24 is midnight of the next day, and a two-digit year is in
   the 1900s; these were D3136. A day of the year past the year's end now keeps the parsed
-  year with the derived month and day, as jsonata-js does; it used to move to the next year. Components the picture leaves out come from
-  the evaluation's timestamp, and an offset too large to apply is D3136 rather than an
-  overflow.
+  year with the derived month and day, as jsonata-js does; it used to move to the next year.
+  Components the picture leaves out come from the evaluation's timestamp. Where jsonata-js
+  returns NaN (a result past JavaScript's dates, or an offset too large to apply), this is
+  D3136, as before.
 - **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and
   `encodeURIComponent` do.** `$encodeUrl("a b")` is `"a%20b"`, where it was `"a b"`: only
   control characters were encoded. `$encodeUrlComponent` no longer encodes `-_.!~*'()`.
