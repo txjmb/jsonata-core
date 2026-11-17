@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call, so two calls in one expression could disagree.
 - **`$fromMillis` takes the whole range of a JavaScript date**, ±8.64e15 milliseconds
   (years -271821 to 275760). It stopped at chrono's ±262143 years.
+  It also takes a fraction of a millisecond, dropping it as JavaScript's `Date` does, where it
+  raised "requires an integer".
 - **`$toMillis(timestamp, picture)` carries fields past their range into the next one, as
   `Date.UTC` does in jsonata-js.** `"2018-02-30"` with `"[Y]-[M]-[D]"` is 2 March, month 13 is
   January of the next year, hour 24 is midnight of the next day, and a two-digit year is in

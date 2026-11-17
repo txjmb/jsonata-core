@@ -5600,6 +5600,18 @@ fn test_from_millis_spans_javascript_dates() {
             r#"$fromMillis(951782400000, "[FNn] [d] [W]")"#,
             r#""Tuesday 60 9""#,
         ),
+        // A fraction of a millisecond is dropped toward zero after the
+        // timezone shift, as JavaScript's `Date` drops it.
+        ("$fromMillis(1.5)", r#""1970-01-01T00:00:00.001Z""#),
+        ("$fromMillis(-0.5)", r#""1970-01-01T00:00:00.000Z""#),
+        (
+            r#"$fromMillis(-0.5, "[H01]:[m01]:[s01].[f001]", "+0100")"#,
+            r#""00:59:59.999""#,
+        ),
+        (
+            r#"$fromMillis(-1.5, "[Y0001]-[M01]-[D01] [H01]:[m01]:[s01].[f001]")"#,
+            r#""1969-12-31 23:59:59.999""#,
+        ),
     ] {
         let expected = format!("Ok({expected})");
         let (tree_walker, default) =

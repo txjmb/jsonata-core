@@ -292,7 +292,7 @@ pub(crate) fn evaluation_millis() -> i64 {
 pub fn now() -> JValue {
     // `$now()` is `$fromMillis()` of the timestamp, whose default picture is
     // ISO 8601; a clock beyond JavaScript's dates is the only way it fails.
-    from_millis_with_picture(evaluation_millis(), None, None).unwrap_or(JValue::Undefined)
+    from_millis_with_picture(evaluation_millis() as f64, None, None).unwrap_or(JValue::Undefined)
 }
 
 /// $millis() - The evaluation's timestamp, in milliseconds since the epoch
@@ -328,7 +328,7 @@ pub fn to_millis_with_picture(timestamp: &str, picture: &str) -> Result<JValue, 
 /// $fromMillis(millis, picture?, timezone?) - Convert milliseconds since epoch to a
 /// formatted timestamp. `picture` defaults to ISO 8601; `timezone` defaults to UTC.
 pub fn from_millis_with_picture(
-    millis: i64,
+    millis: f64,
     picture: Option<&str>,
     timezone: Option<&str>,
 ) -> Result<JValue, DateTimeError> {
@@ -1501,7 +1501,7 @@ fn parse_timezone_offset(timezone: Option<&str>) -> (i64, i64) {
 
 /// Formats the date/time as specified by the XPath fn:format-dateTime function.
 fn format_date_time(
-    millis: i64,
+    millis: f64,
     picture: Option<&str>,
     timezone: Option<&str>,
 ) -> Result<String, DateTimeError> {
@@ -1516,14 +1516,17 @@ fn format_date_time(
         None => iso_default_picture_spec(),
     };
 
-    // The time in the target timezone, if it is a JavaScript date. A
-    // timestamp or offset too large to add up is not one either.
+    // The time in the target timezone, if it is a JavaScript date: jsonata-js
+    // formats `new Date(millis + offsetMillis)`, which drops any fraction of
+    // a millisecond (toward zero) after the offset is added. A timestamp or
+    // offset too large to add up is not a date either.
     let local_millis = offset_hours
         .checked_mul(60)
         .and_then(|minutes| minutes.checked_add(offset_minutes))
         .and_then(|minutes| minutes.checked_mul(60 * 1000))
-        .and_then(|offset_millis| millis.checked_add(offset_millis))
-        .filter(|shifted| (-MAX_DATE_MILLIS..=MAX_DATE_MILLIS).contains(shifted))
+        .map(|offset_millis| (millis + offset_millis as f64).trunc())
+        .filter(|shifted| shifted.abs() <= MAX_DATE_MILLIS as f64)
+        .map(|shifted| shifted as i64)
         .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {millis}")))?;
 
     let mut result = String::new();
@@ -2227,7 +2230,7 @@ mod tests {
 
     #[test]
     fn test_from_millis() {
-        let result = from_millis_with_picture(1, None, None).unwrap();
+        let result = from_millis_with_picture(1.0, None, None).unwrap();
         assert!(matches!(result, JValue::String(_)));
     }
 
@@ -2247,7 +2250,7 @@ mod tests {
     fn test_from_millis_with_picture_basic() {
         // "should format the date in ISO 8601 style" (function-fromMillis/formatDateTime)
         let result =
-            from_millis_with_picture(1521801216617, Some("[Y0001]-[M01]-[D01]"), None).unwrap();
+            from_millis_with_picture(1521801216617.0, Some("[Y0001]-[M01]-[D01]"), None).unwrap();
         assert_eq!(result, JValue::string("2018-03-23".to_string()));
     }
 
@@ -2255,14 +2258,14 @@ mod tests {
     fn test_from_millis_with_picture_roman_numeral_year() {
         // "year in roman numerals" (function-fromMillis/formatDateTime)
         let result =
-            from_millis_with_picture(1521801216617, Some("[D1] [M01] [YI]"), None).unwrap();
+            from_millis_with_picture(1521801216617.0, Some("[D1] [M01] [YI]"), None).unwrap();
         assert_eq!(result, JValue::string("23 03 MMXVIII".to_string()));
     }
 
     #[test]
     fn test_from_millis_with_picture_words() {
         // "year in words" (function-fromMillis/formatDateTime)
-        let result = from_millis_with_picture(1521801216617, Some("[Yw]"), None).unwrap();
+        let result = from_millis_with_picture(1521801216617.0, Some("[Yw]"), None).unwrap();
         assert_eq!(
             result,
             JValue::string("two thousand and eighteen".to_string())
