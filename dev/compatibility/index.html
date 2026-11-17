@@ -2096,6 +2096,56 @@ hold their defining frame by reference, so they see a variable rebound after the
 <p>Live frames would make every named recursive function an <code>Rc</code> reference cycle, and so a memory
 leak in a long-lived Python process. See
 <a href="https://github.com/txjmb/jsonata-core/issues/159">#159</a> for the designs considered.</p>
+<p>Some path and evaluation-order shapes differ too:</p>
+<table>
+<thead>
+<tr>
+<th>Expression</th>
+<th>jsonatapy</th>
+<th>jsonata-js</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>x[]#$i#$j.$i</code></td>
+<td><code>[0,1]</code></td>
+<td>undefined</td>
+<td><code>#</code> after <code>[]</code> adds an index stage rather than replacing the step's index</td>
+</tr>
+<tr>
+<td><code>acct.o[0]#$i[].id</code></td>
+<td><code>[1]</code></td>
+<td><code>1</code></td>
+<td>a <code>[]</code> after <code>#</code> keeps a singleton array</td>
+</tr>
+<tr>
+<td><code>[$string(1,2,3), "f"@$v()]</code></td>
+<td>T0410</td>
+<td>T1006</td>
+<td>constructor members run in order, so the first member's error is reported; jsonata-js runs them concurrently</td>
+</tr>
+<tr>
+<td><code>a ~&gt; $map(function($v){$v.b})[1]</code></td>
+<td><code>"y"</code></td>
+<td><code>["x","y"]</code></td>
+<td>a filter on the call after <code>~&gt;</code> is applied; jsonata-js ignores it (<a href="https://github.com/txjmb/jsonata-core/issues/286">#286</a>)</td>
+</tr>
+<tr>
+<td><code>nope[**[$error("E")]]</code></td>
+<td>undefined</td>
+<td>D3137</td>
+<td>a <code>**</code> on a missing value runs no filters; jsonata-js runs them on nothing (<a href="https://github.com/txjmb/jsonata-core/issues/290">#290</a>)</td>
+</tr>
+<tr>
+<td><code>(%.b)[%.x]{"k":1}.k</code></td>
+<td>undefined</td>
+<td><code>1</code></td>
+<td>a block whose path starts with a <code>%</code> nothing can bind groups as tuples (<a href="https://github.com/txjmb/jsonata-core/issues/285">#285</a>)</td>
+</tr>
+</tbody>
+</table>
+<p>(Data for these rows: <code>{"x":[1,2],"acct":{"o":[{"id":1}]},"a":[{"b":"x"},{"b":"y"}]}</code>.)</p>
 <h2 id="current-compatibility-status">Current Compatibility Status<a class="headerlink" href="#current-compatibility-status" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run full test suite</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/python/test_reference_suite.py
