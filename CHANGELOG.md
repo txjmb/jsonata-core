@@ -43,15 +43,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (years -271821 to 275760). It stopped at chrono's ±262143 years.
   It also takes a fraction of a millisecond, dropping it as JavaScript's `Date` does, where it
   raised "requires an integer".
-- **`$toMillis(timestamp, picture)` carries fields past their range into the next one, as
-  `Date.UTC` does in jsonata-js.** `"2018-02-30"` with `"[Y]-[M]-[D]"` is 2 March, month 13 is
-  January of the next year, hour 24 is midnight of the next day, and a two-digit year is in
-  the 1900s; these were D3136. A day of the year past the year's end now keeps the parsed
-  year with the derived month and day, as jsonata-js does; it used to move to the next year.
-  Components the picture leaves out come from the evaluation's timestamp. Where jsonata-js
-  returns NaN (a date past JavaScript's range), this is D3136, as before; an offset too large
-  to subtract is D3136 too, where it was an integer overflow. A result that only the offset
-  moves past JavaScript's range is returned, as in jsonata-js.
+- **`$toMillis` returns what jsonata-js does across its edge cases**
+  ([#295](https://github.com/txjmb/jsonata-core/issues/295)). With a picture, the timestamp is
+  built as `Date.UTC` builds it: a field past its range carries into the next (`"2018-02-30"`
+  with `"[Y]-[M]-[D]"` is 2 March, hour 24 is the next midnight, month 13 is January of the
+  next year), a two-digit year is in the 1900s, a day of the year past the year's end keeps
+  the parsed year, and a component of 0 counts as not given when choosing the date and time
+  types, as jsonata-js's truthiness test does (so `"0:33 am"` with `"[h]:[m] [P]"` is D3136).
+  Components the picture leaves out come from the evaluation's timestamp, and the timezone
+  offset is applied in floating point. Without a picture, the timestamp is read as
+  `Date.parse` reads it: a day up to 31 carries over, `T24:00:00` is the next midnight, and
+  the pattern that decides D3110 is jsonata-js's own. A date past JavaScript's range, a month
+  or day of 0, a month over 12 or a day over 31 is NaN, as in jsonata-js (`nan` in Python);
+  these were D3136 or D3110.
+- **Week numbers and day of the year for years 0 to 99 match jsonata-js**, which reads those
+  years as 1900 to 1999 when it works them out (`Date.UTC`).
 - **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and
   `encodeURIComponent` do.** `$encodeUrl("a b")` is `"a%20b"`, where it was `"a b"`: only
   control characters were encoded. `$encodeUrlComponent` no longer encodes `-_.!~*'()`.

@@ -15,7 +15,7 @@ fn iso8601_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?(?:T(\d{2}):(\d{2}):(\d{2}))?(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$"
+            r"^(\d{4})(?:-([01]\d))?(?:-([0-3]\d))?(?:T([0-2]\d):([0-5]\d):([0-5]\d))?(?:\.(\d+))?(Z|[+-][0-2]\d:?[0-5]\d)?$"
         ).unwrap()
     })
 }
@@ -46,55 +46,65 @@ fn coded(code: &'static str, message: impl Into<String>) -> DateTimeError {
 
 /// Parse a potentially partial ISO 8601 timestamp
 /// Supports: YYYY, YYYY-MM, YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, etc.
-pub fn parse_iso8601_partial(s: &str) -> Result<i64, DateTimeError> {
-    if let Some(caps) = iso8601_regex().captures(s) {
-        let year: i64 = caps.get(1).unwrap().as_str().parse().unwrap();
-        let month: u32 = caps.get(2).map_or(1, |m| m.as_str().parse().unwrap());
-        let day: u32 = caps.get(3).map_or(1, |m| m.as_str().parse().unwrap());
-        let hour: u32 = caps.get(4).map_or(0, |m| m.as_str().parse().unwrap());
-        let minute: u32 = caps.get(5).map_or(0, |m| m.as_str().parse().unwrap());
-        let second: u32 = caps.get(6).map_or(0, |m| m.as_str().parse().unwrap());
-        let millis: u32 = caps.get(7).map_or(0, |m| {
-            let s = m.as_str();
-            // Pad or truncate to 3 digits for milliseconds
-            let padded = format!("{:0<3}", &s[..s.len().min(3)]);
-            padded.parse().unwrap_or(0)
-        });
-
-        // Parse timezone offset
-        let tz_offset_minutes: i32 = caps.get(8).map_or(0, |m| {
-            let tz = m.as_str();
-            if tz == "Z" {
-                0
-            } else {
-                // Parse +HH:MM or +HHMM format
-                let sign = if tz.starts_with('-') { -1 } else { 1 };
-                let digits: String = tz[1..].chars().filter(|c| c.is_ascii_digit()).collect();
-                if digits.len() >= 4 {
-                    let hours: i32 = digits[0..2].parse().unwrap_or(0);
-                    let mins: i32 = digits[2..4].parse().unwrap_or(0);
-                    sign * (hours * 60 + mins)
-                } else if digits.len() >= 2 {
-                    let hours: i32 = digits[0..2].parse().unwrap_or(0);
-                    sign * hours * 60
-                } else {
-                    0
-                }
-            }
-        });
-
-        // Create UTC datetime
-        let utc_millis = CivilDate::from_ymd(year, month as i64, day as i64)
-            .and_then(|date| date.at_time(hour as i64, minute as i64, second as i64, millis as i64))
-            .ok_or_else(|| DateTimeError::ParseError(format!("Invalid date components: {}", s)))?;
-        let millis = utc_millis - (tz_offset_minutes as i64 * 60 * 1000);
-
-        Ok(millis)
-    } else {
-        Err(DateTimeError::ParseError(
+pub fn parse_iso8601_partial(s: &str) -> Result<f64, DateTimeError> {
+    // jsonata-js checks the timestamp against this pattern (D3110 if it does
+    // not match) and returns `Date.parse(timestamp)`. `Date.parse` reads a
+    // day up to 31 in any month and carries it over (30 February is 2
+    // March), allows 24:00:00 as the next midnight, and gives NaN for a month
+    // or day of 0, a month over 12, a day over 31, any other hour past 23, or
+    // an offset of 24 hours or more. A form outside ECMAScript's date-time
+    // format, such as a fraction or offset with no time, goes to the
+    // engine's own fallback parser in JavaScript and is read here as the
+    // fields it names.
+    let Some(caps) = iso8601_regex().captures(s) else {
+        return Err(DateTimeError::ParseError(
             "premature end of input".to_string(),
-        ))
+        ));
+    };
+    let field = |i: usize, default: i64| {
+        caps.get(i)
+            .map_or(default, |m| m.as_str().parse().unwrap_or(default))
+    };
+    let year = field(1, 0);
+    let month = field(2, 1);
+    let day = field(3, 1);
+    let hour = field(4, 0);
+    let minute = field(5, 0);
+    let second = field(6, 0);
+    let millis: i64 = caps.get(7).map_or(0, |m| {
+        // The first three digits, padded: ".5" is 500 ms.
+        let digits = m.as_str();
+        format!("{:0<3}", &digits[..digits.len().min(3)])
+            .parse()
+            .unwrap_or(0)
+    });
+    // Parse timezone offset: Z, +HH:MM or +HHMM.
+    let (offset_hours, offset_minutes) = match caps.get(8).map(|m| m.as_str()) {
+        None | Some("Z") => (0, 0),
+        Some(tz) => {
+            let sign = if tz.starts_with('-') { -1 } else { 1 };
+            let digits: String = tz[1..].chars().filter(|c| c.is_ascii_digit()).collect();
+            let hours: i64 = digits[0..2].parse().unwrap_or(0);
+            let minutes: i64 = digits[2..4].parse().unwrap_or(0);
+            (sign * hours, sign * minutes)
+        }
+    };
+
+    let midnight_next = hour == 24 && minute == 0 && second == 0 && millis == 0;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(hour < 24 || midnight_next)
+        || offset_hours.abs() > 23
+    {
+        return Ok(f64::NAN);
     }
+    let days = days_from_civil(year, month, 1) + day - 1;
+    let utc_millis = days * MILLIS_PER_DAY + ((hour * 60 + minute) * 60 + second) * 1000 + millis
+        - (offset_hours * 60 + offset_minutes) * 60 * 1000;
+    if utc_millis.abs() > MAX_DATE_MILLIS {
+        return Ok(f64::NAN);
+    }
+    Ok(utc_millis as f64)
 }
 
 /// The clock as milliseconds since the Unix epoch.
@@ -114,7 +124,7 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 /// milliseconds (ECMAScript's TimeClip): 100,000,000 days.
 const MAX_DATE_MILLIS: i64 = 8_640_000_000_000_000;
 
-/// The furthest year `CivilDate::from_ymd` and `date_utc` build.
+/// The furthest year `date_utc` builds.
 const MAX_CIVIL_YEAR: i64 = 1_000_000;
 
 /// A day in the proleptic Gregorian calendar, the calendar JavaScript's `Date`
@@ -128,23 +138,6 @@ struct CivilDate {
 }
 
 impl CivilDate {
-    /// The date `year`-`month`-`day`, or `None` if there is no such day
-    /// (month outside 1-12, day past the end of the month).
-    fn from_ymd(year: i64, month: i64, day: i64) -> Option<Self> {
-        // Past JavaScript's dates (about 275,760 years either way), with room
-        // to spare, so the arithmetic below cannot overflow.
-        if !(-MAX_CIVIL_YEAR..=MAX_CIVIL_YEAR).contains(&year)
-            || !(1..=12).contains(&month)
-            || day < 1
-            || day > days_in_month(year, month)
-        {
-            return None;
-        }
-        Some(Self {
-            days: days_from_civil(year, month, day),
-        })
-    }
-
     /// The date `millis` falls on, counting from the epoch in UTC.
     fn from_millis(millis: i64) -> Self {
         Self {
@@ -180,11 +173,6 @@ impl CivilDate {
         self.ymd().1 - 1
     }
 
-    /// The day of the year, 1-366.
-    fn ordinal(self) -> i64 {
-        self.days - days_from_civil(self.year(), 1, 1) + 1
-    }
-
     /// The day of the week, Monday 1 to Sunday 7. 1970-01-01 was a Thursday.
     fn weekday_from_monday(self) -> i64 {
         (self.days + 3).rem_euclid(7) + 1
@@ -194,22 +182,6 @@ impl CivilDate {
         Self {
             days: self.days + days,
         }
-    }
-
-    /// Milliseconds since the epoch at the given time of day on this date, or
-    /// `None` if the time is not one (see `is_time_of_day`) or the result is
-    /// beyond JavaScript's dates.
-    fn at_time(self, hour: i64, minute: i64, second: i64, millis: i64) -> Option<i64> {
-        if !is_time_of_day(hour, minute, second, millis) {
-            return None;
-        }
-        let total = self
-            .days
-            .checked_mul(MILLIS_PER_DAY)?
-            .checked_add(((hour * 60 + minute) * 60 + second) * 1000 + millis)?;
-        (-MAX_DATE_MILLIS..=MAX_DATE_MILLIS)
-            .contains(&total)
-            .then_some(total)
     }
 }
 
@@ -223,27 +195,6 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let day_of_year = (153 * month_from_march + 2) / 5 + day - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     era * 146_097 + day_of_era - 719_468
-}
-
-/// Hour 0-23, minute and second 0-59, millisecond 0-999.
-fn is_time_of_day(hour: i64, minute: i64, second: i64, millis: i64) -> bool {
-    (0..24).contains(&hour)
-        && (0..60).contains(&minute)
-        && (0..60).contains(&second)
-        && (0..1000).contains(&millis)
-}
-
-fn is_leap_year(year: i64) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
-}
-
-fn days_in_month(year: i64, month: i64) -> i64 {
-    match month {
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    }
 }
 
 thread_local! {
@@ -314,13 +265,13 @@ pub fn to_millis(timestamp: &str) -> Result<JValue, DateTimeError> {
             ),
         )
     })?;
-    Ok(JValue::Number(millis as f64))
+    Ok(JValue::Number(millis))
 }
 
 /// $toMillis(timestamp, picture) - Convert formatted timestamp to milliseconds since epoch
 pub fn to_millis_with_picture(timestamp: &str, picture: &str) -> Result<JValue, DateTimeError> {
     match parse_date_time(timestamp, picture, evaluation_millis())? {
-        Some(millis) => Ok(JValue::Number(millis as f64)),
+        Some(millis) => Ok(JValue::Number(millis)),
         None => Ok(JValue::Undefined),
     }
 }
@@ -1219,8 +1170,23 @@ fn prev_month(year: i64, month0: i64) -> (i64, i64) {
 
 /// ISO 8601 defines the first week of the year (or, by extension, of the month) to be
 /// the week containing the first Thursday. Weeks start on Monday.
+/// The date `Date.UTC(year, month0, day)` names in jsonata-js, which reads a
+/// year from 0 to 99 as 1900 to 1999. The week calculations go through it, so
+/// they inherit that reading for the years 0-99, as there.
+fn js_utc_date(year: i64, month0: i64, day: i64) -> CivilDate {
+    let year = if (0..=99).contains(&year) {
+        year + 1900
+    } else {
+        year
+    };
+    let year = year + month0.div_euclid(12);
+    CivilDate {
+        days: days_from_civil(year, month0.rem_euclid(12) + 1, 1) + day - 1,
+    }
+}
+
 fn start_of_first_week(year: i64, month0: i64) -> CivilDate {
-    let first = CivilDate::from_ymd(year, month0 + 1, 1).expect("valid year/month");
+    let first = js_utc_date(year, month0, 1);
     let day_of_first = first.weekday_from_monday(); // Mon=1 .. Sun=7
     if day_of_first > 4 {
         first.plus_days(8 - day_of_first)
@@ -1234,7 +1200,8 @@ fn delta_weeks(start: CivilDate, end: CivilDate) -> f64 {
 }
 
 fn week_in_year(date: CivilDate) -> i64 {
-    let year = date.year();
+    let (year, month, day) = date.ymd();
+    let date = js_utc_date(year, month - 1, day);
     let start_of_week1 = start_of_first_week(year, 0);
     let mut week = delta_weeks(start_of_week1, date);
     if week > 52.0 {
@@ -1250,8 +1217,9 @@ fn week_in_year(date: CivilDate) -> i64 {
 }
 
 fn week_in_month(date: CivilDate) -> i64 {
-    let year = date.year();
-    let month0 = date.month0();
+    let (year, month, day) = date.ymd();
+    let month0 = month - 1;
+    let date = js_utc_date(year, month0, day);
     let start_of_week1 = start_of_first_week(year, month0);
     let mut week = delta_weeks(start_of_week1, date);
     if week > 4.0 {
@@ -1313,7 +1281,13 @@ fn get_date_time_fragment(millis: i64, component: char) -> i64 {
         'Y' => date.year(),
         'M' => date.month0() + 1,
         'D' => date.ymd().2,
-        'd' => date.ordinal(),
+        'd' => {
+            // As jsonata-js: the days from `Date.UTC(year, 0)` to
+            // `Date.UTC(year, month, day)`, which for a year 0-99 counts in
+            // the 1900s' calendar.
+            let (year, month, day) = date.ymd();
+            js_utc_date(year, month - 1, day).days - js_utc_date(year, 0, 1).days + 1
+        }
         'F' => date.weekday_from_monday(),
         'W' => week_in_year(date),
         'w' => week_in_month(date),
@@ -1840,7 +1814,7 @@ fn parse_component_value(
 /// Parses a string containing a timestamp as specified by a date/time picture string
 /// (mirrors datetime.js's `parseDateTime`). Returns `Ok(None)` (meaning "undefined") if
 /// the timestamp doesn't match the picture, or if the picture has no markers at all.
-fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i64>, DateTimeError> {
+fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f64>, DateTimeError> {
     let spec = analyse_date_time_picture(picture)?;
     let parts = build_matcher_parts(&spec)?;
 
@@ -1875,10 +1849,14 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
         return Ok(None);
     }
 
+    // jsonata-js builds the masks with `shift(components[part])`, which is
+    // truthy-tested: a component that parsed as 0 (hour 0, "am", day 0)
+    // counts as not given when choosing the date and time types.
     let mask_of = |order: &str| -> u8 {
         let mut mask = 0u8;
         for ch in order.chars() {
-            mask = (mask << 1) | (components.contains_key(&ch) as u8);
+            let given = components.get(&ch).is_some_and(|value| *value != 0);
+            mask = (mask << 1) | given as u8;
         }
         mask
     };
@@ -1943,8 +1921,11 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
         let h = components[&'h'];
         let hh = if h == 12 { 0 } else { h };
         if components.get(&'P').copied() == Some(1) {
-            hh.checked_add(12)
-                .ok_or_else(|| coded("D3136", "invalid time components"))?
+            match hh.checked_add(12) {
+                Some(hour) => hour,
+                // An hour this large is NaN from `Date.UTC` in jsonata-js.
+                None => return Ok(Some(f64::NAN)),
+            }
         } else {
             hh
         }
@@ -1964,9 +1945,9 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
     if date_b {
         // As jsonata-js: the month and day `d - 1` days on from 1 January,
         // kept with the parsed year, so a day past the year's end lands in
-        // the same year, not the next. Where jsonata-js gets NaN (1 January
-        // or the derived date past JavaScript's range), this is D3136.
-        let derived = date_utc(year, 0, 1, 0, 0, 0, 0)
+        // the same year, not the next. If 1 January or the derived date is
+        // past JavaScript's range, the date is invalid and the result NaN.
+        let derived = match date_utc(year, 0, 1, 0, 0, 0, 0)
             .and_then(|first_jan| {
                 let offset_millis = components[&'d']
                     .checked_sub(1)?
@@ -1974,12 +1955,17 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
                 first_jan.checked_add(offset_millis)
             })
             .filter(|derived| (-MAX_DATE_MILLIS..=MAX_DATE_MILLIS).contains(derived))
-            .ok_or_else(|| coded("D3136", "invalid date components"))?;
+        {
+            Some(derived) => derived,
+            None => return Ok(Some(f64::NAN)),
+        };
         let (_, m, d) = CivilDate::from_millis(derived).ymd();
         month0 = m - 1;
         day = d;
     }
-    let millis_val = date_utc(
+    // A date past JavaScript's range is NaN from `Date.UTC`, and jsonata-js
+    // returns that NaN.
+    let Some(millis) = date_utc(
         year,
         month0,
         day,
@@ -1987,27 +1973,19 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<i6
         components[&'m'],
         components[&'s'],
         components.get(&'f').copied().unwrap_or(0),
-    )
-    .and_then(
-        // `components.Z || components.z`: a zero Z falls through to z.
-        |millis| match components
-            .get(&'Z')
-            .filter(|offset| **offset != 0)
-            .or_else(|| components.get(&'z'))
-        {
-            Some(offset) => offset
-                .checked_mul(60 * 1000)
-                .and_then(|offset_millis| millis.checked_sub(offset_millis)),
-            None => Some(millis),
-        },
-    )
-    // Where `Date.UTC` gives NaN (a date past JavaScript's range), jsonata-js
-    // returns NaN; this is D3136. An offset too large to subtract in i64 is
-    // D3136 too, where jsonata-js returns a huge finite number. A result the
-    // offset moves past JavaScript's range is returned as is, as there.
-    .ok_or_else(|| coded("D3136", "invalid date components"))?;
-
-    Ok(Some(millis_val))
+    ) else {
+        return Ok(Some(f64::NAN));
+    };
+    // `millis -= (components.Z || components.z) * 60 * 1000`, in JavaScript
+    // numbers: a zero Z falls through to z, and nothing clips the result, so
+    // an offset can move it past JavaScript's range.
+    let offset = components
+        .get(&'Z')
+        .filter(|offset| **offset != 0)
+        .or_else(|| components.get(&'z'))
+        .copied()
+        .unwrap_or(0);
+    Ok(Some(millis as f64 - offset as f64 * 60.0 * 1000.0))
 }
 
 /// A timezone offset in minutes, if it adds up without overflowing.
@@ -2058,6 +2036,20 @@ fn date_utc(
 mod tests {
     use super::*;
 
+    /// The date `year`-`month`-`day`, or `None` if there is no such day.
+    fn from_ymd(year: i64, month: i64, day: i64) -> Option<CivilDate> {
+        let days_in_month = match month {
+            2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            1..=12 => 31,
+            _ => return None,
+        };
+        (1..=days_in_month).contains(&day).then(|| CivilDate {
+            days: days_from_civil(year, month, day),
+        })
+    }
+
     /// `CivilDate` against dates whose day numbers and weekdays are fixed
     /// facts, and a round trip through every day of ±1,000 years around the
     /// epoch plus a stretch at either end of JavaScript's dates.
@@ -2073,7 +2065,7 @@ mod tests {
             (275_760, 9, 13, 100_000_000, 6),
             (-271_821, 4, 20, -100_000_000, 2),
         ] {
-            let date = CivilDate::from_ymd(y, m, d).expect("a real date");
+            let date = from_ymd(y, m, d).expect("a real date");
             assert_eq!(date.days, days, "{y}-{m}-{d}");
             assert_eq!(date.ymd(), (y, m, d));
             assert_eq!(date.weekday_from_monday(), weekday, "{y}-{m}-{d}");
@@ -2086,10 +2078,14 @@ mod tests {
             (2018, 4, 31),
             (2018, 1, 0),
         ] {
-            assert!(CivilDate::from_ymd(y, m, d).is_none(), "{y}-{m}-{d}");
+            assert!(from_ymd(y, m, d).is_none(), "{y}-{m}-{d}");
         }
-        assert_eq!(CivilDate::from_ymd(2016, 12, 31).unwrap().ordinal(), 366);
-        assert_eq!(CivilDate::from_ymd(2018, 3, 1).unwrap().ordinal(), 60);
+        let day_of_year =
+            |y, m, d| get_date_time_fragment(from_ymd(y, m, d).unwrap().days * MILLIS_PER_DAY, 'd');
+        assert_eq!(day_of_year(2016, 12, 31), 366);
+        assert_eq!(day_of_year(2018, 3, 1), 60);
+        // Years 0-99 count in the 1900s' calendar, as `Date.UTC` reads them.
+        assert_eq!(day_of_year(0, 12, 31), 365);
 
         let ranges = [
             (-366_000, 366_000),
@@ -2101,11 +2097,11 @@ mod tests {
             for days in from..=to {
                 let date = CivilDate { days };
                 let (y, m, d) = date.ymd();
-                assert_eq!(CivilDate::from_ymd(y, m, d), Some(date));
+                assert_eq!(from_ymd(y, m, d), Some(date));
                 if days > from {
                     // The day after the previous one.
                     let (py, pm, pd) = expected;
-                    let next = if pd < days_in_month(py, pm) {
+                    let next = if from_ymd(py, pm, pd + 1).is_some() {
                         (py, pm, pd + 1)
                     } else if pm < 12 {
                         (py, pm + 1, 1)
@@ -2120,47 +2116,57 @@ mod tests {
     }
 
     #[test]
-    fn at_time_stays_within_javascript_dates() {
-        let last = CivilDate::from_ymd(275_760, 9, 13).unwrap();
-        assert_eq!(last.at_time(0, 0, 0, 0), Some(MAX_DATE_MILLIS));
-        assert_eq!(last.at_time(0, 0, 0, 1), None);
-        let first = CivilDate::from_ymd(-271_821, 4, 20).unwrap();
-        assert_eq!(first.at_time(0, 0, 0, 0), Some(-MAX_DATE_MILLIS));
-        assert_eq!(first.plus_days(-1).at_time(23, 59, 59, 999), None);
-        let epoch = CivilDate { days: 0 };
-        assert_eq!(epoch.at_time(24, 0, 0, 0), None);
-        assert_eq!(epoch.at_time(0, 60, 0, 0), None);
-        assert_eq!(epoch.at_time(0, 0, 0, 1000), None);
-        assert_eq!(epoch.at_time(-1, 0, 0, 0), None);
-        assert!(CivilDate::from_ymd(MAX_CIVIL_YEAR + 1, 1, 1).is_none());
+    fn date_utc_stays_within_javascript_dates() {
+        assert_eq!(date_utc(275_760, 8, 13, 0, 0, 0, 0), Some(MAX_DATE_MILLIS));
+        assert_eq!(date_utc(275_760, 8, 13, 0, 0, 0, 1), None);
+        assert_eq!(
+            date_utc(-271_821, 3, 20, 0, 0, 0, 0),
+            Some(-MAX_DATE_MILLIS)
+        );
+        assert_eq!(date_utc(-271_821, 3, 19, 23, 59, 59, 999), None);
+        assert_eq!(date_utc(1970, 0, 1, 24, 0, 0, 0), Some(MILLIS_PER_DAY));
+        assert_eq!(date_utc(70, 0, 1, 0, 0, 0, 0), Some(0), "year 70 is 1970");
+        assert_eq!(date_utc(MAX_CIVIL_YEAR + 1, 0, 1, 0, 0, 0, 0), None);
+        assert_eq!(date_utc(2018, 0, 1, i64::MAX, 0, 0, 0), None);
     }
 
-    /// Fields past their range carry into the next, as `Date.UTC` does in
-    /// jsonata-js (expected values from jsonata-js). A date past JavaScript's
-    /// range (NaN in jsonata-js), or an offset too large to subtract, is
-    /// D3136; a result only the offset moves past the range is returned, as
-    /// in jsonata-js.
+    /// `$toMillis(timestamp, picture)` as jsonata-js computes it (expected
+    /// values from jsonata-js): fields past their range carry into the next,
+    /// as in `Date.UTC`; a date past JavaScript's range is NaN; the offset is
+    /// applied in floating point with no clipping; and a component of 0
+    /// counts as not given when choosing the date and time types.
     #[test]
-    fn parse_date_time_carries_like_date_utc() {
+    fn parse_date_time_matches_jsonata_js() {
         for (timestamp, picture, expected) in [
-            ("2018-01-01 24", "[Y]-[M]-[D] [H]", 1_514_851_200_000),
-            ("2018-02-30", "[Y]-[M]-[D]", 1_519_948_800_000),
-            ("1999 13", "[Y] [M]", 946_684_800_000),
-            ("2018-400", "[Y]-[d]", 1_517_702_400_000),
+            ("2018-01-01 24", "[Y]-[M]-[D] [H]", 1_514_851_200_000.0),
+            ("2018-02-30", "[Y]-[M]-[D]", 1_519_948_800_000.0),
+            ("1999 13", "[Y] [M]", 946_684_800_000.0),
+            ("2018-400", "[Y]-[d]", 1_517_702_400_000.0),
+            ("2018-0", "[Y]-[d]", 1_514_764_800_000.0),
             (
                 "28/25/98 2:2 am",
                 "[D]/[M]/[Y] [h]:[m] [P]",
-                949_024_920_000,
+                949_024_920_000.0,
             ),
             (
                 "2018-01-01 +00:00 GMT+05:00",
                 "[Y]-[M]-[D] [Z] [z]",
-                1_514_746_800_000,
+                1_514_746_800_000.0,
             ),
             (
                 "275760-09-13T00:00:00-05:00",
                 "[Y]-[M]-[D]T[H]:[m]:[s][Z01:01]",
-                8_640_000_018_000_000,
+                8_640_000_018_000_000.0,
+            ),
+            (
+                "2018-01-01T00:00:00+0099999999999999999",
+                "[Y]-[M]-[D]T[H]:[m]:[s][Z0000]",
+                -5.999999998485235e21,
+            ),
+            (
+                "2018-01-01T00:00:00+9999999999999999:00",
+                "[Y]-[M]-[D]T[H]:[m]:[s][Z01:01]",
+                -3.5999999998485235e22,
             ),
         ] {
             assert_eq!(
@@ -2173,19 +2179,58 @@ mod tests {
             ("280000", "[Y]"),
             ("2018-100000000", "[Y]-[d]"),
             ("99999999999999999999 pm", "[h] [P]"),
-            (
-                "2018-01-01T00:00:00+0099999999999999999",
-                "[Y]-[M]-[D]T[H]:[m]:[s][Z0000]",
-            ),
-            (
-                "2018-01-01T00:00:00+9999999999999999:00",
-                "[Y]-[M]-[D]T[H]:[m]:[s][Z01:01]",
-            ),
         ] {
-            let err = parse_date_time(timestamp, picture, 0)
-                .unwrap_err()
-                .to_string();
-            assert!(err.starts_with("D3136"), "{timestamp}: {err}");
+            let millis = parse_date_time(timestamp, picture, 0).unwrap().unwrap();
+            assert!(millis.is_nan(), "{timestamp} / {picture}: {millis}");
+        }
+        // An hour of 0 counts as not given, so the minute after it is a gap.
+        let err = parse_date_time("39/13/1927 0:33 am", "[D]/[M]/[Y] [h]:[m] [P]", 0)
+            .unwrap_err()
+            .to_string();
+        assert!(err.starts_with("D3136"), "{err}");
+    }
+
+    /// `$toMillis(timestamp)` as `Date.parse` reads it in jsonata-js
+    /// (expected values from jsonata-js on Node).
+    #[test]
+    fn parse_iso8601_matches_date_parse() {
+        for (timestamp, expected) in [
+            ("2018-02-29", 1_519_862_400_000.0),
+            ("2018-04-31", 1_525_132_800_000.0),
+            ("2018-01-01T24:00:00", 1_514_851_200_000.0),
+            ("2018-02-30T10:00:00Z", 1_519_984_800_000.0),
+            ("2018-01-01T00:00:00+23:59", 1_514_678_460_000.0),
+            ("2018-01-01T00:00:00.9999", 1_514_764_800_999.0),
+            ("0099-02-29", -59_037_897_600_000.0),
+            ("0000", -62_167_219_200_000.0),
+        ] {
+            assert_eq!(
+                parse_iso8601_partial(timestamp).unwrap(),
+                expected,
+                "{timestamp}"
+            );
+        }
+        for timestamp in [
+            "2018-00-10",
+            "2018-13-01",
+            "2018-01-00",
+            "2018-01-39",
+            "2018-01-01T24:00:01",
+            "2018-01-01T25:00:00",
+            "2018-01-01T00:00:00+24:00",
+        ] {
+            assert!(
+                parse_iso8601_partial(timestamp).unwrap().is_nan(),
+                "{timestamp}"
+            );
+        }
+        for timestamp in [
+            "2018-23-01",
+            "2018-01-41",
+            "2018-01-01T30:00:00",
+            "2018-1-1",
+        ] {
+            assert!(parse_iso8601_partial(timestamp).is_err(), "{timestamp}");
         }
     }
 
