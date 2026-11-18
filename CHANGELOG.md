@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.2.15] - 2026-11-18
+
+### Added
+
+### Changed
+
 - **Breaking for Rust users of the AST:** `parser::Parser::parse` now returns the finished
   tree, with ancestry resolved, as `parser::parse` does, and `ast_transform::resolve_ancestry`
   is no longer public. `BinaryOp` has the raw path operators `Map`, `Filter` and `KeepArray`,
