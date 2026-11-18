@@ -5653,6 +5653,9 @@ fn test_nan_operand_is_not_numeric() {
         ("(0/0) + 1", "T2001"),
         ("1 - (0/0)", "T2002"),
         (r#"$toMillis("2018-13-01") * 2"#, "T2001"),
+        (r#""a" + (1/0)"#, "T2001"),
+        ("(0/0) + (1/0)", "T2001"),
+        (r#"(1/0) + "a""#, "D1001"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);

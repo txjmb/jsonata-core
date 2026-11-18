@@ -1763,62 +1763,42 @@ pub(crate) fn compiled_arithmetic(
         CompiledArithOp::Div => "/",
         CompiledArithOp::Mod => "%",
     };
-    // jsonata-js's `isNumeric` throws D1001 when an *operand* is Infinity. It
-    // must run before the numeric arm below, or `1/(10e300 * 10e100)` quietly
-    // computes 1/inf = 0 instead of raising. NaN operands are reported as
-    // non-numeric instead and fall through to T2001/T2002.
-    if matches!(left, JValue::Number(n) if n.is_infinite())
-        || matches!(right, JValue::Number(n) if n.is_infinite())
-    {
-        return Err(EvaluatorError::EvaluationError(
-            "D1001: Number out of range".to_string(),
-        ));
-    }
-
-    match (left, right) {
-        // A NaN operand (`0/0`, a `$toMillis` jsonata-js gives NaN for) is
-        // not numeric to `isNumeric`, so it falls to T2001/T2002 below.
-        (JValue::Number(a), JValue::Number(b)) if !a.is_nan() && !b.is_nan() => {
-            let result = match op {
-                CompiledArithOp::Add => *a + *b,
-                CompiledArithOp::Sub => *a - *b,
-                // No check on the *result*: jsonata-js returns Infinity for
-                // `1/0` and `10e300 * 10e100`, and NaN for `0/0` and `1%0`. The
-                // error surfaces when such a value is later used as an operand
-                // (see the D1001 guard above), matching `isNumeric`.
-                CompiledArithOp::Mul => *a * *b,
-                CompiledArithOp::Div => *a / *b,
-                CompiledArithOp::Mod => *a % *b,
-            };
-            Ok(JValue::Number(result))
-        }
-        // Order matters, and matches jsonata-js: type-check each *defined*
-        // operand first, then propagate undefined. `false + $x` raises T2001 on
-        // the boolean even though the right side is undefined.
-        //
-        // Only undefined propagates. An explicit null -- like any other
-        // non-number -- is a type error, whether written as a literal or
-        // arriving at runtime from data or a lambda parameter (the
-        // null/undefined split, #32, made runtime nulls unambiguous).
-        _ if !matches!(left, JValue::Number(n) if !n.is_nan())
-            && !matches!(left, JValue::Undefined) =>
-        {
-            Err(EvaluatorError::TypeError(format!(
-                "T2001: The left side of the {} operator must evaluate to a number",
-                op_sym
-            )))
-        }
-        _ if !matches!(right, JValue::Number(n) if !n.is_nan())
-            && !matches!(right, JValue::Undefined) =>
-        {
-            Err(EvaluatorError::TypeError(format!(
-                "T2002: The right side of the {} operator must evaluate to a number",
-                op_sym
-            )))
-        }
-        // At least one operand is undefined and neither is a bad type.
-        _ => Ok(JValue::Undefined),
-    }
+    // jsonata-js's `evaluateNumericExpression`: each *defined* operand, left
+    // then right, must pass `isNumeric`, which raises D1001 for Infinity and
+    // is false for NaN and any non-number (T2001/T2002). Only then does an
+    // undefined operand make the result undefined: `false + $x` raises T2001
+    // even though the right side is undefined, and `"a" + (1/0)` is T2001,
+    // not D1001. An explicit null, like any other non-number, is a type error,
+    // whether written as a literal or arriving at runtime (#32).
+    //
+    // There is no check on the *result*: jsonata-js returns Infinity for
+    // `1/0` and `10e300 * 10e100`, and NaN for `0/0` and `1%0`. The error
+    // surfaces when such a value is later used as an operand.
+    let numeric_operand =
+        |value: &JValue, code: &str, side: &str| -> Result<Option<f64>, EvaluatorError> {
+            match value {
+                JValue::Undefined => Ok(None),
+                JValue::Number(n) if n.is_infinite() => Err(EvaluatorError::EvaluationError(
+                    "D1001: Number out of range".to_string(),
+                )),
+                JValue::Number(n) if !n.is_nan() => Ok(Some(*n)),
+                _ => Err(EvaluatorError::TypeError(format!(
+                    "{code}: The {side} side of the {op_sym} operator must evaluate to a number"
+                ))),
+            }
+        };
+    let left = numeric_operand(left, "T2001", "left")?;
+    let right = numeric_operand(right, "T2002", "right")?;
+    let (Some(a), Some(b)) = (left, right) else {
+        return Ok(JValue::Undefined);
+    };
+    Ok(JValue::Number(match op {
+        CompiledArithOp::Add => a + b,
+        CompiledArithOp::Sub => a - b,
+        CompiledArithOp::Mul => a * b,
+        CompiledArithOp::Div => a / b,
+        CompiledArithOp::Mod => a % b,
+    }))
 }
 
 /// Convert a value to string for concatenation in compiled expressions.
@@ -4519,8 +4499,8 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
 fn binary_may_raise_on_nothing(op: BinaryOp, l: KindOnNothing, r: KindOnNothing) -> bool {
     use KindOnNothing as K;
     match op {
-        // evaluateNumericExpression: T2001/T2002 for a defined non-number,
-        // and D1001 once both are numbers (`1/0`, an overflow).
+        // evaluateNumericExpression: T2001/T2002 for a defined non-number
+        // (or a number that is NaN), and D1001 for an infinite operand.
         BinaryOp::Add
         | BinaryOp::Subtract
         | BinaryOp::Multiply
