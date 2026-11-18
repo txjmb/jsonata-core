@@ -5328,3 +5328,369 @@ fn test_eval_input_inside_path_step() {
         assert!(default.contains("T0410"), "default: {expr} => {default}");
     }
 }
+
+/// A group-by over a block whose tail path a `%` resolves through reads a
+/// tuple stream only if that path reaches its tuple step, as jsonata-js
+/// decides at run time; one that stops before it (an unbound `%` or a
+/// missing field) gives a plain empty result, which groups once (#285). A
+/// sort is a tuple step itself, so a path led by a sort of one stays a
+/// tuple stream. Every expected value is from jsonata-js.
+#[test]
+fn test_group_by_on_block_that_stops_before_its_tuple_step() {
+    let data = JValue::from_json_str(r#"{"x":1,"a":{"x":2,"b":[{"x":3}]}}"#).unwrap();
+    for (expr, expected) in [
+        (r#"(%.b)[%.x]{"k":1}.k"#, "1"),
+        (r#"(%.*)[%.x]{"k":1}^(k)"#, r#"{"k":1}"#),
+        (r#"(%.b)@$o[%.x]{"k":1}.$o"#, r#"{"k":1}"#),
+        (r#"(nope.b)[%.x]{"k":1}.k"#, "1"),
+        (r#"($nope.b)[%.x]{"k":1}.k"#, "1"),
+        (r#"x.((%.b)[%.x]{"k":1}.k)"#, "1"),
+        // The path reaches its tuple step, so the stream is empty.
+        (r#"(a.nope)@$o[%.x]{"k":1}.$o"#, "{}"),
+        (r#"a.((%.b)[%.x=9]{"k":x})"#, "{}"),
+        // An index makes the block a tuple step itself.
+        (r#"(%.b)#$i[%.x]{"k":1}.k"#, "{}"),
+        (r#"(%)[%.x]#$i{"k":1}"#, "{}"),
+        // So does a sort, alone or leading a path.
+        (r#"(nope.b)[%.x]^(x){"k":1}"#, "{}"),
+        (r#"(nope.b)[%.x]^(x){"k":1}.k"#, "{}"),
+        (r#"(a.b)[%.x=9]^(x){"k":1}.k"#, "{}"),
+        (r#"(nope.b)^(x){"k":1}.k"#, r#"{"k":1}"#),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+    // A path is a tuple stream once it reaches its first tuple step, a block
+    // as a later step included, and stops with a plain result before it. A
+    // tuple path elsewhere in the input, in a predicate, doesn't count.
+    let data =
+        JValue::from_json_str(r#"{"x":[1,2],"c":[{"d":1},{"d":2}],"acct":{"o":[{"id":1}]}}"#)
+            .unwrap();
+    for (expr, expected) in [
+        (r#"c.(nope.b)[%.x]{"k":1}"#, "{}"),
+        (r#"acct.(nope.b)[%.x]{"k":1}"#, "{}"),
+        (r#"c.d.(nope.b)[%.x]{"k":1}"#, "{}"),
+        (r#"c.(nope.b@$q)[%.x]{"k":1}"#, "{}"),
+        (r#"c[d=9].(nope.b)[%.x]{"k":1}"#, r#"{"k":1}"#),
+        (r#"(x[$count($$.c#$i.d)=9].b)[%.x]{"k":1}.k"#, "1"),
+        (r#"nope.b#$i{"k":1}"#, r#"{"k":1}"#),
+        (r#"c.nope#$i{"k":1}"#, "{}"),
+        (r#"nope^(d)#$i{"k":1}"#, r#"{"k":1}"#),
+        (r#"c^(d).nope#$i{"k":1}"#, "{}"),
+        (r#"c.d^($)#$i[$i>5]{"k":1}"#, "{}"),
+        // A sort holds the steps before it, which may stop first.
+        (r#"c[d=9].d#$i^($){"k":1}"#, r#"{"k":1}"#),
+        (r#"c[d=9].(nope.b)[%.x]^(x){"k":1}"#, r#"{"k":1}"#),
+        // A recursive call reaching the same step says nothing of the
+        // call waiting outside it.
+        (
+            r#"($f := function($n){ c[$n=1 or ($n=0 and $exists($f(1))=false)].(nope.b)[%.x]{"k":$n} }; $f(0))"#,
+            r#"{"k":0}"#,
+        ),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
+
+/// A `[]` after a group-by on a path is jsonata-js's `keepArray` on the
+/// path itself, which a `~>` keeps; one before the group-by, on the path's
+/// last step, isn't (#292). Every expected value is from jsonata-js.
+#[test]
+fn test_chain_keeps_array_after_group_by() {
+    let data = JValue::from_json_str(r#"{"o":[{"b":1}],"acct":{"o":[{"id":1}]}}"#).unwrap();
+    for (expr, expected) in [
+        (r#"o.b{"k":$}[] ~> $map(function($v){$v})"#, r#"[{"k":1}]"#),
+        (r#"o.b[]{"k":$} ~> $map(function($v){$v})"#, r#"{"k":1}"#),
+        (
+            r#"acct.o{"k":$}[] ~> $map(function($v){$v})"#,
+            r#"[{"k":{"id":1}}]"#,
+        ),
+        (
+            r#"$.o.b{"k":$}[] ~> $map(function($v){$v})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (
+            r#"($x:=[{"b":1}]; $x.b{"k":$}[] ~> $map(function($v){$v}))"#,
+            r#"[{"k":1}]"#,
+        ),
+        (r#"o{"k":b}[] ~> $map(function($v){$v})"#, r#"[{"k":1}]"#),
+        // Without a `~>` the `[]` keeps nothing: the group-by gives an object.
+        (r#"o.b{"k":$}[]"#, r#"{"k":1}"#),
+        (r#"o.b{"k":$}[].k"#, "{}"),
+        (r#"o.b{"k":$}[]@$v"#, r#"{"k":{"b":1}}"#),
+        (r#"$map(o.b{"k":$}[], function($v){$v})"#, r#"{"k":1}"#),
+        // Operators after the `[]` leave it on the path.
+        (r#"o.b{"k":$}[].k ~> $map(function($v){$v})"#, "[{}]"),
+        (
+            r#"o.b{"k":$}[]#$i ~> $map(function($v){$v})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (
+            r#"o.b{"k":$}[]^(k) ~> $map(function($v){$v})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (r#"o.b{"k":$}[]^(k)"#, r#"{"k":1}"#),
+        // `$filter` of a single value gives a one-item sequence, which the
+        // `[]` keeps there; alone it is the value.
+        (
+            r#"o.b{"k":$}[] ~> $filter(function($v){true})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (
+            r#"{"a":1}{"k":a}[] ~> $filter(function($v){true})"#,
+            r#"[{"k":1}]"#,
+        ),
+        (r#"$filter({"a":1}, function($v){true})"#, r#"{"a":1}"#),
+        (
+            r#"$type($filter({"a":1}, function($v){true}))"#,
+            r#""object""#,
+        ),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
+
+/// jsonata-js applies a builtin's partial application to the parameters
+/// its JavaScript function declares (#292): an argument past them is
+/// dropped, a trailing undefined one isn't passed, and `$string`'s
+/// `prettify = false` doesn't parse as a parameter, so its partial is
+/// S0208. Every expected value is from jsonata-js.
+#[test]
+fn test_builtin_partial_takes_declared_parameters() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, expected) in [
+        (r#"$substring(?, 1, 2, 3)("hello")"#, r#""el""#),
+        (r#"$uppercase(?, 5)("a")"#, r#""A""#),
+        (r#"$sum(?, 1)([1,2])"#, "3"),
+        (r#"$zip([1], ?)([2])"#, "[[1]]"),
+        (r#"$zip(?, [1])([2])"#, "[[2]]"),
+        (r#"$zip(?, ?)([1], [2])"#, "[[1]]"),
+        (r#"$length(?, ?)("ab", 1)"#, "2"),
+        (r#"$millis(?)() > 0"#, "true"),
+        (r#"$millis(?)(5) > 0"#, "true"),
+        (r#"$type($now(?)())"#, r#""string""#),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+    // jsonata-js evaluates the arguments first, so an error in one wins.
+    let (tree_walker, default) = eval_both_engines_with(
+        r#"$string(?, $error("boom"))"#,
+        EvaluatorOptions::default(),
+        &data,
+    );
+    assert!(tree_walker.contains("D3137"), "tree-walker: {tree_walker}");
+    assert!(default.contains("D3137"), "default: {default}");
+    for expr in [
+        r#"$string(?)"#,
+        r#"$string(5, ?)"#,
+        r#"($f := $string(?); $f(5))"#,
+        r#"$map([1], $string(?))"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains("S0208"),
+            "tree-walker: {expr} => {tree_walker}"
+        );
+        assert!(default.contains("S0208"), "default: {expr} => {default}");
+    }
+}
+
+/// `$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's
+/// `encodeURI` and `encodeURIComponent` do, and `$now` formats the time
+/// with a picture and timezone, as in jsonata-js. Expected values are from
+/// jsonata-js.
+#[test]
+fn test_url_encoding_and_now_picture() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, expected) in [
+        (r#"$encodeUrl("a b")"#, r#""a%20b""#),
+        (
+            r#"$encodeUrl("https://x.org/a b?q=1&r=[2]#f")"#,
+            r#""https://x.org/a%20b?q=1&r=%5B2%5D#f""#,
+        ),
+        (
+            r#"$encodeUrl("!#$&'()*+,-./:;=?@_~<>\"{}|^`")"#,
+            r#""!#$&'()*+,-./:;=?@_~%3C%3E%22%7B%7D%7C%5E%60""#,
+        ),
+        (
+            r#"$encodeUrlComponent("!#$&'()*+,-./:;=?@_~")"#,
+            r#""!%23%24%26'()*%2B%2C-.%2F%3A%3B%3D%3F%40_~""#,
+        ),
+        (r#"$type($now("[Y]"))"#, r#""string""#),
+        (r#"$length($now("[H01]:[m01]", "-0500"))"#, "5"),
+        (r#"$type($now(?)("[Y]"))"#, r#""string""#),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+    let (tree_walker, default) =
+        eval_both_engines_with("$now(5)", EvaluatorOptions::default(), &data);
+    assert!(tree_walker.contains("T0410"), "tree-walker: {tree_walker}");
+    assert!(default.contains("T0410"), "default: {default}");
+}
+
+/// `$now()` and `$millis()` report one timestamp for the whole evaluation,
+/// read when it starts, as jsonata-js does (#294): repeated calls agree even
+/// when the evaluation spans many milliseconds, `$now()` is `$millis()`
+/// formatted, and `$toMillis` fills the components its picture leaves out
+/// from it. A later evaluation reads the clock again.
+#[test]
+fn test_now_and_millis_share_one_timestamp_per_evaluation() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for expr in [
+        "$count($distinct($map([1..50000], function($i) { $millis() }))) = 1",
+        "$count($distinct($map([1..50000], function($i) { $now() }))) = 1",
+        "$millis() ~> $fromMillis() = $now()",
+        "$now() = $fromMillis($millis())",
+        r#"$now("[H01]:[m01]:[s01].[f001]") = $fromMillis($millis(), "[H01]:[m01]:[s01].[f001]")"#,
+        r#"$eval("$millis()") = $millis()"#,
+        r#"$toMillis($now("[H01]:[m01]:[s01]"), "[H01]:[m01]:[s01]") = $millis() - $millis() % 1000"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, "Ok(true)", "tree-walker: {expr}");
+        assert_eq!(default, "Ok(true)", "default: {expr}");
+    }
+
+    let ast = parse("$millis()").unwrap();
+    let first = Evaluator::new().evaluate(&ast, &data).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let second = Evaluator::new().evaluate(&ast, &data).unwrap();
+    assert_ne!(second, first, "each evaluation reads the clock");
+}
+
+/// `$fromMillis` covers every JavaScript date, ±8.64e15 milliseconds, and
+/// formats its edges as jsonata-js does (expected values from jsonata-js).
+#[test]
+fn test_from_millis_spans_javascript_dates() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, expected) in [
+        (
+            "$fromMillis(8640000000000000)",
+            r#""5760-09-13T00:00:00.000Z""#,
+        ),
+        (
+            r#"$fromMillis(-8640000000000000, "[Y0001]-[M01]-[D01]")"#,
+            r#""-1821-04-20""#,
+        ),
+        (
+            r#"$fromMillis(8640000000000000, "[W] [w] [X] [x] [F] [d]")"#,
+            r#""37 2 275760 9 saturday 257""#,
+        ),
+        (
+            r#"$fromMillis(951782400000, "[FNn] [d] [W]")"#,
+            r#""Tuesday 60 9""#,
+        ),
+        // A fraction of a millisecond is dropped toward zero after the
+        // timezone shift, as JavaScript's `Date` drops it.
+        ("$fromMillis(1.5)", r#""1970-01-01T00:00:00.001Z""#),
+        ("$fromMillis(-0.5)", r#""1970-01-01T00:00:00.000Z""#),
+        (
+            r#"$fromMillis(-0.5, "[H01]:[m01]:[s01].[f001]", "+0100")"#,
+            r#""00:59:59.999""#,
+        ),
+        (
+            r#"$fromMillis(-1.5, "[Y0001]-[M01]-[D01] [H01]:[m01]:[s01].[f001]")"#,
+            r#""1969-12-31 23:59:59.999""#,
+        ),
+    ] {
+        let expected = format!("Ok({expected})");
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert_eq!(tree_walker, expected, "tree-walker: {expr}");
+        assert_eq!(default, expected, "default: {expr}");
+    }
+}
+
+/// A timestamp or timezone too large to add up is an invalid timestamp, not
+/// an arithmetic overflow.
+#[test]
+fn test_from_millis_rejects_overflowing_offsets() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for expr in [
+        r#"$fromMillis(1e19, "[Y]", "+0100")"#,
+        r#"$fromMillis(-1e19, "[Y]", "-0100")"#,
+        r#"$fromMillis(0, "[Y]", "+92233720368547758")"#,
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains("Invalid timestamp"),
+            "tree-walker: {expr}: {tree_walker}"
+        );
+        assert!(
+            default.contains("Invalid timestamp"),
+            "default: {expr}: {default}"
+        );
+    }
+}
+
+/// A NaN operand is not a number to jsonata-js's `isNumeric`: arithmetic on
+/// it is T2001/T2002 (expected codes from jsonata-js).
+#[test]
+fn test_nan_operand_is_not_numeric() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, code) in [
+        ("(0/0) + 1", "T2001"),
+        ("1 - (0/0)", "T2002"),
+        (r#"$toMillis("2018-13-01") * 2"#, "T2001"),
+        (r#""a" + (1/0)"#, "T2001"),
+        ("(0/0) + (1/0)", "T2001"),
+        (r#"(1/0) + "a""#, "D1001"),
+        ("$nothing + (1/0)", "D1001"),
+        ("(1/0) + $nothing", "D1001"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(code),
+            "tree-walker: {expr}: {tree_walker}"
+        );
+        assert!(default.contains(code), "default: {expr}: {default}");
+    }
+}
+
+/// `$type` and `$number` on NaN and Infinity, as in jsonata-js (expected
+/// values from jsonata-js): `$type` asks `isNumeric` (D1001 for Infinity,
+/// false for NaN, so "object"), and `$number` returns a number as it is.
+#[test]
+fn test_type_and_number_of_nan_and_infinity() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, expected) in [
+        ("$type(0/0)", r#"Ok("object")"#),
+        (r#"$type($toMillis("2018-13-01"))"#, r#"Ok("object")"#),
+        ("$type(1)", r#"Ok("number")"#),
+        ("$type(1/0) ? 1 : 2", "D1001"),
+        ("$type(-1/0)", "D1001"),
+        ("$string($number(0/0) = $number(0/0))", r#"Ok("false")"#),
+        ("$number(1/0) > 1e308", "Ok(true)"),
+        ("$number(-1/0) < -1e308", "Ok(true)"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(expected),
+            "tree-walker: {expr}: {tree_walker}"
+        );
+        assert!(default.contains(expected), "default: {expr}: {default}");
+    }
+}

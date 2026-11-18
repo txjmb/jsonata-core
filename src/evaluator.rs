@@ -1763,60 +1763,42 @@ pub(crate) fn compiled_arithmetic(
         CompiledArithOp::Div => "/",
         CompiledArithOp::Mod => "%",
     };
-    // jsonata-js's `isNumeric` throws D1001 when an *operand* is Infinity. It
-    // must run before the numeric arm below, or `1/(10e300 * 10e100)` quietly
-    // computes 1/inf = 0 instead of raising. NaN operands are reported as
-    // non-numeric instead and fall through to T2001/T2002.
-    if matches!(left, JValue::Number(n) if n.is_infinite())
-        || matches!(right, JValue::Number(n) if n.is_infinite())
-    {
-        return Err(EvaluatorError::EvaluationError(
-            "D1001: Number out of range".to_string(),
-        ));
-    }
-
-    match (left, right) {
-        (JValue::Number(a), JValue::Number(b)) => {
-            let result = match op {
-                CompiledArithOp::Add => *a + *b,
-                CompiledArithOp::Sub => *a - *b,
-                // No check on the *result*: jsonata-js returns Infinity for
-                // `1/0` and `10e300 * 10e100`, and NaN for `0/0` and `1%0`. The
-                // error surfaces when such a value is later used as an operand
-                // (see the D1001 guard above), matching `isNumeric`.
-                CompiledArithOp::Mul => *a * *b,
-                CompiledArithOp::Div => *a / *b,
-                CompiledArithOp::Mod => *a % *b,
-            };
-            Ok(JValue::Number(result))
-        }
-        // Order matters, and matches jsonata-js: type-check each *defined*
-        // operand first, then propagate undefined. `false + $x` raises T2001 on
-        // the boolean even though the right side is undefined.
-        //
-        // Only undefined propagates. An explicit null -- like any other
-        // non-number -- is a type error, whether written as a literal or
-        // arriving at runtime from data or a lambda parameter (the
-        // null/undefined split, #32, made runtime nulls unambiguous).
-        _ if !matches!(left, JValue::Number(n) if !n.is_nan())
-            && !matches!(left, JValue::Undefined) =>
-        {
-            Err(EvaluatorError::TypeError(format!(
-                "T2001: The left side of the {} operator must evaluate to a number",
-                op_sym
-            )))
-        }
-        _ if !matches!(right, JValue::Number(n) if !n.is_nan())
-            && !matches!(right, JValue::Undefined) =>
-        {
-            Err(EvaluatorError::TypeError(format!(
-                "T2002: The right side of the {} operator must evaluate to a number",
-                op_sym
-            )))
-        }
-        // At least one operand is undefined and neither is a bad type.
-        _ => Ok(JValue::Undefined),
-    }
+    // jsonata-js's `evaluateNumericExpression`: each *defined* operand, left
+    // then right, must pass `isNumeric`, which raises D1001 for Infinity and
+    // is false for NaN and any non-number (T2001/T2002). Only then does an
+    // undefined operand make the result undefined: `false + $x` raises T2001
+    // even though the right side is undefined, and `"a" + (1/0)` is T2001,
+    // not D1001. An explicit null, like any other non-number, is a type error,
+    // whether written as a literal or arriving at runtime (#32).
+    //
+    // There is no check on the *result*: jsonata-js returns Infinity for
+    // `1/0` and `10e300 * 10e100`, and NaN for `0/0` and `1%0`. The error
+    // surfaces when such a value is later used as an operand.
+    let numeric_operand =
+        |value: &JValue, code: &str, side: &str| -> Result<Option<f64>, EvaluatorError> {
+            match value {
+                JValue::Undefined => Ok(None),
+                JValue::Number(n) if n.is_infinite() => Err(EvaluatorError::EvaluationError(
+                    "D1001: Number out of range".to_string(),
+                )),
+                JValue::Number(n) if !n.is_nan() => Ok(Some(*n)),
+                _ => Err(EvaluatorError::TypeError(format!(
+                    "{code}: The {side} side of the {op_sym} operator must evaluate to a number"
+                ))),
+            }
+        };
+    let left = numeric_operand(left, "T2001", "left")?;
+    let right = numeric_operand(right, "T2002", "right")?;
+    let (Some(a), Some(b)) = (left, right) else {
+        return Ok(JValue::Undefined);
+    };
+    Ok(JValue::Number(match op {
+        CompiledArithOp::Add => a + b,
+        CompiledArithOp::Sub => a - b,
+        CompiledArithOp::Mul => a * b,
+        CompiledArithOp::Div => a / b,
+        CompiledArithOp::Mod => a % b,
+    }))
 }
 
 /// Convert a value to string for concatenation in compiled expressions.
@@ -4517,8 +4499,10 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
 fn binary_may_raise_on_nothing(op: BinaryOp, l: KindOnNothing, r: KindOnNothing) -> bool {
     use KindOnNothing as K;
     match op {
-        // evaluateNumericExpression: T2001/T2002 for a defined non-number,
-        // and D1001 once both are numbers (`1/0`, an overflow).
+        // evaluateNumericExpression: T2001/T2002 for a defined non-number
+        // (or a number that is NaN), and D1001 for an infinite operand. Two
+        // number literals are finite and cannot raise; they still count as
+        // raising here, conservatively, as they always have.
         BinaryOp::Add
         | BinaryOp::Subtract
         | BinaryOp::Multiply
@@ -4579,6 +4563,20 @@ fn item_at(items: &[JValue], position: f64) -> Option<&JValue> {
         index += items.len() as f64;
     }
     (index >= 0.0).then(|| items.get(index as usize)).flatten()
+}
+
+/// `$filter`'s result: its matches as a sequence. One match of a single
+/// value is a one-item sequence too, as in jsonata-js, which a `[]` before
+/// a `~>` keeps (#292); no match of one is undefined.
+fn filter_result(
+    result: Vec<JValue>,
+    was_single_value: bool,
+    options: &EvaluatorOptions,
+) -> Result<JValue, EvaluatorError> {
+    if was_single_value && result.is_empty() {
+        return Ok(JValue::Undefined);
+    }
+    hof_result_sequence(result, options)
 }
 
 /// Wrap a higher-order function's results as a JSONata *sequence*.
@@ -4745,6 +4743,12 @@ pub struct Evaluator {
     /// caller — keeps the vast majority of evaluations, which never touch
     /// `%`/`@`/`#`, at zero added cost.
     tuple_stream_created: bool,
+    /// For each group-by being evaluated whose input may stop before it is
+    /// a tuple stream (a block standing alone, or a path or sort with steps
+    /// before its first tuple step), the address of that tuple step, and
+    /// whether `create_tuple_stream` has run it (`block_tuple_step`). Only
+    /// compared, never dereferenced.
+    tuple_probes: Vec<(usize, bool)>,
     /// When true, `evaluate_path` skips its end-of-path `@`-projection and returns
     /// the raw `{@, $var, !label, __tuple__}` tuple wrappers. Set (saved/restored)
     /// by the two consumers that read those carried bindings directly from the
@@ -4855,6 +4859,7 @@ impl Evaluator {
             context: Context::new(),
             recursion_depth: 0,
             tuple_stream_created: false,
+            tuple_probes: Vec::new(),
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
@@ -4872,6 +4877,7 @@ impl Evaluator {
             context,
             recursion_depth: 0,
             tuple_stream_created: false,
+            tuple_probes: Vec::new(),
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
@@ -4891,6 +4897,7 @@ impl Evaluator {
             context,
             recursion_depth: 0,
             tuple_stream_created: false,
+            tuple_probes: Vec::new(),
             keep_tuple_stream: false,
             callback_apply: ApplyMode::Direct,
             tail_call_args: false,
@@ -5360,6 +5367,7 @@ impl Evaluator {
     pub fn evaluate(&mut self, node: &AstNode, data: &JValue) -> Result<JValue, EvaluatorError> {
         let entry_depth = self.context.scope_stack.len();
         let caller_parent = self.context.get_parent().is_some();
+        let _timestamp = crate::datetime::EvaluationTimestamp::enter();
         self.context.push_scope();
         let result = self.evaluate_from_entry(node, data);
         debug_assert!(
@@ -5697,9 +5705,22 @@ impl Evaluator {
                 let saved_keep = self.keep_tuple_stream;
                 self.keep_tuple_stream =
                     Self::is_tuple_path_node(input) || Self::sorts_tuples(input);
+                // Whether the input reaches the step that makes it a tuple
+                // stream, when only running it tells (see the empty-input
+                // case below).
+                // Only an input that can be a tuple stream needs one.
+                let tuple_input = Self::groups_tuple_stream(input);
+                let probe = tuple_input.then(|| Self::block_tuple_step(input)).flatten();
+                if let Some(step) = probe {
+                    self.tuple_probes.push((step, false));
+                }
                 // jsonata-js groups the input's result before the generic
                 // unwrap, so a one-item sequence holding an array is one item.
                 let input_value = self.evaluate_unwrapped_later(input, data);
+                let reached_tuples = match probe {
+                    Some(_) => self.tuple_probes.pop().is_some_and(|(_, reached)| reached),
+                    None => true,
+                };
                 self.keep_tuple_stream = saved_keep;
                 let input_value = input_value?;
 
@@ -5729,8 +5750,12 @@ impl Evaluator {
                 // If array is empty, add undefined to enable literal JSON object
                 // generation. An empty tuple stream gets no such item: jsonata-js
                 // reduces it tuple by tuple, so it makes no group and gives `{}`
-                // (#215).
-                if items.is_empty() && Self::groups_tuple_stream(input) {
+                // (#215). For a block whose tail a `%` resolves through,
+                // jsonata-js decides that at run time: the block's path enters
+                // tuple mode only on reaching its tuple step, so one that
+                // stops before it (`(nope.b)[%.x]`, `nope` missing) gives a
+                // plain empty result, which groups like any other (#285).
+                if items.is_empty() && reached_tuples && tuple_input {
                     return Ok(JValue::object(IndexMap::new()));
                 }
                 let items = if items.is_empty() {
@@ -7394,7 +7419,107 @@ impl Evaluator {
                     || step.stages.iter().any(|stage| matches!(stage, Stage::Index(_)))
             }
             AstNode::Sort { input, .. } => Self::groups_tuple_stream(input),
+            // A path that starts with a sort of one, with steps after it:
+            // the sort is a tuple step in jsonata-js, so the rest of the path
+            // runs on its tuples (`(nope.b)[%.x]^(x){"k":1}.k` is `{}`).
+            _ if Self::leading_sort(node).is_some_and(Self::groups_tuple_stream) => true,
             _ => Self::is_tuple_path_node(node),
+        }
+    }
+
+    /// The step that makes a group-by's input a tuple stream, when only
+    /// running the input tells whether it gets there. jsonata-js's path
+    /// enters tuple mode on reaching its first tuple step, and stops at an
+    /// empty step before it with a plain empty result (#285):
+    /// - for a block standing alone as the input, whose tail a `%` resolves
+    ///   through (`(nope.b)[%.x]`), that is the tail's first tuple step;
+    /// - otherwise, the input path's (`path_tuple_step`).
+    fn block_tuple_step(input: &AstNode) -> Option<usize> {
+        if let AstNode::Path { steps } = input {
+            if let [step @ PathStep {
+                node: AstNode::Block(exprs),
+                inner_tuple: true,
+                ..
+            }] = steps.as_slice()
+            {
+                let own_tuple = Self::step_creates_tuple(step)
+                    || step
+                        .stages
+                        .iter()
+                        .any(|stage| matches!(stage, Stage::Index(_)));
+                if own_tuple {
+                    return None;
+                }
+                let tail = exprs.last()?;
+                let AstNode::Path { steps: tail_steps } = tail else {
+                    return None;
+                };
+                return Self::path_tuple_step(tail).or_else(|| {
+                    tail_steps
+                        .iter()
+                        .find(|s| s.is_tuple)
+                        .map(|s| s as *const PathStep as usize)
+                });
+            }
+        }
+        Self::path_tuple_step(input)
+    }
+
+    /// The first tuple step of the path `node`, when steps come before it
+    /// (`c[d=9].(nope.b)[%.x]`), so that the path may stop before it. In
+    /// this AST a sort holds the steps before it as its input, so for a
+    /// path that starts with a sort that is the input's first tuple step
+    /// (`c[d=9].d#$i^($)`). `None` when the path is a tuple stream from its
+    /// first step.
+    fn path_tuple_step(node: &AstNode) -> Option<usize> {
+        let steps = match node {
+            AstNode::Path { steps } => steps.as_slice(),
+            AstNode::Sort { input, .. } => return Self::path_tuple_step(input),
+            _ => return None,
+        };
+        let sorts_tuple_stream = |s: &PathStep| {
+            matches!(&s.node, AstNode::Sort { input, .. }
+                if Self::is_tuple_path_node(input)
+                    || Self::sorts_tuples(input)
+                    || Self::groups_tuple_stream(input))
+        };
+        let first = steps
+            .iter()
+            .position(|s| s.is_tuple || Self::step_creates_tuple(s) || sorts_tuple_stream(s))?;
+        let step = &steps[first];
+        match (first, &step.node) {
+            (0, AstNode::Sort { input, .. }) if sorts_tuple_stream(step) => {
+                Self::path_tuple_step(input)
+            }
+            (0, AstNode::Sort { .. }) => Some(step as *const PathStep as usize),
+            (0, _) => None,
+            _ => Some(step as *const PathStep as usize),
+        }
+    }
+
+    /// Record that `step` ran, for the innermost group-by waiting on it
+    /// (`block_tuple_step`): a recursive call of the same group-by reaching
+    /// it says nothing of the call that is waiting outside it.
+    fn mark_tuple_probe(&mut self, step: &PathStep) {
+        let address = step as *const PathStep as usize;
+        if let Some((_, reached)) = self
+            .tuple_probes
+            .iter_mut()
+            .rev()
+            .find(|(probe, _)| *probe == address)
+        {
+            *reached = true;
+        }
+    }
+
+    /// The sort a path starts with.
+    fn leading_sort(node: &AstNode) -> Option<&AstNode> {
+        match node {
+            AstNode::Path { steps } => match steps.first().map(|step| &step.node) {
+                Some(sort @ AstNode::Sort { .. }) => Some(sort),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -7822,6 +7947,12 @@ impl Evaluator {
         // Mark that this evaluate() call produced tuple wrappers, so the
         // top-level `evaluate()` knows to run the output-unwrap pass.
         self.tuple_stream_created = true;
+        // A group-by waiting to learn whether its input reached this step
+        // (see `block_tuple_step`). A sort step is reached only when its
+        // input gives it something, marked below.
+        if !matches!(step.node, AstNode::Sort { .. }) {
+            self.mark_tuple_probe(step);
+        }
 
         // Gather the incoming tuple bindings.
         let is_tuple_input = matches!(
@@ -7932,6 +8063,13 @@ impl Evaluator {
                 self.keep_tuple_stream = saved;
                 value?
             };
+            // jsonata-js's path reaches the sort only if its input gives it
+            // something: `nope^(d)#$i` stops at `nope`.
+            let reached = is_tuple_input
+                || !(sorted.is_undefined() || matches!(&sorted, JValue::Array(a) if a.is_empty()));
+            if reached {
+                self.mark_tuple_probe(step);
+            }
             // A sort of more than one tuple leaves them unmarked (#214).
             let sorted_tuples = match &sorted {
                 JValue::Array(a) => a.sorted_tuples || (is_tuple_input && a.len() > 1),
@@ -9120,14 +9258,7 @@ impl Evaluator {
                                     result.push(item.clone());
                                 }
                             }
-                            if was_single_value {
-                                if result.len() == 1 {
-                                    return Ok(result.remove(0));
-                                } else if result.is_empty() {
-                                    return Ok(JValue::Undefined);
-                                }
-                            }
-                            return hof_result_sequence(result, &self.options);
+                            return filter_result(result, was_single_value, &self.options);
                         }
                     }
                     // Stored lambda variable fast path: $var with pre-compiled body
@@ -9151,14 +9282,7 @@ impl Evaluator {
                                         result.push(item.clone());
                                     }
                                 }
-                                if was_single_value {
-                                    if result.len() == 1 {
-                                        return Ok(result.remove(0));
-                                    } else if result.is_empty() {
-                                        return Ok(JValue::Undefined);
-                                    }
-                                }
-                                return hof_result_sequence(result, &self.options);
+                                return filter_result(result, was_single_value, &self.options);
                             }
                         }
                     }
@@ -9187,15 +9311,7 @@ impl Evaluator {
 
                 // If input was a single value, return the single matching item
                 // (or undefined if no match)
-                if was_single_value {
-                    if result.len() == 1 {
-                        return Ok(result.remove(0));
-                    } else if result.is_empty() {
-                        return Ok(JValue::Undefined);
-                    }
-                }
-
-                hof_result_sequence(result, &self.options)
+                filter_result(result, was_single_value, &self.options)
             }
 
             "reduce" => {
@@ -12044,6 +12160,21 @@ impl Evaluator {
             }
         }
 
+        // jsonata-js then builds a builtin's partial application from the
+        // parameter list of its JavaScript function, parsed as a JSONata
+        // function definition. `$string`'s is `(arg, prettify = false)`, and
+        // `$prettify = false` isn't a parameter name.
+        if let PartialTarget::Builtin(name) = &target {
+            let declared = crate::builtins::js_native_params(name).unwrap_or_default();
+            let is_name = |p: &&str| p.chars().all(|c| c.is_alphanumeric() || c == '_');
+            if let Some(bad) = declared.iter().position(|p| !is_name(p)) {
+                return Err(EvaluatorError::EvaluationError(format!(
+                    "S0208: Parameter {} of function definition must be a variable name (start with $)",
+                    bad + 1
+                )));
+            }
+        }
+
         // Generate parameter names for each placeholder
         let param_names: Vec<String> = placeholder_positions
             .iter()
@@ -12127,6 +12258,34 @@ impl Evaluator {
         }))
     }
 
+    /// The arguments jsonata-js passes a builtin's partial application:
+    /// one for each parameter its JavaScript function declares
+    /// (`builtins::JS_NATIVE_PARAMS`), so an argument past them is dropped
+    /// (`$sum(?, 1)` given `[1,2]` is 3). A function declared with none has
+    /// one, `$`, which `$zip` reads (`$zip(?, [1])` given `[2]` is `[[2]]`)
+    /// and `$millis` ignores. An undefined argument is one JavaScript
+    /// doesn't tell from a missing one, so a trailing undefined past the
+    /// signature's required parameters isn't passed (`$now(?)()` is the
+    /// time). A builtin jsonata-js doesn't have gets its arguments as given.
+    fn native_partial_args(name: &str, mut args: Vec<JValue>) -> Vec<JValue> {
+        let Some(declared) = crate::builtins::js_native_params(name) else {
+            return args;
+        };
+        let sig = crate::signature::builtin_signature(name);
+        let declared = match declared {
+            // `function()`: its one parameter, `$`, reaches the builtin only
+            // as an argument its signature takes.
+            [""] => sig.map_or(0, |sig| sig.params.len().min(1)),
+            params => params.len(),
+        };
+        args.truncate(declared);
+        let required = sig.map_or(0, |sig| sig.strict_required_len());
+        while args.len() > required && args.last().is_some_and(JValue::is_undefined) {
+            args.pop();
+        }
+        args
+    }
+
     /// Invoke a partial application: rebuild the full argument list (bound
     /// values in their creation-time positions, call arguments filling the
     /// placeholder positions in order, anything else Null) and apply the
@@ -12178,7 +12337,8 @@ impl Evaluator {
             // builtin never sees the caller's `$`, nor the null input of a
             // callback application, which is that lambda's (#287).
             PartialTarget::Builtin(name) => {
-                self.call_builtin_with_values_in(name, &full_args, None)
+                let args = Self::native_partial_args(name, full_args);
+                self.call_builtin_with_values_in(name, &args, None)
             }
             PartialTarget::Host(HostTarget(f)) => {
                 let f = Rc::clone(f);

@@ -702,6 +702,10 @@ struct Proc {
     /// `keepSingletonArray`.
     dotted: bool,
     group: Option<Vec<(AstNode, AstNode)>>,
+    /// A `[]` after the path's group-by: jsonata-js's `keepArray` on the
+    /// path itself, which only a `~>` reads. It keeps no step's result, so
+    /// it isn't a stage of the last step (`o.b{..}[]` isn't `o.b[]{..}`).
+    keep_array: bool,
     pending: Vec<PendingAncestor>,
     /// The `%` slots the path's last step seeks itself (jsonata-js's
     /// `seekingParent` on that step rather than on the path): from a node
@@ -721,6 +725,7 @@ impl Proc {
             is_path: false,
             dotted: false,
             group: None,
+            keep_array: false,
             pending: t.pending,
             step_pending: Vec::new(),
             checked: 0,
@@ -887,6 +892,7 @@ fn lower_value(proc: Proc) -> Transformed {
         is_path,
         dotted,
         group,
+        keep_array,
         pending,
         step_pending: _,
         checked: _,
@@ -921,6 +927,16 @@ fn lower_value(proc: Proc) -> Transformed {
             pattern,
         },
         None => node,
+    };
+    // The path's own `[]` goes on a step around its group-by, where it
+    // keeps nothing (an object isn't a sequence) and `~>` finds it
+    // (`Evaluator::keeps_array`).
+    let node = if keep_array {
+        AstNode::Path {
+            steps: vec![PathStep::with_stages(node, vec![Stage::KeepArray])],
+        }
+    } else {
+        node
     };
     Transformed { node, pending }
 }
@@ -1114,6 +1130,7 @@ fn process_base(
                 is_path: true,
                 dotted: true,
                 group: None,
+                keep_array: false,
                 pending: Vec::new(),
                 step_pending: Vec::new(),
                 checked: 0,
@@ -1154,7 +1171,11 @@ fn apply_path_op(
         PathOp::Map(rhs) => apply_map(proc, rhs, state, depth),
         PathOp::Filter(predicate) => apply_filter(proc, predicate, state, depth),
         PathOp::KeepArray => {
-            proc.target_step().stages.push(Stage::KeepArray);
+            if proc.is_path && proc.group.is_some() {
+                proc.keep_array = true;
+            } else {
+                proc.target_step().stages.push(Stage::KeepArray);
+            }
             Ok(())
         }
         PathOp::Group(pattern) => apply_group(proc, pattern, state, depth),

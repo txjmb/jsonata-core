@@ -54,7 +54,11 @@ class TestRegister:
 
     @pytest.mark.parametrize(
         "source",
-        ["$tick() ~> $string()", "$tick() ~> $string", "$tick() ~> $string(?, false)"],
+        [
+            "$tick() ~> $string()",
+            "$tick() ~> $string",
+            '$tick() ~> $formatNumber(?, "#")',
+        ],
     )
     def test_chain_left_side_evaluated_once(self, source):
         # `~>` used to evaluate its left side twice: once to check for

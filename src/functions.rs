@@ -1387,15 +1387,9 @@ pub mod numeric {
     /// Supports decimal, hex (0x), octal (0o), and binary (0b) formats
     pub fn number(value: &JValue) -> Result<JValue, FunctionError> {
         match value {
-            JValue::Number(n) => {
-                let f = *n;
-                if !f.is_finite() {
-                    return Err(FunctionError::RuntimeError(
-                        "D3030: Cannot convert infinite number".to_string(),
-                    ));
-                }
-                Ok(JValue::Number(f))
-            }
+            // Already a number: jsonata-js returns it as it is, NaN and
+            // Infinity included.
+            JValue::Number(n) => Ok(JValue::Number(*n)),
             JValue::String(s) => {
                 let trimmed = s.trim();
 
@@ -2568,10 +2562,38 @@ pub mod encoding {
         }
     }
 
-    /// $encodeUrlComponent(string) - Encode URL component
+    /// What JavaScript's `encodeURIComponent` encodes: everything but
+    /// letters, digits and `-_.!~*'()`.
+    const URI_COMPONENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'_')
+        .remove(b'.')
+        .remove(b'!')
+        .remove(b'~')
+        .remove(b'*')
+        .remove(b'\'')
+        .remove(b'(')
+        .remove(b')');
+
+    /// What JavaScript's `encodeURI` encodes: as `encodeURIComponent`, but
+    /// keeping the characters that give a URL its structure, `;,/?:@&=+$#`.
+    const URI: &percent_encoding::AsciiSet = &URI_COMPONENT
+        .remove(b';')
+        .remove(b',')
+        .remove(b'/')
+        .remove(b'?')
+        .remove(b':')
+        .remove(b'@')
+        .remove(b'&')
+        .remove(b'=')
+        .remove(b'+')
+        .remove(b'$')
+        .remove(b'#');
+
+    /// $encodeUrlComponent(string) - Encode URL component, as jsonata-js
+    /// does with `encodeURIComponent`
     pub fn encode_url_component(s: &str) -> Result<JValue, FunctionError> {
-        let encoded = percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC)
-            .to_string();
+        let encoded = percent_encoding::utf8_percent_encode(s, URI_COMPONENT).to_string();
         Ok(JValue::string(encoded))
     }
 
@@ -2588,12 +2610,10 @@ pub mod encoding {
         }
     }
 
-    /// $encodeUrl(string) - Encode full URL
-    /// More permissive than encodeUrlComponent - allows URL structure characters
+    /// $encodeUrl(string) - Encode a full URL, as jsonata-js does with
+    /// `encodeURI`, keeping the characters of its structure
     pub fn encode_url(s: &str) -> Result<JValue, FunctionError> {
-        // Use CONTROLS to preserve URL structure (://?#[]@!$&'()*+,;=)
-        let encoded =
-            percent_encoding::utf8_percent_encode(s, percent_encoding::CONTROLS).to_string();
+        let encoded = percent_encoding::utf8_percent_encode(s, URI).to_string();
         Ok(JValue::string(encoded))
     }
 

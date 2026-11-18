@@ -28,7 +28,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **The `chrono` dependency.** RUSTSEC-2026-0543 marks it unmaintained, with no fixed
+  release. The date arithmetic `$fromMillis`, `$toMillis` and `$now` need (UTC calendar
+  dates, weekdays, ISO week numbers) is now a small calendar type in `src/datetime.rs`,
+  computing on the proleptic Gregorian calendar as JavaScript's `Date` does. Output is
+  unchanged except at the edge below.
+
 ### Fixed
+
+- **`$now()` and `$millis()` report one timestamp per evaluation, as in jsonata-js**
+  ([#294](https://github.com/txjmb/jsonata-core/issues/294)). The clock was read on every
+  call, so two calls in one expression could disagree.
+- **`$fromMillis` takes the whole range of a JavaScript date**, ±8.64e15 milliseconds
+  (years -271821 to 275760). It stopped at chrono's ±262143 years.
+  It also takes a fraction of a millisecond, dropping it as JavaScript's `Date` does, where it
+  raised "requires an integer".
+- **`$toMillis` returns what jsonata-js does across its edge cases**
+  ([#295](https://github.com/txjmb/jsonata-core/issues/295)). With a picture, the timestamp is
+  built as `Date.UTC` builds it: a field past its range carries into the next (`"2018-02-30"`
+  with `"[Y]-[M]-[D]"` is 2 March, hour 24 is the next midnight, month 13 is January of the
+  next year), a two-digit year is in the 1900s, a day of the year past the year's end keeps
+  the parsed year, and a component of 0 counts as not given when choosing the date and time
+  types, as jsonata-js's truthiness test does (so `"0:33 am"` with `"[h]:[m] [P]"` is D3136).
+  Components the picture leaves out come from the evaluation's timestamp, and the timezone
+  offset is applied in floating point. Without a picture, the timestamp is read as
+  `Date.parse` reads it: a day up to 31 carries over, `T24:00:00` is the next midnight, and
+  the pattern that decides D3110 is jsonata-js's own. A date past JavaScript's range, a month
+  or day of 0, a month over 12 or a day over 31 is NaN, as in jsonata-js (`nan` in Python);
+  these were D3136 or D3110. A fraction or a numeric offset with no time is NaN, as
+  V8's `Date.parse` gives, except that V8's fallback parser reads `"2018.5"` as 1 May and
+  `"2018-01.5"` as 5 January, which are NaN here. A date-time with no offset is still read as
+  UTC, where `Date.parse` uses the host's time zone.
+- **Arithmetic checks each operand in jsonata-js's order.** A NaN operand is T2001/T2002
+  (`(0/0) + 1` returned undefined), and the left side is checked before the right, so
+  `"a" + (1/0)` is T2001 rather than D1001.
+- **`$type` and `$number` on NaN and Infinity match jsonata-js.** `$type` of NaN (such as an
+  invalid `$toMillis` date) is `"object"`, and of Infinity is D1001. `$number` returns any
+  number as it is, so `$number(1/0)` is Infinity rather than D3030.
+- **Week numbers and day of the year for years 0 to 99 match jsonata-js**, which reads those
+  years as 1900 to 1999 when it works them out (`Date.UTC`).
+- **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and
+  `encodeURIComponent` do.** `$encodeUrl("a b")` is `"a%20b"`, where it was `"a b"`: only
+  control characters were encoded. `$encodeUrlComponent` no longer encodes `-_.!~*'()`.
+- **`$now(picture, timezone)` formats the time as `$fromMillis` does, as in jsonata-js.** It
+  was T0410.
+
+- **A `[]` after a group-by on a path keeps the `~>` result an array, as in jsonata-js**
+  ([#292](https://github.com/txjmb/jsonata-core/issues/292)). `o.b{"k":$}[] ~> $map(f)` is
+  `[{"k":1}]`, where it was `{"k":1}`; a `[]` before the group-by (`o.b[]{"k":$}`) still keeps
+  nothing there. `$filter` of a single value gives a one-item sequence, as in jsonata-js, so
+  `o.b{"k":$}[] ~> $filter(f)` keeps the array too. In the Rust AST, such a `[]` is now a `KeepArray` stage on a one-step path
+  around the `ObjectTransform`, not a stage of the path's last step.
+- **A builtin's partial application takes the parameters jsonata-js's function declares**
+  ([#292](https://github.com/txjmb/jsonata-core/issues/292)). An argument past the builtin's
+  parameters is dropped (`$sum(?, 1)` given `[1,2]` is 3, and `$zip(?, [1])` given `[2]` is
+  `[[2]]`), and a trailing undefined one isn't passed (`$millis(?)()` and `$now(?)()` give the
+  time, where they were T0410). `$string(?)` is S0208, as in jsonata-js, whose `$string`
+  declares `prettify = false`, which doesn't parse as a parameter name; it was a function.
+
+- **A group-by over a block whose path stops before its tuple step groups once, as in
+  jsonata-js** ([#285](https://github.com/txjmb/jsonata-core/issues/285)). jsonata-js enters
+  tuple mode only when a path reaches a tuple step, so `(%.b)[%.x]{"k":1}.k` and
+  `(nope.b)[%.x]{"k":1}.k` are `1`, where they were undefined, and `nope^(d)#$i{"k":1}` and
+  `c[d=9].(nope.b)[%.x]{"k":1}` and `c[d=9].d#$i^($){"k":1}` are `{"k":1}`, where they were `{}`. A path that starts with a sort
+  of such a block is a tuple stream, since the sort is a tuple step itself:
+  `(nope.b)[%.x]^(x){"k":1}.k` is `{}`, where it was `{"k":1}`.
 
 - **A filter or group-by on the call after `~>` is ignored, as in jsonata-js**
   ([#286](https://github.com/txjmb/jsonata-core/issues/286)). jsonata-js applies the call and
