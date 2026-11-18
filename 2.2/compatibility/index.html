@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -1140,6 +1140,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#known-differences-outside-the-reference-suite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known differences outside the reference suite
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1817,6 +1828,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#known-differences-outside-the-reference-suite" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known differences outside the reference suite
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2027,9 +2049,91 @@
 <ul>
 <li><strong>Total Tests</strong>: 1686</li>
 <li><strong>Passing</strong>: 1686 (100%)</li>
-<li><strong>Known divergences</strong>: none. <code>KNOWN_DIVERGENCES</code> in <code>tests/python/test_reference_suite.py</code> is the registry; entries there are strict <code>xfail</code>, so one that starts passing fails the suite until it is removed</li>
+<li><strong>Known divergences</strong>: none in the suite (see <a href="#known-differences-outside-the-reference-suite">Known differences outside the reference suite</a> for closure shapes it does not cover). <code>KNOWN_DIVERGENCES</code> in <code>tests/python/test_reference_suite.py</code> is the registry; entries there are strict <code>xfail</code>, so one that starts passing fails the suite until it is removed</li>
 <li><strong>Source</strong>: Official jsonata-js repository (v2.2.2) at <code>tests/jsonata-js/</code></li>
 </ul>
+<h3 id="known-differences-outside-the-reference-suite">Known differences outside the reference suite<a class="headerlink" href="#known-differences-outside-the-reference-suite" title="Permanent link">&para;</a></h3>
+<p>These shapes appear in neither the reference suite nor the differential corpora, and are kept
+on purpose. Each is pinned in <code>tests/lambda_closure_suite.rs::divergent_from_reference</code>.</p>
+<p>A function captures the variables it uses when it is defined, by value. jsonata-js closures
+hold their defining frame by reference, so they see a variable rebound after they were made:</p>
+<table>
+<thead>
+<tr>
+<th>Expression</th>
+<th>jsonatapy</th>
+<th>jsonata-js</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$x := 1; $g := function(){$x}; $x := 2; $g()</code></td>
+<td><code>1</code></td>
+<td><code>2</code></td>
+</tr>
+<tr>
+<td><code>$esc := ( $f := function(){$g()}; $g := function(){"m"}; $f ); $esc()</code></td>
+<td>T1006</td>
+<td><code>"m"</code></td>
+</tr>
+<tr>
+<td><code>$f := A; $g := function(){$f()}; $f := B; $g()</code></td>
+<td><code>"A"</code></td>
+<td><code>"B"</code></td>
+</tr>
+<tr>
+<td><code>$f := A; $g := function(){$f()}; $f := 42; $g()</code></td>
+<td><code>"A"</code></td>
+<td>error (calls 42)</td>
+</tr>
+<tr>
+<td>a recursive <code>$f</code> aliased, then <code>$f</code> rebound, then the alias called</td>
+<td>recurses into itself</td>
+<td>recurses into the rebound <code>$f</code></td>
+</tr>
+</tbody>
+</table>
+<p>Live frames would make every named recursive function an <code>Rc</code> reference cycle, and so a memory
+leak in a long-lived Python process. See
+<a href="https://github.com/txjmb/jsonata-core/issues/159">#159</a> for the designs considered.</p>
+<p>Some path and evaluation-order shapes differ too:</p>
+<table>
+<thead>
+<tr>
+<th>Expression</th>
+<th>jsonatapy</th>
+<th>jsonata-js</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>x[]#$i#$j.$i</code></td>
+<td><code>[0,1]</code></td>
+<td>undefined</td>
+<td><code>#</code> after <code>[]</code> adds an index stage rather than replacing the step's index</td>
+</tr>
+<tr>
+<td><code>acct.o[0]#$i[].id</code></td>
+<td><code>[1]</code></td>
+<td><code>1</code></td>
+<td>a <code>[]</code> after <code>#</code> keeps a singleton array</td>
+</tr>
+<tr>
+<td><code>[$string(1,2,3), "f"@$v()]</code></td>
+<td>T0410</td>
+<td>T1006</td>
+<td>constructor members run in order, so the first member's error is reported; jsonata-js runs them concurrently</td>
+</tr>
+<tr>
+<td><code>($f := $substring(?, 1); $f(5))</code></td>
+<td>T0410</td>
+<td>a JavaScript <code>TypeError</code> with no code</td>
+<td>jsonata-js doesn't check a builtin's partial application against the builtin's signature, so a wrong argument type fails inside the function or gives a meaningless value (<code>$fromMillis(?, "[Y]")</code> given <code>"x"</code> is <code>"NaN"</code>); here the arguments are checked, and none is taken from the context. A required argument left out of the partial of a builtin that isn't pure is T0410 too (<code>$replace(?, "l")</code> given <code>"hello"</code>, where jsonata-js gives <code>"heundefinedundefinedo"</code>) (<a href="https://github.com/txjmb/jsonata-core/issues/287">#287</a>)</td>
+</tr>
+</tbody>
+</table>
+<p>(Data for these rows: <code>{"x":[1,2],"acct":{"o":[{"id":1}]}}</code>.)</p>
 <h2 id="current-compatibility-status">Current Compatibility Status<a class="headerlink" href="#current-compatibility-status" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run full test suite</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/python/test_reference_suite.py
@@ -2290,7 +2394,7 @@ in <code>tests/python/test_reference_suite.py</code> pins that count at 2 so it 
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tracking", "navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
