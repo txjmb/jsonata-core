@@ -51,11 +51,15 @@ pub fn parse_iso8601_partial(s: &str) -> Result<f64, DateTimeError> {
     // not match) and returns `Date.parse(timestamp)`. `Date.parse` reads a
     // day up to 31 in any month and carries it over (30 February is 2
     // March), allows 24:00:00 as the next midnight, and gives NaN for a month
-    // or day of 0, a month over 12, a day over 31, any other hour past 23, or
-    // an offset of 24 hours or more. A form outside ECMAScript's date-time
-    // format, such as a fraction or offset with no time, goes to the
-    // engine's own fallback parser in JavaScript and is read here as the
-    // fields it names.
+    // or day of 0, a month over 12, a day over 31, any other hour past 23, an
+    // offset of 24 hours or more, and (in V8) a fraction or a numeric offset
+    // with no time.
+    //
+    // Two differences remain, both down to the JavaScript engine rather than
+    // jsonata-js. A date-time with no offset is read as UTC here; `Date.parse`
+    // reads it in the host's time zone, which is the same only on a host set
+    // to UTC. And V8's fallback parser reads "2018.5" as 1 May and
+    // "2018-01.5" as 5 January (local time); both are NaN here.
     let Some(caps) = iso8601_regex().captures(s) else {
         return Err(DateTimeError::ParseError(
             "premature end of input".to_string(),
@@ -90,8 +94,11 @@ pub fn parse_iso8601_partial(s: &str) -> Result<f64, DateTimeError> {
         }
     };
 
+    let has_time = caps.get(4).is_some();
+    let numeric_offset = caps.get(8).is_some_and(|m| m.as_str() != "Z");
     let midnight_next = hour == 24 && minute == 0 && second == 0 && millis == 0;
-    if !(1..=12).contains(&month)
+    if (!has_time && (caps.get(7).is_some() || numeric_offset))
+        || !(1..=12).contains(&month)
         || !(1..=31).contains(&day)
         || !(hour < 24 || midnight_next)
         || offset_hours.abs() > 23
@@ -101,9 +108,7 @@ pub fn parse_iso8601_partial(s: &str) -> Result<f64, DateTimeError> {
     let days = days_from_civil(year, month, 1) + day - 1;
     let utc_millis = days * MILLIS_PER_DAY + ((hour * 60 + minute) * 60 + second) * 1000 + millis
         - (offset_hours * 60 + offset_minutes) * 60 * 1000;
-    if utc_millis.abs() > MAX_DATE_MILLIS {
-        return Ok(f64::NAN);
-    }
+    // A four-digit year is well inside JavaScript's dates, so no clip is due.
     Ok(utc_millis as f64)
 }
 
@@ -1168,23 +1173,28 @@ fn prev_month(year: i64, month0: i64) -> (i64, i64) {
     }
 }
 
-/// ISO 8601 defines the first week of the year (or, by extension, of the month) to be
-/// the week containing the first Thursday. Weeks start on Monday.
-/// The date `Date.UTC(year, month0, day)` names in jsonata-js, which reads a
-/// year from 0 to 99 as 1900 to 1999. The week calculations go through it, so
-/// they inherit that reading for the years 0-99, as there.
-fn js_utc_date(year: i64, month0: i64, day: i64) -> CivilDate {
-    let year = if (0..=99).contains(&year) {
+/// `Date.UTC` reads a year from 0 to 99 as 1900 to 1999.
+fn js_utc_year(year: i64) -> i64 {
+    if (0..=99).contains(&year) {
         year + 1900
     } else {
         year
-    };
-    let year = year + month0.div_euclid(12);
+    }
+}
+
+/// The date `Date.UTC(year, month0, day)` names in jsonata-js. The week and
+/// day-of-year calculations go through it, so they inherit its reading of the
+/// years 0-99, as there. The year is one of a real date, so nothing here can
+/// overflow.
+fn js_utc_date(year: i64, month0: i64, day: i64) -> CivilDate {
+    let year = js_utc_year(year) + month0.div_euclid(12);
     CivilDate {
         days: days_from_civil(year, month0.rem_euclid(12) + 1, 1) + day - 1,
     }
 }
 
+/// ISO 8601 defines the first week of the year (or, by extension, of the month) to be
+/// the week containing the first Thursday. Weeks start on Monday.
 fn start_of_first_week(year: i64, month0: i64) -> CivilDate {
     let first = js_utc_date(year, month0, 1);
     let day_of_first = first.weekday_from_monday(); // Mon=1 .. Sun=7
@@ -2009,13 +2019,7 @@ fn date_utc(
     second: i64,
     millis: i64,
 ) -> Option<i64> {
-    // `Date.UTC` reads a year from 0 to 99 as 1900 to 1999.
-    let year = if (0..=99).contains(&year) {
-        year + 1900
-    } else {
-        year
-    };
-    let year = year.checked_add(month0.div_euclid(12))?;
+    let year = js_utc_year(year).checked_add(month0.div_euclid(12))?;
     if !(-MAX_CIVIL_YEAR..=MAX_CIVIL_YEAR).contains(&year) {
         return None;
     }
@@ -2203,6 +2207,7 @@ mod tests {
             ("2018-01-01T00:00:00.9999", 1_514_764_800_999.0),
             ("0099-02-29", -59_037_897_600_000.0),
             ("0000", -62_167_219_200_000.0),
+            ("2018-01-01Z", 1_514_764_800_000.0),
         ] {
             assert_eq!(
                 parse_iso8601_partial(timestamp).unwrap(),
@@ -2218,6 +2223,8 @@ mod tests {
             "2018-01-01T24:00:01",
             "2018-01-01T25:00:00",
             "2018-01-01T00:00:00+24:00",
+            "2018-01-01.5",
+            "2018-01-01+05:00",
         ] {
             assert!(
                 parse_iso8601_partial(timestamp).unwrap().is_nan(),

@@ -55,7 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Date.parse` reads it: a day up to 31 carries over, `T24:00:00` is the next midnight, and
   the pattern that decides D3110 is jsonata-js's own. A date past JavaScript's range, a month
   or day of 0, a month over 12 or a day over 31 is NaN, as in jsonata-js (`nan` in Python);
-  these were D3136 or D3110.
+  these were D3136 or D3110. A date-time with no offset is still read as UTC, where
+  `Date.parse` uses the host's time zone.
+- **Arithmetic on NaN is T2001/T2002, as in jsonata-js.** `(0/0) + 1` returned undefined.
 - **Week numbers and day of the year for years 0 to 99 match jsonata-js**, which reads those
   years as 1900 to 1999 when it works them out (`Date.UTC`).
 - **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and

@@ -5643,3 +5643,23 @@ fn test_from_millis_rejects_overflowing_offsets() {
         );
     }
 }
+
+/// A NaN operand is not a number to jsonata-js's `isNumeric`: arithmetic on
+/// it is T2001/T2002 (expected codes from jsonata-js).
+#[test]
+fn test_nan_operand_is_not_numeric() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, code) in [
+        ("(0/0) + 1", "T2001"),
+        ("1 - (0/0)", "T2002"),
+        (r#"$toMillis("2018-13-01") * 2"#, "T2001"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(code),
+            "tree-walker: {expr}: {tree_walker}"
+        );
+        assert!(default.contains(code), "default: {expr}: {default}");
+    }
+}

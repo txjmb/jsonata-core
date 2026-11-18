@@ -1776,7 +1776,9 @@ pub(crate) fn compiled_arithmetic(
     }
 
     match (left, right) {
-        (JValue::Number(a), JValue::Number(b)) => {
+        // A NaN operand (`0/0`, a `$toMillis` jsonata-js gives NaN for) is
+        // not numeric to `isNumeric`, so it falls to T2001/T2002 below.
+        (JValue::Number(a), JValue::Number(b)) if !a.is_nan() && !b.is_nan() => {
             let result = match op {
                 CompiledArithOp::Add => *a + *b,
                 CompiledArithOp::Sub => *a - *b,
