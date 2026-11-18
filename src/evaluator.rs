@@ -4500,7 +4500,9 @@ fn binary_may_raise_on_nothing(op: BinaryOp, l: KindOnNothing, r: KindOnNothing)
     use KindOnNothing as K;
     match op {
         // evaluateNumericExpression: T2001/T2002 for a defined non-number
-        // (or a number that is NaN), and D1001 for an infinite operand.
+        // (or a number that is NaN), and D1001 for an infinite operand. Two
+        // number literals are finite and cannot raise; they still count as
+        // raising here, conservatively, as they always have.
         BinaryOp::Add
         | BinaryOp::Subtract
         | BinaryOp::Multiply

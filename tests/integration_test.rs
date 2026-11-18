@@ -5656,6 +5656,8 @@ fn test_nan_operand_is_not_numeric() {
         (r#""a" + (1/0)"#, "T2001"),
         ("(0/0) + (1/0)", "T2001"),
         (r#"(1/0) + "a""#, "D1001"),
+        ("$nothing + (1/0)", "D1001"),
+        ("(1/0) + $nothing", "D1001"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
