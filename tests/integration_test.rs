@@ -5668,3 +5668,29 @@ fn test_nan_operand_is_not_numeric() {
         assert!(default.contains(code), "default: {expr}: {default}");
     }
 }
+
+/// `$type` and `$number` on NaN and Infinity, as in jsonata-js (expected
+/// values from jsonata-js): `$type` asks `isNumeric` (D1001 for Infinity,
+/// false for NaN, so "object"), and `$number` returns a number as it is.
+#[test]
+fn test_type_and_number_of_nan_and_infinity() {
+    let data = JValue::from_json_str("{}").unwrap();
+    for (expr, expected) in [
+        ("$type(0/0)", r#"Ok("object")"#),
+        (r#"$type($toMillis("2018-13-01"))"#, r#"Ok("object")"#),
+        ("$type(1)", r#"Ok("number")"#),
+        ("$type(1/0) ? 1 : 2", "D1001"),
+        ("$type(-1/0)", "D1001"),
+        ("$string($number(0/0) = $number(0/0))", r#"Ok("false")"#),
+        ("$number(1/0) > 1e308", "Ok(true)"),
+        ("$number(-1/0) < -1e308", "Ok(true)"),
+    ] {
+        let (tree_walker, default) =
+            eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
+        assert!(
+            tree_walker.contains(expected),
+            "tree-walker: {expr}: {tree_walker}"
+        );
+        assert!(default.contains(expected), "default: {expr}: {default}");
+    }
+}

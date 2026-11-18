@@ -1387,15 +1387,9 @@ pub mod numeric {
     /// Supports decimal, hex (0x), octal (0o), and binary (0b) formats
     pub fn number(value: &JValue) -> Result<JValue, FunctionError> {
         match value {
-            JValue::Number(n) => {
-                let f = *n;
-                if !f.is_finite() {
-                    return Err(FunctionError::RuntimeError(
-                        "D3030: Cannot convert infinite number".to_string(),
-                    ));
-                }
-                Ok(JValue::Number(f))
-            }
+            // Already a number: jsonata-js returns it as it is, NaN and
+            // Infinity included.
+            JValue::Number(n) => Ok(JValue::Number(*n)),
             JValue::String(s) => {
                 let trimmed = s.trim();
 

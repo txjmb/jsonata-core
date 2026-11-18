@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Arithmetic checks each operand in jsonata-js's order.** A NaN operand is T2001/T2002
   (`(0/0) + 1` returned undefined), and the left side is checked before the right, so
   `"a" + (1/0)` is T2001 rather than D1001.
+- **`$type` and `$number` on NaN and Infinity match jsonata-js.** `$type` of NaN (such as an
+  invalid `$toMillis` date) is `"object"`, and of Infinity is D1001. `$number` returns any
+  number as it is, so `$number(1/0)` is Infinity rather than D3030.
 - **Week numbers and day of the year for years 0 to 99 match jsonata-js**, which reads those
   years as 1900 to 1999 when it works them out (`Date.UTC`).
 - **`$encodeUrl` and `$encodeUrlComponent` encode what JavaScript's `encodeURI` and

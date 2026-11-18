@@ -1309,6 +1309,13 @@ pub(crate) fn dispatch_pure_with(
             match &args[0] {
                 JValue::Null => Ok(JValue::string("null")),
                 JValue::Bool(_) => Ok(JValue::string("boolean")),
+                // jsonata-js asks `isNumeric`, which raises D1001 for an
+                // infinite number and is false for NaN, so NaN falls through
+                // its checks to "object".
+                JValue::Number(n) if n.is_infinite() => Err(EvaluatorError::EvaluationError(
+                    "D1001: Number out of range".to_string(),
+                )),
+                JValue::Number(n) if n.is_nan() => Ok(JValue::string("object")),
                 JValue::Number(_) => Ok(JValue::string("number")),
                 JValue::String(_) => Ok(JValue::string("string")),
                 JValue::Array(_) => Ok(JValue::string("array")),
