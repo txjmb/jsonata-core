@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   had exited (microsoft/mimalloc#1287). Only the PyPI wheels and sdist get the
   vendored copy: Rust users who enable the optional `mimalloc` feature from
   crates.io still build v3.3.2 until `libmimalloc-sys` ships mimalloc >= 3.4.5.
+  Thanks to @dotsonwells-vynca for the report, whose clean reproduction and
+  import-order and version matrix made the cause quick to find.
 
 ### Security
 
