@@ -13,6 +13,16 @@
 //! [`SmallAlignMiMalloc`] calls `mi_malloc` directly for the alignments it
 //! guarantees, which is nearly every Rust allocation, and hands the rest to
 //! `MiMalloc`.
+//!
+//! The crates are built with their `v2` feature (Cargo.toml), which bundles
+//! mimalloc 2.x instead of 3.3.x. mimalloc v3 keeps its thread heap in fixed
+//! macOS thread-specific-data slots shared by every v3 copy in the process,
+//! so it corrupted pyarrow 24's bundled mimalloc (and was corrupted by it),
+//! and it crashes once the first thread that allocated has exited
+//! (microsoft/mimalloc#1287). See GitHub issue #298. v2 keeps the heap in a
+//! plain thread-local. Moving back to v3 needs a release that uses a
+//! thread-local on macOS (mimalloc 3.4.1 can be configured to) and a
+//! passing `tests/python/test_allocator_coexistence.py`.
 
 use std::alloc::{GlobalAlloc, Layout};
 

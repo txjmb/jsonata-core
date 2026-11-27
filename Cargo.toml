@@ -55,8 +55,11 @@ rand = "0.10"
 stacker = "0.1"
 simd-json = { version = "0.19", optional = true }
 clap = { version = "4.6", features = ["derive"], optional = true }
-mimalloc = { version = "0.1.52", optional = true }
-libmimalloc-sys = { version = "0.1.49", optional = true }
+# mimalloc v2, not v3: v3.3.x shares fixed macOS TLS slots with other copies
+# (pyarrow 24) and crashes after the first thread exits. See #298 and
+# src/allocator.rs.
+mimalloc = { version = "0.1.52", optional = true, features = ["v2"] }
+libmimalloc-sys = { version = "0.1.49", optional = true, features = ["v2"] }
 
 [features]
 default = ["simd"]
