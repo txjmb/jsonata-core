@@ -705,8 +705,12 @@ pub(crate) fn dispatch_pure_with(
             // is therefore NaN too. `NaN > 0` is false, so the reference
             // skips padding entirely and returns the string unchanged --
             // whatever pad character was given.
+            //
+            // The width is kept as an f64 (truncated, as `Math.trunc` does)
+            // so a huge width is not silently saturated by an integer cast
+            // before the D2016 size check below.
             let width = match &args.get(1) {
-                Some(JValue::Number(n)) => *n as i32,
+                Some(JValue::Number(n)) => n.trunc(),
                 Some(JValue::Undefined) | None => return Ok(JValue::string(string)),
                 _ => {
                     return Err(EvaluatorError::TypeError(
@@ -721,16 +725,31 @@ pub(crate) fn dispatch_pure_with(
                 _ => Rc::from(" "),
             };
 
-            let abs_width = width.unsigned_abs() as usize;
             // Count Unicode characters (code points), not bytes
             let char_count = string.chars().count();
+            let pad_length = width.abs() - char_count as f64;
 
-            if char_count >= abs_width {
+            // NaN (from a NaN width) compares false here too, matching
+            // jsonata-js, which then returns the string unchanged.
+            if pad_length.is_nan() || pad_length <= 0.0 {
                 // String is already long enough
                 return Ok(JValue::string(string));
             }
 
-            let padding_needed = abs_width - char_count;
+            // jsonata-js 2.3.0 (#832) caps the padding at ten million
+            // characters, the same limit as the range operator (D2014).
+            if pad_length > 1e7 {
+                return Err(EvaluatorError::EvaluationError(format!(
+                    "D2016: The size of the string requested by the $pad function must not exceed 1e7.  Attempted to allocate {}.",
+                    if pad_length.is_finite() {
+                        crate::value::js_number_to_string(pad_length)
+                    } else {
+                        "Infinity".to_string()
+                    }
+                )));
+            }
+
+            let padding_needed = pad_length as usize;
 
             let pad_chars: Vec<char> = pad_string.chars().collect();
             let mut padding = String::with_capacity(padding_needed);
@@ -738,7 +757,7 @@ pub(crate) fn dispatch_pure_with(
                 padding.push(pad_chars[i % pad_chars.len()]);
             }
 
-            let result = if width < 0 {
+            let result = if width < 0.0 {
                 // Left pad (negative width)
                 format!("{}{}", padding, string)
             } else {

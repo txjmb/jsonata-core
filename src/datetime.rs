@@ -534,6 +534,11 @@ const ROMAN_NUMERALS: [(i64, &str); 13] = [
     (1, "i"),
 ];
 
+/// The largest number formatted in roman numerals (jsonata-js 2.3.0
+/// `maxRoman`): ten thousand Ms. §4.6.1 allows an upper bound, and larger
+/// numbers use the format token `1`.
+const MAX_ROMAN: f64 = 1e7;
+
 fn decimal_to_roman(mut value: i64) -> String {
     let mut result = String::new();
     for &(v, s) in ROMAN_NUMERALS.iter() {
@@ -832,6 +837,13 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
                 'a'
             },
         ),
+        // There is no numeral larger than M, so a large number would be a
+        // long run of them (1e15 is 1e12 Ms). Like jsonata-js 2.3.0, numbers
+        // above ten thousand Ms are formatted as plain decimal digits.
+        // f64's Display prints integers without an exponent and with the
+        // shortest round-trip digits, as jsonata-js's decimal digits do, so
+        // this is right above i64 too (unlike the Decimal arm, #864).
+        PrimaryFormat::Roman if value > MAX_ROMAN => format!("{}", value.trunc()),
         PrimaryFormat::Roman => {
             let r = decimal_to_roman(value as i64);
             if format.case == TCase::Upper {
@@ -975,6 +987,10 @@ fn add_literal(spec: &mut Vec<PictureItem>, lit: &str) {
     }
 }
 
+/// The largest width modifier allowed in a date/time picture string
+/// (jsonata-js 2.3.0 `maxWidthModifier`, error D3142).
+const MAX_WIDTH_MODIFIER: usize = 100;
+
 /// Analyse a date/time picture string (§9.8.4.1).
 fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTimeError> {
     let chars: Vec<char> = picture.chars().collect();
@@ -1014,19 +1030,33 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
             let (pres_mod, width) = if let Some(comma_idx) = comma {
                 let width_mod = &marker[comma_idx + 1..];
                 let dash = width_mod.find('-');
-                let parse_width = |s: &str| -> Option<usize> {
+                let parse_width = |s: &str| -> Result<Option<usize>, DateTimeError> {
                     if s.is_empty() || s == "*" {
-                        None
+                        Ok(None)
                     } else {
-                        s.parse().ok()
+                        // jsonata-js 2.3.0 rejects a width modifier above 100
+                        // (D3142): a component is padded to its minimum width,
+                        // so a huge width would build a huge string (or, for
+                        // `Y`, overflow `10^n`). The test uses JS `parseInt`,
+                        // so a value too large for usize is still caught.
+                        if js_parse_int(s) > MAX_WIDTH_MODIFIER as f64 {
+                            return Err(coded(
+                                "D3142",
+                                format!(
+                                    "A width modifier in a date/time picture string cannot be greater than 100: \"{}\"",
+                                    s
+                                ),
+                            ));
+                        }
+                        Ok(s.parse().ok())
                     }
                 };
                 let (min, max) = match dash {
                     Some(d) => (
-                        parse_width(&width_mod[..d]),
-                        parse_width(&width_mod[d + 1..]),
+                        parse_width(&width_mod[..d])?,
+                        parse_width(&width_mod[d + 1..])?,
                     ),
-                    None => (parse_width(width_mod), None),
+                    None => (parse_width(width_mod)?, None),
                 };
                 (
                     marker[1..comma_idx].to_string(),
@@ -1408,7 +1438,12 @@ fn format_component(
         let mut value = get_date_time_fragment(local_millis, marker.component);
         if marker.component == 'Y' {
             if let Some(n) = marker.n {
-                value %= 10i64.pow(n);
+                // `10^n` overflows i64 from n = 19, when every i64 year is
+                // already below it, so the modulus is then a no-op (as
+                // `value % Math.pow(10, n)` is in JS).
+                if let Some(modulus) = 10i64.checked_pow(n) {
+                    value %= modulus;
+                }
             }
         }
         if let Some(case) = marker.names {
@@ -1440,10 +1475,13 @@ fn format_component(
     } else if marker.component == 'f' {
         // §9.8.4.5 Formatting Fractional Seconds
         let value = get_date_time_fragment(local_millis, 'f');
+        // A name presentation (`[fN]`) leaves no integer format: fractional
+        // seconds can't be formatted as a name (D3133, as in jsonata-js
+        // 2.3.0) -- this used to panic.
         let fmt = marker
             .integer_format
             .as_ref()
-            .expect("f marker always has an integer_format");
+            .ok_or_else(|| coded("D3133", "f"))?;
         format_integer_value(value as f64, fmt)
     } else {
         // C (calendar) / E (era) -- always "ISO"
@@ -1611,7 +1649,18 @@ fn decimal_digits(fmt: &IntegerFormat, captured: &str) -> String {
     if fmt.zero_code != 0x30 {
         digits = digits
             .chars()
-            .map(|c| char::from_u32(c as u32 - fmt.zero_code + 0x30).unwrap())
+            // Only digits of the picture's own family are mapped to ASCII;
+            // anything else (an ASCII digit, say) is left alone instead of
+            // underflowing into an invalid code point (as jsonata-js 2.3.0's
+            // `toAsciiDigits` does).
+            .map(|c| {
+                let code = c as u32;
+                if (fmt.zero_code..=fmt.zero_code + 9).contains(&code) {
+                    char::from_u32(code - fmt.zero_code + 0x30).unwrap_or(c)
+                } else {
+                    c
+                }
+            })
             .collect();
     }
     digits
@@ -1821,11 +1870,35 @@ fn parse_component_value(
     }
 }
 
+/// The largest match (picture parts times timestamp positions) attempted
+/// when parsing a timestamp (jsonata-js 2.3.0 `maxMatchSize`).
+const MAX_MATCH_SIZE: usize = 1_000_000;
+
 /// Parses a string containing a timestamp as specified by a date/time picture string
 /// (mirrors datetime.js's `parseDateTime`). Returns `Ok(None)` (meaning "undefined") if
 /// the timestamp doesn't match the picture, or if the picture has no markers at all.
 fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f64>, DateTimeError> {
     let spec = analyse_date_time_picture(picture)?;
+
+    // Guard from jsonata-js 2.3.0 (`analyseDateTimePicture`'s `cannotMatch`):
+    // a timestamp needs every character of each literal and at least one per
+    // marker, and matching costs time and memory proportional to the number
+    // of picture parts times the timestamp length. A timestamp that is too
+    // short, or a match that would be too large, cannot match -- return
+    // undefined instead of compiling a regex that can exhaust memory. The
+    // picture is analysed first, so an invalid one is still an error.
+    let max_length = timestamp.chars().count();
+    let min_length: usize = spec
+        .iter()
+        .map(|item| match item {
+            PictureItem::Literal(lit) => lit.chars().count(),
+            PictureItem::Marker(_) => 1,
+        })
+        .sum();
+    if min_length > max_length || spec.len().saturating_mul(max_length + 1) > MAX_MATCH_SIZE {
+        return Ok(None);
+    }
+
     let parts = build_matcher_parts(&spec)?;
 
     let pattern = format!(
@@ -2039,6 +2112,100 @@ fn date_utc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The code of a coded datetime error, for the 2.2.17 guard tests.
+    fn error_code(result: Result<JValue, DateTimeError>) -> &'static str {
+        match result {
+            Err(DateTimeError::Coded { code, .. }) => code,
+            other => panic!("expected a coded error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn width_modifier_over_100_is_d3142() {
+        for picture in [
+            "[Y,101]",
+            "[Y,600000000]",
+            "[f,150000000]",
+            "[Y,2-101]",
+            "[D,99999999999999999999]",
+        ] {
+            assert_eq!(
+                error_code(from_millis_with_picture(0.0, Some(picture), None)),
+                "D3142",
+                "{picture}"
+            );
+        }
+        assert_eq!(
+            error_code(to_millis_with_picture("1970", "[Y,101]")),
+            "D3142"
+        );
+    }
+
+    #[test]
+    fn width_modifier_of_100_does_not_overflow_the_year_modulus() {
+        let formatted = from_millis_with_picture(0.0, Some("[Y,100]"), None).unwrap();
+        assert_eq!(formatted, JValue::string(format!("{}1970", "0".repeat(96))));
+    }
+
+    #[test]
+    fn roman_numerals_above_1e7_are_decimal() {
+        assert_eq!(
+            format_integer(1e8, "I").unwrap(),
+            JValue::string("100000000")
+        );
+        assert_eq!(
+            format_integer(-1e15, "i").unwrap(),
+            JValue::string("-1000000000000000")
+        );
+        assert_eq!(
+            format_integer(1e20, "I").unwrap(),
+            JValue::string("100000000000000000000")
+        );
+        assert_eq!(
+            format_integer(1999.0, "I").unwrap(),
+            JValue::string("MCMXCIX")
+        );
+    }
+
+    #[test]
+    fn digits_outside_the_picture_family_do_not_panic() {
+        assert_eq!(
+            parse_integer("12", "\u{661}").unwrap(),
+            JValue::Number(12.0)
+        );
+        assert_eq!(
+            parse_integer("\u{661}\u{662}", "\u{661}").unwrap(),
+            JValue::Number(12.0)
+        );
+    }
+
+    #[test]
+    fn fractional_seconds_as_a_name_is_d3133() {
+        assert_eq!(
+            error_code(from_millis_with_picture(0.0, Some("[fN]"), None)),
+            "D3133"
+        );
+    }
+
+    #[test]
+    fn unmatchable_timestamps_are_undefined_without_matching() {
+        let markers = "[Y]1".repeat(100_000);
+        let timestamp = format!("{}x", "1".repeat(99_999));
+        assert_eq!(
+            to_millis_with_picture(&timestamp, &markers).unwrap(),
+            JValue::Undefined
+        );
+        let literal = "a".repeat(10_000_000);
+        assert_eq!(
+            to_millis_with_picture("x", &literal).unwrap(),
+            JValue::Undefined
+        );
+        assert_eq!(
+            to_millis_with_picture("1", "[Y][M]").unwrap(),
+            JValue::Undefined
+        );
+    }
 
     /// The date `year`-`month`-`day`, or `None` if there is no such day.
     fn from_ymd(year: i64, month: i64, day: i64) -> Option<CivilDate> {

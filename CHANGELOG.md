@@ -17,6 +17,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The transform operator (`~> | location | update |`) now changes only the
+  objects its location matches, by identity, as jsonata-js does. It used to
+  match by value, so `{"b":{"a":1},"c":{"a":1}} ~> | b | {"x":2} |` changed
+  `c` too. Matches now also apply in order, each to the object as earlier
+  matches left it, and the delete clause sees the object after its update.
+  A location that matches an object outside the input's copy (one it built,
+  such as `{}` or `$merge([a])`) raises D1014, as in jsonata-js 2.3.0.
+- Inputs that panicked or exhausted memory now give a result or a coded
+  error, following the limits jsonata-js 2.3.0 added for them:
+  - `$pad` raises D2016 when the padding would exceed 1e7 characters
+    (jsonata-js #832). A huge width no longer saturates to 2^31 and
+    allocates gigabytes.
+  - `$formatInteger` (and date/time pictures) format numbers above 1e7 as
+    decimal digits instead of roman numerals, so `$formatInteger(-1e15, 'i')`
+    no longer tries to build 1e12 `M`s.
+  - A date/time width modifier above 100 raises D3142, so `[Y,600000000]`
+    no longer divides by zero and `[f,150000000]` no longer builds a
+    150-million-character string. `[Y,100]` no longer panics on `10^100`.
+  - `$parseInteger('12', '١')` (ASCII digits with a picture in another digit
+    family) no longer panics, and `$fromMillis(0, '[fN]')` raises D3133
+    instead of panicking.
+  - `$toMillis` returns undefined, without building the regex, when the
+    timestamp is shorter than the picture needs or matching it would be too
+    large, so a picture with 100,000 markers or a 10-million-character
+    literal no longer exhausts memory.
+
 ### Security
 
 ## [2.2.16] - 2026-11-27
