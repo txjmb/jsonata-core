@@ -26,6 +26,49 @@ use common::norm;
 /// `(engine, expression)`. The list must stay exact: a case that starts
 /// matching has to be removed from it.
 const KNOWN_DIVERGENCES: &[(&str, &str)] = &[
+    // jsonata-js 2.3.0 (#838): a step after a group-by applies to the
+    // grouped result, `a{k:v}.x` being `(a{k:v}).x`. Plan PR 4.
+    ("compiled", "acct.Order.P{N: N}.A"),
+    ("tree", "acct.Order.P{N: N}.A"),
+    ("compiled", "acct.Order.P{N: N}.Z"),
+    ("tree", "acct.Order.P{N: N}.Z"),
+    ("compiled", "acct.Order.P{N: nope}.A"),
+    ("tree", "acct.Order.P{N: nope}.A"),
+    ("compiled", "acct.Order.P{N: N}.%"),
+    ("tree", "acct.Order.P{N: N}.%"),
+    ("compiled", "acct.Order.P{N: N}[0].N"),
+    ("tree", "acct.Order.P{N: N}[0].N"),
+    ("compiled", "acct{\"a\": 1}.Order"),
+    ("tree", "acct{\"a\": 1}.Order"),
+    ("compile", "acct.Order{id: id}.P{N: N}"),
+    ("compiled", "acct.Order{\"k\": id}@$o.P"),
+    ("tree", "acct.Order{\"k\": id}@$o.P"),
+    ("compiled", "acct.Order{\"k\": id}#$i.P"),
+    ("tree", "acct.Order{\"k\": id}#$i.P"),
+    ("compiled", "acct.Order@$o.P{N: $o.id}.N"),
+    ("tree", "acct.Order@$o.P{N: $o.id}.N"),
+    ("compiled", "acct.Order.P{N: N}.$uppercase(N)"),
+    ("tree", "acct.Order.P{N: N}.$uppercase(N)"),
+    ("compiled", "acct.Order{\"k\": id}.P.$string()"),
+    ("tree", "acct.Order{\"k\": id}.P.$string()"),
+    ("compiled", "acct.Order{\"k\": id}.$count(P)"),
+    ("tree", "acct.Order{\"k\": id}.$count(P)"),
+    ("compiled", "acct.Order.P{N: N}.function($x) { $x }(1)"),
+    ("tree", "acct.Order.P{N: N}.function($x) { $x }(1)"),
+    ("compiled", "acct^(id)[0]{\"k\": 1}.Order"),
+    ("tree", "acct^(id)[0]{\"k\": 1}.Order"),
+    ("compiled", "acct.Order@$o[id = \"zz\"]{\"k\": 1}.id"),
+    ("tree", "acct.Order@$o[id = \"zz\"]{\"k\": 1}.id"),
+    ("compiled", "acct.Order^(id)[0]{\"k\": id}.P"),
+    ("tree", "acct.Order^(id)[0]{\"k\": id}.P"),
+    ("compiled", "acct.*{\"k\": 1}.%"),
+    ("tree", "acct.*{\"k\": 1}.%"),
+    ("compiled", "acct.Order.P.%{\"x\": id}.%"),
+    ("tree", "acct.Order.P.%{\"x\": id}.%"),
+    // jsonata-js 2.3.0 (#841): a constructed array stays one value of a
+    // tuple stream. Plan PR 3.
+    ("compiled", "[[1,2],[3]].([$]#$k.[$, $k])"),
+    ("tree", "[[1,2],[3]].([$]#$k.[$, $k])"),
     // Deliberate: jsonata-js matches a regex on the right of `~>` against
     // its left side converted to a string, so an undefined left side is the
     // text "undefined" and `/n/` matches it. An undefined left side gives
