@@ -70,6 +70,7 @@ def test_pad_unchanged_behaviour(bindings):
         ("$formatInteger(1e8, 'I')", "100000000"),
         ("$formatInteger(10000001, 'I')", "10000001"),
         ("$formatInteger(1999, 'I')", "MCMXCIX"),
+        ("$formatInteger(1e20, 'I')", "100000000000000000000"),
         ("$formatInteger(1e7, 'i')", "m" * 10000),
     ],
 )

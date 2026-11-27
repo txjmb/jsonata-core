@@ -9845,23 +9845,16 @@ impl Evaluator {
         // jsonata-js transforms a deep copy of the input in place: the
         // location is evaluated on the copy, and each object it matches is
         // changed *by reference*, so only those objects change -- not other
-        // objects that happen to be equal to them. Our values are
-        // immutable and shared, so `TransformTree` stands in for the copy:
-        // it indexes every object of the input by its `Rc` pointer, which
-        // the location's result keeps, and rebuilds only what changed.
-        let mut tree = TransformTree::build(input);
-        let copy = if tree.is_none() {
-            // The input holds the same object at two places (or a lazy
-            // Python dict, whose objects are built on access): give every
-            // place its own object first, as jsonata-js's copy does, so a
-            // match names one place.
-            let copy = transform_unshare(input)?;
-            tree = TransformTree::build(&copy);
-            copy
-        } else {
-            input.clone()
-        };
-        let mut tree = tree.expect("an unshared copy has one place per object");
+        // objects that happen to be equal to them. Our values are immutable,
+        // so `TransformTree` stands in for the copy being changed: it indexes
+        // every object of a fresh deep copy by its `Rc` pointer, which the
+        // location's result keeps. The copy must be a real one, with objects
+        // of its own: an object reached some other way (a variable, `$$`)
+        // is then never part of it, and an input that holds one object at
+        // two places gets an object for each place, as in jsonata-js.
+        let copy = transform_unshare(input)?;
+        let mut tree =
+            TransformTree::build(&copy).expect("a fresh copy holds each object at one place only");
 
         // `$` in the location is the copy, as in jsonata-js.
         let matches = self.with_dollar(&copy, |ev| ev.evaluate_internal(location, &copy))?;
@@ -12384,10 +12377,10 @@ struct TransformTree {
 }
 
 impl TransformTree {
-    /// The tree for `input`, or `None` when an object appears at more than
-    /// one place in it (or a lazy Python dict does), so a pointer would not
-    /// name one place: the caller then copies the input with
-    /// [`transform_unshare`] and builds the tree for the copy.
+    /// The tree for `input`, an object or array, or `None` when an object
+    /// appears at more than one place in it (or a lazy Python dict does), so
+    /// a pointer would not name one place. A copy made by
+    /// [`transform_unshare`] never does.
     fn build(input: &JValue) -> Option<TransformTree> {
         let mut tree = TransformTree {
             nodes: Vec::new(),
@@ -12422,8 +12415,9 @@ impl TransformTree {
                 self.nodes[id].kind = TransformNodeKind::Object(fields);
                 Some(TransformSlot::Node(id))
             }
-            // An array holding no object or array has nothing to match.
-            JValue::Array(arr) if !arr.iter().any(transform_container) => {
+            // An array holding no object or array has nothing to match --
+            // unless it is the input itself, which is always node 0.
+            JValue::Array(arr) if parent.is_some() && !arr.iter().any(transform_container) => {
                 Some(TransformSlot::Value(value.clone()))
             }
             JValue::Array(arr) => {
@@ -12568,6 +12562,86 @@ fn transform_unshare(value: &JValue) -> Result<JValue, EvaluatorError> {
 mod tests {
     use super::*;
     use crate::ast::{BinaryOp, UnaryOp};
+
+    // --- 2.2.17: transform matches by identity --------------------------------
+
+    fn eval_transform(expr: &str) -> Result<JValue, String> {
+        let ast = parser::parse(expr).map_err(|e| e.to_string())?;
+        let mut evaluator = Evaluator::new();
+        evaluator
+            .evaluate(&ast, &JValue::Undefined)
+            .map_err(|e| e.message().to_string())
+    }
+
+    fn json(value: serde_json::Value) -> JValue {
+        value.into()
+    }
+
+    #[test]
+    fn transform_leaves_equal_siblings_alone() {
+        assert_eq!(
+            eval_transform(r#"{"b":{"a":1},"c":{"a":1}} ~> | b | {"x":2} |"#).unwrap(),
+            json(serde_json::json!({"b": {"a": 1, "x": 2}, "c": {"a": 1}}))
+        );
+        assert_eq!(
+            eval_transform(r#"[{"a":1},{"a":1}] ~> | $[0] | {"x":2} |"#).unwrap(),
+            json(serde_json::json!([{"a": 1, "x": 2}, {"a": 1}]))
+        );
+    }
+
+    #[test]
+    fn transform_of_an_array_without_objects() {
+        // The input is always the tree's root node, even with nothing to index.
+        assert_eq!(
+            eval_transform(r#"[] ~> | $ | {"x":1} |"#).unwrap(),
+            json(serde_json::json!([]))
+        );
+        assert_eq!(
+            eval_transform(r#"[1,2] ~> | foo | {"x":1} |"#).unwrap(),
+            json(serde_json::json!([1, 2]))
+        );
+    }
+
+    #[test]
+    fn transform_location_outside_the_copy_is_d1014() {
+        for expr in [
+            r#"{"a":{"b":1}} ~> | {"z":1} | {"x":1} |"#,
+            r#"{"a":{"b":1}} ~> | $merge([a]) | {"x":1} |"#,
+            // `$o` is the object the input holds, but not the copy's.
+            r#"($o := {"a":1}; {"b":$o} ~> | $o | {"x":2} |)"#,
+        ] {
+            let err = eval_transform(expr).unwrap_err();
+            assert!(err.starts_with("D1014"), "{expr}: {err}");
+        }
+    }
+
+    #[test]
+    fn transform_gives_a_shared_object_one_copy_per_place() {
+        assert_eq!(
+            eval_transform(r#"($o := {"a":1}; {"b":$o,"c":$o} ~> | b | {"x":2} |)"#).unwrap(),
+            json(serde_json::json!({"b": {"a": 1, "x": 2}, "c": {"a": 1}}))
+        );
+    }
+
+    #[test]
+    fn transform_applies_matches_in_order_in_place() {
+        // The second match sees the first one's change.
+        assert_eq!(
+            eval_transform(r#"{"a":{"b":{"c":1}}} ~> | [a.b, a] | {"z": $.b.z ? $.b.z + 1 : 1} |"#)
+                .unwrap(),
+            json(serde_json::json!({"a": {"b": {"c": 1, "z": 1}, "z": 2}}))
+        );
+        // A match whose field an earlier update replaced is detached.
+        assert_eq!(
+            eval_transform(r#"{"a":{"b":{"c":1}}} ~> | [a, a.b] | {"b":{"q":1}} |"#).unwrap(),
+            json(serde_json::json!({"a": {"b": {"q": 1}}}))
+        );
+        // The delete clause sees the object after its update.
+        assert_eq!(
+            eval_transform(r#"{"a":{"b":1}} ~> | a | {"x":1}, $keys($) |"#).unwrap(),
+            json(serde_json::json!({"a": {}}))
+        );
+    }
 
     // --- Task 7: tuple-wrapper output leak -----------------------------------
     //

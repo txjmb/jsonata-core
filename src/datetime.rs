@@ -840,7 +840,10 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
         // There is no numeral larger than M, so a large number would be a
         // long run of them (1e15 is 1e12 Ms). Like jsonata-js 2.3.0, numbers
         // above ten thousand Ms are formatted as plain decimal digits.
-        PrimaryFormat::Roman if value > MAX_ROMAN => (value as i64).to_string(),
+        // f64's Display prints integers without an exponent and with the
+        // shortest round-trip digits, as jsonata-js's decimal digits do, so
+        // this is right above i64 too (unlike the Decimal arm, #864).
+        PrimaryFormat::Roman if value > MAX_ROMAN => format!("{}", value.trunc()),
         PrimaryFormat::Roman => {
             let r = decimal_to_roman(value as i64);
             if format.case == TCase::Upper {
@@ -1867,13 +1870,13 @@ fn parse_component_value(
     }
 }
 
-/// Parses a string containing a timestamp as specified by a date/time picture string
-/// (mirrors datetime.js's `parseDateTime`). Returns `Ok(None)` (meaning "undefined") if
-/// the timestamp doesn't match the picture, or if the picture has no markers at all.
 /// The largest match (picture parts times timestamp positions) attempted
 /// when parsing a timestamp (jsonata-js 2.3.0 `maxMatchSize`).
 const MAX_MATCH_SIZE: usize = 1_000_000;
 
+/// Parses a string containing a timestamp as specified by a date/time picture string
+/// (mirrors datetime.js's `parseDateTime`). Returns `Ok(None)` (meaning "undefined") if
+/// the timestamp doesn't match the picture, or if the picture has no markers at all.
 fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f64>, DateTimeError> {
     let spec = analyse_date_time_picture(picture)?;
 
@@ -2109,6 +2112,100 @@ fn date_utc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The code of a coded datetime error, for the 2.2.17 guard tests.
+    fn error_code(result: Result<JValue, DateTimeError>) -> &'static str {
+        match result {
+            Err(DateTimeError::Coded { code, .. }) => code,
+            other => panic!("expected a coded error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn width_modifier_over_100_is_d3142() {
+        for picture in [
+            "[Y,101]",
+            "[Y,600000000]",
+            "[f,150000000]",
+            "[Y,2-101]",
+            "[D,99999999999999999999]",
+        ] {
+            assert_eq!(
+                error_code(from_millis_with_picture(0.0, Some(picture), None)),
+                "D3142",
+                "{picture}"
+            );
+        }
+        assert_eq!(
+            error_code(to_millis_with_picture("1970", "[Y,101]")),
+            "D3142"
+        );
+    }
+
+    #[test]
+    fn width_modifier_of_100_does_not_overflow_the_year_modulus() {
+        let formatted = from_millis_with_picture(0.0, Some("[Y,100]"), None).unwrap();
+        assert_eq!(formatted, JValue::string(format!("{}1970", "0".repeat(96))));
+    }
+
+    #[test]
+    fn roman_numerals_above_1e7_are_decimal() {
+        assert_eq!(
+            format_integer(1e8, "I").unwrap(),
+            JValue::string("100000000")
+        );
+        assert_eq!(
+            format_integer(-1e15, "i").unwrap(),
+            JValue::string("-1000000000000000")
+        );
+        assert_eq!(
+            format_integer(1e20, "I").unwrap(),
+            JValue::string("100000000000000000000")
+        );
+        assert_eq!(
+            format_integer(1999.0, "I").unwrap(),
+            JValue::string("MCMXCIX")
+        );
+    }
+
+    #[test]
+    fn digits_outside_the_picture_family_do_not_panic() {
+        assert_eq!(
+            parse_integer("12", "\u{661}").unwrap(),
+            JValue::Number(12.0)
+        );
+        assert_eq!(
+            parse_integer("\u{661}\u{662}", "\u{661}").unwrap(),
+            JValue::Number(12.0)
+        );
+    }
+
+    #[test]
+    fn fractional_seconds_as_a_name_is_d3133() {
+        assert_eq!(
+            error_code(from_millis_with_picture(0.0, Some("[fN]"), None)),
+            "D3133"
+        );
+    }
+
+    #[test]
+    fn unmatchable_timestamps_are_undefined_without_matching() {
+        let markers = "[Y]1".repeat(100_000);
+        let timestamp = format!("{}x", "1".repeat(99_999));
+        assert_eq!(
+            to_millis_with_picture(&timestamp, &markers).unwrap(),
+            JValue::Undefined
+        );
+        let literal = "a".repeat(10_000_000);
+        assert_eq!(
+            to_millis_with_picture("x", &literal).unwrap(),
+            JValue::Undefined
+        );
+        assert_eq!(
+            to_millis_with_picture("1", "[Y][M]").unwrap(),
+            JValue::Undefined
+        );
+    }
 
     /// The date `year`-`month`-`day`, or `None` if there is no such day.
     fn from_ymd(year: i64, month: i64, day: i64) -> Option<CivilDate> {
