@@ -5,11 +5,14 @@ use std::path::{Path, PathBuf};
 fn main() {
     let mut build = cc::Build::new();
 
-    let version = if env::var("CARGO_FEATURE_V2").is_ok() {
-        "v2"
-    } else {
-        "v3"
-    };
+    // Vendored copy (see VENDORED.md): only the v3 sources are kept.
+    if env::var("CARGO_FEATURE_V2").is_ok() {
+        panic!(
+            "the `v2` feature is not available in jsonata-core's vendored libmimalloc-sys \
+             (c_src/mimalloc/v2 was removed); see vendor/libmimalloc-sys/VENDORED.md"
+        );
+    }
+    let version = "v3";
 
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let include_root = Path::new(&cargo_manifest_dir)

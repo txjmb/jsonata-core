@@ -66,6 +66,10 @@ python = ["dep:pyo3"]
 cli = ["dep:clap"]
 bench = []   # exposes _bench facade for Criterion benchmarks
 capi = []
+# Note for crates.io users: the vendored mimalloc 3.4.5 (see [patch.crates-io]
+# below) only applies when building from this repository or the sdist; a
+# crates.io build of this feature gets libmimalloc-sys 0.1.49's mimalloc 3.3.2,
+# which can crash after the first thread that allocated exits (#298).
 mimalloc = ["dep:mimalloc", "dep:libmimalloc-sys"]
 
 [dev-dependencies]
