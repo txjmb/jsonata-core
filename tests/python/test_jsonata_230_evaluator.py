@@ -185,6 +185,14 @@ GROUPED = {
         ("n.m{k: v}.nope", GROUPED, UNDEFINED),
         ("o{c: b}.x.$string()", GROUPED, "1"),
         ("(o{c: b}).x", GROUPED, 1),
+        # A grouped path that starts with an array constructor is evaluated
+        # once, so the next step reads the grouped object as no items.
+        ('[1,2].${"k":$}.k', GROUPED, UNDEFINED),
+        ('[1,2][0].${"k":$}.k', GROUPED, UNDEFINED),
+        ('[o.b].${"k":$}.k', GROUPED, UNDEFINED),
+        ("[o].${c:b}.$keys()", GROUPED, UNDEFINED),
+        ('[1,2].${"k":$}', GROUPED, {"k": [1, 2]}),
+        ('o.([1,2].${"k":$})', GROUPED, [{"k": [1, 2]}, {"k": [1, 2]}]),
     ],
 )
 def test_grouped_path_steps(engine, expr, data, expected):
