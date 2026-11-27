@@ -1349,33 +1349,13 @@ pub mod boolean {
     /// - array: empty -> false; single element -> recursive; multi-element -> any truthy
     /// - object: empty -> false; non-empty -> true
     /// - function -> false
+    ///
+    /// An infinite number anywhere the cast reads raises D1001, as in
+    /// jsonata-js. The one rule is `evaluator::compiled_boolean`.
     pub fn boolean(value: &JValue) -> Result<JValue, FunctionError> {
-        Ok(JValue::Bool(to_boolean(value)))
-    }
-
-    /// Helper function to recursively convert values to boolean.
-    fn to_boolean(value: &JValue) -> bool {
-        match value {
-            JValue::Null | JValue::Undefined => false,
-            JValue::Bool(b) => *b,
-            JValue::Number(n) => *n != 0.0 && !n.is_nan(), // NaN is false in jsonata-js
-            JValue::String(s) => !s.is_empty(),
-            JValue::Array(arr) => {
-                with_stack(|| {
-                    if arr.len() == 1 {
-                        to_boolean(&arr[0])
-                    } else {
-                        // Empty arrays are falsy; multi-element: true if any element is truthy
-                        arr.iter().any(to_boolean)
-                    }
-                })
-            }
-            JValue::Object(obj) => !obj.is_empty(),
-            // Functions are false, a regex being one (#205).
-            JValue::Lambda { .. } | JValue::Builtin { .. } | JValue::Regex { .. } => false,
-            #[cfg(feature = "python")]
-            JValue::LazyPyDict(lazy) => !lazy.is_empty(),
-        }
+        crate::evaluator::compiled_boolean(value)
+            .map(JValue::Bool)
+            .map_err(|_| FunctionError::RuntimeError("D1001: Number out of range".to_string()))
     }
 }
 

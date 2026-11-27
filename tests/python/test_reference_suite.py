@@ -106,12 +106,8 @@ _DATETIME_REWRITE = (
     "date/time picture rewrite: out-of-range dates, digit families, grouping separators, "
     "linear-time parsing (jsonata-js #869)"
 )
-_CHAINED_PREDICATES = "chained predicates after a computed index, $arr[$i][0] (jsonata-js #861)"
 _GROUPED_PATH_STEPS = "a step after a group-by, a{k:v}.x, is (a{k:v}).x (jsonata-js #838)"
-_TUPLE_ARRAYS = "constructed arrays kept in tuple results, a#$i.[b] (jsonata-js #841)"
-_BOOLEAN_OPERAND_ERRORS = "number overflow in an and/or operand raises D1001 (jsonata-js #857)"
 _FORMAT_NUMBER_DIGITS = "$formatNumber exponent mantissa scaling (jsonata-js #865, #868)"
-_UNDEFINED_PATTERN = "$split/$replace give undefined for an undefined pattern (jsonata-js #831)"
 
 # Reference cases that are known to diverge, each with the reason. Marked
 # xfail(strict), so one that starts passing fails the suite and has to be

@@ -73,10 +73,23 @@ def test_descendants(engine, expr, data, expected):
         ("$boolean([0, 1e308 * 10])", None, "D1001"),
         ("(0/0) and true", None, False),
         ('$boolean({"a": 1e308 * 10})', None, True),
+        (
+            "( $f := function($n, $a){ $n > 3 ? ($a ? 1 : 0) : $f($n+1, $a) }; $f(0, 1e308*10) )",
+            None,
+            "D1001",
+        ),
+        ("(1e308*10) ?: 5", None, "D1001"),
+        ("0 ?: 5", None, 5),
+        ("[1,2][1e308*10]", None, "D1001"),
+        ("[1,2][[0, 1e308*10]]", None, "D1001"),
+        ('[1,2][["a", 1e308*10]]', None, "D1001"),
+        ("$filter([1e308*10], function($v){$v})", None, "D1001"),
+        ("$single([1e308*10], function($v){$v})", None, "D1001"),
+        ('$sift({"a":1e308*10}, function($v){$v})', None, "D1001"),
     ],
 )
 def test_boolean_cast(engine, expr, data, expected):
-    """The boolean cast raises D1001 for an infinite number it reads (jsonata-js #857). NaN is false."""
+    """A boolean cast raises D1001 for an infinite number it reads (jsonata-js #857): and/or, conditions, ?:, $boolean, $not, predicates and the predicate functions. NaN is false."""
     check(expr, data, expected)
 
 
@@ -91,6 +104,8 @@ def test_boolean_cast(engine, expr, data, expected):
         ("$arr[[$i]][0]", None, [4, 5]),
         ("x[$i][$j]", {"x": [[1, 2], [3, 4]]}, 4),
         ("x[$ > 0][0]", {"x": [[1, 2], [3, 4]]}, "T2010"),
+        ("$arr[$i][][0]", None, [4]),
+        ("x[$i][][0]", {"x": [[1, 2], [4, 5]]}, [4]),
     ],
 )
 def test_chained_predicates(engine, expr, data, expected):
@@ -119,6 +134,11 @@ def test_chained_predicates(engine, expr, data, expected):
         ),
         ("foo#$i.[$][$ > 1]", {"foo": [1, 2, 3]}, [2, 3]),
         ("foo#$i.[$, $i]", {"foo": [1, 2]}, [[1, 0], [2, 1]]),
+        ("foo#$i.[$, 9][]", {"foo": [1, 2]}, [[1, 9], [2, 9]]),
+        ("foo#$i.[$, 9]#$j", {"foo": [1, 2]}, [[1, 9], [2, 9]]),
+        ("foo.[$, 9]#$k.$k", {"foo": [1, 2]}, [0, 0]),
+        ("foo.[$, 9]#$k.$", {"foo": [1, 2]}, [[1, 9], [2, 9]]),
+        ("foo.[$, 9]@$v.$v", {"foo": [1, 2]}, [[1, 9], [2, 9]]),
     ],
 )
 def test_tuple_arrays(engine, expr, data, expected):

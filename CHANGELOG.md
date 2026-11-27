@@ -17,14 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `**` no longer returns functions, the same as `*` (jsonata-js #873):
     `[[$sum].**]` is `[]`.
   - The boolean cast raises D1001 when it reads an infinite number: the
-    `and`/`or` operands, a condition, `$boolean` and `$not` (jsonata-js #857).
+    `and`/`or` operands, a condition, `?:`, `$boolean`, `$not`, predicates,
+    and `$filter`, `$single` and `$sift` (jsonata-js #857).
     `(1e308 * 10) and true` used to be `true`. NaN is now false there, as in
     jsonata-js; `(0/0) and true` used to be `true`.
   - A computed index that selects one array returns that array when another
     predicate follows, as a literal index does (jsonata-js #861):
     `$arr[$i][0]` is `4` for `$arr = [[1,2],[4,5]]` and `$i = 1`, not `[4,5]`.
   - A constructed array stays one value in a tuple stream (jsonata-js #841):
-    `orders#$i.[items.sku]` keeps each order's array instead of flattening it.
+    `orders#$i.[items.sku]` keeps each order's array instead of flattening it,
+    and so does `foo.[$, 9]#$k`.
   - The transform operator runs its update and delete clauses, and checks
     their types, for every match, including scalars and arrays, so
     `|a.b|"s"|` raises T2011 and `|a.b|{}, 5|` raises T2012. A `null` update

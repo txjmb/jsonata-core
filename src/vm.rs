@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use crate::evaluator::{
     check_loop_timeout, check_sequence_length, eval_compiled, object_context,
-    predicate_index_match, CompiledExpr, EvaluatorError, EvaluatorOptions,
+    predicate_index_match, reject_infinite, CompiledExpr, EvaluatorError, EvaluatorOptions,
 };
 use crate::value::JValue;
 
@@ -571,10 +571,11 @@ fn run_inner(
                                 options,
                                 start_time,
                             )?;
-                            let repeats = match predicate_index_match(&test, index, len) {
-                                Some(n) => n,
-                                None => usize::from(compiled_is_truthy(&test)),
-                            };
+                            let repeats =
+                                match predicate_index_match(reject_infinite(&test)?, index, len) {
+                                    Some(n) => n,
+                                    None => usize::from(compiled_is_truthy(&test)),
+                                };
                             for _ in 0..repeats {
                                 kept.push(item.clone());
                             }
@@ -596,7 +597,7 @@ fn run_inner(
                         // A non-array is a singleton sequence: index 0, length 1.
                         let test =
                             run_inner(sub_prog, &other, vars, &mut sub_stack, options, start_time)?;
-                        let repeats = match predicate_index_match(&test, 0, 1) {
+                        let repeats = match predicate_index_match(reject_infinite(&test)?, 0, 1) {
                             Some(n) => n,
                             None => usize::from(compiled_is_truthy(&test)),
                         };

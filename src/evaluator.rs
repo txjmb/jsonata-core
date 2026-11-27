@@ -1533,7 +1533,7 @@ fn eval_compiled_node(
                         options,
                         start_time,
                     )?;
-                    if compiled_is_truthy(&pred) {
+                    if compiled_boolean(&pred)? {
                         result.push(item.clone());
                     }
                 }
@@ -1551,7 +1551,7 @@ fn eval_compiled_node(
                         options,
                         start_time,
                     )?;
-                    if compiled_is_truthy(&pred) {
+                    if compiled_boolean(&pred)? {
                         result.push(item.clone());
                     }
                 }
@@ -1632,19 +1632,14 @@ fn js_truthy(value: &JValue) -> bool {
     }
 }
 
-/// Truthiness check (matches JSONata semantics). Standalone function for compiled path.
-#[inline]
-/// The boolean cast of `value`, as jsonata-js's `boolean` does it for the
-/// `and`/`or` operands, a condition, `$boolean` and `$not`: like
-/// `compiled_is_truthy`, but an infinite number it inspects raises D1001,
-/// because jsonata-js asks `isNumeric`, which throws for one (#857). NaN is
-/// not numeric there, so it is false, not an error.
-pub(crate) fn compiled_boolean(value: &JValue) -> Result<bool, EvaluatorError> {
+/// `value`, or D1001 if it is an infinite number or an array holding one at
+/// any depth. jsonata-js's `isNumeric` throws for an infinity, and its
+/// `boolean` and `evaluateFilter` reach every number such an array holds
+/// (#857). NaN is not numeric there, so it is no error.
+pub(crate) fn reject_infinite(value: &JValue) -> Result<&JValue, EvaluatorError> {
     fn find_infinite(value: &JValue) -> bool {
         match value {
             JValue::Number(n) => n.is_infinite(),
-            // The cast reads a one-item array's item and every item of a
-            // longer one, so an infinity anywhere in them is reached.
             JValue::Array(a) => with_stack(|| a.iter().any(find_infinite)),
             _ => false,
         }
@@ -1654,18 +1649,23 @@ pub(crate) fn compiled_boolean(value: &JValue) -> Result<bool, EvaluatorError> {
             "D1001: Number out of range".to_string(),
         ));
     }
-    Ok(compiled_is_truthy(value))
+    Ok(value)
 }
 
+/// The boolean cast of `value`, as jsonata-js's `boolean` does it for the
+/// `and`/`or` operands, a condition, `?:`, `$boolean`, `$not` and the
+/// predicate functions: `compiled_is_truthy`, after `reject_infinite`.
+pub(crate) fn compiled_boolean(value: &JValue) -> Result<bool, EvaluatorError> {
+    Ok(compiled_is_truthy(reject_infinite(value)?))
+}
+
+/// Truthiness check (matches JSONata semantics). Standalone function for compiled path.
+#[inline]
 pub(crate) fn compiled_is_truthy(value: &JValue) -> bool {
     match value {
         JValue::Null | JValue::Undefined => false,
         JValue::Bool(b) => *b,
-        JValue::Number(n) =>
-        // NaN is not numeric to jsonata-js, so it is false.
-        {
-            *n != 0.0 && !n.is_nan()
-        }
+        JValue::Number(n) => *n != 0.0 && !n.is_nan(), // NaN is false in jsonata-js
         JValue::String(s) => !s.is_empty(),
         // Recursive, matching `Evaluator::is_truthy` and `$boolean` (#111).
         JValue::Array(a) => with_stack(|| match a.len() {
@@ -2361,7 +2361,7 @@ fn compiled_apply_filter(
     for (index, item) in items.iter().enumerate() {
         check_loop_timeout(options, start_time)?;
         let selector = eval_compiled_inner(filter, item, vars, ctx, shape, options, start_time)?;
-        let repeats = match predicate_index_match(&selector, index, len) {
+        let repeats = match predicate_index_match(reject_infinite(&selector)?, index, len) {
             Some(n) => n,
             None => usize::from(compiled_is_truthy(&selector)),
         };
@@ -7300,8 +7300,14 @@ impl Evaluator {
     ) -> Result<JValue, EvaluatorError> {
         for (i, stage) in stages.iter().enumerate() {
             if let Stage::Filter(predicate) = stage {
-                // jsonata-js passes `chained` when the next stage is a filter too.
-                let chained = matches!(stages.get(i + 1), Some(Stage::Filter(_)));
+                // jsonata-js passes `chained` when another filter follows.
+                // `[]` is not a stage there, so it is skipped.
+                let chained = matches!(
+                    stages[i + 1..]
+                        .iter()
+                        .find(|s| !matches!(s, Stage::KeepArray)),
+                    Some(Stage::Filter(_))
+                );
                 value = self.evaluate_filter(predicate, value, chained)?;
             }
         }
@@ -7344,10 +7350,12 @@ impl Evaluator {
         // and keeps it, so the next filter runs (`x[$count([])][$error()]`
         // raises in jsonata-js). Only a numeric literal drops it, and
         // `filters_run_on_nothing` never runs those.
-        Ok(match predicate_index_match(&selector, 0, 1) {
-            Some(n) => n > 0,
-            None => self.is_truthy(&selector),
-        })
+        Ok(
+            match predicate_index_match(reject_infinite(&selector)?, 0, 1) {
+                Some(n) => n > 0,
+                None => self.is_truthy(&selector),
+            },
+        )
     }
 
     /// Apply a filter predicate to a value, following jsonata-js
@@ -7423,7 +7431,7 @@ impl Evaluator {
                 }
                 _ => same_position = false,
             }
-            let repeats = match predicate_index_match(&selector, index, len) {
+            let repeats = match predicate_index_match(reject_infinite(&selector)?, index, len) {
                 Some(n) => n,
                 None => usize::from(self.is_truthy(&selector)),
             };
@@ -8194,8 +8202,21 @@ impl Evaluator {
                 JValue::Undefined => continue,
                 // A constructed array (`.[...]`) is one value of the stream,
                 // unless stages follow and filter its items (jsonata-js
-                // 2.3.0, #841).
-                JValue::Array(arr) if arr.cons && step.stages.is_empty() => {
+                // 2.3.0, #841). `[]` is not a stage in jsonata-js.
+                // A later step that is an array constructor carrying its own
+                // binding (`.[...]#$k`) parses as `Array`, not `ArrayGroup`;
+                // jsonata-js flags it `consarray` all the same. A leading one
+                // (`[3,1]#$k`) is evaluated once on the input and its items
+                // make the stream, as before.
+                JValue::Array(arr)
+                    if (arr.cons
+                        || (!is_first_path_step && matches!(step.node, AstNode::Array(_))))
+                        && step.stages.iter().all(|s| matches!(s, Stage::KeepArray)) =>
+                {
+                    // The flag travels with the value, as on jsonata-js's
+                    // array, so a later `.$` keeps it whole too.
+                    let mut arr = arr;
+                    arr.cons = true;
                     vec![JValue::Array(arr)]
                 }
                 JValue::Array(arr) => arr.iter().cloned().collect(),
@@ -8296,10 +8317,11 @@ impl Evaluator {
                             self.with_dollar_bound(&at, |ev| ev.evaluate_internal(pred, &at));
                         tuple_bindings.restore(self);
                         let selector = selector?;
-                        let repeats = match predicate_index_match(&selector, index, len) {
-                            Some(n) => n,
-                            None => usize::from(self.is_truthy(&selector)),
-                        };
+                        let repeats =
+                            match predicate_index_match(reject_infinite(&selector)?, index, len) {
+                                Some(n) => n,
+                                None => usize::from(self.is_truthy(&selector)),
+                            };
                         for _ in 0..repeats {
                             kept.push(tup.clone());
                         }
@@ -8354,7 +8376,8 @@ impl Evaluator {
             // `?:` used to have its own truthiness rule, half-recursive where
             // `is_truthy` was flat. Now that `is_truthy` matches `$boolean`
             // the two agree exactly, so there is one rule again (#111).
-            if self.is_truthy(&left) {
+            // jsonata-js parses `a ?: b` as a condition, so its D1001 too.
+            if compiled_boolean(&left)? {
                 return Ok(left);
             }
             return self.evaluate_internal(rhs, data);
@@ -8526,7 +8549,7 @@ impl Evaluator {
                     "D1002: Cannot negate non-number value".to_string(),
                 )),
             },
-            UnaryOp::Not => Ok(JValue::Bool(!self.is_truthy(&value))),
+            UnaryOp::Not => Ok(JValue::Bool(!compiled_boolean(&value)?)),
         }
     }
 
@@ -8622,7 +8645,7 @@ impl Evaluator {
                     } else {
                         eval_compiled(compiled, item, None, &self.options, self.start_time)?
                     };
-                    match predicate_index_match(&selector, index, len) {
+                    match predicate_index_match(reject_infinite(&selector)?, index, len) {
                         Some(n) => n,
                         None => usize::from(compiled_is_truthy(&selector)),
                     }
@@ -9043,7 +9066,7 @@ impl Evaluator {
                         check_loop_timeout(&evaluator.options, evaluator.start_time)?;
                         let pred_result =
                             evaluator.apply_function(func_node, &call_args, context_data)?;
-                        if evaluator.is_truthy(&pred_result) {
+                        if compiled_boolean(&pred_result)? {
                             result.insert(key.clone(), value.clone());
                         }
                     }
@@ -9319,7 +9342,7 @@ impl Evaluator {
                                     &self.options,
                                     self.start_time,
                                 )?;
-                                if compiled_is_truthy(&pred_result) {
+                                if compiled_boolean(&pred_result)? {
                                     result.push(item.clone());
                                 }
                             }
@@ -9343,7 +9366,7 @@ impl Evaluator {
                                         &self.options,
                                         self.start_time,
                                     )?;
-                                    if compiled_is_truthy(&pred_result) {
+                                    if compiled_boolean(&pred_result)? {
                                         result.push(item.clone());
                                     }
                                 }
@@ -9369,7 +9392,7 @@ impl Evaluator {
 
                     check_loop_timeout(&self.options, self.start_time)?;
                     let predicate_result = self.apply_function(&args[1], &call_args, data)?;
-                    if self.is_truthy(&predicate_result) {
+                    if compiled_boolean(&predicate_result)? {
                         result.push(item.clone());
                     }
                 }
@@ -9585,7 +9608,7 @@ impl Evaluator {
                             hof_array_call_args(item, index, arr_value.as_ref(), param_count);
                         check_loop_timeout(&self.options, self.start_time)?;
                         let predicate_result = self.apply_function(&args[1], &call_args, data)?;
-                        if self.is_truthy(&predicate_result) {
+                        if compiled_boolean(&predicate_result)? {
                             matches.push(item.clone());
                         }
                     }
@@ -10305,7 +10328,7 @@ impl Evaluator {
                 else_branch,
             } => {
                 let cond_value = self.evaluate_internal(condition, data)?;
-                let is_truthy = self.is_truthy(&cond_value);
+                let is_truthy = compiled_boolean(&cond_value)?;
 
                 if is_truthy {
                     self.evaluate_for_tco(then_branch, data)
