@@ -135,6 +135,9 @@ CLAIMS: list[Claim] = [
     Claim("docs/compatibility.md", r"\*\*Total Tests\*\*: (?P<total>\d+)", {"total": "total"}),
     Claim("docs/compatibility.md", r"\*\*Passing\*\*: (?P<passing>\d+) \(", {"passing": "passing"}),
     Claim(
+        "docs/compatibility.md", r"\*\*Known divergences\*\*: (?P<xfail>\d+), ", {"xfail": "xfail"}
+    ),
+    Claim(
         "docs/compatibility.md",
         r"Official jsonata-js repository \(v(?P<version>[\d.]+)\)",
         {"version": "version"},

@@ -1358,7 +1358,7 @@ pub mod boolean {
         match value {
             JValue::Null | JValue::Undefined => false,
             JValue::Bool(b) => *b,
-            JValue::Number(n) => *n != 0.0,
+            JValue::Number(n) => *n != 0.0 && !n.is_nan(), // NaN is false in jsonata-js
             JValue::String(s) => !s.is_empty(),
             JValue::Array(arr) => {
                 with_stack(|| {

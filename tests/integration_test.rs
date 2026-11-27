@@ -5003,8 +5003,9 @@ fn test_call_of_non_function_fails_when_run() {
         ("1(?)", "T1008"),
         ("a.b.2(?)", "T1008"),
         (r#"|x|{"z":1}|($).x.z"#, "Ok(1)"),
-        // `#` after `#` replaces the step's index, as in jsonata-js.
-        ("a#$i#$j.[$i,$j]", "Ok(0)"),
+        // `#` after `#` replaces the step's index, as in jsonata-js; the
+        // constructed array stays one value of the stream (jsonata-js 2.3.0).
+        ("a#$i#$j.[$i,$j]", "Ok([0])"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);

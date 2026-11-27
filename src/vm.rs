@@ -231,7 +231,7 @@ fn run_inner(
 ) -> Result<JValue, EvaluatorError> {
     use crate::builtins::dispatch_pure;
     use crate::evaluator::{
-        compiled_arithmetic, compiled_concat, compiled_equal, compiled_is_truthy,
+        compiled_arithmetic, compiled_boolean, compiled_concat, compiled_equal, compiled_is_truthy,
         compiled_not_equal, compiled_ordered_cmp, CompiledArithOp,
     };
 
@@ -420,7 +420,7 @@ fn run_inner(
             // ── Logical / string ─────────────────────────────────────
             Instr::Not => {
                 let val = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(JValue::Bool(!compiled_is_truthy(&val)));
+                stack.push(JValue::Bool(!compiled_boolean(&val)?));
                 ip += 1;
             }
             Instr::Negate => {
@@ -449,7 +449,7 @@ fn run_inner(
             }
             Instr::JumpIfFalsy(offset) => {
                 let val = stack.pop().unwrap_or(JValue::Undefined);
-                if !compiled_is_truthy(&val) {
+                if !compiled_boolean(&val)? {
                     ip = (ip as isize + 1 + *offset as isize) as usize;
                 } else {
                     ip += 1;
@@ -457,7 +457,7 @@ fn run_inner(
             }
             Instr::JumpIfTruthy(offset) => {
                 let val = stack.pop().unwrap_or(JValue::Undefined);
-                if compiled_is_truthy(&val) {
+                if compiled_boolean(&val)? {
                     ip = (ip as isize + 1 + *offset as isize) as usize;
                 } else {
                     ip += 1;

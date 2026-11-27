@@ -2,7 +2,7 @@
 Test adapter for the JSONata reference test suite.
 
 This module loads and runs all 1972 test cases from the reference JavaScript JSONata
-implementation (jsonata-js v2.3.0). 1803 pass; the rest are listed below, with reasons, in
+implementation (jsonata-js v2.3.0). 1824 pass; the rest are listed below, with reasons, in
 KNOWN_DIVERGENCES (strict xfail) and KNOWN_HANGS (skipped). Both shrink to empty as the
 jsonata-js 2.3.0 changes land. See
 docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md and
@@ -121,12 +121,6 @@ _UNDEFINED_PATTERN = "$split/$replace give undefined for an undefined pattern (j
 # carries no code for the suite to compare. That is not a known divergence, it
 # is an unverified case -- counted by UNVERIFIED_ERROR_CEILING below.
 KNOWN_DIVERGENCES: dict[str, str] = {
-    "array-constructor/tuple-arrays[0]": _TUPLE_ARRAYS,
-    "array-constructor/tuple-arrays[1]": _TUPLE_ARRAYS,
-    "boolean-expresssions/issue765[10]": _BOOLEAN_OPERAND_ERRORS,
-    "boolean-expresssions/issue765[11]": _BOOLEAN_OPERAND_ERRORS,
-    "boolean-expresssions/issue765[12]": _BOOLEAN_OPERAND_ERRORS,
-    "boolean-expresssions/issue765[13]": _BOOLEAN_OPERAND_ERRORS,
     "function-eval/case009": _TEMPLATE_STRINGS,
     "function-formatNumber/issue865[0]": _FORMAT_NUMBER_DIGITS,
     "function-formatNumber/issue865[1]": _FORMAT_NUMBER_DIGITS,
@@ -168,8 +162,6 @@ KNOWN_DIVERGENCES: dict[str, str] = {
     "function-fromMillis/outOfRange[1]": _DATETIME_REWRITE,
     "function-parseInteger/digitFamily[1]": _DATETIME_REWRITE,
     "function-parseInteger/groupingSeparators[1]": _DATETIME_REWRITE,
-    "function-replace/case012": _UNDEFINED_PATTERN,
-    "function-split/case019": _UNDEFINED_PATTERN,
     "function-tomillis/issue852[0]": _OFFSET_MINUTES,
     "function-tomillis/issue852[1]": _OFFSET_MINUTES,
     "function-tomillis/issue852[2]": _OFFSET_MINUTES,
@@ -199,25 +191,12 @@ KNOWN_DIVERGENCES: dict[str, str] = {
     "function-tomillis/parseDateTime[93]": _DATETIME_REWRITE,
     "function-tomillis/parseDateTime[94]": _DATETIME_REWRITE,
     "function-tomillis/parseDateTime[102]": _DATETIME_REWRITE,
-    "multiple-array-selectors/case003[0]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[1]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[2]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[3]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[4]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[5]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[6]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[9]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[13]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[14]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[15]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[16]": _CHAINED_PREDICATES,
     "object-constructor/case027": _GROUPED_PATH_STEPS,
     "object-constructor/grouped-path-steps[0]": _GROUPED_PATH_STEPS,
     "object-constructor/grouped-path-steps[2]": _GROUPED_PATH_STEPS,
     "object-constructor/grouped-path-steps[3]": _GROUPED_PATH_STEPS,
     "object-constructor/grouped-path-steps[4]": _GROUPED_PATH_STEPS,
     "object-constructor/grouped-path-steps[5]": _GROUPED_PATH_STEPS,
-    "parent-operator/parent[2]": _TUPLE_ARRAYS,
     "template-strings/case000": _TEMPLATE_STRINGS,
     "template-strings/case001": _TEMPLATE_STRINGS,
     "template-strings/case002": _TEMPLATE_STRINGS,
