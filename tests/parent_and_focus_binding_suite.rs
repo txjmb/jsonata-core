@@ -116,6 +116,18 @@ fn run_case(case: &JsonValue, group_dir: &Path, dataset_dir: &Path) -> Result<()
 }
 
 fn run_group_file(path: &Path, group_dir: &Path, dataset_dir: &Path) -> (usize, Vec<String>) {
+    run_group_file_except(path, group_dir, dataset_dir, &[])
+}
+
+/// Like `run_group_file`, but does not run the cases at the indices in `skip`: the ones
+/// `KNOWN_DIVERGENCES` in tests/python/test_reference_suite.py lists for this file. The
+/// Python suite is where those are strict (an xfail that starts passing fails there).
+fn run_group_file_except(
+    path: &Path,
+    group_dir: &Path,
+    dataset_dir: &Path,
+    skip: &[usize],
+) -> (usize, Vec<String>) {
     let content = fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {path:?}: {e}"));
     let json: JsonValue =
         serde_json::from_str(&content).unwrap_or_else(|e| panic!("parsing {path:?}: {e}"));
@@ -126,6 +138,9 @@ fn run_group_file(path: &Path, group_dir: &Path, dataset_dir: &Path) -> (usize, 
 
     let mut failures = Vec::new();
     for (i, case) in cases.iter().enumerate() {
+        if skip.contains(&i) {
+            continue;
+        }
         if let Err(msg) = run_case(case, group_dir, dataset_dir) {
             let desc = case
                 .get("description")
@@ -137,7 +152,7 @@ fn run_group_file(path: &Path, group_dir: &Path, dataset_dir: &Path) -> (usize, 
             ));
         }
     }
-    (cases.len(), failures)
+    (cases.len() - skip.len(), failures)
 }
 
 fn groups_root() -> std::path::PathBuf {
@@ -151,8 +166,13 @@ fn dataset_dir() -> std::path::PathBuf {
 #[test]
 fn parent_operator() {
     let group_dir = groups_root().join("parent-operator");
-    let (total, failures) =
-        run_group_file(&group_dir.join("parent.json"), &group_dir, &dataset_dir());
+    // New in jsonata-js 2.3.0: constructed arrays kept in tuple results (#841).
+    let (total, failures) = run_group_file_except(
+        &group_dir.join("parent.json"),
+        &group_dir,
+        &dataset_dir(),
+        &[2],
+    );
     assert!(
         failures.is_empty(),
         "{}/{} failed:\n{}",

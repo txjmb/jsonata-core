@@ -1,7 +1,7 @@
 ## jsonatapy: source map
 
 Rust-based Python extension implementing JSONata (JSON query/transform language), targeting
-near-100% compatibility with the reference `jsonata-js` v2.2.2 test suite (1686/1686 passing).
+near-100% compatibility with the reference `jsonata-js` v2.3.0 test suite (1803/1972 passing).
 Two published artifacts from one codebase: `jsonata-core` (crates.io, pure Rust) and
 `jsonatapy` (PyPI, PyO3 wrapper). See root `CLAUDE.md` for full project charter/design goals —
 this memory only covers what CLAUDE.md omits or what changes faster than that doc.
@@ -14,7 +14,7 @@ this memory only covers what CLAUDE.md omits or what changes faster than that do
   `signature.rs`, `lib.rs` (PyO3 Python boundary).
 - `python/jsonatapy/` — thin Python package; `__init__.py` re-exports the compiled `_jsonatapy`
   extension module and adds optional orjson-backed `json_dumps`/`json_loads`.
-- `tests/jsonata-js/` — git submodule, the upstream JS reference suite (source of the 1686 cases).
+- `tests/jsonata-js/` — git submodule, the upstream JS reference suite (source of the 1972 cases).
 - `tests/python/test_reference_suite.py` — runs the submodule's cases against the compiled extension.
 - `tests/integration_test.rs` — Rust-side integration tests (separate from inline `#[cfg(test)]`).
 - `benchmarks/` — cross-language perf comparisons (Python/JS/Rust) driving the "faster than JS" claim.

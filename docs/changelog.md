@@ -16,7 +16,7 @@ The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) a
 
 jsonatapy tracks the [jsonata-js](https://github.com/jsonata-js/jsonata) reference implementation.
 
-**Current target version:** v2.2.2
+**Current target version:** v2.3.0
 
 ## Quick Links
 
