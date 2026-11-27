@@ -35,6 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (jsonata-js #838): `n.m{k: v}.a` is the group's `a` entry, and
     `o{c: b}.$keys()` lists the group's keys. `o.b{"k":$}[].k` used to be
     `{}`.
+  - `$formatNumber` formats the shortest decimal that converts back to the
+    number, as XPath F&O 3.1 section 4.7.5 says, and rounds that decimal
+    exactly (jsonata-js #868, #865). An exponent mantissa that rounds up is
+    scaled back down, so `$formatNumber(9.99, '0.0e0')` is `1.0e1`, not
+    `10.0e0`. Long fractions no longer show the double's binary value:
+    `$formatNumber(0.1 + 0.2, '0.##################')` is
+    `0.30000000000000004`, not `0.300000000000000044`.
+  - `$formatNumber` gives the `NaN` and `infinity` properties of the decimal
+    format for a NaN or infinite number from a binding, and for a number that
+    overflows when scaled by `%` or `‰`: `$formatNumber(1e308, '0%')` is
+    `Infinity%`. Both properties can be set in the options object.
+  - `$formatInteger` is exact above the 64-bit integer range (jsonata-js
+    #864): `$formatInteger(1e21, '#,##0')` is
+    `1,000,000,000,000,000,000,000`. It used to saturate at
+    `9,223,372,036,854,775,807`.
 
 ### Deprecated
 

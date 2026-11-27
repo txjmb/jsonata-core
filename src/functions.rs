@@ -1360,6 +1360,127 @@ pub mod boolean {
 }
 
 /// Built-in numeric functions
+/// Exact decimal arithmetic on the digits of a double, mirroring
+/// `decimalDigits`, `roundDecimalDigits` and `decimalDigitsToString` in
+/// jsonata-js's utils.js (2.3.0, #868).
+///
+/// XPath F&O 3.1 section 4.7.5 formats the decimal with the fewest digits that
+/// converts back to the double, and rounds that decimal. Working on those
+/// digits rather than on the double keeps scaling a mantissa by a power of ten
+/// and rounding it exact: `1.1` with twenty decimal places is
+/// `1.10000000000000000000`, not the binary value's `1.10000000000000008882`.
+pub(crate) mod decimal {
+    /// A decimal number: `digits` times ten to the power `exponent`. The
+    /// digits have no leading zeros, and zero is `"0"`.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) struct DecimalDigits {
+        pub digits: String,
+        pub exponent: i64,
+    }
+
+    /// The shortest round-trip decimal digits of a finite number, ignoring
+    /// its sign. Rust's `{:e}` gives the same digits as JavaScript's
+    /// `Number.prototype.toString`; only the trailing zeros, which don't
+    /// change the value, can differ.
+    pub(crate) fn decimal_digits(value: f64) -> DecimalDigits {
+        let text = format!("{:e}", value.abs());
+        let (mantissa, exp) = text.split_once('e').unwrap_or((text.as_str(), "0"));
+        let exp: i64 = exp.parse().unwrap_or(0);
+        let (int_part, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+        let digits = format!("{int_part}{fraction}");
+        let digits = digits.trim_start_matches('0');
+        if digits.is_empty() {
+            return DecimalDigits {
+                digits: "0".to_string(),
+                exponent: 0,
+            };
+        }
+        DecimalDigits {
+            digits: digits.to_string(),
+            exponent: exp - fraction.len() as i64,
+        }
+    }
+
+    /// Round half-to-even to `dp` decimal places.
+    pub(crate) fn round_decimal_digits(number: &DecimalDigits, dp: i64) -> DecimalDigits {
+        let drop_count = -number.exponent - dp;
+        if drop_count <= 0 {
+            return number.clone();
+        }
+        let drop_count = drop_count as usize;
+        let digits = format!(
+            "{}{}",
+            "0".repeat(drop_count.saturating_sub(number.digits.len())),
+            number.digits
+        );
+        let (kept, dropped) = digits.split_at(digits.len() - drop_count);
+        let last_kept = kept.bytes().last().map_or(0, |b| b - b'0');
+        let first_dropped = dropped.as_bytes()[0];
+        let round_up = first_dropped > b'5'
+            || (first_dropped == b'5'
+                && (dropped[1..].bytes().any(|b| b != b'0') || last_kept % 2 == 1));
+        let mut kept = kept.to_string();
+        if round_up {
+            // Add one to the kept digits.
+            let mut bytes = kept.into_bytes();
+            let mut ii = bytes.len();
+            while ii > 0 && bytes[ii - 1] == b'9' {
+                bytes[ii - 1] = b'0';
+                ii -= 1;
+            }
+            if ii == 0 {
+                bytes.insert(0, b'1');
+            } else {
+                bytes[ii - 1] += 1;
+            }
+            kept = String::from_utf8(bytes).unwrap_or_default();
+        }
+        let trimmed = kept.trim_start_matches('0');
+        DecimalDigits {
+            digits: if trimmed.is_empty() {
+                "0".to_string()
+            } else {
+                trimmed.to_string()
+            },
+            exponent: -dp,
+        }
+    }
+
+    /// Write the digits out in full, never in exponent notation, with exactly
+    /// `dp` decimal places. The digits must already be rounded to `dp`.
+    pub(crate) fn decimal_digits_to_string(number: &DecimalDigits, dp: usize) -> String {
+        let (integer_part, mut fractional_part) = if number.exponent >= 0 {
+            (
+                format!("{}{}", number.digits, "0".repeat(number.exponent as usize)),
+                String::new(),
+            )
+        } else {
+            let shift = (-number.exponent) as usize;
+            let digits = format!(
+                "{}{}",
+                "0".repeat(shift.saturating_sub(number.digits.len())),
+                number.digits
+            );
+            let split = digits.len() - shift;
+            (digits[..split].to_string(), digits[split..].to_string())
+        };
+        let integer_part = integer_part.trim_start_matches('0');
+        let integer_part = if integer_part.is_empty() {
+            "0"
+        } else {
+            integer_part
+        };
+        if fractional_part.len() < dp {
+            fractional_part.push_str(&"0".repeat(dp - fractional_part.len()));
+        }
+        if dp > 0 {
+            format!("{integer_part}.{fractional_part}")
+        } else {
+            integer_part.to_string()
+        }
+    }
+}
+
 pub mod numeric {
     use super::*;
 
@@ -1561,6 +1682,8 @@ pub mod numeric {
         let mut zero_digit = '0';
         let mut percent_symbol = "%".to_string();
         let mut per_mille_symbol = "\u{2030}".to_string();
+        let mut nan_symbol = "NaN".to_string();
+        let mut infinity_symbol = "Infinity".to_string();
         let digit_char = '#';
         let pattern_separator = ';';
 
@@ -1580,6 +1703,12 @@ pub mod numeric {
             }
             if let Some(JValue::String(s)) = opts.get("per-mille") {
                 per_mille_symbol = s.to_string();
+            }
+            if let Some(JValue::String(s)) = opts.get("NaN") {
+                nan_symbol = s.to_string();
+            }
+            if let Some(JValue::String(s)) = opts.get("infinity") {
+                infinity_symbol = s.to_string();
             }
         }
 
@@ -1602,6 +1731,12 @@ pub mod numeric {
             &per_mille_symbol,
         )?;
 
+        // Bullet 1: JSON can't hold NaN, but a caller's binding can. It is the
+        // NaN property alone, with no prefix or suffix.
+        if value.is_nan() {
+            return Ok(JValue::string(nan_symbol));
+        }
+
         // For negative numbers, use second pattern or add minus sign to first pattern
         let is_negative = value < 0.0;
         let mut abs_value = value.abs();
@@ -1620,6 +1755,7 @@ pub mod numeric {
             decimal_separator,
             grouping_separator,
             zero_digit,
+            &infinity_symbol,
         )?;
 
         // Add prefix/suffix and handle negative
@@ -1641,6 +1777,7 @@ pub mod numeric {
                     decimal_separator,
                     grouping_separator,
                     zero_digit,
+                    &infinity_symbol,
                 )?;
                 format!("{}{}{}", neg_parts.prefix, neg_formatted, neg_parts.suffix)
             } else {
@@ -1960,52 +2097,49 @@ pub mod numeric {
         decimal_sep: char,
         grouping_sep: char,
         zero_digit: char,
+        infinity_symbol: &str,
     ) -> Result<String, FunctionError> {
-        // Handle exponential notation
-        let (mantissa, exponent) = if parts.min_exponent_digits > 0 {
-            // Calculate mantissa and exponent: mantissa * 10^exponent = value
-            let max_mantissa = 10_f64.powi(parts.scaling_factor as i32);
-            let min_mantissa = 10_f64.powi(parts.scaling_factor as i32 - 1);
-
-            let mut m = value;
-            let mut e = 0_i32;
-
-            // Magnitudes, and the upper bound is strictly-greater: with
-            // `>=`, a picture of `"#.e0"` (scaling factor 0, so
-            // max_mantissa 1) pushed a value of exactly 1 to "0.1e1" where
-            // the reference leaves it at "1.0e0". Zero keeps exponent 0 --
-            // F&O bullet 5 says so, and the loops would not terminate.
-            if m != 0.0 {
-                while m.abs() < min_mantissa {
-                    m *= 10.0;
-                    e -= 1;
-                }
-                while m.abs() > max_mantissa {
-                    m /= 10.0;
-                    e += 1;
-                }
+        // Bullet 4: an infinite value, which includes a finite one that
+        // overflowed when scaled for a percent or per-mille sign.
+        if value.is_infinite() {
+            return Ok(infinity_symbol.to_string());
+        }
+        // Bullets 5 and 6 work on the decimal digits of the number, not on
+        // the double, so that scaling the mantissa and rounding it are both
+        // exact (jsonata-js #868).
+        let mut mantissa = decimal::decimal_digits(value);
+        let mut exponent: Option<i64> = None;
+        let scaling_factor = parts.scaling_factor as i64;
+        if parts.min_exponent_digits > 0 {
+            // mantissa * 10^exponent = value, with `scaling_factor` digits
+            // before the mantissa's decimal point. Zero keeps exponent 0.
+            let e = if mantissa.digits == "0" {
+                0
+            } else {
+                mantissa.digits.len() as i64 + mantissa.exponent - scaling_factor
+            };
+            mantissa.exponent -= e;
+            exponent = Some(e);
+        }
+        let dp = parts.max_fractional_digits as i64;
+        let mut rounded = decimal::round_decimal_digits(&mantissa, dp);
+        if let Some(e) = exponent.as_mut() {
+            if rounded.digits != "0"
+                && rounded.digits.len() as i64 + rounded.exponent > scaling_factor
+            {
+                // Rounding carried the mantissa up to 10^scaling_factor, so
+                // divide it by ten.
+                rounded = decimal::round_decimal_digits(
+                    &decimal::DecimalDigits {
+                        digits: rounded.digits,
+                        exponent: rounded.exponent - 1,
+                    },
+                    dp,
+                );
+                *e += 1;
             }
-
-            (m, Some(e))
-        } else {
-            (value, None)
-        };
-
-        // Round mantissa to max fractional digits.
-        //
-        // jsonata-js routes this through the same `round()` helper `$round`
-        // uses, which is half-to-EVEN. `f64::round` is half-away-from-zero, so
-        // `$formatNumber(0.25, "0.0")` came out "0.3" where the reference says
-        // "0.2", and `$formatNumber(12.345, "#,##0.00")` was "12.35" not
-        // "12.34" -- wrong numbers in ordinary pictures, not just edge cases
-        // (#136).
-        let rounded = match numeric::round(mantissa, Some(parts.max_fractional_digits as i32))? {
-            JValue::Number(n) => n,
-            _ => mantissa,
-        };
-
-        // Convert to string with fixed decimal places
-        let mut num_str = format!("{:.prec$}", rounded, prec = parts.max_fractional_digits);
+        }
+        let mut num_str = decimal::decimal_digits_to_string(&rounded, parts.max_fractional_digits);
 
         // Replace '.' with decimal separator
         if decimal_sep != '.' {

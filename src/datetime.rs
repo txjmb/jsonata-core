@@ -861,7 +861,13 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
             }
         }
         PrimaryFormat::Decimal => {
-            let mut digits = (value as i64).to_string();
+            // The shortest round-trip digits written out in full, as
+            // jsonata-js 2.3.0 does (#864, #868): exact above i64, where a
+            // cast would saturate.
+            let mut digits = crate::functions::decimal::decimal_digits_to_string(
+                &crate::functions::decimal::decimal_digits(value),
+                0,
+            );
             if format.mandatory_digits > digits.len() {
                 digits = format!(
                     "{}{}",
