@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated Rust dependencies: `regex` 1.13.1 → 1.13.2, `regex-syntax` 0.8.11 → 0.8.12,
+  `rand` 0.10.3 → 0.10.4 and `clap` 4.6.7 → 4.6.9. (#297)
+
 ### Deprecated
 
 ### Removed
