@@ -57,6 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `$formatNumber` scales a negative number by the percent or per-mille sign
+  of the sub-picture it uses: `$formatNumber(-0.5, "0;0%")` is `50%`, not
+  `0%`. Both sub-pictures are checked for errors whatever the number's sign,
+  so `$formatNumber(1, "0;0%e0")` raises D3092. With a custom `zero-digit`,
+  optional zeros are dropped as they are with `0`:
+  `$formatNumber(1.5, "#.##", {"zero-digit": "٠"})` is `١.٥`.
+
 ### Security
 
 ## [2.2.17] - 2026-11-28

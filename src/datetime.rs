@@ -821,9 +821,10 @@ fn analyse_integer_picture(picture: &str) -> Result<IntegerFormat, DateTimeError
 /// datetime.js's private `_formatInteger`).
 ///
 /// Takes `f64` (matching JS's Number type) rather than `i64` because the `words` format
-/// must support magnitudes far beyond `i64::MAX` (e.g. 1e46). Letters/roman/decimal are
-/// cast down to `i64` internally -- safe for the magnitudes they're actually specified
-/// and tested for (spreadsheet columns, roman numerals, decimal digit patterns).
+/// must support magnitudes far beyond `i64::MAX` (e.g. 1e46). Decimal digits, and roman
+/// numerals past their limit, are written from the number's shortest decimal digits, so
+/// they are exact at any magnitude. Letters and smaller roman numerals are cast down to
+/// `i64` internally -- safe for the magnitudes they're actually specified and tested for.
 fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, DateTimeError> {
     let negative = value < 0.0;
     let value = value.abs();
@@ -839,11 +840,15 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
         ),
         // There is no numeral larger than M, so a large number would be a
         // long run of them (1e15 is 1e12 Ms). Like jsonata-js 2.3.0, numbers
-        // above ten thousand Ms are formatted as plain decimal digits.
-        // f64's Display prints integers without an exponent and with the
-        // shortest round-trip digits, as jsonata-js's decimal digits do, so
-        // this is right above i64 too (unlike the Decimal arm, #864).
-        PrimaryFormat::Roman if value > MAX_ROMAN => format!("{}", value.trunc()),
+        // above ten thousand Ms are formatted as plain decimal digits, from
+        // the shortest round-trip digits like the Decimal arm (#864), and an
+        // infinite number as `Infinity`.
+        PrimaryFormat::Roman if value > MAX_ROMAN => {
+            crate::functions::decimal::decimal_digits_to_string(
+                &crate::functions::decimal::decimal_digits(value.trunc()),
+                0,
+            )
+        }
         PrimaryFormat::Roman => {
             let r = decimal_to_roman(value as i64);
             if format.case == TCase::Upper {
@@ -863,7 +868,8 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
         PrimaryFormat::Decimal => {
             // The shortest round-trip digits written out in full, as
             // jsonata-js 2.3.0 does (#864, #868): exact above i64, where a
-            // cast would saturate.
+            // cast would saturate. An infinite number is `Infinity`, which
+            // padding and grouping then treat as digits, as jsonata-js does.
             let mut digits = crate::functions::decimal::decimal_digits_to_string(
                 &crate::functions::decimal::decimal_digits(value),
                 0,
@@ -878,7 +884,13 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
             if format.zero_code != 0x30 {
                 digits = digits
                     .chars()
-                    .map(|c| char::from_u32(c as u32 + format.zero_code - 0x30).unwrap())
+                    .map(|c| {
+                        if c.is_ascii_digit() {
+                            char::from_u32(c as u32 + format.zero_code - 0x30).unwrap_or(c)
+                        } else {
+                            c
+                        }
+                    })
                     .collect();
             }
             // Insert the grouping-separator-signs, if any.

@@ -1359,7 +1359,6 @@ pub mod boolean {
     }
 }
 
-/// Built-in numeric functions
 /// Exact decimal arithmetic on the digits of a double, mirroring
 /// `decimalDigits`, `roundDecimalDigits` and `decimalDigitsToString` in
 /// jsonata-js's utils.js (2.3.0, #868).
@@ -1382,7 +1381,17 @@ pub(crate) mod decimal {
     /// its sign. Rust's `{:e}` gives the same digits as JavaScript's
     /// `Number.prototype.toString`; only the trailing zeros, which don't
     /// change the value, can differ.
+    ///
+    /// A non-finite number gives the text JavaScript's `toString` gives it,
+    /// `Infinity` or `NaN`, as its "digits", which is what jsonata-js's
+    /// `$formatInteger` then writes out.
     pub(crate) fn decimal_digits(value: f64) -> DecimalDigits {
+        if !value.is_finite() {
+            return DecimalDigits {
+                digits: if value.is_nan() { "NaN" } else { "Infinity" }.to_string(),
+                exponent: 0,
+            };
+        }
         let text = format!("{:e}", value.abs());
         let (mantissa, exp) = text.split_once('e').unwrap_or((text.as_str(), "0"));
         let exp: i64 = exp.parse().unwrap_or(0);
@@ -1481,6 +1490,7 @@ pub(crate) mod decimal {
     }
 }
 
+/// Built-in numeric functions
 pub mod numeric {
     use super::*;
 
@@ -1720,16 +1730,20 @@ pub mod numeric {
             ));
         }
 
-        // Parse and analyze the picture string
-        let parts = parse_picture(
-            sub_pictures[0],
-            decimal_separator,
-            grouping_separator,
-            zero_digit,
-            digit_char,
-            &percent_symbol,
-            &per_mille_symbol,
-        )?;
+        // Parse and analyze every sub-picture before formatting: jsonata-js
+        // raises a bad picture's error (D3080-D3093) whatever the value.
+        let mut pictures = Vec::with_capacity(sub_pictures.len());
+        for sub_picture in &sub_pictures {
+            pictures.push(parse_picture(
+                sub_picture,
+                decimal_separator,
+                grouping_separator,
+                zero_digit,
+                digit_char,
+                &percent_symbol,
+                &per_mille_symbol,
+            )?);
+        }
 
         // Bullet 1: JSON can't hold NaN, but a caller's binding can. It is the
         // NaN property alone, with no prefix or suffix.
@@ -1737,56 +1751,32 @@ pub mod numeric {
             return Ok(JValue::string(nan_symbol));
         }
 
-        // For negative numbers, use second pattern or add minus sign to first pattern
+        // Bullet 2: a negative number uses the second sub-picture, or the
+        // first with a minus sign before its prefix.
         let is_negative = value < 0.0;
-        let mut abs_value = value.abs();
+        let (parts, minus) = match (is_negative, pictures.get(1)) {
+            (true, Some(neg_parts)) => (neg_parts, ""),
+            (true, None) => (&pictures[0], "-"),
+            (false, _) => (&pictures[0], ""),
+        };
 
-        // Apply percent or per-mille scaling
+        // Bullet 3: the chosen sub-picture's percent or per-mille scaling.
+        let mut abs_value = value.abs();
         if parts.has_percent {
             abs_value *= 100.0;
         } else if parts.has_per_mille {
             abs_value *= 1000.0;
         }
 
-        // Apply the pattern
         let formatted = apply_number_picture(
             abs_value,
-            &parts,
+            parts,
             decimal_separator,
             grouping_separator,
             zero_digit,
             &infinity_symbol,
         )?;
-
-        // Add prefix/suffix and handle negative
-        let result = if is_negative {
-            if sub_pictures.len() == 2 {
-                // Use second pattern for negatives
-                let neg_parts = parse_picture(
-                    sub_pictures[1],
-                    decimal_separator,
-                    grouping_separator,
-                    zero_digit,
-                    digit_char,
-                    &percent_symbol,
-                    &per_mille_symbol,
-                )?;
-                let neg_formatted = apply_number_picture(
-                    abs_value,
-                    &neg_parts,
-                    decimal_separator,
-                    grouping_separator,
-                    zero_digit,
-                    &infinity_symbol,
-                )?;
-                format!("{}{}{}", neg_parts.prefix, neg_formatted, neg_parts.suffix)
-            } else {
-                // Add minus sign to prefix
-                format!("-{}{}{}", parts.prefix, formatted, parts.suffix)
-            }
-        } else {
-            format!("{}{}{}", parts.prefix, formatted, parts.suffix)
-        };
+        let result = format!("{}{}{}{}", minus, parts.prefix, formatted, parts.suffix);
 
         Ok(JValue::string(result))
     }
@@ -2155,8 +2145,12 @@ pub mod numeric {
             String::new()
         };
 
+        // The digits are ASCII until the zero-digit family is applied below,
+        // so trim and pad with ASCII '0': comparing against a custom zero
+        // digit never matched, and `$formatNumber(0.5, "#.\u{660}",
+        // {"zero-digit":"\u{660}"})` kept a leading zero jsonata-js drops.
         // Strip leading zeros from integer part
-        while integer_str.len() > 1 && integer_str.starts_with(zero_digit) {
+        while integer_str.len() > 1 && integer_str.starts_with('0') {
             integer_str.remove(0);
         }
         // Whether a lone zero is shown is decided by the *minimum* integer
@@ -2165,31 +2159,31 @@ pub mod numeric {
         // adjustments leave the minimum at zero, so `$formatNumber(0.25,
         // "#.#")` is ".2" -- no leading zero. `"#"` alone is different: the
         // adjustment raises its minimum to 1, so it keeps the "0".
-        if integer_str == zero_digit.to_string() && parts.min_integer_digits == 0 {
+        if integer_str == "0" && parts.min_integer_digits == 0 {
             integer_str.clear();
         }
         if integer_str.is_empty() && parts.min_integer_digits > 0 {
-            integer_str.push(zero_digit);
+            integer_str.push('0');
         }
 
         // Strip trailing zeros from fractional part
-        while !fractional_str.is_empty() && fractional_str.ends_with(zero_digit) {
+        while !fractional_str.is_empty() && fractional_str.ends_with('0') {
             fractional_str.pop();
         }
 
         // Pad integer part to minimum size
         while integer_str.len() < parts.min_integer_digits {
-            integer_str.insert(0, zero_digit);
+            integer_str.insert(0, '0');
         }
 
         // Pad fractional part to minimum size
         while fractional_str.len() < parts.min_fractional_digits {
-            fractional_str.push(zero_digit);
+            fractional_str.push('0');
         }
 
         // Trim trailing zeros beyond minimum (for optional # digits)
         while fractional_str.len() > parts.min_fractional_digits {
-            if fractional_str.ends_with(zero_digit) {
+            if fractional_str.ends_with('0') {
                 fractional_str.pop();
             } else {
                 break;
@@ -2748,6 +2742,58 @@ pub mod encoding {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod decimal_digits {
+        use super::super::decimal::*;
+
+        fn dd(digits: &str, exponent: i64) -> DecimalDigits {
+            DecimalDigits {
+                digits: digits.to_string(),
+                exponent,
+            }
+        }
+
+        #[test]
+        fn shortest_digits() {
+            assert_eq!(decimal_digits(0.0), dd("0", 0));
+            assert_eq!(decimal_digits(-0.0), dd("0", 0));
+            assert_eq!(decimal_digits(123.0), dd("123", 0));
+            assert_eq!(decimal_digits(-1.5), dd("15", -1));
+            assert_eq!(decimal_digits(1e21), dd("1", 21));
+            assert_eq!(decimal_digits(0.1 + 0.2), dd("30000000000000004", -17));
+            assert_eq!(decimal_digits(5e-324), dd("5", -324));
+            assert_eq!(decimal_digits(f64::INFINITY), dd("Infinity", 0));
+            assert_eq!(decimal_digits(f64::NAN), dd("NaN", 0));
+        }
+
+        #[test]
+        fn rounds_half_to_even() {
+            assert_eq!(round_decimal_digits(&dd("25", -2), 1), dd("2", -1));
+            assert_eq!(round_decimal_digits(&dd("35", -2), 1), dd("4", -1));
+            assert_eq!(round_decimal_digits(&dd("251", -3), 1), dd("3", -1));
+            // A carry into a new digit.
+            assert_eq!(round_decimal_digits(&dd("99995", -3), 2), dd("10000", -2));
+            // Every digit dropped.
+            assert_eq!(round_decimal_digits(&dd("5", -7), 6), dd("0", -6));
+            assert_eq!(round_decimal_digits(&dd("15", -7), 6), dd("2", -6));
+            assert_eq!(round_decimal_digits(&dd("4", -9), 2), dd("0", -2));
+            // Nothing to drop.
+            assert_eq!(round_decimal_digits(&dd("1", 21), 2), dd("1", 21));
+        }
+
+        #[test]
+        fn writes_digits_in_full() {
+            assert_eq!(
+                decimal_digits_to_string(&dd("1", 21), 0),
+                "1000000000000000000000"
+            );
+            assert_eq!(decimal_digits_to_string(&dd("1", 3), 2), "1000.00");
+            assert_eq!(decimal_digits_to_string(&dd("5", -3), 3), "0.005");
+            assert_eq!(decimal_digits_to_string(&dd("15", -1), 3), "1.500");
+            assert_eq!(decimal_digits_to_string(&dd("0", -2), 2), "0.00");
+            assert_eq!(decimal_digits_to_string(&dd("0", 0), 0), "0");
+        }
+    }
 
     // ===== String Functions Tests =====
 
