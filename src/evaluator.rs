@@ -9853,8 +9853,12 @@ impl Evaluator {
         // is then never part of it, and an input that holds one object at
         // two places gets an object for each place, as in jsonata-js.
         let copy = transform_unshare(input)?;
-        let mut tree =
-            TransformTree::build(&copy).expect("a fresh copy holds each object at one place only");
+        let mut tree = TransformTree::build(&copy).ok_or_else(|| {
+            // A fresh copy holds each object at one place only.
+            EvaluatorError::EvaluationError(
+                "internal error: the transform's copy shares an object".to_string(),
+            )
+        })?;
 
         // `$` in the location is the copy, as in jsonata-js.
         let matches = self.with_dollar(&copy, |ev| ev.evaluate_internal(location, &copy))?;
@@ -9865,22 +9869,30 @@ impl Evaluator {
         };
 
         // Only the copy can be changed, so check every match before changing
-        // any of them (jsonata-js 2.3.0 D1014): an object the location built
-        // or found outside the input, such as `{}` or `$merge([a])`, is not
-        // part of the result.
+        // any of them (jsonata-js 2.3.0 D1014): an object, array or function
+        // the location built or found outside the input, such as `{}`,
+        // `$merge([a])` or `$string`, is not part of the result.
+        let outside_copy = || {
+            EvaluatorError::EvaluationError(
+                "D1014: The location in a transform expression can only match objects in the copy that is being transformed".to_string(),
+            )
+        };
         let mut targets: Vec<Option<usize>> = Vec::with_capacity(matches.len());
         for matched in &matches {
             match matched {
-                JValue::Object(map) => match tree.node_of(map) {
-                    Some(id) => targets.push(Some(id)),
-                    None => {
-                        return Err(EvaluatorError::EvaluationError(
-                            "D1014: The location in a transform expression can only match objects in the copy that is being transformed".to_string(),
-                        ))
-                    }
-                },
-                // Arrays and other values have no fields to change; jsonata-js
-                // ignores them too (its assignments to them are not visible).
+                JValue::Object(map) => {
+                    targets.push(Some(tree.node_of(map).ok_or_else(outside_copy)?))
+                }
+                // An array of the copy has no fields to change; jsonata-js
+                // ignores it too (its assignments to it are not visible).
+                JValue::Array(arr) if tree.has_array(arr) => targets.push(None),
+                JValue::Array(_)
+                | JValue::Lambda(_)
+                | JValue::Builtin { .. }
+                | JValue::Regex { .. } => return Err(outside_copy()),
+                #[cfg(feature = "python")]
+                JValue::LazyPyDict(_) => return Err(outside_copy()),
+                // Scalars have nothing to change.
                 _ => targets.push(None),
             }
         }
@@ -12351,8 +12363,7 @@ enum TransformSlot {
 
 enum TransformNodeKind {
     Object(IndexMap<String, TransformSlot>),
-    /// The items, and the input array (for its flags).
-    Array(Vec<TransformSlot>, JArray),
+    Array(Vec<TransformSlot>),
 }
 
 struct TransformNode {
@@ -12374,6 +12385,8 @@ struct TransformTree {
     nodes: Vec<TransformNode>,
     /// `Rc` pointer of each input object -> its node.
     objects: HashMap<usize, usize>,
+    /// Items pointer of every input array, with objects in it or not.
+    arrays: HashSet<usize>,
 }
 
 impl TransformTree {
@@ -12385,18 +12398,13 @@ impl TransformTree {
         let mut tree = TransformTree {
             nodes: Vec::new(),
             objects: HashMap::new(),
+            arrays: HashSet::new(),
         };
-        let mut arrays: HashSet<usize> = HashSet::new();
-        tree.add(input, None, &mut arrays)?;
+        tree.add(input, None)?;
         Some(tree)
     }
 
-    fn add(
-        &mut self,
-        value: &JValue,
-        parent: Option<usize>,
-        arrays: &mut HashSet<usize>,
-    ) -> Option<TransformSlot> {
+    fn add(&mut self, value: &JValue, parent: Option<usize>) -> Option<TransformSlot> {
         match value {
             JValue::Object(map) => {
                 let id = self.nodes.len();
@@ -12410,32 +12418,32 @@ impl TransformTree {
                 });
                 let mut fields = IndexMap::with_capacity(map.len());
                 for (k, v) in map.iter() {
-                    fields.insert(k.clone(), self.add(v, Some(id), arrays)?);
+                    fields.insert(k.clone(), self.add(v, Some(id))?);
                 }
                 self.nodes[id].kind = TransformNodeKind::Object(fields);
                 Some(TransformSlot::Node(id))
             }
-            // An array holding no object or array has nothing to match --
-            // unless it is the input itself, which is always node 0.
-            JValue::Array(arr) if parent.is_some() && !arr.iter().any(transform_container) => {
-                Some(TransformSlot::Value(value.clone()))
-            }
             JValue::Array(arr) => {
                 // A shared array would put its objects at two places too.
-                if !arrays.insert(Rc::as_ptr(arr.items_rc()) as usize) {
+                if !self.arrays.insert(Rc::as_ptr(arr.items_rc()) as usize) {
                     return None;
+                }
+                // An array holding no object or array has nothing to match --
+                // unless it is the input itself, which is always node 0.
+                if parent.is_some() && !arr.iter().any(transform_container) {
+                    return Some(TransformSlot::Value(value.clone()));
                 }
                 let id = self.nodes.len();
                 self.nodes.push(TransformNode {
-                    kind: TransformNodeKind::Array(Vec::new(), arr.clone()),
+                    kind: TransformNodeKind::Array(Vec::new()),
                     original: Some(value.clone()),
                     parent,
                 });
                 let mut items = Vec::with_capacity(arr.len());
                 for v in arr.iter() {
-                    items.push(self.add(v, Some(id), arrays)?);
+                    items.push(self.add(v, Some(id))?);
                 }
-                self.nodes[id].kind = TransformNodeKind::Array(items, arr.clone());
+                self.nodes[id].kind = TransformNodeKind::Array(items);
                 Some(TransformSlot::Node(id))
             }
             #[cfg(feature = "python")]
@@ -12447,6 +12455,11 @@ impl TransformTree {
     /// The node of the input object `map`, if it is one.
     fn node_of(&self, map: &Rc<crate::value::JMap>) -> Option<usize> {
         self.objects.get(&(Rc::as_ptr(map) as usize)).copied()
+    }
+
+    /// Whether `arr` is one of the input's arrays (shares its items).
+    fn has_array(&self, arr: &JArray) -> bool {
+        self.arrays.contains(&(Rc::as_ptr(arr.items_rc()) as usize))
     }
 
     /// Mark `id` and the nodes holding it as changed.
@@ -12506,13 +12519,11 @@ impl TransformTree {
                     .map(|(k, slot)| (k.clone(), self.materialize_slot(slot)))
                     .collect(),
             ),
-            TransformNodeKind::Array(items, arr) => JValue::Array(
-                arr.with_items(
-                    items
-                        .iter()
-                        .map(|slot| self.materialize_slot(slot))
-                        .collect(),
-                ),
+            TransformNodeKind::Array(items) => JValue::array(
+                items
+                    .iter()
+                    .map(|slot| self.materialize_slot(slot))
+                    .collect(),
             ),
         }
     }
@@ -12550,7 +12561,9 @@ fn transform_unshare(value: &JValue) -> Result<JValue, EvaluatorError> {
                 .iter()
                 .map(transform_unshare)
                 .collect::<Result<Vec<_>, EvaluatorError>>()?;
-            JValue::Array(arr.with_items(items))
+            // Plain arrays, as jsonata-js's JSON copy makes: the evaluator's
+            // flags (sequence, keep-singleton...) are not part of the value.
+            JValue::array(items)
         }
         #[cfg(feature = "python")]
         JValue::LazyPyDict(_) => transform_unshare(&normalize_lazy(value)?)?,
@@ -12609,6 +12622,8 @@ mod tests {
             r#"{"a":{"b":1}} ~> | $merge([a]) | {"x":1} |"#,
             // `$o` is the object the input holds, but not the copy's.
             r#"($o := {"a":1}; {"b":$o} ~> | $o | {"x":2} |)"#,
+            r#"{"a":1} ~> | [[{}]] | {"x":1} |"#,
+            r#"{"a":1} ~> | $string | {"x":1} |"#,
         ] {
             let err = eval_transform(expr).unwrap_err();
             assert!(err.starts_with("D1014"), "{expr}: {err}");

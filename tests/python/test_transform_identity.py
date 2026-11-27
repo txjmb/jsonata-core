@@ -71,6 +71,9 @@ PATHS = [
         ('[] ~> | $ | {"x":1} |', []),
         ('[1,2] ~> | foo | {"x":1} |', [1, 2]),
         ('[{"a":1}] ~> | $ | {"x":1} |', [{"a": 1, "x": 1}]),
+        # Arrays of the copy are accepted and left as they are.
+        ('{"a":[[1,2],[3]]} ~> | a | {"x":1} |', {"a": [[1, 2], [3]]}),
+        ('{"a":[[1]]} ~> | [a] | {"x":1} |', {"a": [[1]]}),
     ],
 )
 def test_transform_matches_by_identity(expr, expected, bindings):
@@ -109,6 +112,9 @@ def test_bound_transform_applies_per_item(bindings):
         '{"a":{"b":1}} ~> | $merge([a]) | {"x":1} |',
         # `$o` is the object the input holds, but not the copy's.
         '($o := {"a":1}; {"b":$o} ~> | $o | {"x":2} |)',
+        # Arrays and functions outside the copy count too.
+        '{"a":1} ~> | [[{}]] | {"x":1} |',
+        '{"a":1} ~> | $string | {"x":1} |',
     ],
 )
 def test_location_outside_the_copy_raises_d1014(expr, bindings):
