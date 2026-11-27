@@ -122,13 +122,8 @@ def test_parse_integer_ascii_digits_with_other_family_picture(bindings):
 @pytest.mark.parametrize("bindings", PATHS)
 def test_other_digit_families_still_work(bindings):
     assert _eval("$parseInteger('\u0661\u0662', '\u0661')", bindings=bindings) == 12
-    assert (
-        _eval("$formatInteger(12, '\u0660\u0661')", bindings=bindings) == "\u0661\u0662"
-    )
-    assert (
-        _eval("$fromMillis(0, '[Y\u0661]')", bindings=bindings)
-        == "\u0661\u0669\u0667\u0660"
-    )
+    assert _eval("$formatInteger(12, '\u0660\u0661')", bindings=bindings) == "\u0661\u0662"
+    assert _eval("$fromMillis(0, '[Y\u0661]')", bindings=bindings) == "\u0661\u0669\u0667\u0660"
 
 
 # ── Fractional seconds as a name ────────────────────────────────────────────
@@ -172,7 +167,4 @@ def test_invalid_picture_still_raises_before_size_check(bindings):
 
 @pytest.mark.parametrize("bindings", PATHS)
 def test_ordinary_parsing_unchanged(bindings):
-    assert (
-        _eval("$toMillis('2024-01-02', '[Y]-[M]-[D]')", bindings=bindings)
-        == 1704153600000
-    )
+    assert _eval("$toMillis('2024-01-02', '[Y]-[M]-[D]')", bindings=bindings) == 1704153600000
