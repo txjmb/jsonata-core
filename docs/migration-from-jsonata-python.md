@@ -41,7 +41,7 @@ jsonata-python uses PyExecJS to embed a JavaScript engine:
 -**Zero Dependencies**: No Node.js, no JS engine required
 -**Pre-compilation**: Compile once, evaluate many times
 -**Optimized APIs**: JSON string API, pre-converted data handles
--**Highly Compatible**: Passes 1824/1972 reference test suite tests
+-**Highly Compatible**: Passes 1830/1972 reference test suite tests
 
 ## API Differences
 
@@ -373,7 +373,7 @@ results = process_records(records, 'value * 2')  # ~0.2 seconds!
 
 ### Full Language Compatibility
 
-jsonatapy implements the JSONata 2.3.0 specification (1824/1972 reference tests passing):
+jsonatapy implements the JSONata 2.3.0 specification (1830/1972 reference tests passing):
 
 -All built-in functions (40+)
 -Lambda functions and closures
@@ -386,7 +386,7 @@ jsonatapy implements the JSONata 2.3.0 specification (1824/1972 reference tests 
 
 ### Test Suite Compatibility
 
-jsonatapy passes **1824/1972** (92%) of the official JSONata reference test suite.
+jsonatapy passes **1830/1972** (93%) of the official JSONata reference test suite.
 
 ### No Breaking Changes to JSONata Syntax
 

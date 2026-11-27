@@ -483,7 +483,7 @@ fn evaluate_conditional(ctx: &mut Context, cond: &AstNode,
 
 3. **Reference Test Suite** (1972 tests)
    - Official JSONata compatibility tests
-   - 1824/1972 pass rate
+   - 1830/1972 pass rate
 
 ### Test Coverage
 
