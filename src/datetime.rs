@@ -889,13 +889,9 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
             if format.zero_code != 0x30 {
                 digits = digits
                     .chars()
-                    .map(|c| {
-                        if c.is_ascii_digit() {
-                            char::from_u32(c as u32 + format.zero_code - 0x30).unwrap_or(c)
-                        } else {
-                            c
-                        }
-                    })
+                    // Every character moves by the family's offset, as in
+                    // jsonata-js: the "digits" of NaN and Infinity too.
+                    .map(|c| char::from_u32(c as u32 + format.zero_code - 0x30).unwrap_or(c))
                     .collect();
             }
             // Insert the grouping-separator-signs, if any.
@@ -1387,12 +1383,15 @@ fn two_digit_decimal_format() -> IntegerFormat {
     analyse_integer_picture("00").expect("static pattern is always valid")
 }
 
+/// `offset_hours` and `offset_minutes` are NaN for a timezone that isn't a
+/// number, as in jsonata-js: the sign is then `+`, the minutes are always
+/// written, and `t` never makes it `Z`.
 fn format_timezone_component(
-    offset_hours: i64,
-    offset_minutes: i64,
+    offset_hours: f64,
+    offset_minutes: f64,
     marker: &MarkerSpec,
 ) -> Result<String, DateTimeError> {
-    let offset = offset_hours * 100 + offset_minutes;
+    let offset = offset_hours * 100.0 + offset_minutes;
     let fmt = marker
         .integer_format
         .as_ref()
@@ -1402,31 +1401,32 @@ fn format_timezone_component(
     // the parts are formatted as magnitudes: -03:30, not -3:-30 (jsonata-js
     // 2.3.0, #856).
     let mut component_value = if fmt.regular {
-        format_integer_value(offset.abs() as f64, fmt)?
+        format_integer_value(offset.abs(), fmt)?
     } else {
         let num_digits = fmt.mandatory_digits;
         if num_digits == 1 || num_digits == 2 {
-            let mut cv = format_integer_value(offset_hours.abs() as f64, fmt)?;
-            if offset_minutes != 0 {
+            let mut cv = format_integer_value(offset_hours.abs(), fmt)?;
+            // `NaN !== 0` in jsonata-js, so NaN minutes are written too.
+            if offset_minutes != 0.0 {
                 cv.push(':');
                 cv.push_str(&format_integer_value(
-                    offset_minutes.abs() as f64,
+                    offset_minutes.abs(),
                     &two_digit_decimal_format(),
                 )?);
             }
             cv
         } else if num_digits == 3 || num_digits == 4 {
-            format_integer_value(offset.abs() as f64, fmt)?
+            format_integer_value(offset.abs(), fmt)?
         } else {
             return Err(coded("D3134", num_digits.to_string()));
         }
     };
 
-    component_value = format!("{}{component_value}", if offset < 0 { '-' } else { '+' });
+    component_value = format!("{}{component_value}", if offset < 0.0 { '-' } else { '+' });
     if marker.component == 'z' {
         component_value = format!("GMT{component_value}");
     }
-    if offset == 0 && marker.presentation2 == Some('t') {
+    if offset == 0.0 && marker.presentation2 == Some('t') {
         component_value = "Z".to_string();
     }
 
@@ -1438,8 +1438,8 @@ fn format_timezone_component(
 /// words, roman numerals and letters as empty strings.
 fn format_component(
     local_millis: Option<i64>,
-    offset_hours: i64,
-    offset_minutes: i64,
+    offset_hours: f64,
+    offset_minutes: f64,
     marker: &MarkerSpec,
 ) -> Result<String, DateTimeError> {
     if marker.component == 'Z' || marker.component == 'z' {
@@ -1643,6 +1643,12 @@ fn format_date_time(
 ) -> Result<String, DateTimeError> {
     let parsed_offset = parse_timezone_offset(timezone);
     let (offset_hours, offset_minutes) = parsed_offset.unwrap_or((0, 0));
+    // jsonata-js's NaN offset, for the timezone markers. A number too large
+    // for i64 is NaN here too, where jsonata-js would still format it.
+    let (tz_hours, tz_minutes) = match parsed_offset {
+        Some((h, m)) => (h as f64, m as f64),
+        None => (f64::NAN, f64::NAN),
+    };
 
     let owned_spec;
     let spec: &Vec<PictureItem> = match picture {
@@ -1672,12 +1678,7 @@ fn format_date_time(
         match item {
             PictureItem::Literal(s) => result.push_str(s),
             PictureItem::Marker(m) => {
-                result.push_str(&format_component(
-                    local_millis,
-                    offset_hours,
-                    offset_minutes,
-                    m,
-                )?);
+                result.push_str(&format_component(local_millis, tz_hours, tz_minutes, m)?);
             }
         }
     }

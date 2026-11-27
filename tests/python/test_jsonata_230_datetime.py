@@ -63,6 +63,15 @@ def test_fractional_seconds(engine, expr, expected):
         ('$fromMillis(1e20, "[f001]")', "NaN"),
         ('$fromMillis(1, "[Y]", "abc")', "NaN"),
         ('$fromMillis(1e19, "[Y]", "+0100")', "NaN"),
+        # A timezone that isn't a number is a NaN offset in the timezone markers too.
+        ('$fromMillis(0, "[Z01:01t]", "abc")', "+0N:aN"),
+        (
+            '$fromMillis(0, "[H01]:[m01] [Z01:01] [z] [Z0001] [Z0]", "abc")',
+            "NaN:NaN +0N:aN GMT+0N:aN +0NaN +NaN:NaN",
+        ),
+        # A digit family moves every character, those of NaN included.
+        ('$fromMillis(8.64e15+1, "[H\u0660\u0661]")', "\u067e\u0691\u067e"),
+        ('$fromMillis(8.64e15+1, "[f\u0660\u0660\u0661]")', "\u067e\u0691\u067e"),
     ],
 )
 def test_out_of_range_dates(engine, expr, expected):

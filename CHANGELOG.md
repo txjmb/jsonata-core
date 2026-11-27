@@ -60,7 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     timezone that isn't a number, as jsonata-js 2.3.0 does (#869): its
     digits are `NaN` and its names, words, roman numerals and letters are
     empty. `$fromMillis(1e20, "[Y0001]")` is `0NaN`; it used to raise
-    "Invalid timestamp".
+    "Invalid timestamp". A timezone too large for a 64-bit integer is also
+    treated as not a number, where jsonata-js still formats its digits.
 
 ### Deprecated
 
