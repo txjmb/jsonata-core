@@ -40,12 +40,12 @@ def test_first_allocating_thread_exits():
 
         def first():
             import jsonatapy
-            jsonatapy.compile("$x").evaluate({"x": [1, 2]})
+            assert jsonatapy.compile("x").evaluate({"x": [1, 2]}) == [1, 2]
 
         def second():
             import jsonatapy
             for i in range(1000):
-                jsonatapy.compile("$x.a").evaluate({"x": [{"a": i}] * 50})
+                assert jsonatapy.compile("x.a").evaluate({"x": [{"a": i}] * 50}) == [i] * 50
 
         for target in (first, second):
             t = threading.Thread(target=target)

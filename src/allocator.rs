@@ -12,7 +12,8 @@
 //!
 //! [`SmallAlignMiMalloc`] calls `mi_malloc` directly for the alignments it
 //! guarantees, which is nearly every Rust allocation, and hands the rest to
-//! `MiMalloc`.
+//! `MiMalloc`. (The slow path was measured on mimalloc v3; v2 checks for
+//! natural alignment first, so there the wrapper mainly saves that check.)
 //!
 //! The crates are built with their `v2` feature (Cargo.toml), which bundles
 //! mimalloc 2.x instead of 3.3.x. mimalloc v3 keeps its thread heap in fixed
