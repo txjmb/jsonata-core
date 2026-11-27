@@ -13,6 +13,7 @@ categories = ["parsing", "data-structures"]
 readme = "README.md"
 rust-version = "1.70"
 exclude = [
+    "vendor/*",
     "tests/jsonata-js/*",
     "tests/python/*",
     "python/*",
@@ -65,6 +66,10 @@ python = ["dep:pyo3"]
 cli = ["dep:clap"]
 bench = []   # exposes _bench facade for Criterion benchmarks
 capi = []
+# Note for crates.io users: the vendored mimalloc 3.4.5 (see [patch.crates-io]
+# below) only applies when building from this repository or the sdist; a
+# crates.io build of this feature gets libmimalloc-sys 0.1.49's mimalloc 3.3.2,
+# which can crash after the first thread that allocated exits (#298).
 mimalloc = ["dep:mimalloc", "dep:libmimalloc-sys"]
 
 [dev-dependencies]
@@ -93,3 +98,15 @@ opt-level = 0
 [package.metadata.maturin]
 python-source = "python"
 module-name = "jsonatapy._jsonatapy"
+
+# libmimalloc-sys 0.1.49 bundles mimalloc v3.3.2, which crashes next to other
+# mimalloc v3 copies on macOS (fixed TLS slots, e.g. pyarrow 24) and once the
+# first thread that allocated has exited (microsoft/mimalloc#1287). The
+# vendored copy is that crate unchanged except for mimalloc v3.4.5 sources,
+# which fix both (see vendor/libmimalloc-sys/VENDORED.md and GitHub #298).
+# Remove this patch and vendor/ once a libmimalloc-sys release bundles
+# mimalloc >= 3.4.5 (purpleprotocol/mimalloc_rust#169). `[patch]` does not
+# apply to crates.io dependents, who still get v3.3.2 with the `mimalloc`
+# feature.
+[patch.crates-io]
+libmimalloc-sys = { path = "vendor/libmimalloc-sys" }

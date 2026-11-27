@@ -140,17 +140,53 @@ jobs:
           name: test-results-${{ matrix.os }}-py${{ matrix.python-version }}
           path: test-results.xml
 
+  allocator-coexistence-macos:
+    # The bundled mimalloc once shared fixed macOS TLS slots with pyarrow 24's
+    # own copy, and compile() crashed when jsonatapy was imported first (#298).
+    # Linux and Windows never showed it, so it needs a macOS runner, and
+    # pyarrow is pinned to the release that triggered it.
+    name: Allocator coexistence (macOS, pyarrow 24)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install UV
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build extension
+        run: |
+          uv venv
+          uv pip install maturin pytest pyarrow==24.0.0
+          uv run maturin develop --release
+
+      - name: Run allocator coexistence tests
+        run: uv run pytest tests/python/test_allocator_coexistence.py -v --tb=short
+
   all-tests-passed:
     name: All Tests Passed
     runs-on: ubuntu-latest
-    needs: [rust-tests, python-tests]
+    needs: [rust-tests, python-tests, allocator-coexistence-macos]
     if: always()
 
     steps:
       - name: Check test results
         run: |
           if [ "${{ needs.rust-tests.result }}" != "success" ] || \
-             [ "${{ needs.python-tests.result }}" != "success" ]; then
+             [ "${{ needs.python-tests.result }}" != "success" ] || \
+             [ "${{ needs.allocator-coexistence-macos.result }}" != "success" ]; then
             echo "::error::Some tests failed"
             exit 1
           fi

@@ -13,6 +13,13 @@
 //! [`SmallAlignMiMalloc`] calls `mi_malloc` directly for the alignments it
 //! guarantees, which is nearly every Rust allocation, and hands the rest to
 //! `MiMalloc`.
+//!
+//! The mimalloc C sources come from `vendor/libmimalloc-sys` (mimalloc
+//! v3.4.5, via `[patch.crates-io]` in Cargo.toml) rather than the v3.3.2 that
+//! `libmimalloc-sys` 0.1.49 bundles: v3.3.2 kept its thread heap in fixed
+//! macOS TLS slots shared with other mimalloc copies such as pyarrow 24's, and
+//! crashed once the first thread that allocated had exited. See GitHub #298
+//! and `vendor/libmimalloc-sys/VENDORED.md`.
 
 use std::alloc::{GlobalAlloc, Layout};
 
