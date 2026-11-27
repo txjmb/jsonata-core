@@ -12,10 +12,10 @@ inherited:
   allocation on another thread segfaults in `mi_thread_init`
   (microsoft/mimalloc#1287).
 
-The extension now builds mimalloc v2, which keeps its heap in an ordinary
-thread-local variable and has neither problem. Each case runs in a fresh
-interpreter, because the crash takes the process down and depends on which
-code allocates first.
+The extension now builds mimalloc v3.4.5 (vendor/libmimalloc-sys), which uses
+pthread keys for its thread heap on macOS and fixes the thread-exit crash.
+Each case runs in a fresh interpreter, because the crash takes the process
+down and depends on which code allocates first.
 """
 
 import subprocess

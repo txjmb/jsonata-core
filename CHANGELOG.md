@@ -17,12 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Python wheels now bundle mimalloc v2 instead of v3.3.2, fixing two crashes
-  in the allocator (#298). On macOS, mimalloc v3 keeps its thread heap in
-  fixed thread-specific-data slots that every mimalloc v3 copy in the process
-  shares, so importing jsonatapy before pyarrow 24.0.0 (or chdb) made the
-  first `compile()` segfault or hang. On every platform, a crash followed
-  once the first thread that used jsonatapy had exited (microsoft/mimalloc#1287).
+- Python wheels now build mimalloc v3.4.5 (vendored `libmimalloc-sys` with
+  updated sources) instead of v3.3.2, fixing two allocator crashes (#298). On
+  macOS, v3.3.2 kept its thread heap in fixed thread-specific-data slots that
+  every mimalloc v3 copy in the process shares, so importing jsonatapy before
+  pyarrow 24.0.0 (or chdb) made the first `compile()` segfault or hang. On
+  every platform, a crash followed once the first thread that used jsonatapy
+  had exited (microsoft/mimalloc#1287).
 
 ### Security
 

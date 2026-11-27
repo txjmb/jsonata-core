@@ -74,6 +74,10 @@ Repository = "https://github.com/txjmb/jsonata-core"
 python-source = "python"
 module-name = "jsonatapy._jsonatapy"
 features = ["pyo3/extension-module", "python", "mimalloc"]
+# Cargo.toml excludes vendor/ from the crates.io package, which maturin
+# honours too, but the sdist needs the vendored libmimalloc-sys that
+# `[patch.crates-io]` points at (GitHub #298).
+include = [{ path = "vendor/**/*", format = "sdist" }]
 
 [dependency-groups]
 dev = [
