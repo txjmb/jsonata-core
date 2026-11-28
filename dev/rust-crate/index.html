@@ -2036,6 +2036,11 @@ that does I/O simply blocks (run evaluations across threads for concurrency).</p
   (<code>$now</code>, <code>$millis</code>, <code>$random</code>, <code>$eval</code>) are all overridable.</li>
 <li>Arguments arrive already evaluated. A host function that does I/O blocks;
   parallelise across threads (one <code>Evaluator</code> per thread).</li>
+<li>A host function that implements <code>HostFn</code> itself gets a <code>HostCtx</code>:
+  <code>ctx.call_function(&amp;f, &amp;args)</code> calls a JSONata function it was passed (a lambda,
+  a builtin, a regex), and <code>ctx.function_value(Rc::new(g))</code> makes a function value
+  of <code>g</code> to return. <code>HostFn::arity</code> says how many of (value, index, array) a
+  higher-order function such as <code>$map</code> passes it (every one, by default).</li>
 </ul>
 <p>See <code>examples/host_functions.rs</code> for a runnable walkthrough.</p>
 <h2 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h2>

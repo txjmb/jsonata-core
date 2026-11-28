@@ -2081,7 +2081,17 @@
 lists every one of them and records whether it is ported to a test here or does not apply (with
 the reason, such as a JavaScript runtime detail, the Promise API, or parser recovery mode, which
 jsonatapy does not have). Its test fails if the pinned submodule adds or renames a check that the
-registry does not name. Triage is in progress for 2.3.0.</p>
+registry does not name. For 2.3.0, 151 are ported (most to
+<code>tests/python/test_jsonata_js_implementation_tests.py</code>) and 46 do not apply.</p>
+<p>Two ported checks behave differently here on purpose:</p>
+<ul>
+<li>A Python host function can only return <code>None</code> for "no match", so a host matcher's null
+  is no match for <code>$contains</code>. A JSONata matcher's null is a match, as in jsonata-js, which
+  tests for undefined.</li>
+<li>A host <code>clone</code> that returns its argument unchanged makes jsonata-js's transform change
+  the input itself. Here the clone's result is copied again, so the input never changes, and
+  a location that reaches the input another way (<code>$$.a</code>) is D1014.</li>
+</ul>
 <h3 id="known-differences-outside-the-reference-suite">Known differences outside the reference suite<a class="headerlink" href="#known-differences-outside-the-reference-suite" title="Permanent link">&para;</a></h3>
 <p>These shapes appear in neither the reference suite nor the differential corpora, and are kept
 on purpose. Each is pinned in <code>tests/lambda_closure_suite.rs::divergent_from_reference</code>.</p>
