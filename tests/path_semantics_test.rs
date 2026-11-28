@@ -65,10 +65,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str)] = &[
     ("tree", "acct.*{\"k\": 1}.%"),
     ("compiled", "acct.Order.P.%{\"x\": id}.%"),
     ("tree", "acct.Order.P.%{\"x\": id}.%"),
-    // jsonata-js 2.3.0 (#841): a constructed array stays one value of a
-    // tuple stream. Plan PR 3.
-    ("compiled", "[[1,2],[3]].([$]#$k.[$, $k])"),
-    ("tree", "[[1,2],[3]].([$]#$k.[$, $k])"),
     // Deliberate: jsonata-js matches a regex on the right of `~>` against
     // its left side converted to a string, so an undefined left side is the
     // text "undefined" and `/n/` matches it. An undefined left side gives

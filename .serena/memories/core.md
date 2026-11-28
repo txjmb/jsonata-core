@@ -1,7 +1,7 @@
 ## jsonatapy: source map
 
 Rust-based Python extension implementing JSONata (JSON query/transform language), targeting
-near-100% compatibility with the reference `jsonata-js` v2.3.0 test suite (1803/1972 passing).
+near-100% compatibility with the reference `jsonata-js` v2.3.0 test suite (1824/1972 passing).
 Two published artifacts from one codebase: `jsonata-core` (crates.io, pure Rust) and
 `jsonatapy` (PyPI, PyO3 wrapper). See root `CLAUDE.md` for full project charter/design goals —
 this memory only covers what CLAUDE.md omits or what changes faster than that doc.
