@@ -287,7 +287,6 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: |
-            3.10
             3.11
             3.12
             3.13
@@ -300,7 +299,7 @@ jobs:
 
       - name: Install Python versions (macOS)
         if: matrix.platform.os == 'macOS'
-        run: uv python install 3.10 3.11 3.12 3.13 3.14 3.15
+        run: uv python install 3.11 3.12 3.13 3.14 3.15
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -323,7 +322,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14 3.15
+          args: --release --out dist --interpreter 3.11 3.12 3.13 3.14 3.15
           sccache: 'true'
           manylinux: ${{ matrix.platform.manylinux }}
 
@@ -332,7 +331,6 @@ jobs:
         run: |
           uvx maturin build --release --out dist \
             --interpreter \
-            "$(uv python find 3.10)" \
             "$(uv python find 3.11)" \
             "$(uv python find 3.12)" \
             "$(uv python find 3.13)" \
@@ -462,7 +460,7 @@ jobs:
           - { os: 'ubuntu-latest', runner: ubuntu-latest }
           - { os: 'windows-latest', runner: windows-latest }
           - { os: 'macOS', runner: [self-hosted, macOS, ARM64] }
-        python: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.15']
+        python: ['3.11', '3.12', '3.13', '3.14', '3.15']
 
     steps:
       - name: Checkout

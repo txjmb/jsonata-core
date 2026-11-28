@@ -141,6 +141,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Python 3.10, which reached end of life in October 2026. `requires-python` is
+  now `>=3.11`, and releases build and test wheels for 3.11 through 3.15.
+  jsonatapy 2.2.x stays installable on 3.10. The `mcp` extra and the charts
+  in the `bench` extra lose their 3.11-only markers, since every supported
+  Python now meets them.
+
 ### Fixed
 
 - `$random()` returns a number in [0, 1). It raised T1006. As a callback it

@@ -602,7 +602,7 @@ def test_sum_ignores_null_values():
 
 All tests run on CI for:
 - **Platforms**: Linux, macOS, Windows
-- **Python versions**: 3.10, 3.11, 3.12, 3.13, 3.14, 3.15
+- **Python versions**: 3.11, 3.12, 3.13, 3.14, 3.15
 - **Architectures**: x86_64, aarch64
 
 ### CI Commands

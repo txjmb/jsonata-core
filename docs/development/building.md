@@ -8,7 +8,7 @@
    source $HOME/.cargo/env
    ```
 
-2. **Python** 3.10+ with development headers
+2. **Python** 3.11+ with development headers
    ```bash
    # Ubuntu/Debian
    sudo apt-get install python3-dev build-essential
@@ -58,7 +58,7 @@ maturin build --release --interpreter python3.11
 
 **Build for multiple Python versions**:
 ```bash
-maturin build --release --interpreter python3.10 python3.11 python3.12 python3.13 python3.14 python3.15
+maturin build --release --interpreter python3.11 python3.12 python3.13 python3.14 python3.15
 ```
 
 ## Testing

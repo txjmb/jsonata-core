@@ -11,14 +11,13 @@ authors = [
 ]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["jsonata", "json", "query", "transform"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -43,20 +42,15 @@ dev = [
     "ruff>=0.3.0",        # Linting and formatting
     "mypy>=1.0",
     "maturin>=1.0",
-    "fastmcp>=4.1.2; python_version >= '3.11'",  # So `dev` installs can run the full test suite
+    "fastmcp>=4.1.2",  # So `dev` installs can run the full test suite
 ]
 mcp = [
-    # 3.11+ only: fastmcp pulls in dnspython through email-validator, and dnspython 2.9.0,
-    # the first release with the fix for GHSA-45c3-73f7-pv4m, dropped 3.10.
-    "fastmcp>=4.1.2; python_version >= '3.11'",
+    "fastmcp>=4.1.2",
 ]
 bench = [
     "jsonata>=0.2.0",     # jsonata-python for benchmarking
     "rich>=13.0",         # Rich tables for benchmarks
-    # Charts and graphs. 3.11+ only: Pillow 13, the first release with the fixes for
-    # CVE-2026-112395 and the rest of its October 2026 advisories, dropped 3.10, and
-    # the benchmarks run without charts when matplotlib is missing.
-    "matplotlib>=3.5; python_version >= '3.11'",
+    "matplotlib>=3.5",    # Charts and graphs
 ]
 docs = [
     "mkdocs>=1.5",
@@ -94,7 +88,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -120,7 +114,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
