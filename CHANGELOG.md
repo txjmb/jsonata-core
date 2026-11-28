@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through JSON (`JSON.parse($string(arg))`), so a function inside it becomes
   `""`. It was T1006. `register("clone", f)` still works and is the host `clone`
   a transform copies with.
+- Python 3.14 and 3.15 wheels for every platform, tested in the release pipeline and CI. The backfill workflow (`release-macos-backfill.yml`, now "Backfill Release Wheels") can add wheels for chosen Python versions and platforms to an already published release.
 
 ### Changed
 

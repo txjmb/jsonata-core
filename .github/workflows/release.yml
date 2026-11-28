@@ -274,11 +274,25 @@ jobs:
       # password"). Use uv there instead -- it installs standalone Python
       # builds into a user-writable directory, no sudo required. See
       # release-macos-backfill.yml, which already uses this working pattern.
+      #
+      # Install every interpreter we build for. maturin-action builds natively on
+      # the Windows host, so each --interpreter below must exist there; the Linux
+      # builds run inside the manylinux container, which carries its own
+      # interpreters, so this step only matters on Windows. Keep this list, the
+      # --interpreter lists below and test-wheels' matrix in sync.
+      # release-macos-backfill.yml mirrors these build steps for adding wheels
+      # to a release that is already out.
       - name: Set up Python
         if: matrix.platform.os != 'macOS'
         uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+            3.15
 
       - name: Install uv (macOS)
         if: matrix.platform.os == 'macOS'
@@ -286,7 +300,7 @@ jobs:
 
       - name: Install Python versions (macOS)
         if: matrix.platform.os == 'macOS'
-        run: uv python install 3.10 3.11 3.12 3.13
+        run: uv python install 3.10 3.11 3.12 3.13 3.14 3.15
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -309,7 +323,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14 3.15
           sccache: 'true'
           manylinux: ${{ matrix.platform.manylinux }}
 
@@ -321,7 +335,9 @@ jobs:
             "$(uv python find 3.10)" \
             "$(uv python find 3.11)" \
             "$(uv python find 3.12)" \
-            "$(uv python find 3.13)"
+            "$(uv python find 3.13)" \
+            "$(uv python find 3.14)" \
+            "$(uv python find 3.15)"
 
       - name: Upload wheels
         uses: actions/upload-artifact@v7
@@ -446,7 +462,7 @@ jobs:
           - { os: 'ubuntu-latest', runner: ubuntu-latest }
           - { os: 'windows-latest', runner: windows-latest }
           - { os: 'macOS', runner: [self-hosted, macOS, ARM64] }
-        python: ['3.10', '3.11', '3.12', '3.13']
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.15']
 
     steps:
       - name: Checkout
@@ -487,7 +503,9 @@ jobs:
           # file instead of trusting its cache, which is keyed by filename
           # only for --find-links sources -- see the macOS comment below,
           # which is where this actually bit us (issue #45).
-          uv pip install --system --reinstall --find-links dist jsonatapy
+          # --no-index: dist holds only this release's wheels, so a wheel missing
+          # for this interpreter fails here instead of quietly testing PyPI's copy.
+          uv pip install --system --reinstall --no-index --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install wheel (macOS)
@@ -507,7 +525,7 @@ jobs:
           # this is exactly what caused issue #45 (verified: the built wheel
           # was correct, `uv pip install` resolved and "installed" it in
           # ~1ms, but the parser behaved like the pre-%/@-operator code).
-          uv pip install --reinstall --find-links dist jsonatapy
+          uv pip install --reinstall --no-index --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install test dependencies (Linux/Windows)
