@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [2.2.17] - 2026-11-28
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
 - The transform operator (`~> | location | update |`) now changes only the
   objects its location matches, by identity, as jsonata-js does. It used to
   match by value, so `{"b":{"a":1},"c":{"a":1}} ~> | b | {"x":2} |` changed
