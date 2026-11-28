@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [2.3.0] "Full jsonata-js 2.3.0 conformance" - 2026-11-28
+
 Conforms to jsonata-js 2.3.0: all 1972 cases of the jsonata-js 2.3.0 reference
 suite pass, with no known divergences, on both the default path and the forced
 tree-walker. The JavaScript-only checks in jsonata-js's implementation tests are
