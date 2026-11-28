@@ -236,7 +236,7 @@ def test_host_function_recursing_deep_inside_a_recursion(n, stack):
         timeout=300,
     )
     assert proc.returncode == 0, f"process crashed ({proc.returncode}): {proc.stderr[-2000:]}"
-    baseline, result = proc.stdout.split()
+    baseline, result = proc.stdout.strip().splitlines()
     if baseline == "no error":
         # This interpreter's C stack guard has more room than the probe needs,
         # so the probe can't reach the guard even outside an evaluation (seen
