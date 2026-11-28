@@ -56,6 +56,7 @@ function buildBuiltinArity() {
   for (const name of DATETIME_JS_ARITY_NAMES) arity[name] = jsDatetime[name].length;
   arity.now = 2; // jsonata.js:2140 -- function(picture, timezone)
   arity.millis = 0; // jsonata.js:2143 -- function()
+  arity.clone = 1; // jsonata.js functionClone(arg)
   // $eval is evaluator-dependent, so it is not in `jsFunctions`, but it IS
   // reachable by reference and so needs a callback arity like any other
   // (#140). jsonata.js:1811 -- async function functionEval(expr, focus).

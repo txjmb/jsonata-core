@@ -192,6 +192,9 @@ class JsonataExpression:
 
         The function receives the (already-evaluated) arguments as positional
         Python values and must return a JSON-compatible value **synchronously**.
+        A JSONata function among the arguments arrives as a callable, and a
+        callable in the result is a JSONata function (see the API docs,
+        "Functions as arguments and results").
         This is the equivalent of jsonata-js's ``registerFunction`` — use it to
         expose enrichment/lookup, formatting, or scoring logic to an expression.
 

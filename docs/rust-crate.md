@@ -196,6 +196,11 @@ Resolution and shadowing rules:
   (`$now`, `$millis`, `$random`, `$eval`) are all overridable.
 - Arguments arrive already evaluated. A host function that does I/O blocks;
   parallelise across threads (one `Evaluator` per thread).
+- A host function that implements `HostFn` itself gets a `HostCtx`:
+  `ctx.call_function(&f, &args)` calls a JSONata function it was passed (a lambda,
+  a builtin, a regex), and `ctx.function_value(Rc::new(g))` makes a function value
+  of `g` to return. `HostFn::arity` says how many of (value, index, array) a
+  higher-order function such as `$map` passes it (every one, by default).
 
 See `examples/host_functions.rs` for a runnable walkthrough.
 

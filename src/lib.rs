@@ -145,6 +145,8 @@ pub mod functions;
 pub mod lazy;
 pub mod parser;
 #[cfg(feature = "python")]
+mod pyhost;
+#[cfg(feature = "python")]
 mod pystack;
 mod signature;
 pub mod value;
@@ -209,7 +211,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 #[cfg(feature = "python")]
-use pyo3::types::{PyDict, PyList, PyString, PyTuple};
+use pyo3::types::{PyDict, PyList, PyString};
 
 /// Pre-converted data handle for efficient repeated evaluation.
 ///
@@ -324,7 +326,7 @@ impl JsonataExpression {
             expression::run_compiled(&self.ast, &self.bytecode, data, options)
                 .map_err(evaluator_error_to_py)
         } else {
-            let mut ev = create_evaluator(py, bindings, options)?;
+            let mut ev = create_evaluator(py, bindings, options, pystack::StackEntry::here())?;
             self.register_host_fns(py, &mut ev)?;
             ev.evaluate(&self.ast, data).map_err(evaluator_error_to_py)
         }
@@ -354,8 +356,9 @@ impl JsonataExpression {
         // Called right before the evaluation starts, so this is its entry.
         let entry = pystack::StackEntry::here();
         for reg in &self.host_fns {
-            let hf = PyHostFn {
+            let hf = pyhost::PyHostFn {
                 func: reg.func.clone_ref(py),
+                arity: reg.arity,
                 entry,
             };
             if reg.is_override {
@@ -409,17 +412,20 @@ impl JsonataExpression {
         probe
             .register_fn(
                 name.clone(),
-                PyHostFn {
+                pyhost::PyHostFn {
                     func: func.clone_ref(py),
+                    arity: None,
                     entry: None,
                 },
             )
             .map_err(evaluator_error_to_py)?;
         self.host_fns.retain(|r| r.name != name);
+        let arity = pyhost::python_arity(func.bind(py));
         self.host_fns.push(HostFnReg {
             name,
             func,
             is_override: false,
+            arity,
         });
         Ok(())
     }
@@ -438,17 +444,20 @@ impl JsonataExpression {
         probe
             .register_fn_override(
                 name.clone(),
-                PyHostFn {
+                pyhost::PyHostFn {
                     func: func.clone_ref(py),
+                    arity: None,
                     entry: None,
                 },
             )
             .map_err(evaluator_error_to_py)?;
         self.host_fns.retain(|r| r.name != name);
+        let arity = pyhost::python_arity(func.bind(py));
         self.host_fns.push(HostFnReg {
             name,
             func,
             is_override: true,
+            arity,
         });
         Ok(())
     }
@@ -805,73 +814,8 @@ struct HostFnReg {
     name: String,
     func: Py<PyAny>,
     is_override: bool,
-}
-
-/// Bridges a Python callable to the core [`evaluator::HostFn`] trait. On each
-/// call it re-acquires the GIL, marshals the JSONata arguments to Python,
-/// invokes the callable, and marshals the result back.
-#[cfg(feature = "python")]
-struct PyHostFn {
-    func: Py<PyAny>,
-    /// Where the evaluation calling this function started, so a call made
-    /// deep inside it can be given enough stack (see `pystack`).
-    entry: Option<pystack::StackEntry>,
-}
-
-#[cfg(feature = "python")]
-fn pyerr_to_evaluator_error(e: PyErr) -> evaluator::EvaluatorError {
-    evaluator::EvaluatorError::EvaluationError(format!("host function raised {e}"))
-}
-
-#[cfg(feature = "python")]
-impl evaluator::HostFn for PyHostFn {
-    fn call(
-        &self,
-        args: &[JValue],
-        _ctx: &mut evaluator::HostCtx,
-    ) -> Result<JValue, evaluator::EvaluatorError> {
-        Python::attach(|py| {
-            pystack::with_python_stack(py, self.entry, || self.call_python(py, args))
-        })
-    }
-}
-
-#[cfg(feature = "python")]
-impl PyHostFn {
-    fn call_python(
-        &self,
-        py: Python<'_>,
-        args: &[JValue],
-    ) -> Result<JValue, evaluator::EvaluatorError> {
-        {
-            let py_args: Vec<Bound<'_, PyAny>> = args
-                .iter()
-                .map(|a| json_to_python(py, a).map(|o| o.into_bound(py)))
-                .collect::<PyResult<_>>()
-                .map_err(pyerr_to_evaluator_error)?;
-            let args_tuple = PyTuple::new(py, &py_args).map_err(pyerr_to_evaluator_error)?;
-
-            let result = self
-                .func
-                .bind(py)
-                .call1(&args_tuple)
-                .map_err(pyerr_to_evaluator_error)?;
-
-            // The synchronous core cannot await, so an `async def` (which returns
-            // a coroutine) has no meaningful result. Reject it with actionable
-            // guidance rather than silently converting the coroutine object.
-            if result.hasattr("__await__").unwrap_or(false) {
-                return Err(evaluator::EvaluatorError::EvaluationError(
-                    "host function returned a coroutine; async functions are not \
-                     supported. Use a synchronous function, or perform the async I/O \
-                     outside jsonata and pass the result in via bindings."
-                        .to_string(),
-                ));
-            }
-
-            lazy::convert(&result, false).map_err(pyerr_to_evaluator_error)
-        }
-    }
+    /// `python_arity(func)`, read once at registration.
+    arity: Option<usize>,
 }
 
 /// Create an evaluator, optionally configured with Python bindings
@@ -880,19 +824,22 @@ fn create_evaluator(
     py: Python,
     bindings: Option<Py<PyAny>>,
     options: evaluator::EvaluatorOptions,
+    entry: Option<pystack::StackEntry>,
 ) -> PyResult<evaluator::Evaluator> {
-    let mut context = evaluator::Context::new();
+    let mut ev = evaluator::Evaluator::with_options(evaluator::Context::new(), options);
     if let Some(bindings_obj) = bindings {
-        let bindings_json = python_to_json(py, &bindings_obj)?;
-        if let JValue::Object(map) = bindings_json {
-            for (key, value) in map.iter() {
-                context.bind(key.clone(), value.clone());
-            }
-        } else {
+        // A callable in the bindings is a function, as one `assign`ed in
+        // jsonata-js is: it is registered on this evaluator, so the values
+        // are converted after the evaluator exists.
+        let bindings_json = pyhost::to_jvalue(bindings_obj.bind(py), &mut ev, entry)?;
+        let JValue::Object(map) = bindings_json else {
             return Err(PyTypeError::new_err("bindings must be a dictionary"));
+        };
+        for (key, value) in map.iter() {
+            ev.bind(key.clone(), value.clone());
         }
     }
-    Ok(evaluator::Evaluator::with_options(context, options))
+    Ok(ev)
 }
 
 /// Convert an EvaluatorError to a PyErr
@@ -924,6 +871,7 @@ fn _jsonatapy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_get_force_tree_walker, m)?)?;
     m.add_class::<JsonataExpression>()?;
     m.add_class::<JsonataData>()?;
+    m.add_class::<pyhost::JsonataFunction>()?;
 
     // Add version info
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

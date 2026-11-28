@@ -227,7 +227,9 @@ expression, so calls can be chained.
 **Parameters:**
 - `name` (str): The function name, called as `$name(...)` in the expression.
 - `func` (Callable): Receives the already-evaluated arguments as positional Python
-  values and must return a JSON-compatible value **synchronously**.
+  values and must return a JSON-compatible value, or a callable (see
+  [Functions as arguments and results](#functions-as-arguments-and-results)),
+  **synchronously**.
 
 **Returns:** the `JsonataExpression` (for chaining)
 
@@ -245,6 +247,15 @@ expression, so calls can be chained.
 - Evaluation is synchronous, so an `async def` (which returns a coroutine) is rejected
   at call time. For async I/O, await it outside jsonata and pass the result via
   `bindings`.
+- Passed to `$map`, `$filter`, `$each` or another higher-order function, a host function
+  gets only as many of (value, index, array) as it declares, as jsonata-js reads a
+  JavaScript function's `length`: the positional parameters before the first default,
+  `*args` or keyword-only one. `$map([1, 4, 9], $sqrt)` with `math.sqrt` works. A
+  callable `inspect.signature` can't read gets every argument.
+- A host override of `clone` (or a `clone` in the bindings) is what the transform
+  operator `~> |...|...|` copies its input with, as in jsonata-js. A `clone` binding
+  that isn't a function is T2013. The clone's result is copied again, so the input
+  itself never changes.
 
 **Example:**
 ```python
@@ -264,6 +275,45 @@ expr.evaluate(None)
 
 See `examples/host_functions.py` for a runnable walkthrough.
 
+#### Functions as arguments and results
+
+Functions cross the boundary both ways, as they do between jsonata-js and JavaScript:
+
+- A JSONata function in a host function's arguments (a lambda, `$sum`, a regex, a partial
+  application, nested in an object or array too) arrives as a callable. Calling it with
+  positional arguments applies it and returns its result. An error it raises is a
+  `ValueError` whose message starts with the JSONata code; if the host function lets it
+  propagate, the evaluation raises that same error. It can be called only while the
+  evaluation it came from is running a host function; kept and called later, it raises
+  `ValueError`.
+- A Python callable in what a host function returns, or in the `bindings`, is a JSONata
+  function: the expression can call it, pass it to `$map`, or use it as a custom matcher
+  for `$match`, `$split`, `$replace` and `$contains`. An object holding callables has
+  methods: `$counter(0).inc().value`. A function in an evaluation's result comes back to
+  Python as `None`.
+
+```python
+expr = jsonatapy.compile("$twice([1, 2, 3], $sum)")
+expr.register("twice", lambda arr, fn: 2 * fn(arr))
+expr.evaluate(None)
+# 12
+
+expr = jsonatapy.compile('($hi := $startsWith("Hello"); [$hi("Hello, Bob"), $hi("Bye")])')
+expr.register("startsWith", lambda prefix: lambda s: s.startswith(prefix))
+expr.evaluate(None)
+# [True, False]
+
+def counter(n):
+    return {"value": n, "inc": lambda: counter(n + 1)}
+
+jsonatapy.evaluate("$counter(0).inc().inc().value", None, {"counter": counter})
+# 2
+```
+
+A custom matcher is a function of the string that returns the first match as
+`{"match", "start", "end", "groups", "next"}`, where `next()` returns the following match,
+or `None` when there are no more.
+
 #### Why host functions are synchronous
 
 Host functions run synchronously: the callable is invoked mid-evaluation, and if
@@ -275,8 +325,8 @@ from running independent evaluations across threads or processes, exactly as you
 would parallelize any other CPU-bound work. Async would only ever help a host
 function that is *I/O-bound* — a CPU-bound one gains nothing from it — and even an
 I/O-bound host function can run concurrently by dispatching evaluations to a thread
-pool (a blocked thread waiting on I/O lets others proceed), so blocking is rarely a
-real constraint. This is why an `async def` is rejected:
+pool (a blocked thread waiting on I/O lets others proceed; compile the expression in
+each worker, see [Thread Safety](#thread-safety)), so blocking is rarely a real constraint. This is why an `async def` is rejected:
 the synchronous core has no event loop to await a coroutine on, so a coroutine
 return has no meaningful value. (jsonata-js is async only because JavaScript has no
 threads and no blocking I/O — its event loop is the *only* concurrency primitive
@@ -427,23 +477,28 @@ def safe_evaluate(expression, data, default=None):
 
 ## Thread Safety
 
-jsonatapy is thread-safe:
-- Multiple threads can call functions concurrently
-- `JsonataExpression` objects can be shared across threads
-- Evaluation is stateless (except for bindings)
+Module-level functions such as `jsonatapy.evaluate()` can be called from any number of threads.
+A compiled `JsonataExpression`, and a `JsonataData` handle, belong to the thread that created
+them: using one from another thread raises `pyo3_runtime.PanicException`. To evaluate in a
+thread pool, compile the expression once in each worker thread:
 
-**Example:**
 ```python
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
-expr = jsonatapy.compile("items[price > 100].name")
+local = threading.local()
 
 def process(data):
-    return expr.evaluate(data)
+    if not hasattr(local, "expr"):
+        local.expr = jsonatapy.compile("items[price > 100].name")
+    return local.expr.evaluate(data)
 
 with ThreadPoolExecutor(max_workers=10) as executor:
     results = executor.map(process, data_list)
 ```
+
+An evaluation keeps no state on the expression, so a host function may evaluate the same
+expression again while it runs, on the same thread.
 
 ## Performance Tips
 

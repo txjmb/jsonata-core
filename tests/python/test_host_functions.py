@@ -143,13 +143,25 @@ class TestOverride:
         with pytest.raises(ValueError, match="compiled fast path"):
             expr.register_override("round", lambda x: 0)
 
-    def test_override_gets_full_hof_args_not_builtin_arity(self):
-        # `now` has table arity 2 (picture, timezone), but a host override
-        # replacing it is an arbitrary closure -- jsonata-js truncates a
-        # by-reference HOF callback to the *override's own*
-        # implementation.length, which this API can't introspect. So the
-        # override must receive $map's full (item, index, array) triple
-        # uncut, not get truncated to the shadowed builtin's table arity.
+    def test_override_gets_its_own_hof_arity_not_the_builtins(self):
+        # `now` has table arity 2 (picture, timezone), but jsonata-js truncates
+        # a by-reference HOF callback to the *override's own*
+        # implementation.length. A three-parameter override receives $map's
+        # full (item, index, array) triple, not the shadowed builtin's two.
+        calls = []
+
+        def spy(item, index, array):
+            calls.append((item, index, array))
+            return "x"
+
+        expr = jsonatapy.compile('$map(["a", "b"], $now)')
+        expr.register_override("now", spy)
+        assert expr.evaluate(None) == ["x", "x"]
+        assert calls == [("a", 0, ["a", "b"]), ("b", 1, ["a", "b"])]
+
+    def test_star_args_override_gets_one_hof_arg(self):
+        # A JavaScript `function(...args)` has length 0 and gets only the value;
+        # a Python `*args` callable counts the same way.
         calls = []
 
         def spy(*args):
@@ -159,7 +171,26 @@ class TestOverride:
         expr = jsonatapy.compile('$map(["a", "b"], $now)')
         expr.register_override("now", spy)
         assert expr.evaluate(None) == ["x", "x"]
-        assert calls == [("a", 0, ["a", "b"]), ("b", 1, ["a", "b"])]
+        assert calls == [("a",), ("b",)]
+
+    def test_uninspectable_callable_gets_every_hof_arg(self):
+        # A callable inspect.signature can't read keeps the old behavior:
+        # every argument the higher-order function has.
+        calls = []
+
+        class Opaque:
+            def __call__(self, *args):
+                calls.append(args)
+                return "x"
+
+            @property
+            def __signature__(self):
+                raise ValueError("no signature")
+
+        expr = jsonatapy.compile('$map(["a"], $f)')
+        expr.register("f", Opaque())
+        assert expr.evaluate(None) == "x"
+        assert calls == [("a", 0, ["a"])]
 
 
 class TestNoImpact:
@@ -187,3 +218,112 @@ class TestCalleeEvaluatedOnce:
         expr.register("tick", tick)
         assert expr.evaluate(None) == "1"
         assert len(calls) == 1
+
+
+class TestFunctionValues:
+    """Functions cross the boundary both ways, as between jsonata-js and JavaScript."""
+
+    def test_function_argument_is_callable(self):
+        expr = jsonatapy.compile("$apply(function($x, $y){ $x * $y }, 6, 7)")
+        expr.register("apply", lambda fn, a, b: fn(a, b))
+        assert expr.evaluate(None) == 42
+
+    def test_functions_nested_in_arguments(self):
+        expr = jsonatapy.compile('$call({"f": $uppercase, "fs": [$lowercase]}, "Ab")')
+        expr.register("call", lambda obj, s: [obj["f"](s), obj["fs"][0](s)])
+        assert expr.evaluate(None) == ["AB", "ab"]
+
+    def test_function_argument_comes_back_as_itself(self):
+        expr = jsonatapy.compile("$identity($sum)([1, 2])")
+        expr.register("identity", lambda fn: fn)
+        assert expr.evaluate(None) == 3
+
+    def test_function_argument_repr(self):
+        expr = jsonatapy.compile("[$show($sum), $show(function(){1})]")
+        expr.register("show", repr)
+        assert expr.evaluate(None) == ["<jsonata function $sum>", "<jsonata function>"]
+
+    def test_function_kept_past_its_evaluation_raises(self):
+        kept = []
+        expr = jsonatapy.compile("$keep($sum)")
+        expr.register("keep", lambda fn: kept.append(fn) or 1)
+        assert expr.evaluate(None) == 1
+        with pytest.raises(ValueError, match="can only be called while"):
+            kept[0]([1])
+
+    def test_function_kept_for_another_evaluation_raises(self):
+        kept = []
+        expr = jsonatapy.compile("$keep($sum)")
+        expr.register("keep", lambda fn: kept.append(fn) or 1)
+        expr.evaluate(None)
+        other = jsonatapy.compile("$call()")
+        other.register("call", lambda: kept[0]([1]))
+        with pytest.raises(ValueError, match="can only be called while"):
+            other.evaluate(None)
+
+    def test_error_in_a_function_argument_keeps_its_code(self):
+        expr = jsonatapy.compile("$apply(function(){ $error('boom') })")
+        expr.register("apply", lambda fn: fn())
+        with pytest.raises(ValueError, match=r"^D3137: boom"):
+            expr.evaluate(None)
+
+    def test_host_can_catch_an_error_in_a_function_argument(self):
+        def attempt(fn):
+            try:
+                return fn()
+            except ValueError as e:
+                return str(e)[:5]
+
+        expr = jsonatapy.compile("$attempt(function(){ $error('boom') })")
+        expr.register("attempt", attempt)
+        assert expr.evaluate(None) == "D3137"
+
+    def test_returned_callable_reports_its_arity(self):
+        expr = jsonatapy.compile("$map([1, 2], $make())")
+        expr.register("make", lambda: lambda value, index: [value, index])
+        assert expr.evaluate(None) == [[1, 0], [2, 1]]
+
+    def test_callable_bindings(self):
+        assert jsonatapy.evaluate("$f(2)", None, {"f": lambda x: x * 10}) == 20
+        assert jsonatapy.evaluate("$type($f)", None, {"f": len}) == "function"
+        assert jsonatapy.evaluate("$o.m(3)", None, {"o": {"m": lambda x: -x}}) == -3
+
+    def test_function_result_is_none_in_python(self):
+        assert jsonatapy.evaluate("$f", None, {"f": len}) is None
+
+    def test_function_value_from_another_evaluation_is_rejected(self):
+        # Review finding: a host function value names an entry in its own
+        # evaluator's registry, so handed to a later evaluation it called
+        # whichever callable had that entry there.
+        kept = []
+        first = jsonatapy.compile("$keep($make())")
+        first.register("make", lambda: lambda: "first")
+        first.register("keep", lambda fn: kept.append(fn) or 1)
+        first.evaluate(None)
+        second = jsonatapy.compile("$get()()")
+        second.register("get", lambda: kept[0])
+        with pytest.raises(ValueError, match="only be used in the evaluation it came from"):
+            second.evaluate(None, {"x": lambda: "wrong", "y": lambda: "wrong"})
+        with pytest.raises(ValueError, match="only be used in the evaluation it came from"):
+            jsonatapy.evaluate("$f()", None, {"f": kept[0]})
+
+    def test_same_callable_is_registered_once(self):
+        fn = lambda x: x  # noqa: E731
+        expr = jsonatapy.compile("$map([1, 2, 3], function($i){ $same() }) ~> $count()")
+        expr.register("same", lambda: fn)
+        assert expr.evaluate(None) == 3
+
+    def test_register_clone_still_works(self):
+        # Review finding: `$clone` became a builtin in 2.3.0, and `register`
+        # rejects builtins; a host `clone` registered before keeps working.
+        calls = []
+        expr = jsonatapy.compile('$ ~> |a|{"b": 2}|')
+        expr.register("clone", lambda obj: calls.append(obj) or obj)
+        assert expr.evaluate({"a": {"b": 1}}) == {"a": {"b": 2}}
+        assert calls == [{"a": {"b": 1}}]
+
+    def test_binding_callable_called_deep_in_a_recursion(self):
+        # Review finding: callables in the bindings were not given the
+        # evaluation's stack entry, so deep calls skipped the stack guard.
+        expr = "($r := function($n){ $n = 0 ? $f() : $r($n - 1) }; $r(2000))"
+        assert jsonatapy.evaluate(expr, None, {"f": lambda: "bottom"}) == "bottom"

@@ -922,7 +922,7 @@ mod builtin_signature_table_tests {
             declared.len(),
             bad.join("\n")
         );
-        assert_eq!(declared.len(), 61);
+        assert_eq!(declared.len(), 62);
     }
 
     /// The signatures declared in `builtins::BUILTINS` must match the pinned
@@ -941,13 +941,10 @@ mod builtin_signature_table_tests {
     /// Regenerate the fixture with `node scripts/gen_fastpath_corpus.js`.
     #[test]
     fn signature_table_matches_reference() {
-        // Two builtins the reference declares that jsonata-core does not
-        // implement at all. Removing a name from here without adding the
-        // builtin is the mistake this list is shaped to prevent.
+        // Builtins the reference declares a signature for that have none here.
+        // Removing a name from here without giving the builtin its signature is
+        // the mistake this list is shaped to prevent.
         const NOT_IMPLEMENTED: &[&str] = &[
-            // `$clone` exists only as the transform operator's internal deep
-            // copy here; there is no user-facing builtin to bind it to.
-            "clone",
             // `$eval` is implemented, but in `evaluate_function_call` rather
             // than `dispatch_pure` -- it needs the evaluator. Giving it a
             // signature would newly validate that arm, which is its own

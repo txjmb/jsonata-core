@@ -90,6 +90,7 @@ pub(crate) static BUILTINS: &[BuiltinSpec] = &[
     BuiltinSpec { name: "base64encode", arity: Some(1), signature: Some("<s-:s>"), pure: true, compilable: false },
     BuiltinSpec { name: "boolean", arity: Some(1), signature: Some("<x-:b>"), pure: true, compilable: true },
     BuiltinSpec { name: "ceil", arity: Some(1), signature: Some("<n-:n>"), pure: true, compilable: true },
+    BuiltinSpec { name: "clone", arity: Some(1), signature: Some("<(oa)-:o>"), pure: true, compilable: false },
     BuiltinSpec { name: "contains", arity: Some(2), signature: Some("<s-(sf):b>"), pure: true, compilable: true },
     BuiltinSpec { name: "count", arity: Some(1), signature: Some("<a:n>"), pure: true, compilable: true },
     BuiltinSpec { name: "decodeUrl", arity: Some(1), signature: Some("<s-:s>"), pure: true, compilable: false },
@@ -1140,6 +1141,20 @@ pub(crate) fn dispatch_pure_with(
         }
 
         // ── Object functions ────────────────────────────────────────────
+        // jsonata.js functionClone: `JSON.parse(fn.string(arg))`, so a function
+        // inside the value comes back as "" (what `$string` writes for one).
+        "clone" => match args.first() {
+            None | Some(JValue::Undefined) => Ok(JValue::Undefined),
+            Some(arg) => {
+                let JValue::String(json) = functions::string::string(arg, None)? else {
+                    return Err(EvaluatorError::EvaluationError(
+                        "clone() could not serialize its argument".to_string(),
+                    ));
+                };
+                JValue::from_json_str(&json)
+                    .map_err(|e| EvaluatorError::EvaluationError(format!("clone() failed: {e}")))
+            }
+        },
         "keys" => match args.first() {
             // jsonata-js's $keys returns undefined whenever there are no keys to
             // report -- a missing/undefined argument, an explicit null, a
