@@ -5,7 +5,7 @@ optimisation produces the same answer as the code it replaces. Those are
 different properties, and the second is where issue #97 hid: the fused
 aggregate fast path returned a plausible wrong number for
 ``$sum(array.field)``, and the suite could not catch it because exactly one
-of its ~1686 cases is shaped that way -- and that one declines the fast path.
+of its ~1972 cases is shaped that way -- and that one declines the fast path.
 
 An engine toggle alone would not have caught it either. The default engine
 *is* the fused path, so any suite case that diverged would already be

@@ -481,9 +481,9 @@ fn evaluate_conditional(ctx: &mut Context, cond: &AstNode,
    - Test Python API
    - Located in `tests/python/`
 
-3. **Reference Test Suite** (1686 tests)
+3. **Reference Test Suite** (1972 tests)
    - Official JSONata compatibility tests
-   - 1686/1686 pass rate
+   - 1803/1972 pass rate
 
 ### Test Coverage
 

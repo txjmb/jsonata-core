@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Cross-check every doc/memory claim about reference-suite numbers against reality.
 
-The jsonata-js reference-suite total (1686 cases), the passing count (total minus
-however many divergences are tracked as strict xfail -- currently none, so 1686),
-and the jsonata-js version (2.2.2) are
+The jsonata-js reference-suite total, the passing count (total minus however many
+divergences are tracked in KNOWN_DIVERGENCES, as strict xfail, or KNOWN_HANGS, as
+skips), and the jsonata-js version are
 each restated in prose across README.md, docs/, .github/, tests/, and
 .serena/memories/ instead of being computed once. Those restatements silently went
 stale for months (the docs said "1258/1258" and "v2.1.0" long after the submodule
@@ -12,7 +12,7 @@ submodule or the KNOWN_DIVERGENCES registry in test_reference_suite.py.
 
 This script computes the ground truth directly (by counting cases in
 tests/jsonata-js/test/test-suite/groups, reading tests/jsonata-js/package.json's
-version, and counting KNOWN_DIVERGENCES entries) and checks a registry of known
+version, and counting KNOWN_DIVERGENCES and KNOWN_HANGS entries) and checks a registry of known
 "claim sites" against it. It is intentionally NOT a generic text scanner: each
 claim site is an explicit (file, regex) pair anchored on stable surrounding text,
 the same style as KNOWN_DIVERGENCES itself. If a claim's surrounding wording
@@ -42,6 +42,7 @@ class GroundTruth:
     passing: int
     xfail: int
     version: str
+    implemented: str
 
 
 def compute_ground_truth() -> GroundTruth:
@@ -59,7 +60,7 @@ def compute_ground_truth() -> GroundTruth:
 
     suite_src = (ROOT / "tests/python/test_reference_suite.py").read_text(encoding="utf-8")
     tree = ast.parse(suite_src)
-    xfail = None
+    registries: dict[str, int | None] = {"KNOWN_DIVERGENCES": None, "KNOWN_HANGS": None}
     for node in ast.walk(tree):
         targets = None
         if isinstance(node, ast.Assign):
@@ -69,21 +70,38 @@ def compute_ground_truth() -> GroundTruth:
         if not targets:
             continue
         for target in targets:
-            if isinstance(target, ast.Name) and target.id == "KNOWN_DIVERGENCES":
+            if isinstance(target, ast.Name) and target.id in registries:
                 if not isinstance(node.value, ast.Dict):
-                    raise SystemExit("KNOWN_DIVERGENCES is not a dict literal; can't count it")
-                xfail = len(node.value.keys)
-    if xfail is None:
-        raise SystemExit("Could not find KNOWN_DIVERGENCES in tests/python/test_reference_suite.py")
+                    raise SystemExit(f"{target.id} is not a dict literal; can't count it")
+                registries[target.id] = len(node.value.keys)
+    for name, count in registries.items():
+        if count is None:
+            raise SystemExit(f"Could not find {name} in tests/python/test_reference_suite.py")
+    # A skipped hang diverges as much as a strict xfail does; neither passes.
+    xfail = sum(c for c in registries.values() if c is not None)
 
-    return GroundTruth(total=total, passing=total - xfail, xfail=xfail, version=version)
+    lib_rs = (ROOT / "src/lib.rs").read_text(encoding="utf-8")
+    m = re.search(r'const JSONATA_REFERENCE_VERSION: &str = "([\d.]+)";', lib_rs)
+    if m is None:
+        raise SystemExit("Could not find JSONATA_REFERENCE_VERSION in src/lib.rs")
+
+    return GroundTruth(
+        total=total,
+        passing=total - xfail,
+        xfail=xfail,
+        version=version,
+        implemented=m.group(1),
+    )
 
 
 @dataclass
 class Claim:
     file: str
     pattern: str
-    # Maps regex named group -> ground-truth field ('total', 'passing', 'xfail', 'version')
+    # Maps regex named group -> ground-truth field ('total', 'passing', 'xfail', 'version',
+    # 'implemented'). 'version' is the pinned suite's; 'implemented' is the jsonata-js
+    # version the library reports as `__jsonata_version__` (JSONATA_REFERENCE_VERSION).
+    # They differ while a new suite is pinned and its divergences are being worked off.
     fields: dict[str, str]
     flags: int = re.MULTILINE
 
@@ -158,7 +176,7 @@ CLAIMS: list[Claim] = [
     ),
     Claim(
         "docs/development/testing.md",
-        r"(?P<passing>\d+)/(?P<total>\d+) passing \(no known divergences",
+        r"(?P<passing>\d+)/(?P<total>\d+) passing \(the rest are known divergences",
         {"passing": "passing", "total": "total"},
     ),
     Claim(
@@ -192,7 +210,9 @@ CLAIMS: list[Claim] = [
         r"\*\*(?P<passing>\d+)/(?P<total>\d+) tests passing\*\*",
         {"passing": "passing", "total": "total"},
     ),
-    Claim("docs/README.md", r"Full JSONata (?P<version>[\d.]+) support", {"version": "version"}),
+    Claim(
+        "docs/README.md", r"Full JSONata (?P<version>[\d.]+) support", {"version": "implemented"}
+    ),
     Claim(
         "docs/README.md",
         r"(?P<passing>\d+)/(?P<total>\d+) test suite compatibility",
@@ -250,27 +270,22 @@ CLAIMS: list[Claim] = [
     Claim(
         "docs/performance.md",
         r"\*\*jsonata-js\*\* \| JavaScript \| (?P<version>[\d.]+) \|",
-        {"version": "version"},
+        {"version": "implemented"},
     ),
     Claim(
         "benchmarks/python/generate_performance_doc.py",
         r"\*\*jsonata-js\*\* \| JavaScript \| (?P<version>[\d.]+) \|",
-        {"version": "version"},
+        {"version": "implemented"},
     ),
     Claim(
         "docs/api.md",
         r'print\(jsonatapy\.__jsonata_version__\)\s*#\s*"(?P<version>[\d.]+)"',
-        {"version": "version"},
+        {"version": "implemented"},
     ),
     Claim(
         "tests/python/test_basic.py",
         r'assert jsonatapy\.__jsonata_version__ == "(?P<version>[\d.]+)"',
-        {"version": "version"},
-    ),
-    Claim(
-        "src/lib.rs",
-        r'const JSONATA_REFERENCE_VERSION: &str = "(?P<version>[\d.]+)";',
-        {"version": "version"},
+        {"version": "implemented"},
     ),
     Claim(
         "docs/changelog.md",
@@ -284,11 +299,18 @@ def main() -> int:
     truth = compute_ground_truth()
     print(
         f"Ground truth: {truth.passing}/{truth.total} passing, "
-        f"{truth.xfail} known xfail, jsonata-js v{truth.version}"
+        f"{truth.xfail} known divergences, jsonata-js suite v{truth.version}, "
+        f"implemented v{truth.implemented}"
     )
 
     errors: list[str] = []
     file_cache: dict[str, str] = {}
+
+    if truth.xfail == 0 and truth.implemented != truth.version:
+        errors.append(
+            f"src/lib.rs: JSONATA_REFERENCE_VERSION is {truth.implemented}, but the pinned suite "
+            f"(v{truth.version}) passes with no known divergences. Bump it to {truth.version}."
+        )
 
     for claim in CLAIMS:
         if claim.file not in file_cache:

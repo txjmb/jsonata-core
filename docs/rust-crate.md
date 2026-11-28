@@ -235,6 +235,6 @@ cargo bench --no-default-features --features simd
 ## Compatibility
 
 - Rust stable 1.70+
-- Passes 1686/1686 JSONata 2.2.2 reference tests
+- Passes 1803/1972 JSONata 2.3.0 reference tests
 - `!Send` — uses `Rc` internally; not safe to send across threads.
   For parallel workloads, create one `Evaluator` per thread.

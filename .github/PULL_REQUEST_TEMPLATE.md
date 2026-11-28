@@ -45,7 +45,7 @@ Relates to #
 
 - [ ] All existing tests pass (`cargo test` and `pytest`)
 - [ ] New tests added for bug fixes/features
-- [ ] Reference test suite still passes (1686/1686 tests; no known divergences)
+- [ ] Reference test suite still passes (1803/1972 tests; no new divergences)
 - [ ] Tested manually with provided examples
 - [ ] Edge cases considered and tested
 - [ ] Performance impact assessed (if applicable)

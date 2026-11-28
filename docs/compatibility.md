@@ -8,10 +8,20 @@ jsonatapy includes a comprehensive test adapter that runs the complete reference
 
 ### Reference Test Suite
 
-- **Total Tests**: 1686
-- **Passing**: 1686 (100%)
-- **Known divergences**: none in the suite (see [Known differences outside the reference suite](#known-differences-outside-the-reference-suite) for closure shapes it does not cover). `KNOWN_DIVERGENCES` in `tests/python/test_reference_suite.py` is the registry; entries there are strict `xfail`, so one that starts passing fails the suite until it is removed
-- **Source**: Official jsonata-js repository (v2.2.2) at `tests/jsonata-js/`
+- **Total Tests**: 1972
+- **Passing**: 1803 (91%)
+- **Known divergences**: 169, all from changes new in jsonata-js 2.3.0 that are still being ported (template strings, the date/time picture rewrite, and a few smaller fixes). Each is listed with its reason, and the upstream change it waits on, in `KNOWN_DIVERGENCES` (strict `xfail`) or, for three that run for minutes, `KNOWN_HANGS` (skipped), both in `tests/python/test_reference_suite.py`. A strict `xfail` that starts passing fails the suite until it is removed. See [Known differences outside the reference suite](#known-differences-outside-the-reference-suite) for closure shapes the suite does not cover
+- **Source**: Official jsonata-js repository (v2.3.0) at `tests/jsonata-js/`
+
+### Checks written in JavaScript
+
+jsonata-js also tests behavior in JavaScript files that no adapter can run:
+`implementation-tests.js`, `parser-recovery.js`, `async-function.js` and
+`parser-pluggable-regex.js`, 197 checks in 2.3.0. `tests/python/test_implementation_parity.py`
+lists every one of them and records whether it is ported to a test here or does not apply (with
+the reason, such as a JavaScript runtime detail, the Promise API, or parser recovery mode, which
+jsonatapy does not have). Its test fails if the pinned submodule adds or renames a check that the
+registry does not name. Triage is in progress for 2.3.0.
 
 ### Known differences outside the reference suite
 
@@ -51,7 +61,7 @@ Some path and evaluation-order shapes differ too:
 uv run pytest tests/python/test_reference_suite.py
 ```
 
-Results show 1686/1686 (100%) of the suite passing against the reference JSONata implementation.
+Results show 1803/1972 (91%) of the suite passing against the reference JSONata implementation.
 
 Two of those 1686 pass only because *something* was raised, not because the error code was
 compared — our message for them carries no code for the suite to check. `UNVERIFIED_ERROR_CEILING`
@@ -145,7 +155,6 @@ The reference suite is organized into 102 test groups covering all aspects of JS
 - `errors` - Error conditions and messages
 - `missing-paths` - Handling undefined paths
 - `null` - Null value handling
-- `parser-recovery` - Parser error recovery
 
 ## Running Compatibility Tests
 
