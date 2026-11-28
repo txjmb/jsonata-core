@@ -50,6 +50,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     #864): `$formatInteger(1e21, '#,##0')` is
     `1,000,000,000,000,000,000,000`. It used to saturate at
     `9,223,372,036,854,775,807`.
+  - `$fromMillis` writes fractional seconds as the digits of a fraction,
+    padded and truncated on the right (jsonata-js #855): 30 ms with `[f01]`
+    is `03`, not `30`, and a one-digit `[f]` shows up to three digits.
+  - `$fromMillis` gives both parts of a negative timezone offset its sign
+    (jsonata-js #856): `-0330` is `-03:30` and moves the time back three and
+    a half hours. It was read as `-4` hours and `-30` minutes.
+  - `$fromMillis` formats a date outside JavaScript's range, or with a
+    timezone that isn't a number, as jsonata-js 2.3.0 does (#869): its
+    digits are `NaN` and its names, words, roman numerals and letters are
+    empty. `$fromMillis(1e20, "[Y0001]")` is `0NaN`; it used to raise
+    "Invalid timestamp". A timezone too large for a 64-bit integer is also
+    treated as not a number, where jsonata-js still formats its digits.
 
 ### Deprecated
 

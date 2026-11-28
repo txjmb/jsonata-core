@@ -455,6 +455,11 @@ fn words_lookup(num: f64, prev: bool, ord: bool) -> String {
 
 /// Converts a number into English words
 fn number_to_words(value: f64, ordinal: bool) -> String {
+    if value.is_nan() {
+        // A component of an out-of-range date: empty, as in roman numerals
+        // and letters (jsonata-js 2.3.0).
+        return String::new();
+    }
     words_lookup(value, false, ordinal)
 }
 
@@ -884,13 +889,9 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
             if format.zero_code != 0x30 {
                 digits = digits
                     .chars()
-                    .map(|c| {
-                        if c.is_ascii_digit() {
-                            char::from_u32(c as u32 + format.zero_code - 0x30).unwrap_or(c)
-                        } else {
-                            c
-                        }
-                    })
+                    // Every character moves by the family's offset, as in
+                    // jsonata-js: the "digits" of NaN and Infinity too.
+                    .map(|c| char::from_u32(c as u32 + format.zero_code - 0x30).unwrap_or(c))
                     .collect();
             }
             // Insert the grouping-separator-signs, if any.
@@ -1382,55 +1383,63 @@ fn two_digit_decimal_format() -> IntegerFormat {
     analyse_integer_picture("00").expect("static pattern is always valid")
 }
 
+/// `offset_hours` and `offset_minutes` are NaN for a timezone that isn't a
+/// number, as in jsonata-js: the sign is then `+`, the minutes are always
+/// written, and `t` never makes it `Z`.
 fn format_timezone_component(
-    offset_hours: i64,
-    offset_minutes: i64,
+    offset_hours: f64,
+    offset_minutes: f64,
     marker: &MarkerSpec,
 ) -> Result<String, DateTimeError> {
-    let offset = offset_hours * 100 + offset_minutes;
+    let offset = offset_hours * 100.0 + offset_minutes;
     let fmt = marker
         .integer_format
         .as_ref()
         .expect("Z/z marker always has an integer_format");
 
+    // The sign is written once, before both the hours and the minutes, so
+    // the parts are formatted as magnitudes: -03:30, not -3:-30 (jsonata-js
+    // 2.3.0, #856).
     let mut component_value = if fmt.regular {
-        format_integer_value(offset as f64, fmt)?
+        format_integer_value(offset.abs(), fmt)?
     } else {
         let num_digits = fmt.mandatory_digits;
         if num_digits == 1 || num_digits == 2 {
-            let mut cv = format_integer_value(offset_hours as f64, fmt)?;
-            if offset_minutes != 0 {
+            let mut cv = format_integer_value(offset_hours.abs(), fmt)?;
+            // `NaN !== 0` in jsonata-js, so NaN minutes are written too.
+            if offset_minutes != 0.0 {
                 cv.push(':');
                 cv.push_str(&format_integer_value(
-                    offset_minutes as f64,
+                    offset_minutes.abs(),
                     &two_digit_decimal_format(),
                 )?);
             }
             cv
         } else if num_digits == 3 || num_digits == 4 {
-            format_integer_value(offset as f64, fmt)?
+            format_integer_value(offset.abs(), fmt)?
         } else {
             return Err(coded("D3134", num_digits.to_string()));
         }
     };
 
-    if offset >= 0 {
-        component_value = format!("+{component_value}");
-    }
+    component_value = format!("{}{component_value}", if offset < 0.0 { '-' } else { '+' });
     if marker.component == 'z' {
         component_value = format!("GMT{component_value}");
     }
-    if offset == 0 && marker.presentation2 == Some('t') {
+    if offset == 0.0 && marker.presentation2 == Some('t') {
         component_value = "Z".to_string();
     }
 
     Ok(component_value)
 }
 
+/// `local_millis` is `None` for a date outside JavaScript's range, whose
+/// components are all NaN in jsonata-js: digits format as `NaN`, and names,
+/// words, roman numerals and letters as empty strings.
 fn format_component(
-    local_millis: i64,
-    offset_hours: i64,
-    offset_minutes: i64,
+    local_millis: Option<i64>,
+    offset_hours: f64,
+    offset_minutes: f64,
     marker: &MarkerSpec,
 ) -> Result<String, DateTimeError> {
     if marker.component == 'Z' || marker.component == 'z' {
@@ -1439,7 +1448,8 @@ fn format_component(
 
     if marker.component == 'P' {
         // §9.8.4.7 am/pm marker
-        let mut s = if get_date_time_fragment(local_millis, 'P') == 1 {
+        // NaN hours compare false with 12, so an out-of-range date is "am".
+        let mut s = if local_millis.is_some_and(|ms| get_date_time_fragment(ms, 'P') == 1) {
             "pm"
         } else {
             "am"
@@ -1453,6 +1463,19 @@ fn format_component(
 
     if "YMDdFWwXxHhms".contains(marker.component) {
         // §9.8.4.3 Formatting Integer-Valued Date/Time Components
+        let Some(local_millis) = local_millis else {
+            if marker.names.is_some() {
+                if !"MxF".contains(marker.component) {
+                    return Err(coded("D3133", marker.component.to_string()));
+                }
+                return Ok(String::new());
+            }
+            let fmt = marker
+                .integer_format
+                .as_ref()
+                .expect("numeric marker always has an integer_format");
+            return format_integer_value(f64::NAN, fmt);
+        };
         let mut value = get_date_time_fragment(local_millis, marker.component);
         if marker.component == 'Y' {
             if let Some(n) = marker.n {
@@ -1492,7 +1515,6 @@ fn format_component(
         }
     } else if marker.component == 'f' {
         // §9.8.4.5 Formatting Fractional Seconds
-        let value = get_date_time_fragment(local_millis, 'f');
         // A name presentation (`[fN]`) leaves no integer format: fractional
         // seconds can't be formatted as a name (D3133, as in jsonata-js
         // 2.3.0) -- this used to panic.
@@ -1500,11 +1522,78 @@ fn format_component(
             .integer_format
             .as_ref()
             .ok_or_else(|| coded("D3133", "f"))?;
-        format_integer_value(value as f64, fmt)
+        let Some(local_millis) = local_millis else {
+            return format_integer_value(f64::NAN, fmt);
+        };
+        let value = get_date_time_fragment(local_millis, 'f');
+        if fmt.primary != PrimaryFormat::Decimal {
+            return format_integer_value(value as f64, fmt);
+        }
+        format_fractional_seconds(value, marker)
     } else {
         // C (calendar) / E (era) -- always "ISO"
         Ok("ISO".to_string())
     }
+}
+
+/// The digit range of a fractional-seconds marker (jsonata-js 2.3.0
+/// `fractionalSecondsFormat`, #855): the picture's own digits, widened by a
+/// width modifier, and up to the full millisecond precision for a picture
+/// of one digit with no width modifier.
+fn fractional_seconds_format(
+    marker: &MarkerSpec,
+) -> Result<(Vec<char>, IntegerFormat, usize, usize), DateTimeError> {
+    let picture: Vec<char> = marker.presentation1.chars().collect();
+    // An empty modifier keeps semicolons in the primary token grouping signs.
+    let format = analyse_integer_picture(&format!("{};", marker.presentation1))?;
+    let mut min_digits = format.mandatory_digits;
+    let mut max_digits = min_digits + format.optional_digits;
+    if let Some(width) = &marker.width {
+        if let Some(min) = width.min {
+            min_digits = min_digits.max(min);
+        }
+        max_digits = max_digits.max(min_digits);
+        if let Some(max) = width.max {
+            max_digits = max_digits.max(max);
+        }
+    } else if picture.len() == 1 {
+        max_digits = 3;
+    }
+    Ok((picture, format, min_digits, max_digits))
+}
+
+/// §9.8.4.5: fractional seconds are the digits of a decimal fraction, so
+/// they are padded and truncated on the right, never rounded into the next
+/// second: 30 ms with `[f01]` is `03` (jsonata-js 2.3.0, #855).
+fn format_fractional_seconds(millis: i64, marker: &MarkerSpec) -> Result<String, DateTimeError> {
+    let (picture, format, min_digits, max_digits) = fractional_seconds_format(marker)?;
+    let mut fraction = format!("{:03}", millis.rem_euclid(1000));
+    while fraction.ends_with('0') {
+        fraction.pop();
+    }
+    while fraction.len() < min_digits {
+        fraction.push('0');
+    }
+    let mut digits: Vec<String> = fraction
+        .chars()
+        .take(max_digits)
+        .map(|d| {
+            let code = format.zero_code + d.to_digit(10).unwrap_or(0);
+            char::from_u32(code).unwrap_or(d).to_string()
+        })
+        .collect();
+    // Grouping positions count from the left. The output never exceeds the
+    // adjusted picture's width, so separators never need extrapolating.
+    let mut position = 0;
+    for character in picture {
+        let code = character as u32;
+        if character == '#' || (code >= format.zero_code && code <= format.zero_code + 9) {
+            position += 1;
+        } else if position < digits.len() {
+            digits[position] = format!("{character}{}", digits[position]);
+        }
+    }
+    Ok(digits.concat())
 }
 
 fn iso_default_picture_spec() -> &'static Vec<PictureItem> {
@@ -1532,11 +1621,18 @@ fn parse_leading_int(s: &str) -> Option<i64> {
     s[..idx].parse::<i64>().ok()
 }
 
-fn parse_timezone_offset(timezone: Option<&str>) -> (i64, i64) {
-    let offset = timezone.and_then(parse_leading_int).unwrap_or(0);
-    let offset_hours = (offset as f64 / 100.0).floor() as i64;
+/// The hours and minutes of a `+hhmm` offset, or `None` for a timezone that
+/// isn't a number, which jsonata-js reads as NaN.
+fn parse_timezone_offset(timezone: Option<&str>) -> Option<(i64, i64)> {
+    // Both parts take the offset's sign: -0330 is -3 hours and -30 minutes
+    // (jsonata-js 2.3.0, #856). Flooring the hours read it as -4 and -30.
+    let offset = match timezone {
+        Some(tz) => parse_leading_int(tz)?,
+        None => 0,
+    };
     let offset_minutes = offset % 100;
-    (offset_hours, offset_minutes)
+    let offset_hours = (offset - offset_minutes) / 100;
+    Some((offset_hours, offset_minutes))
 }
 
 /// Formats the date/time as specified by the XPath fn:format-dateTime function.
@@ -1545,7 +1641,14 @@ fn format_date_time(
     picture: Option<&str>,
     timezone: Option<&str>,
 ) -> Result<String, DateTimeError> {
-    let (offset_hours, offset_minutes) = parse_timezone_offset(timezone);
+    let parsed_offset = parse_timezone_offset(timezone);
+    let (offset_hours, offset_minutes) = parsed_offset.unwrap_or((0, 0));
+    // jsonata-js's NaN offset, for the timezone markers. A number too large
+    // for i64 is NaN here too, where jsonata-js would still format it.
+    let (tz_hours, tz_minutes) = match parsed_offset {
+        Some((h, m)) => (h as f64, m as f64),
+        None => (f64::NAN, f64::NAN),
+    };
 
     let owned_spec;
     let spec: &Vec<PictureItem> = match picture {
@@ -1559,28 +1662,23 @@ fn format_date_time(
     // The time in the target timezone, if it is a JavaScript date: jsonata-js
     // formats `new Date(millis + offsetMillis)`, which drops any fraction of
     // a millisecond (toward zero) after the offset is added. A timestamp or
-    // offset too large to add up is not a date either.
-    let local_millis = offset_hours
-        .checked_mul(60)
+    // offset outside the range of a JavaScript date, or a timezone that isn't
+    // a number, gives an invalid date, whose components jsonata-js 2.3.0
+    // formats as NaN (#869).
+    let local_millis = parsed_offset
+        .and_then(|_| offset_hours.checked_mul(60))
         .and_then(|minutes| minutes.checked_add(offset_minutes))
         .and_then(|minutes| minutes.checked_mul(60 * 1000))
         .map(|offset_millis| (millis + offset_millis as f64).trunc())
         .filter(|shifted| shifted.abs() <= MAX_DATE_MILLIS as f64)
-        .map(|shifted| shifted as i64)
-        // `{:?}` keeps a huge value short (1e300, not 301 digits).
-        .ok_or_else(|| DateTimeError::FormatError(format!("Invalid timestamp: {millis:?}")))?;
+        .map(|shifted| shifted as i64);
 
     let mut result = String::new();
     for item in spec {
         match item {
             PictureItem::Literal(s) => result.push_str(s),
             PictureItem::Marker(m) => {
-                result.push_str(&format_component(
-                    local_millis,
-                    offset_hours,
-                    offset_minutes,
-                    m,
-                )?);
+                result.push_str(&format_component(local_millis, tz_hours, tz_minutes, m)?);
             }
         }
     }

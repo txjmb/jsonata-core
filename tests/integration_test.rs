@@ -5627,10 +5627,10 @@ fn test_from_millis_spans_javascript_dates() {
     }
 }
 
-/// A timestamp or timezone too large to add up is an invalid timestamp, not
-/// an arithmetic overflow.
+/// A timestamp or timezone too large to add up is an out-of-range date, not
+/// an arithmetic overflow: jsonata-js 2.3.0 formats its components as NaN.
 #[test]
-fn test_from_millis_rejects_overflowing_offsets() {
+fn test_from_millis_formats_overflowing_offsets_as_nan() {
     let data = JValue::from_json_str("{}").unwrap();
     for expr in [
         r#"$fromMillis(1e19, "[Y]", "+0100")"#,
@@ -5639,14 +5639,8 @@ fn test_from_millis_rejects_overflowing_offsets() {
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
-        assert!(
-            tree_walker.contains("Invalid timestamp"),
-            "tree-walker: {expr}: {tree_walker}"
-        );
-        assert!(
-            default.contains("Invalid timestamp"),
-            "default: {expr}: {default}"
-        );
+        assert_eq!(tree_walker, r#"Ok("NaN")"#, "tree-walker: {expr}");
+        assert_eq!(default, r#"Ok("NaN")"#, "default: {expr}");
     }
 }
 

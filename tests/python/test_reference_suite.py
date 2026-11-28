@@ -2,7 +2,7 @@
 Test adapter for the JSONata reference test suite.
 
 This module loads and runs all 1972 test cases from the reference JavaScript JSONata
-implementation (jsonata-js v2.3.0). 1835 pass; the rest are listed below, with reasons, in
+implementation (jsonata-js v2.3.0). 1868 pass; the rest are listed below, with reasons, in
 KNOWN_DIVERGENCES (strict xfail) and KNOWN_HANGS (skipped). Both shrink to empty as the
 jsonata-js 2.3.0 changes land. See
 docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md and
@@ -100,8 +100,9 @@ def extract_error_code(error_msg: str) -> str | None:
 # names the jsonata-js pull request and the plan item that removes its entries; see the 2.3.0
 # implementation plan.
 _TEMPLATE_STRINGS = "template strings «...» and <<...>> are not implemented (jsonata-js #860)"
-_OFFSET_MINUTES = "negative timezone offsets with minutes, -03:30 read as -02:30 (jsonata-js #856)"
-_FRACTIONAL_SECONDS = "fractional seconds in $fromMillis pictures, [f01] (jsonata-js #855)"
+_OFFSET_MINUTES = (
+    "$toMillis reads a negative timezone offset with minutes, -03:30, as -02:30 (jsonata-js #856)"
+)
 _DATETIME_REWRITE = (
     "date/time picture rewrite: out-of-range dates, digit families, grouping separators, "
     "linear-time parsing (jsonata-js #869)"
@@ -116,41 +117,6 @@ _DATETIME_REWRITE = (
 # is an unverified case -- counted by UNVERIFIED_ERROR_CEILING below.
 KNOWN_DIVERGENCES: dict[str, str] = {
     "function-eval/case009": _TEMPLATE_STRINGS,
-    "function-fromMillis/issue852[0]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[1]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[2]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[3]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[9]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[10]": _OFFSET_MINUTES,
-    "function-fromMillis/issue853[0]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[1]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[2]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[3]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[4]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[5]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[6]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[7]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[8]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[9]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[10]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[11]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[14]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[15]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[16]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[17]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[19]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[20]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[22]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[23]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[25]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[26]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[27]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[30]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[31]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/outOfRange[0]": _DATETIME_REWRITE,
-    "function-fromMillis/outOfRange[1]": _DATETIME_REWRITE,
-    "function-parseInteger/digitFamily[1]": _DATETIME_REWRITE,
-    "function-parseInteger/groupingSeparators[1]": _DATETIME_REWRITE,
     "function-tomillis/issue852[0]": _OFFSET_MINUTES,
     "function-tomillis/issue852[1]": _OFFSET_MINUTES,
     "function-tomillis/issue852[2]": _OFFSET_MINUTES,
@@ -163,6 +129,8 @@ KNOWN_DIVERGENCES: dict[str, str] = {
     "function-tomillis/issue852[12]": _OFFSET_MINUTES,
     "function-tomillis/issue852[13]": _OFFSET_MINUTES,
     "function-tomillis/issue852[14]": _OFFSET_MINUTES,
+    "function-parseInteger/digitFamily[1]": _DATETIME_REWRITE,
+    "function-parseInteger/groupingSeparators[1]": _DATETIME_REWRITE,
     "function-tomillis/parseDateTime[62]": _DATETIME_REWRITE,
     "function-tomillis/parseDateTime[63]": _DATETIME_REWRITE,
     "function-tomillis/parseDateTime[64]": _DATETIME_REWRITE,
