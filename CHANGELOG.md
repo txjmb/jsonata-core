@@ -19,9 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed is S0107. `<<` opens a template only where an operand starts, so
   `"a"<<<b>>` is `"a" < <<b>>`. The default path compiles templates as well
   as the tree-walker.
+- `$clone`, the jsonata-js builtin that deep-copies an object or array
+  through JSON (`JSON.parse($string(arg))`), so a function inside it becomes
+  `""`. It was T1006.
 
 ### Changed
 
+- A host function passed to `$map`, `$filter`, `$each` and the other
+  higher-order functions gets only as many of (value, index, array) as it
+  declares, as jsonata-js reads a JavaScript function's `length`: the
+  positional parameters before the first default, `*args` or keyword-only
+  one. `$map([1, 4], $sqrt)` with `math.sqrt` works; it raised "takes exactly
+  one argument (3 given)". A `*args` callable now gets one argument, as a
+  JavaScript `function(...args)` does, and one `inspect.signature` can't
+  read still gets every argument.
 - Names follow jsonata-js's tokenizer: a name runs up to whitespace or an
   operator character, so `a€` and `bar»` are names (they were S0204). A `/`
   after `.`, `..` or `|` starts a regex, as it does after other operators.
@@ -117,6 +128,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `$random()` returns a number in [0, 1). It raised T1006. As a callback it
+  is T0410, as in jsonata-js, since its signature takes no argument.
+- On the right of `~>`, a call missing its `$` (`x ~> count()`) evaluates
+  the left side first, as jsonata-js does, so an error there comes first:
+  `[0..100].([0..100]) ~> count()` with a 1000-item sequence limit is D2015,
+  not T1005.
+- The docs said a compiled expression can be shared across threads. It
+  belongs to the thread that compiled it: the thread-pool examples now
+  compile one per worker.
 - `&` raises D3001 for a number that isn't finite (`"" & 1/0`), from
   `$string`, as jsonata-js does. It was an uncoded type error.
 - `$formatNumber` scales a negative number by the percent or per-mille sign

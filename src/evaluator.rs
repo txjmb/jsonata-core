@@ -1854,6 +1854,15 @@ pub(crate) fn compiled_arithmetic(
     }))
 }
 
+/// `$random()`: a number in [0, 1), as JavaScript's `Math.random` gives. It
+/// isn't a pure builtin, so the evaluator calls it itself, by name or by
+/// reference. Its signature `<:n>` takes no argument, so as a callback, which
+/// is always handed one, it is T0410: `$map([1], $random)`, as in jsonata-js.
+fn random_number(args: &[JValue]) -> Result<JValue, EvaluatorError> {
+    validate_builtin_args("random", args, None)?;
+    Ok(JValue::Number(rand::random::<f64>()))
+}
+
 /// Convert a value to string for concatenation in compiled expressions.
 #[inline]
 pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
@@ -4745,6 +4754,15 @@ impl HostCtx {
 /// API break.
 pub trait HostFn {
     fn call(&self, args: &[JValue], ctx: &mut HostCtx) -> HostFnResult;
+
+    /// How many arguments the function declares, as jsonata-js reads a
+    /// JavaScript function's `length`: a higher-order function such as `$map`
+    /// hands a callback the value, then the index and the array only if the
+    /// callback declares that many parameters (`hofFuncArgs`). `None`, the
+    /// default, means unknown, and the callback gets every argument.
+    fn arity(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl<F> HostFn for F
@@ -5130,8 +5148,8 @@ impl Evaluator {
                     // and gets MAX, and the callback is handed every argument
                     // the HOF has (#126 group 5).
                     if let JValue::Builtin { name } = value {
-                        if !self.host_fns.is_empty() && self.host_fns.contains_key(&**name) {
-                            return usize::MAX;
+                        if let Some(host) = self.host_fns.get(&**name) {
+                            return host.arity().unwrap_or(usize::MAX);
                         }
                         if let Some(arity) = crate::builtins::builtin_arity(name) {
                             return arity;
@@ -5143,13 +5161,12 @@ impl Evaluator {
                 // `evaluate_function_call`'s `host_fns` check), so its arity
                 // here must not fall back to the built-in's table entry --
                 // jsonata-js truncates to the *override's own*
-                // `implementation.length`, which this Rust API has no way to
-                // introspect for an arbitrary host closure. Return MAX
-                // instead: an override receives every argument uncut, rather
-                // than being silently truncated to a same-named builtin's
-                // arity it may not share.
-                if !self.host_fns.is_empty() && self.host_fns.contains_key(var_name) {
-                    return usize::MAX;
+                // `implementation.length`. A host function reports that as
+                // `HostFn::arity`; one that can't (a plain Rust closure) gets
+                // MAX, every argument uncut, rather than being truncated to a
+                // same-named builtin's arity it may not share.
+                if let Some(host) = self.host_fns.get(var_name) {
+                    return host.arity().unwrap_or(usize::MAX);
                 }
                 // A builtin passed by reference (e.g. `$map(arr, $uppercase)`)
                 // parses as this same AstNode::Variable shape. jsonata-js
@@ -8842,6 +8859,12 @@ impl Evaluator {
             // before the arguments are evaluated; anything else is T1006,
             // which jsonata-js's `apply` raises after them.
             if self.is_builtin_function(name) {
+                // On the right of `~>` the left side is evaluated first, as
+                // jsonata-js's `evaluateApplyExpression` does before it calls
+                // `evaluateFunction`: `$error("x") ~> count()` is D3137.
+                if chain_first {
+                    self.evaluate_internal(&args[0], data)?;
+                }
                 return Err(EvaluatorError::ReferenceError(format!(
                     "T1005: Attempted to invoke a non-function. Did you mean ${}?",
                     name
@@ -9730,6 +9753,7 @@ impl Evaluator {
                 }
             }
             "eval" => self.eval_from_values(&evaluated_args, data),
+            "random" => random_number(&evaluated_args),
 
             // `$notreal(1)` -- written with the sigil, so no "did you mean"
             // suggestion applies; jsonata-js calls this T1006.
@@ -11402,6 +11426,7 @@ impl Evaluator {
 
             // Object functions
             "keys" | "lookup" | "spread" | "merge" | "sift" | "each" | "error" | "assert" | "type" |
+            "clone" |
 
             // Higher-order functions
             "map" | "filter" | "reduce" | "single" |
@@ -11454,6 +11479,9 @@ impl Evaluator {
         // Only a regex match's `next` holds this builtin (see `call_regex`).
         if name == REGEX_NEXT {
             return Self::regex_next(values);
+        }
+        if name == "random" && !self.host_fns.contains_key(name) {
+            return random_number(values);
         }
         // A host override applied in value position (e.g. `$f := $now; $f()`) or
         // passed to a higher-order function reaches dispatch here rather than

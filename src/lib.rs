@@ -356,6 +356,7 @@ impl JsonataExpression {
         for reg in &self.host_fns {
             let hf = PyHostFn {
                 func: reg.func.clone_ref(py),
+                arity: reg.arity,
                 entry,
             };
             if reg.is_override {
@@ -411,15 +412,18 @@ impl JsonataExpression {
                 name.clone(),
                 PyHostFn {
                     func: func.clone_ref(py),
+                    arity: None,
                     entry: None,
                 },
             )
             .map_err(evaluator_error_to_py)?;
         self.host_fns.retain(|r| r.name != name);
+        let arity = python_arity(func.bind(py));
         self.host_fns.push(HostFnReg {
             name,
             func,
             is_override: false,
+            arity,
         });
         Ok(())
     }
@@ -440,15 +444,18 @@ impl JsonataExpression {
                 name.clone(),
                 PyHostFn {
                     func: func.clone_ref(py),
+                    arity: None,
                     entry: None,
                 },
             )
             .map_err(evaluator_error_to_py)?;
         self.host_fns.retain(|r| r.name != name);
+        let arity = python_arity(func.bind(py));
         self.host_fns.push(HostFnReg {
             name,
             func,
             is_override: true,
+            arity,
         });
         Ok(())
     }
@@ -805,6 +812,8 @@ struct HostFnReg {
     name: String,
     func: Py<PyAny>,
     is_override: bool,
+    /// `python_arity(func)`, read once at registration.
+    arity: Option<usize>,
 }
 
 /// Bridges a Python callable to the core [`evaluator::HostFn`] trait. On each
@@ -813,6 +822,8 @@ struct HostFnReg {
 #[cfg(feature = "python")]
 struct PyHostFn {
     func: Py<PyAny>,
+    /// See `python_arity`.
+    arity: Option<usize>,
     /// Where the evaluation calling this function started, so a call made
     /// deep inside it can be given enough stack (see `pystack`).
     entry: Option<pystack::StackEntry>,
@@ -823,8 +834,43 @@ fn pyerr_to_evaluator_error(e: PyErr) -> evaluator::EvaluatorError {
     evaluator::EvaluatorError::EvaluationError(format!("host function raised {e}"))
 }
 
+/// A Python callable's arity as jsonata-js reads a JavaScript function's
+/// `length`: the positional parameters before the first one with a default,
+/// a `*args`, or a keyword-only one. A higher-order function such as `$map`
+/// passes a callback only that many of (value, index, array), so
+/// `$map([1, 4], $sqrt)` with `math.sqrt` gets one argument, as
+/// `Math.sqrt` does in jsonata-js. `None` when `inspect.signature` can't
+/// read the callable (some builtins), which passes every argument.
+#[cfg(feature = "python")]
+fn python_arity(func: &Bound<'_, PyAny>) -> Option<usize> {
+    let py = func.py();
+    let inspect = py.import("inspect").ok()?;
+    let signature = inspect.call_method1("signature", (func,)).ok()?;
+    let empty = inspect.getattr("Parameter").ok()?.getattr("empty").ok()?;
+    let parameters = signature
+        .getattr("parameters")
+        .ok()?
+        .call_method0("values")
+        .ok()?;
+    let mut count = 0;
+    for parameter in parameters.try_iter().ok()? {
+        let parameter = parameter.ok()?;
+        // POSITIONAL_ONLY = 0, POSITIONAL_OR_KEYWORD = 1
+        let kind: i64 = parameter.getattr("kind").ok()?.extract().ok()?;
+        if kind > 1 || !parameter.getattr("default").ok()?.is(&empty) {
+            break;
+        }
+        count += 1;
+    }
+    Some(count)
+}
+
 #[cfg(feature = "python")]
 impl evaluator::HostFn for PyHostFn {
+    fn arity(&self) -> Option<usize> {
+        self.arity
+    }
+
     fn call(
         &self,
         args: &[JValue],

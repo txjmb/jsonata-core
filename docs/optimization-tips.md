@@ -380,16 +380,21 @@ def process_batch(data_list):
 
 ### Parallel Processing with Thread Pool
 
+A compiled expression belongs to the thread that compiled it (see
+[Thread Safety](api.md#thread-safety)), so compile it once per worker thread:
+
 ```python
+import threading
 import jsonatapy
 from concurrent.futures import ThreadPoolExecutor
 
-# Compile once (thread-safe)
-expr = jsonatapy.compile("items[price > 100].name")
+local = threading.local()
 
 def process_record(data):
     """Process single record."""
-    return expr.evaluate(data)
+    if not hasattr(local, "expr"):
+        local.expr = jsonatapy.compile("items[price > 100].name")
+    return local.expr.evaluate(data)
 
 # Process in parallel
 with ThreadPoolExecutor(max_workers=4) as executor:

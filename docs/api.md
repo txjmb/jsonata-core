@@ -275,8 +275,8 @@ from running independent evaluations across threads or processes, exactly as you
 would parallelize any other CPU-bound work. Async would only ever help a host
 function that is *I/O-bound* — a CPU-bound one gains nothing from it — and even an
 I/O-bound host function can run concurrently by dispatching evaluations to a thread
-pool (a blocked thread waiting on I/O lets others proceed), so blocking is rarely a
-real constraint. This is why an `async def` is rejected:
+pool (a blocked thread waiting on I/O lets others proceed; compile the expression in
+each worker, see [Thread Safety](#thread-safety)), so blocking is rarely a real constraint. This is why an `async def` is rejected:
 the synchronous core has no event loop to await a coroutine on, so a coroutine
 return has no meaningful value. (jsonata-js is async only because JavaScript has no
 threads and no blocking I/O — its event loop is the *only* concurrency primitive
@@ -427,23 +427,28 @@ def safe_evaluate(expression, data, default=None):
 
 ## Thread Safety
 
-jsonatapy is thread-safe:
-- Multiple threads can call functions concurrently
-- `JsonataExpression` objects can be shared across threads
-- Evaluation is stateless (except for bindings)
+Module-level functions such as `jsonatapy.evaluate()` can be called from any number of threads.
+A compiled `JsonataExpression`, and a `JsonataData` handle, belong to the thread that created
+them: using one from another thread raises `pyo3_runtime.PanicException`. To evaluate in a
+thread pool, compile the expression once in each worker thread:
 
-**Example:**
 ```python
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
-expr = jsonatapy.compile("items[price > 100].name")
+local = threading.local()
 
 def process(data):
-    return expr.evaluate(data)
+    if not hasattr(local, "expr"):
+        local.expr = jsonatapy.compile("items[price > 100].name")
+    return local.expr.evaluate(data)
 
 with ThreadPoolExecutor(max_workers=10) as executor:
     results = executor.map(process, data_list)
 ```
+
+An evaluation keeps no state on the expression, so a host function may evaluate the same
+expression again while it runs, on the same thread.
 
 ## Performance Tips
 

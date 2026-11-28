@@ -143,13 +143,25 @@ class TestOverride:
         with pytest.raises(ValueError, match="compiled fast path"):
             expr.register_override("round", lambda x: 0)
 
-    def test_override_gets_full_hof_args_not_builtin_arity(self):
-        # `now` has table arity 2 (picture, timezone), but a host override
-        # replacing it is an arbitrary closure -- jsonata-js truncates a
-        # by-reference HOF callback to the *override's own*
-        # implementation.length, which this API can't introspect. So the
-        # override must receive $map's full (item, index, array) triple
-        # uncut, not get truncated to the shadowed builtin's table arity.
+    def test_override_gets_its_own_hof_arity_not_the_builtins(self):
+        # `now` has table arity 2 (picture, timezone), but jsonata-js truncates
+        # a by-reference HOF callback to the *override's own*
+        # implementation.length. A three-parameter override receives $map's
+        # full (item, index, array) triple, not the shadowed builtin's two.
+        calls = []
+
+        def spy(item, index, array):
+            calls.append((item, index, array))
+            return "x"
+
+        expr = jsonatapy.compile('$map(["a", "b"], $now)')
+        expr.register_override("now", spy)
+        assert expr.evaluate(None) == ["x", "x"]
+        assert calls == [("a", 0, ["a", "b"]), ("b", 1, ["a", "b"])]
+
+    def test_star_args_override_gets_one_hof_arg(self):
+        # A JavaScript `function(...args)` has length 0 and gets only the value;
+        # a Python `*args` callable counts the same way.
         calls = []
 
         def spy(*args):
@@ -159,7 +171,26 @@ class TestOverride:
         expr = jsonatapy.compile('$map(["a", "b"], $now)')
         expr.register_override("now", spy)
         assert expr.evaluate(None) == ["x", "x"]
-        assert calls == [("a", 0, ["a", "b"]), ("b", 1, ["a", "b"])]
+        assert calls == [("a",), ("b",)]
+
+    def test_uninspectable_callable_gets_every_hof_arg(self):
+        # A callable inspect.signature can't read keeps the old behavior:
+        # every argument the higher-order function has.
+        calls = []
+
+        class Opaque:
+            def __call__(self, *args):
+                calls.append(args)
+                return "x"
+
+            @property
+            def __signature__(self):
+                raise ValueError("no signature")
+
+        expr = jsonatapy.compile('$map(["a"], $f)')
+        expr.register("f", Opaque())
+        assert expr.evaluate(None) == "x"
+        assert calls == [("a", 0, ["a"])]
 
 
 class TestNoImpact:

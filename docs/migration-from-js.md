@@ -520,12 +520,13 @@ Promise.all([
 ```
 
 ```python
-# Python - use threading for concurrency
+# Python - use threading for concurrency. A compiled expression belongs to the
+# thread that compiled it, so each worker compiles its own (or uses jsonatapy.evaluate).
 from concurrent.futures import ThreadPoolExecutor
 
 with ThreadPoolExecutor() as executor:
-    future1 = executor.submit(expr1.evaluate, data)
-    future2 = executor.submit(expr2.evaluate, data)
+    future1 = executor.submit(jsonatapy.evaluate, "orders.total", data)
+    future2 = executor.submit(jsonatapy.evaluate, "$count(orders)", data)
     results = [f.result() for f in [future1, future2]]
 ```
 
