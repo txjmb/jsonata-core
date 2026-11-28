@@ -199,6 +199,9 @@ _HOST_RUNNER = textwrap.dedent("""
         except RecursionError:
             return "RecursionError"
 
+    # The same probe outside any evaluation, at the top of the main thread.
+    print(h(), flush=True)
+
     def run():
         expr = jsonatapy.compile(
             '($f := function($n){ $n <= 0 ? $h() : $f($n - 1) & "" }; $f(%d))' % n
@@ -233,7 +236,17 @@ def test_host_function_recursing_deep_inside_a_recursion(n, stack):
         timeout=300,
     )
     assert proc.returncode == 0, f"process crashed ({proc.returncode}): {proc.stderr[-2000:]}"
-    assert proc.stdout.strip() == "RecursionError"
+    baseline, result = proc.stdout.split()
+    if baseline == "no error":
+        # This interpreter's C stack guard has more room than the probe needs,
+        # so the probe can't reach the guard even outside an evaluation (seen
+        # on the actions/setup-python build of CPython 3.15.2 on ubuntu-latest,
+        # though not on the python-build-standalone one). The process still must
+        # not crash, which is checked above, and the probe must still finish
+        # either way.
+        assert result in ("no error", "RecursionError")
+    else:
+        assert result == "RecursionError"
 
 
 _THREADS_RUNNER = textwrap.dedent("""
