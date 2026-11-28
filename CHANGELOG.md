@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Conforms to jsonata-js 2.3.0: all 1972 cases of the jsonata-js 2.3.0 reference
+suite pass, with no known divergences, on both the default path and the forced
+tree-walker. The JavaScript-only checks in jsonata-js's implementation tests are
+triaged in `tests/python/test_implementation_parity.py`: 151 are ported and 46
+don't apply to a Python or Rust host, each with its reason.
+
 ### Added
 
 - Template strings, from jsonata-js 2.3.0 (#860): `«Hello, {name}!»` or
