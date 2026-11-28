@@ -73,7 +73,7 @@ JSONata is a lightweight query and transformation language for JSON data. Think 
 - Lambda functions and higher-order functions
 
 ### Production Ready
-- 1830/1972 test suite compatibility
+- 1835/1972 test suite compatibility
 - Detailed error messages
 - Cross-platform support (Linux, macOS, Windows)
 

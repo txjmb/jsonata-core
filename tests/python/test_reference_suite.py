@@ -2,7 +2,7 @@
 Test adapter for the JSONata reference test suite.
 
 This module loads and runs all 1972 test cases from the reference JavaScript JSONata
-implementation (jsonata-js v2.3.0). 1830 pass; the rest are listed below, with reasons, in
+implementation (jsonata-js v2.3.0). 1835 pass; the rest are listed below, with reasons, in
 KNOWN_DIVERGENCES (strict xfail) and KNOWN_HANGS (skipped). Both shrink to empty as the
 jsonata-js 2.3.0 changes land. See
 docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md and
@@ -106,7 +106,6 @@ _DATETIME_REWRITE = (
     "date/time picture rewrite: out-of-range dates, digit families, grouping separators, "
     "linear-time parsing (jsonata-js #869)"
 )
-_FORMAT_NUMBER_DIGITS = "$formatNumber exponent mantissa scaling (jsonata-js #865, #868)"
 
 # Reference cases that are known to diverge, each with the reason. Marked
 # xfail(strict), so one that starts passing fails the suite and has to be
@@ -117,11 +116,6 @@ _FORMAT_NUMBER_DIGITS = "$formatNumber exponent mantissa scaling (jsonata-js #86
 # is an unverified case -- counted by UNVERIFIED_ERROR_CEILING below.
 KNOWN_DIVERGENCES: dict[str, str] = {
     "function-eval/case009": _TEMPLATE_STRINGS,
-    "function-formatNumber/issue865[0]": _FORMAT_NUMBER_DIGITS,
-    "function-formatNumber/issue865[1]": _FORMAT_NUMBER_DIGITS,
-    "function-formatNumber/issue865[2]": _FORMAT_NUMBER_DIGITS,
-    "function-formatNumber/issue865[3]": _FORMAT_NUMBER_DIGITS,
-    "function-formatNumber/issue865[4]": _FORMAT_NUMBER_DIGITS,
     "function-fromMillis/issue852[0]": _OFFSET_MINUTES,
     "function-fromMillis/issue852[1]": _OFFSET_MINUTES,
     "function-fromMillis/issue852[2]": _OFFSET_MINUTES,
