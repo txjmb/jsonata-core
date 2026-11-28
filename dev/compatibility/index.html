@@ -2070,8 +2070,8 @@
 <h3 id="reference-test-suite">Reference Test Suite<a class="headerlink" href="#reference-test-suite" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Total Tests</strong>: 1972</li>
-<li><strong>Passing</strong>: 1868 (95%)</li>
-<li><strong>Known divergences</strong>: 104, all from changes new in jsonata-js 2.3.0 that are still being ported (template strings and the rewrite of <code>$toMillis</code> picture parsing). Each is listed with its reason, and the upstream change it waits on, in <code>KNOWN_DIVERGENCES</code> (strict <code>xfail</code>) or, for three that run for minutes, <code>KNOWN_HANGS</code> (skipped), both in <code>tests/python/test_reference_suite.py</code>. A strict <code>xfail</code> that starts passing fails the suite until it is removed. See <a href="#known-differences-outside-the-reference-suite">Known differences outside the reference suite</a> for closure shapes the suite does not cover</li>
+<li><strong>Passing</strong>: 1972 (100%)</li>
+<li><strong>Known divergences</strong>: 0, none in the suite (see <a href="#known-differences-outside-the-reference-suite">Known differences outside the reference suite</a> for closure shapes it does not cover). <code>KNOWN_DIVERGENCES</code> in <code>tests/python/test_reference_suite.py</code> is the registry; entries there are strict <code>xfail</code>, so one that starts passing fails the suite until it is removed</li>
 <li><strong>Source</strong>: Official jsonata-js repository (v2.3.0) at <code>tests/jsonata-js/</code></li>
 </ul>
 <h3 id="checks-written-in-javascript">Checks written in JavaScript<a class="headerlink" href="#checks-written-in-javascript" title="Permanent link">&para;</a></h3>
@@ -2164,11 +2164,15 @@ leak in a long-lived Python process. See
 </tbody>
 </table>
 <p>(Data for these rows: <code>{"x":[1,2],"acct":{"o":[{"id":1}]}}</code>.)</p>
+<p>A <code>\u</code> escape that is half of a surrogate pair, with no other half after it (<code>"\ud83d"</code>, or
+<code>«\ud83d»</code> in a template string), is S0104 here. jsonata-js keeps the lone half in its string,
+which a Rust string cannot hold. A pair written as two escapes (<code>"\ud83d\ude00"</code>) is one
+character in both.</p>
 <h2 id="current-compatibility-status">Current Compatibility Status<a class="headerlink" href="#current-compatibility-status" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run full test suite</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/python/test_reference_suite.py
 </span></code></pre></div>
-<p>Results show 1868/1972 (95%) of the suite passing against the reference JSONata implementation.</p>
+<p>Results show 1972/1972 (100%) of the suite passing against the reference JSONata implementation.</p>
 <p>Two of those 1686 pass only because <em>something</em> was raised, not because the error code was
 compared — our message for them carries no code for the suite to check. <code>UNVERIFIED_ERROR_CEILING</code>
 in <code>tests/python/test_reference_suite.py</code> pins that count at 2 so it cannot quietly grow.</p>
