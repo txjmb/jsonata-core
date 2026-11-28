@@ -7,7 +7,7 @@ pip install jsonatapy
 ```
 
 Pre-built wheels available for:
-- **Python**: 3.10, 3.11, 3.12, 3.13
+- **Python**: 3.10, 3.11, 3.12, 3.13, 3.14, 3.15
 - **Platforms**: Windows (x64), Linux (x86_64, aarch64), macOS (Intel, ARM)
 
 ## Verify Installation
