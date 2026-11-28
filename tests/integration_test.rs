@@ -3509,7 +3509,7 @@ fn test_builtin_null_handling_matches_reference() {
 fn test_match_no_match_is_undefined() {
     for expr in [
         r#"$match("xyz", /abc/)"#,
-        r#"$match("xyz", /abc/g)"#,
+        r#"$match("xyz", /abc/i)"#,
         r#"$match("xyz", /abc/, 2)"#,
         r#"$match("xyz", function($s, $offset) { null })"#,
     ] {
@@ -5003,8 +5003,9 @@ fn test_call_of_non_function_fails_when_run() {
         ("1(?)", "T1008"),
         ("a.b.2(?)", "T1008"),
         (r#"|x|{"z":1}|($).x.z"#, "Ok(1)"),
-        // `#` after `#` replaces the step's index, as in jsonata-js.
-        ("a#$i#$j.[$i,$j]", "Ok(0)"),
+        // `#` after `#` replaces the step's index, as in jsonata-js; the
+        // constructed array stays one value of the stream (jsonata-js 2.3.0).
+        ("a#$i#$j.[$i,$j]", "Ok([0])"),
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
@@ -5129,7 +5130,9 @@ fn test_group_by_on_node_that_is_not_a_path() {
         (r#"a.b{"k": 1}[%.%.a]"#, "Ok({})"),
         (r#"acct.Order.P{"k": N}[%.%.Order]"#, "Ok({})"),
         (r#"acct.Order.P{"k": N}[][%.%.Order]"#, "Ok({})"),
-        (r#"acct.Order.P{"k": N}[%.%.Order].k"#, "Ok({})"),
+        // Since jsonata-js 2.3.0 (#838) a `.` after the group-by wraps the
+        // grouped path in a block, so `.k` reads the (empty) group.
+        (r#"acct.Order.P{"k": N}[%.%.Order].k"#, "undefined"),
         (
             r#"acct.Order.P{"k": N}[%.id = "o1"]"#,
             r#"Ok({"k":["A","B"]})"#,
@@ -5348,14 +5351,16 @@ fn test_group_by_on_block_that_stops_before_its_tuple_step() {
         // The path reaches its tuple step, so the stream is empty.
         (r#"(a.nope)@$o[%.x]{"k":1}.$o"#, "{}"),
         (r#"a.((%.b)[%.x=9]{"k":x})"#, "{}"),
-        // An index makes the block a tuple step itself.
-        (r#"(%.b)#$i[%.x]{"k":1}.k"#, "{}"),
+        // An index makes the block a tuple step itself. Since jsonata-js
+        // 2.3.0 (#838) a `.` after the group-by reads the group as a value,
+        // so an empty group gives undefined (`null` here) and `{"k":1}` gives 1.
+        (r#"(%.b)#$i[%.x]{"k":1}.k"#, "null"),
         (r#"(%)[%.x]#$i{"k":1}"#, "{}"),
         // So does a sort, alone or leading a path.
         (r#"(nope.b)[%.x]^(x){"k":1}"#, "{}"),
-        (r#"(nope.b)[%.x]^(x){"k":1}.k"#, "{}"),
-        (r#"(a.b)[%.x=9]^(x){"k":1}.k"#, "{}"),
-        (r#"(nope.b)^(x){"k":1}.k"#, r#"{"k":1}"#),
+        (r#"(nope.b)[%.x]^(x){"k":1}.k"#, "null"),
+        (r#"(a.b)[%.x=9]^(x){"k":1}.k"#, "null"),
+        (r#"(nope.b)^(x){"k":1}.k"#, "1"),
     ] {
         let expected = format!("Ok({expected})");
         let (tree_walker, default) =
@@ -5423,11 +5428,12 @@ fn test_chain_keeps_array_after_group_by() {
         (r#"o{"k":b}[] ~> $map(function($v){$v})"#, r#"[{"k":1}]"#),
         // Without a `~>` the `[]` keeps nothing: the group-by gives an object.
         (r#"o.b{"k":$}[]"#, r#"{"k":1}"#),
-        (r#"o.b{"k":$}[].k"#, "{}"),
+        // jsonata-js 2.3.0 (#838): `.k` reads the grouped object.
+        (r#"o.b{"k":$}[].k"#, "1"),
         (r#"o.b{"k":$}[]@$v"#, r#"{"k":{"b":1}}"#),
         (r#"$map(o.b{"k":$}[], function($v){$v})"#, r#"{"k":1}"#),
         // Operators after the `[]` leave it on the path.
-        (r#"o.b{"k":$}[].k ~> $map(function($v){$v})"#, "[{}]"),
+        (r#"o.b{"k":$}[].k ~> $map(function($v){$v})"#, "1"),
         (
             r#"o.b{"k":$}[]#$i ~> $map(function($v){$v})"#,
             r#"[{"k":1}]"#,
@@ -5621,10 +5627,10 @@ fn test_from_millis_spans_javascript_dates() {
     }
 }
 
-/// A timestamp or timezone too large to add up is an invalid timestamp, not
-/// an arithmetic overflow.
+/// A timestamp or timezone too large to add up is an out-of-range date, not
+/// an arithmetic overflow: jsonata-js 2.3.0 formats its components as NaN.
 #[test]
-fn test_from_millis_rejects_overflowing_offsets() {
+fn test_from_millis_formats_overflowing_offsets_as_nan() {
     let data = JValue::from_json_str("{}").unwrap();
     for expr in [
         r#"$fromMillis(1e19, "[Y]", "+0100")"#,
@@ -5633,14 +5639,8 @@ fn test_from_millis_rejects_overflowing_offsets() {
     ] {
         let (tree_walker, default) =
             eval_both_engines_with(expr, EvaluatorOptions::default(), &data);
-        assert!(
-            tree_walker.contains("Invalid timestamp"),
-            "tree-walker: {expr}: {tree_walker}"
-        );
-        assert!(
-            default.contains("Invalid timestamp"),
-            "default: {expr}: {default}"
-        );
+        assert_eq!(tree_walker, r#"Ok("NaN")"#, "tree-walker: {expr}");
+        assert_eq!(default, r#"Ok("NaN")"#, "default: {expr}");
     }
 }
 

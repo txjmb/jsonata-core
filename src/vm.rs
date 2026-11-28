@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use crate::evaluator::{
     check_loop_timeout, check_sequence_length, eval_compiled, object_context,
-    predicate_index_match, CompiledExpr, EvaluatorError, EvaluatorOptions,
+    predicate_index_match, reject_infinite, CompiledExpr, EvaluatorError, EvaluatorOptions,
 };
 use crate::value::JValue;
 
@@ -231,7 +231,7 @@ fn run_inner(
 ) -> Result<JValue, EvaluatorError> {
     use crate::builtins::dispatch_pure;
     use crate::evaluator::{
-        compiled_arithmetic, compiled_concat, compiled_equal, compiled_is_truthy,
+        compiled_arithmetic, compiled_boolean, compiled_concat, compiled_equal, compiled_is_truthy,
         compiled_not_equal, compiled_ordered_cmp, CompiledArithOp,
     };
 
@@ -420,7 +420,7 @@ fn run_inner(
             // ── Logical / string ─────────────────────────────────────
             Instr::Not => {
                 let val = stack.pop().unwrap_or(JValue::Undefined);
-                stack.push(JValue::Bool(!compiled_is_truthy(&val)));
+                stack.push(JValue::Bool(!compiled_boolean(&val)?));
                 ip += 1;
             }
             Instr::Negate => {
@@ -449,7 +449,7 @@ fn run_inner(
             }
             Instr::JumpIfFalsy(offset) => {
                 let val = stack.pop().unwrap_or(JValue::Undefined);
-                if !compiled_is_truthy(&val) {
+                if !compiled_boolean(&val)? {
                     ip = (ip as isize + 1 + *offset as isize) as usize;
                 } else {
                     ip += 1;
@@ -457,7 +457,7 @@ fn run_inner(
             }
             Instr::JumpIfTruthy(offset) => {
                 let val = stack.pop().unwrap_or(JValue::Undefined);
-                if compiled_is_truthy(&val) {
+                if compiled_boolean(&val)? {
                     ip = (ip as isize + 1 + *offset as isize) as usize;
                 } else {
                     ip += 1;
@@ -571,10 +571,11 @@ fn run_inner(
                                 options,
                                 start_time,
                             )?;
-                            let repeats = match predicate_index_match(&test, index, len) {
-                                Some(n) => n,
-                                None => usize::from(compiled_is_truthy(&test)),
-                            };
+                            let repeats =
+                                match predicate_index_match(reject_infinite(&test)?, index, len) {
+                                    Some(n) => n,
+                                    None => usize::from(compiled_is_truthy(&test)),
+                                };
                             for _ in 0..repeats {
                                 kept.push(item.clone());
                             }
@@ -596,7 +597,7 @@ fn run_inner(
                         // A non-array is a singleton sequence: index 0, length 1.
                         let test =
                             run_inner(sub_prog, &other, vars, &mut sub_stack, options, start_time)?;
-                        let repeats = match predicate_index_match(&test, 0, 1) {
+                        let repeats = match predicate_index_match(reject_infinite(&test)?, 0, 1) {
                             Some(n) => n,
                             None => usize::from(compiled_is_truthy(&test)),
                         };

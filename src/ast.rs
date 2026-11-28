@@ -235,6 +235,14 @@ pub enum AstNode {
     /// Block expression
     Block(Vec<AstNode>),
 
+    /// Template string `«text {expr} text»` or `<<text {expr} text>>`
+    /// (jsonata-js #860, a `template` node). Its parts are evaluated in
+    /// order and joined, each value cast to a string as `&` casts its
+    /// operands. Literal text is kept as `String` parts: jsonata-js keeps it
+    /// as plain strings, and a string literal casts to itself, so the two
+    /// are the same. An empty `{}` contributes no part.
+    Template(Vec<AstNode>),
+
     /// Conditional expression (? :)
     Conditional {
         condition: Box<AstNode>,
@@ -358,6 +366,7 @@ impl Clone for AstNode {
                 pattern: pattern.clone(),
             },
             AstNode::Block(items) => AstNode::Block(items.clone()),
+            AstNode::Template(parts) => AstNode::Template(parts.clone()),
             AstNode::Conditional {
                 condition,
                 then_branch,

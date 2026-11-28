@@ -596,6 +596,8 @@ pub(crate) fn dispatch_pure_with(
                 // callback returning it adds nothing to `$map` (#250).
                 // Validation has already rejected an explicit null.
                 JValue::Undefined => Ok(JValue::Undefined),
+                // An undefined separator gives undefined too (jsonata-js 2.3.0, #831).
+                JValue::String(_) if args[1].is_undefined() => Ok(JValue::Undefined),
                 JValue::String(s) => {
                     // Validate the optional limit argument — must be a positive number.
                     let limit = match args.get(2) {
@@ -985,13 +987,13 @@ pub(crate) fn dispatch_pure_with(
 
         // ── Boolean / logic ─────────────────────────────────────────────
         "boolean" => match args.first() {
-            Some(v) => Ok(functions::boolean::boolean(v)?),
+            Some(v) => Ok(JValue::Bool(crate::evaluator::compiled_boolean(v)?)),
             None => Err(EvaluatorError::EvaluationError(
                 "boolean() requires 1 argument".to_string(),
             )),
         },
         "not" => match args.first() {
-            Some(v) => Ok(JValue::Bool(!crate::evaluator::compiled_is_truthy(v))),
+            Some(v) => Ok(JValue::Bool(!crate::evaluator::compiled_boolean(v)?)),
             None => Err(EvaluatorError::EvaluationError(
                 "not() requires 1 argument".to_string(),
             )),

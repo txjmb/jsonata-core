@@ -2,9 +2,9 @@
 Test adapter for the JSONata reference test suite.
 
 This module loads and runs all 1972 test cases from the reference JavaScript JSONata
-implementation (jsonata-js v2.3.0). 1803 pass; the rest are listed below, with reasons, in
-KNOWN_DIVERGENCES (strict xfail) and KNOWN_HANGS (skipped). Both shrink to empty as the
-jsonata-js 2.3.0 changes land. See
+implementation (jsonata-js v2.3.0). All 1972 pass. A case that diverges is listed below, with
+its reason, in KNOWN_DIVERGENCES (strict xfail), and one that hangs in KNOWN_HANGS (skipped);
+both are empty. See
 docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md and
 docs/superpowers/specs/2026-07-06-parent-and-focus-binding-operators-design.md for the
 history of how the gap (widened test discovery, datetime picture-strings,
@@ -99,19 +99,6 @@ def extract_error_code(error_msg: str) -> str | None:
 # Reasons for the jsonata-js 2.3.0 cases that still diverge, one per upstream change. Each
 # names the jsonata-js pull request and the plan item that removes its entries; see the 2.3.0
 # implementation plan.
-_TEMPLATE_STRINGS = "template strings «...» and <<...>> are not implemented (jsonata-js #860)"
-_OFFSET_MINUTES = "negative timezone offsets with minutes, -03:30 read as -02:30 (jsonata-js #856)"
-_FRACTIONAL_SECONDS = "fractional seconds in $fromMillis pictures, [f01] (jsonata-js #855)"
-_DATETIME_REWRITE = (
-    "date/time picture rewrite: out-of-range dates, digit families, grouping separators, "
-    "linear-time parsing (jsonata-js #869)"
-)
-_CHAINED_PREDICATES = "chained predicates after a computed index, $arr[$i][0] (jsonata-js #861)"
-_GROUPED_PATH_STEPS = "a step after a group-by, a{k:v}.x, is (a{k:v}).x (jsonata-js #838)"
-_TUPLE_ARRAYS = "constructed arrays kept in tuple results, a#$i.[b] (jsonata-js #841)"
-_BOOLEAN_OPERAND_ERRORS = "number overflow in an and/or operand raises D1001 (jsonata-js #857)"
-_FORMAT_NUMBER_DIGITS = "$formatNumber exponent mantissa scaling (jsonata-js #865, #868)"
-_UNDEFINED_PATTERN = "$split/$replace give undefined for an undefined pattern (jsonata-js #831)"
 
 # Reference cases that are known to diverge, each with the reason. Marked
 # xfail(strict), so one that starts passing fails the suite and has to be
@@ -120,187 +107,14 @@ _UNDEFINED_PATTERN = "$split/$replace give undefined for an undefined pattern (j
 # Note what does NOT belong here: a case we satisfy only because our error
 # carries no code for the suite to compare. That is not a known divergence, it
 # is an unverified case -- counted by UNVERIFIED_ERROR_CEILING below.
-KNOWN_DIVERGENCES: dict[str, str] = {
-    "array-constructor/tuple-arrays[0]": _TUPLE_ARRAYS,
-    "array-constructor/tuple-arrays[1]": _TUPLE_ARRAYS,
-    "boolean-expresssions/issue765[10]": _BOOLEAN_OPERAND_ERRORS,
-    "boolean-expresssions/issue765[11]": _BOOLEAN_OPERAND_ERRORS,
-    "boolean-expresssions/issue765[12]": _BOOLEAN_OPERAND_ERRORS,
-    "boolean-expresssions/issue765[13]": _BOOLEAN_OPERAND_ERRORS,
-    "function-eval/case009": _TEMPLATE_STRINGS,
-    "function-formatNumber/issue865[0]": _FORMAT_NUMBER_DIGITS,
-    "function-formatNumber/issue865[1]": _FORMAT_NUMBER_DIGITS,
-    "function-formatNumber/issue865[2]": _FORMAT_NUMBER_DIGITS,
-    "function-formatNumber/issue865[3]": _FORMAT_NUMBER_DIGITS,
-    "function-formatNumber/issue865[4]": _FORMAT_NUMBER_DIGITS,
-    "function-fromMillis/issue852[0]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[1]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[2]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[3]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[9]": _OFFSET_MINUTES,
-    "function-fromMillis/issue852[10]": _OFFSET_MINUTES,
-    "function-fromMillis/issue853[0]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[1]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[2]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[3]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[4]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[5]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[6]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[7]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[8]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[9]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[10]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[11]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[14]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[15]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[16]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[17]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[19]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[20]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[22]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[23]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[25]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[26]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[27]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[30]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/issue853[31]": _FRACTIONAL_SECONDS,
-    "function-fromMillis/outOfRange[0]": _DATETIME_REWRITE,
-    "function-fromMillis/outOfRange[1]": _DATETIME_REWRITE,
-    "function-parseInteger/digitFamily[1]": _DATETIME_REWRITE,
-    "function-parseInteger/groupingSeparators[1]": _DATETIME_REWRITE,
-    "function-replace/case012": _UNDEFINED_PATTERN,
-    "function-split/case019": _UNDEFINED_PATTERN,
-    "function-tomillis/issue852[0]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[1]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[2]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[3]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[4]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[5]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[6]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[8]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[9]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[12]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[13]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[14]": _OFFSET_MINUTES,
-    "function-tomillis/parseDateTime[62]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[63]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[64]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[75]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[81]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[82]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[83]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[84]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[85]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[86]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[89]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[90]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[91]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[92]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[93]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[94]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[102]": _DATETIME_REWRITE,
-    "multiple-array-selectors/case003[0]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[1]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[2]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[3]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[4]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[5]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[6]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[9]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[13]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[14]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[15]": _CHAINED_PREDICATES,
-    "multiple-array-selectors/case003[16]": _CHAINED_PREDICATES,
-    "object-constructor/case027": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[0]": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[2]": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[3]": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[4]": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[5]": _GROUPED_PATH_STEPS,
-    "parent-operator/parent[2]": _TUPLE_ARRAYS,
-    "template-strings/case000": _TEMPLATE_STRINGS,
-    "template-strings/case001": _TEMPLATE_STRINGS,
-    "template-strings/case002": _TEMPLATE_STRINGS,
-    "template-strings/case003": _TEMPLATE_STRINGS,
-    "template-strings/case004": _TEMPLATE_STRINGS,
-    "template-strings/case005": _TEMPLATE_STRINGS,
-    "template-strings/case006": _TEMPLATE_STRINGS,
-    "template-strings/case007": _TEMPLATE_STRINGS,
-    "template-strings/case008": _TEMPLATE_STRINGS,
-    "template-strings/case009": _TEMPLATE_STRINGS,
-    "template-strings/case010": _TEMPLATE_STRINGS,
-    "template-strings/case011": _TEMPLATE_STRINGS,
-    "template-strings/case012": _TEMPLATE_STRINGS,
-    "template-strings/case013": _TEMPLATE_STRINGS,
-    "template-strings/case014": _TEMPLATE_STRINGS,
-    "template-strings/case015": _TEMPLATE_STRINGS,
-    "template-strings/case016": _TEMPLATE_STRINGS,
-    "template-strings/case017": _TEMPLATE_STRINGS,
-    "template-strings/case018": _TEMPLATE_STRINGS,
-    "template-strings/case019": _TEMPLATE_STRINGS,
-    "template-strings/case020": _TEMPLATE_STRINGS,
-    "template-strings/case021": _TEMPLATE_STRINGS,
-    "template-strings/case022": _TEMPLATE_STRINGS,
-    "template-strings/case023": _TEMPLATE_STRINGS,
-    "template-strings/case024": _TEMPLATE_STRINGS,
-    "template-strings/case025": _TEMPLATE_STRINGS,
-    "template-strings/case026": _TEMPLATE_STRINGS,
-    "template-strings/case027": _TEMPLATE_STRINGS,
-    "template-strings/case028": _TEMPLATE_STRINGS,
-    "template-strings/case029": _TEMPLATE_STRINGS,
-    "template-strings/case030": _TEMPLATE_STRINGS,
-    "template-strings/case031": _TEMPLATE_STRINGS,
-    "template-strings/case032": _TEMPLATE_STRINGS,
-    "template-strings/case033": _TEMPLATE_STRINGS,
-    "template-strings/case034": _TEMPLATE_STRINGS,
-    "template-strings/case035": _TEMPLATE_STRINGS,
-    "template-strings/case036": _TEMPLATE_STRINGS,
-    "template-strings/case037": _TEMPLATE_STRINGS,
-    "template-strings/case038": _TEMPLATE_STRINGS,
-    "template-strings/case039": _TEMPLATE_STRINGS,
-    "template-strings/case040": _TEMPLATE_STRINGS,
-    "template-strings/case041": _TEMPLATE_STRINGS,
-    "template-strings/case042": _TEMPLATE_STRINGS,
-    "template-strings/case043": _TEMPLATE_STRINGS,
-    "template-strings/case044": _TEMPLATE_STRINGS,
-    "template-strings/case045": _TEMPLATE_STRINGS,
-    "template-strings/case046": _TEMPLATE_STRINGS,
-    "template-strings/case047": _TEMPLATE_STRINGS,
-    "template-strings/case048": _TEMPLATE_STRINGS,
-    "template-strings/case049": _TEMPLATE_STRINGS,
-    "template-strings/case050": _TEMPLATE_STRINGS,
-    "template-strings/case051": _TEMPLATE_STRINGS,
-    "template-strings/case052": _TEMPLATE_STRINGS,
-    "template-strings/case053": _TEMPLATE_STRINGS,
-    "template-strings/case054": _TEMPLATE_STRINGS,
-    "template-strings/case055": _TEMPLATE_STRINGS,
-    "template-strings/case056": _TEMPLATE_STRINGS,
-    "template-strings/case057": _TEMPLATE_STRINGS,
-    "template-strings/case058": _TEMPLATE_STRINGS,
-    "template-strings/case059": _TEMPLATE_STRINGS,
-    "template-strings/case060": _TEMPLATE_STRINGS,
-    "template-strings/case061": _TEMPLATE_STRINGS,
-    "template-strings/case062": _TEMPLATE_STRINGS,
-    "template-strings/case063": _TEMPLATE_STRINGS,
-    "template-strings/case064": _TEMPLATE_STRINGS,
-    "template-strings/case065": _TEMPLATE_STRINGS,
-    "template-strings/case066": _TEMPLATE_STRINGS,
-    "template-strings/case067": _TEMPLATE_STRINGS,
-    "template-strings/case068": _TEMPLATE_STRINGS,
-}
+KNOWN_DIVERGENCES: dict[str, str] = {}
 
 # Reference cases that diverge and also run for minutes, so they are skipped
 # rather than xfailed: an xfail still runs the case, and these would hold the
-# suite for longer than CI allows (each passed a 20 s timeout without
-# finishing). Our picture matching is not linear-time on these inputs;
-# jsonata-js 2.3.0's picture-parser rewrite (#869) is. Counted with
-# KNOWN_DIVERGENCES by scripts/check_reference_stats.py, and removed the same
-# way.
-KNOWN_HANGS: dict[str, str] = {
-    "function-parseInteger/groupingSeparators[0]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[79]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[97]": _DATETIME_REWRITE,
-}
+# suite for longer than CI allows. Empty since the linear-time picture matcher
+# of jsonata-js 2.3.0 (#869) was ported. Counted with KNOWN_DIVERGENCES by
+# scripts/check_reference_stats.py, and removed the same way.
+KNOWN_HANGS: dict[str, str] = {}
 
 
 def _build_pytest_params(

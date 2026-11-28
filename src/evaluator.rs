@@ -238,6 +238,9 @@ pub(crate) enum CompiledExpr {
 
     // ── String ──────────────────────────────────────────────────────────
     Concat(Box<CompiledExpr>, Box<CompiledExpr>),
+    /// A template string's parts (`AstNode::Template`), each evaluated and
+    /// cast to a string before the next is evaluated, as jsonata-js does.
+    Template(Vec<CompiledExpr>),
 
     // ── Logical ─────────────────────────────────────────────────────────
     And(Box<CompiledExpr>, Box<CompiledExpr>),
@@ -394,6 +397,11 @@ fn compiled_builtin_names(expr: &CompiledExpr, out: &mut Vec<&'static str>) {
         }
         CompiledExpr::ArrayConstruct(elems) => {
             for (e, _) in elems {
+                compiled_builtin_names(e, out);
+            }
+        }
+        CompiledExpr::Template(parts) => {
+            for e in parts {
                 compiled_builtin_names(e, out);
             }
         }
@@ -586,6 +594,7 @@ fn compiled_expr_node_count_exceeds(expr: &CompiledExpr, limit: usize) -> bool {
             // ── Compound ──────────────────────────────────────────────
             CompiledExpr::ObjectConstruct(pairs) => pairs.iter().any(|(_, v)| walk(v, budget)),
             CompiledExpr::ArrayConstruct(elems) => elems.iter().any(|(e, _)| walk(e, budget)),
+            CompiledExpr::Template(parts) => parts.iter().any(|e| walk(e, budget)),
             CompiledExpr::FieldPath { steps, .. } => {
                 for step in steps.iter() {
                     // Each step interns its field name into `string_pool` in
@@ -876,6 +885,15 @@ fn try_compile_node(node: &AstNode, allowed_vars: Option<&[&str]>) -> Option<Com
                 compiled.push((try_compile_expr_inner(elem, allowed_vars)?, is_nested));
             }
             Some(CompiledExpr::ArrayConstruct(compiled))
+        }
+
+        // ── Template string ─────────────────────────────────────────────
+        AstNode::Template(parts) => {
+            let compiled: Option<Vec<CompiledExpr>> = parts
+                .iter()
+                .map(|e| try_compile_expr_inner(e, allowed_vars))
+                .collect();
+            compiled.map(CompiledExpr::Template)
         }
 
         // ── Block (sequential evaluation) ───────────────────────────────
@@ -1292,27 +1310,35 @@ fn eval_compiled_node(
             let rs = compiled_to_concat_string(&right)?;
             Ok(JValue::string(format!("{}{}", ls, rs)))
         }
+        CompiledExpr::Template(parts) => {
+            let mut result = String::new();
+            for part in parts {
+                let value = eval_compiled_inner(part, data, vars, ctx, shape, options, start_time)?;
+                result.push_str(&compiled_to_concat_string(&value)?);
+            }
+            Ok(JValue::string(result))
+        }
 
         // ── Logical ─────────────────────────────────────────────────────
         CompiledExpr::And(lhs, rhs) => {
             let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
-            if !compiled_is_truthy(&left) {
+            if !compiled_boolean(&left)? {
                 return Ok(JValue::Bool(false));
             }
             let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
-            Ok(JValue::Bool(compiled_is_truthy(&right)))
+            Ok(JValue::Bool(compiled_boolean(&right)?))
         }
         CompiledExpr::Or(lhs, rhs) => {
             let left = eval_compiled_inner(lhs, data, vars, ctx, shape, options, start_time)?;
-            if compiled_is_truthy(&left) {
+            if compiled_boolean(&left)? {
                 return Ok(JValue::Bool(true));
             }
             let right = eval_compiled_inner(rhs, data, vars, ctx, shape, options, start_time)?;
-            Ok(JValue::Bool(compiled_is_truthy(&right)))
+            Ok(JValue::Bool(compiled_boolean(&right)?))
         }
         CompiledExpr::Not(inner) => {
             let val = eval_compiled_inner(inner, data, vars, ctx, shape, options, start_time)?;
-            Ok(JValue::Bool(!compiled_is_truthy(&val)))
+            Ok(JValue::Bool(!compiled_boolean(&val)?))
         }
         CompiledExpr::Negate(inner) => {
             let val = eval_compiled_inner(inner, data, vars, ctx, shape, options, start_time)?;
@@ -1334,7 +1360,7 @@ fn eval_compiled_node(
             else_expr,
         } => {
             let cond = eval_compiled_inner(condition, data, vars, ctx, shape, options, start_time)?;
-            if compiled_is_truthy(&cond) {
+            if compiled_boolean(&cond)? {
                 eval_compiled_inner(then_expr, data, vars, ctx, shape, options, start_time)
             } else if let Some(else_e) = else_expr {
                 eval_compiled_inner(else_e, data, vars, ctx, shape, options, start_time)
@@ -1533,7 +1559,7 @@ fn eval_compiled_node(
                         options,
                         start_time,
                     )?;
-                    if compiled_is_truthy(&pred) {
+                    if compiled_boolean(&pred)? {
                         result.push(item.clone());
                     }
                 }
@@ -1551,7 +1577,7 @@ fn eval_compiled_node(
                         options,
                         start_time,
                     )?;
-                    if compiled_is_truthy(&pred) {
+                    if compiled_boolean(&pred)? {
                         result.push(item.clone());
                     }
                 }
@@ -1632,13 +1658,40 @@ fn js_truthy(value: &JValue) -> bool {
     }
 }
 
+/// `value`, or D1001 if it is an infinite number or an array holding one at
+/// any depth. jsonata-js's `isNumeric` throws for an infinity, and its
+/// `boolean` and `evaluateFilter` reach every number such an array holds
+/// (#857). NaN is not numeric there, so it is no error.
+pub(crate) fn reject_infinite(value: &JValue) -> Result<&JValue, EvaluatorError> {
+    fn find_infinite(value: &JValue) -> bool {
+        match value {
+            JValue::Number(n) => n.is_infinite(),
+            JValue::Array(a) => with_stack(|| a.iter().any(find_infinite)),
+            _ => false,
+        }
+    }
+    if find_infinite(value) {
+        return Err(EvaluatorError::EvaluationError(
+            "D1001: Number out of range".to_string(),
+        ));
+    }
+    Ok(value)
+}
+
+/// The boolean cast of `value`, as jsonata-js's `boolean` does it for the
+/// `and`/`or` operands, a condition, `?:`, `$boolean`, `$not` and the
+/// predicate functions: `compiled_is_truthy`, after `reject_infinite`.
+pub(crate) fn compiled_boolean(value: &JValue) -> Result<bool, EvaluatorError> {
+    Ok(compiled_is_truthy(reject_infinite(value)?))
+}
+
 /// Truthiness check (matches JSONata semantics). Standalone function for compiled path.
 #[inline]
 pub(crate) fn compiled_is_truthy(value: &JValue) -> bool {
     match value {
         JValue::Null | JValue::Undefined => false,
         JValue::Bool(b) => *b,
-        JValue::Number(n) => *n != 0.0,
+        JValue::Number(n) => *n != 0.0 && !n.is_nan(), // NaN is false in jsonata-js
         JValue::String(s) => !s.is_empty(),
         // Recursive, matching `Evaluator::is_truthy` and `$boolean` (#111).
         JValue::Array(a) => with_stack(|| match a.len() {
@@ -1827,7 +1880,10 @@ pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, Evalua
         | JValue::Object(_) => match crate::functions::string::string(value, None) {
             Ok(JValue::String(s)) => Ok(s.to_string()),
             Ok(JValue::Null) => Ok(String::new()),
-            _ => Err(EvaluatorError::TypeError(
+            // `$string`'s own error, as jsonata-js's `fn.string` throws it:
+            // D3001 for a non-finite number (`"" & 1/0`).
+            Err(e) => Err(e.into()),
+            Ok(_) => Err(EvaluatorError::TypeError(
                 "Cannot concatenate complex types".to_string(),
             )),
         },
@@ -2334,7 +2390,7 @@ fn compiled_apply_filter(
     for (index, item) in items.iter().enumerate() {
         check_loop_timeout(options, start_time)?;
         let selector = eval_compiled_inner(filter, item, vars, ctx, shape, options, start_time)?;
-        let repeats = match predicate_index_match(&selector, index, len) {
+        let repeats = match predicate_index_match(reject_infinite(&selector)?, index, len) {
             Some(n) => n,
             None => usize::from(compiled_is_truthy(&selector)),
         };
@@ -4448,6 +4504,14 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
         AstNode::Array(items) | AstNode::ArrayGroup(items) => {
             (K::Other, any(items.iter(), from_nothing))
         }
+        // A template casts each part as `&` casts its operands.
+        AstNode::Template(parts) => (
+            K::String,
+            parts.iter().any(|part| {
+                let (kind, raises) = analyze_on_nothing(part, from_nothing);
+                raises || kind == K::Unknown
+            }),
+        ),
         AstNode::Block(items) => match items.split_last() {
             None => (K::Undefined, false),
             Some((last, rest)) => {
@@ -5946,7 +6010,7 @@ impl Evaluator {
                 else_branch,
             } => {
                 let condition_value = self.evaluate_internal(condition, data)?;
-                if self.is_truthy(&condition_value) {
+                if compiled_boolean(&condition_value)? {
                     self.evaluate_internal(then_branch, data)
                 } else if let Some(else_branch) = else_branch {
                     self.evaluate_internal(else_branch, data)
@@ -5958,6 +6022,8 @@ impl Evaluator {
             }
 
             AstNode::Block(expressions) => self.evaluate_block(expressions, data),
+
+            AstNode::Template(parts) => self.evaluate_template(parts, data),
 
             // Lambda: capture current environment for closure support
             AstNode::Lambda {
@@ -7153,9 +7219,10 @@ impl Evaluator {
             AstNode::Function { args, .. } => {
                 args.is_empty() || args.iter().any(Self::may_read_dollar)
             }
-            AstNode::Array(items) | AstNode::ArrayGroup(items) | AstNode::Block(items) => {
-                items.iter().any(Self::may_read_dollar)
-            }
+            AstNode::Array(items)
+            | AstNode::ArrayGroup(items)
+            | AstNode::Block(items)
+            | AstNode::Template(items) => items.iter().any(Self::may_read_dollar),
             AstNode::Object(pairs) => pairs
                 .iter()
                 .any(|(key, value)| Self::may_read_dollar(key) || Self::may_read_dollar(value)),
@@ -7271,9 +7338,17 @@ impl Evaluator {
         mut value: JValue,
         stages: &[Stage],
     ) -> Result<JValue, EvaluatorError> {
-        for stage in stages {
+        for (i, stage) in stages.iter().enumerate() {
             if let Stage::Filter(predicate) = stage {
-                value = self.evaluate_filter(predicate, value)?;
+                // jsonata-js passes `chained` when another filter follows.
+                // `[]` is not a stage there, so it is skipped.
+                let chained = matches!(
+                    stages[i + 1..]
+                        .iter()
+                        .find(|s| !matches!(s, Stage::KeepArray)),
+                    Some(Stage::Filter(_))
+                );
+                value = self.evaluate_filter(predicate, value, chained)?;
             }
         }
         Ok(value)
@@ -7315,10 +7390,12 @@ impl Evaluator {
         // and keeps it, so the next filter runs (`x[$count([])][$error()]`
         // raises in jsonata-js). Only a numeric literal drops it, and
         // `filters_run_on_nothing` never runs those.
-        Ok(match predicate_index_match(&selector, 0, 1) {
-            Some(n) => n > 0,
-            None => self.is_truthy(&selector),
-        })
+        Ok(
+            match predicate_index_match(reject_infinite(&selector)?, 0, 1) {
+                Some(n) => n > 0,
+                None => self.is_truthy(&selector),
+            },
+        )
     }
 
     /// Apply a filter predicate to a value, following jsonata-js
@@ -7327,10 +7404,16 @@ impl Evaluator {
     /// negative), and an array item selected that way is the result itself.
     /// Any other predicate is evaluated against each item: a number or array
     /// of numbers selects by position, anything else by truthiness.
+    ///
+    /// `chained` says another filter follows. Then a predicate that gives the
+    /// same number for every item, and so selects one array, returns that
+    /// array as a numeric literal does, and the next filter indexes into it:
+    /// `$arr[$i][0]` (jsonata-js 2.3.0, #861).
     fn evaluate_filter(
         &mut self,
         predicate: &AstNode,
         input: JValue,
+        chained: bool,
     ) -> Result<JValue, EvaluatorError> {
         if input.is_undefined() {
             return Ok(JValue::Undefined);
@@ -7367,16 +7450,38 @@ impl Evaluator {
         };
         let len = items.len();
         let mut results = Vec::new();
+        // The position the predicate selects, while it is the same number for
+        // every item (jsonata-js's `position` and `samePosition`).
+        let mut position: Option<i64> = None;
+        let mut same_position = true;
         for (index, item) in items.iter().enumerate() {
             let context = plain.as_ref().map_or(item, |plain| &plain[index]);
             let selector =
                 self.with_dollar_bound(context, |ev| ev.evaluate_internal(predicate, context))?;
-            let repeats = match predicate_index_match(&selector, index, len) {
+            match &selector {
+                JValue::Number(n) if !n.is_nan() => {
+                    let mut at = n.floor() as i64;
+                    if at < 0 {
+                        at += len as i64;
+                    }
+                    if index > 0 && position != Some(at) {
+                        same_position = false;
+                    }
+                    position = Some(at);
+                }
+                _ => same_position = false,
+            }
+            let repeats = match predicate_index_match(reject_infinite(&selector)?, index, len) {
                 Some(n) => n,
                 None => usize::from(self.is_truthy(&selector)),
             };
             for _ in 0..repeats {
                 results.push(item.clone());
+            }
+        }
+        if chained && same_position && results.len() == 1 {
+            if let Some(JValue::Array(arr)) = results.first() {
+                return Ok(JValue::Array(arr.clone()));
             }
         }
         Ok(sequence(results))
@@ -7631,12 +7736,17 @@ impl Evaluator {
     /// True when `node` starts with a `consarray` first step: an array
     /// constructor that begins a dotted path (`dotted`), or a consarray
     /// block. A sort is a step of the path it ends in jsonata-js, so
-    /// `[3,1].$^($)` and `[3,1]^($).$` start with one too.
+    /// `[3,1].$^($)` and `[3,1]^($).$` start with one too, and so does a
+    /// path with a group-by.
     fn starts_cons(node: &AstNode, dotted: bool) -> bool {
         match node {
             AstNode::Array(_) => dotted,
             AstNode::Block(_) => Self::is_cons_block(node),
             AstNode::Sort { input, .. } => Self::starts_cons(input, dotted),
+            // A grouped path keeps its first step's mark: parser.js
+            // `blockExpression` tests `steps[0].consarray` whatever the
+            // path's group-by, so `([1,2].${"k":$})` is a consarray block.
+            AstNode::ObjectTransform { input, .. } => Self::starts_cons(input, dotted),
             AstNode::Path { steps } if !Self::is_non_path(steps) => {
                 Self::starts_cons(&steps[0].node, dotted || steps.len() > 1)
             }
@@ -8135,6 +8245,25 @@ impl Evaluator {
 
             let row: Vec<JValue> = match step_value {
                 JValue::Undefined => continue,
+                // A constructed array (`.[...]`) is one value of the stream,
+                // unless stages follow and filter its items (jsonata-js
+                // 2.3.0, #841). `[]` is not a stage in jsonata-js.
+                // A later step that is an array constructor carrying its own
+                // binding (`.[...]#$k`) parses as `Array`, not `ArrayGroup`;
+                // jsonata-js flags it `consarray` all the same. A leading one
+                // (`[3,1]#$k`) is evaluated once on the input and its items
+                // make the stream, as before.
+                JValue::Array(arr)
+                    if (arr.cons
+                        || (!is_first_path_step && matches!(step.node, AstNode::Array(_))))
+                        && step.stages.iter().all(|s| matches!(s, Stage::KeepArray)) =>
+                {
+                    // The flag travels with the value, as on jsonata-js's
+                    // array, so a later `.$` keeps it whole too.
+                    let mut arr = arr;
+                    arr.cons = true;
+                    vec![JValue::Array(arr)]
+                }
                 JValue::Array(arr) => arr.iter().cloned().collect(),
                 other => vec![other],
             };
@@ -8212,7 +8341,7 @@ impl Evaluator {
                     if sorted_tuples {
                         let mut stream = JArray::new(tuples);
                         stream.sorted_tuples = true;
-                        tuples = match self.evaluate_filter(pred, JValue::Array(stream))? {
+                        tuples = match self.evaluate_filter(pred, JValue::Array(stream), false)? {
                             JValue::Array(kept) => kept.into_vec(),
                             _ => Vec::new(),
                         };
@@ -8233,10 +8362,11 @@ impl Evaluator {
                             self.with_dollar_bound(&at, |ev| ev.evaluate_internal(pred, &at));
                         tuple_bindings.restore(self);
                         let selector = selector?;
-                        let repeats = match predicate_index_match(&selector, index, len) {
-                            Some(n) => n,
-                            None => usize::from(self.is_truthy(&selector)),
-                        };
+                        let repeats =
+                            match predicate_index_match(reject_infinite(&selector)?, index, len) {
+                                Some(n) => n,
+                                None => usize::from(self.is_truthy(&selector)),
+                            };
                         for _ in 0..repeats {
                             kept.push(tup.clone());
                         }
@@ -8291,7 +8421,8 @@ impl Evaluator {
             // `?:` used to have its own truthiness rule, half-recursive where
             // `is_truthy` was flat. Now that `is_truthy` matches `$boolean`
             // the two agree exactly, so there is one rule again (#111).
-            if self.is_truthy(&left) {
+            // jsonata-js parses `a ?: b` as a condition, so its D1001 too.
+            if compiled_boolean(&left)? {
                 return Ok(left);
             }
             return self.evaluate_internal(rhs, data);
@@ -8361,22 +8492,22 @@ impl Evaluator {
         // Special handling for logical operators (short-circuit evaluation)
         if op == BinaryOp::And {
             let left = self.evaluate_internal(lhs, data)?;
-            if !self.is_truthy(&left) {
+            if !compiled_boolean(&left)? {
                 // Short-circuit: if left is falsy, return false without evaluating right
                 return Ok(JValue::Bool(false));
             }
             let right = self.evaluate_internal(rhs, data)?;
-            return Ok(JValue::Bool(self.is_truthy(&right)));
+            return Ok(JValue::Bool(compiled_boolean(&right)?));
         }
 
         if op == BinaryOp::Or {
             let left = self.evaluate_internal(lhs, data)?;
-            if self.is_truthy(&left) {
+            if compiled_boolean(&left)? {
                 // Short-circuit: if left is truthy, return true without evaluating right
                 return Ok(JValue::Bool(true));
             }
             let right = self.evaluate_internal(rhs, data)?;
-            return Ok(JValue::Bool(self.is_truthy(&right)));
+            return Ok(JValue::Bool(compiled_boolean(&right)?));
         }
 
         // Standard evaluation: evaluate both operands, then dispatch to the
@@ -8463,7 +8594,7 @@ impl Evaluator {
                     "D1002: Cannot negate non-number value".to_string(),
                 )),
             },
-            UnaryOp::Not => Ok(JValue::Bool(!self.is_truthy(&value))),
+            UnaryOp::Not => Ok(JValue::Bool(!compiled_boolean(&value)?)),
         }
     }
 
@@ -8559,7 +8690,7 @@ impl Evaluator {
                     } else {
                         eval_compiled(compiled, item, None, &self.options, self.start_time)?
                     };
-                    match predicate_index_match(&selector, index, len) {
+                    match predicate_index_match(reject_infinite(&selector)?, index, len) {
                         Some(n) => n,
                         None => usize::from(compiled_is_truthy(&selector)),
                     }
@@ -8866,7 +8997,9 @@ impl Evaluator {
                 if evaluated_args[0].is_null() {
                     return Ok(JValue::Null);
                 }
-                if evaluated_args[0].is_undefined() {
+                // Undefined input or pattern gives undefined (jsonata-js 2.3.0
+                // checks the pattern here too, #831).
+                if evaluated_args[0].is_undefined() || evaluated_args[1].is_undefined() {
                     return Ok(JValue::Undefined);
                 }
 
@@ -8978,7 +9111,7 @@ impl Evaluator {
                         check_loop_timeout(&evaluator.options, evaluator.start_time)?;
                         let pred_result =
                             evaluator.apply_function(func_node, &call_args, context_data)?;
-                        if evaluator.is_truthy(&pred_result) {
+                        if compiled_boolean(&pred_result)? {
                             result.insert(key.clone(), value.clone());
                         }
                     }
@@ -9254,7 +9387,7 @@ impl Evaluator {
                                     &self.options,
                                     self.start_time,
                                 )?;
-                                if compiled_is_truthy(&pred_result) {
+                                if compiled_boolean(&pred_result)? {
                                     result.push(item.clone());
                                 }
                             }
@@ -9278,7 +9411,7 @@ impl Evaluator {
                                         &self.options,
                                         self.start_time,
                                     )?;
-                                    if compiled_is_truthy(&pred_result) {
+                                    if compiled_boolean(&pred_result)? {
                                         result.push(item.clone());
                                     }
                                 }
@@ -9304,7 +9437,7 @@ impl Evaluator {
 
                     check_loop_timeout(&self.options, self.start_time)?;
                     let predicate_result = self.apply_function(&args[1], &call_args, data)?;
-                    if self.is_truthy(&predicate_result) {
+                    if compiled_boolean(&predicate_result)? {
                         result.push(item.clone());
                     }
                 }
@@ -9520,7 +9653,7 @@ impl Evaluator {
                             hof_array_call_args(item, index, arr_value.as_ref(), param_count);
                         check_loop_timeout(&self.options, self.start_time)?;
                         let predicate_result = self.apply_function(&args[1], &call_args, data)?;
-                        if self.is_truthy(&predicate_result) {
+                        if compiled_boolean(&predicate_result)? {
                             matches.push(item.clone());
                         }
                     }
@@ -9862,8 +9995,10 @@ impl Evaluator {
 
         // `$` in the location is the copy, as in jsonata-js.
         let matches = self.with_dollar(&copy, |ev| ev.evaluate_internal(location, &copy))?;
+        // A null is a match like any other value: jsonata-js still runs the
+        // update on it, and so raises T2011 for `|null|5|`.
         let matches: Vec<JValue> = match matches {
-            JValue::Undefined | JValue::Null => Vec::new(),
+            JValue::Undefined => Vec::new(),
             JValue::Array(arr) => arr.to_vec(),
             other => vec![other],
         };
@@ -9877,14 +10012,15 @@ impl Evaluator {
                 "D1014: The location in a transform expression can only match objects in the copy that is being transformed".to_string(),
             )
         };
+        // `None` is a match with no fields to change: a scalar, a null, or an
+        // array of the copy (jsonata-js's assignments to it are not visible).
+        // Its update and delete clauses still run, for their errors.
         let mut targets: Vec<Option<usize>> = Vec::with_capacity(matches.len());
         for matched in &matches {
             match matched {
                 JValue::Object(map) => {
                     targets.push(Some(tree.node_of(map).ok_or_else(outside_copy)?))
                 }
-                // An array of the copy has no fields to change; jsonata-js
-                // ignores it too (its assignments to it are not visible).
                 JValue::Array(arr) if tree.has_array(arr) => targets.push(None),
                 JValue::Array(_)
                 | JValue::Lambda(_)
@@ -9899,7 +10035,25 @@ impl Evaluator {
 
         // Apply the matches in order, each to the object as earlier matches
         // left it, as jsonata-js's in-place loop does.
-        for id in targets.into_iter().flatten() {
+        let not_an_object = || {
+            EvaluatorError::EvaluationError(
+                "T2011: The insert/update clause of the transform expression must evaluate to an object".to_string(),
+            )
+        };
+        for (matched, target) in matches.iter().zip(targets) {
+            let Some(id) = target else {
+                // No fields to change, but jsonata-js evaluates both clauses
+                // and checks their types all the same.
+                let update_val =
+                    self.with_dollar(matched, |ev| ev.evaluate_internal(update, matched))?;
+                if !matches!(update_val, JValue::Undefined | JValue::Object(_)) {
+                    return Err(not_an_object());
+                }
+                if let Some(delete) = delete {
+                    self.transform_deletions(delete, matched)?;
+                }
+                continue;
+            };
             let current = tree.materialize(id);
             // As in jsonata-js, `$` in the update is the matched object, not
             // the transform's input.
@@ -9911,14 +10065,9 @@ impl Evaluator {
                         tree.set(id, key.clone(), val.clone());
                     }
                 }
-                JValue::Null | JValue::Undefined => {
-                    // Null/undefined means no updates, just continue to deletions
-                }
-                _ => {
-                    return Err(EvaluatorError::EvaluationError(
-                        "T2011: The second argument of the transform operator must evaluate to an object".to_string()
-                    ));
-                }
+                // Undefined means no updates; null is T2011, as in jsonata-js.
+                JValue::Undefined => {}
+                _ => return Err(not_an_object()),
             }
             if let Some(delete) = delete {
                 // The delete clause sees the object after its update.
@@ -10224,7 +10373,7 @@ impl Evaluator {
                 else_branch,
             } => {
                 let cond_value = self.evaluate_internal(condition, data)?;
-                let is_truthy = self.is_truthy(&cond_value);
+                let is_truthy = compiled_boolean(&cond_value)?;
 
                 if is_truthy {
                     self.evaluate_for_tco(then_branch, data)
@@ -11166,7 +11315,9 @@ impl Evaluator {
                     }
                 }
             }
-            AstNode::Array(exprs) | AstNode::ArrayGroup(exprs) => {
+            // A template's parts are evaluated in the template's scope, as
+            // an array's members are.
+            AstNode::Array(exprs) | AstNode::ArrayGroup(exprs) | AstNode::Template(exprs) => {
                 for expr in exprs {
                     Self::collect_free_vars_walk(expr, bound, free);
                 }
@@ -11593,6 +11744,9 @@ impl Evaluator {
                     descendants.extend(with_stack(|| self.collect_descendants(val))?);
                 }
             }
+            // A function is never a descendant, the same as for `*`
+            // (jsonata-js 2.3.0, #873).
+            _ if value.is_function() => {}
             _ => {
                 // For primitives (string, number, boolean), just include the value itself
                 descendants.push(value.clone());
@@ -11925,37 +12079,31 @@ impl Evaluator {
         }
     }
 
-    /// Convert a value to a string for concatenation
+    /// Convert a value to a string for concatenation, as `&` and template
+    /// strings cast their operands (jsonata-js `castString`).
     fn value_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
-        // Normalize a lazy operand up front: `functions::string::string`'s lazy arm maps a
-        // conversion failure to `JValue::Null` (silently stringifying to `""`), which would
-        // swallow the TypeError this must raise instead. Guarded by `is_lazy` so the
-        // common (non-lazy) path pays no clone.
-        let normalized;
-        let value = if value.is_lazy() {
-            normalized = normalize_lazy(value)?;
-            &normalized
-        } else {
-            value
-        };
-        match value {
-            JValue::String(s) => Ok(s.to_string()),
-            // An explicit null stringifies as "null" (same as `$string(null)`);
-            // only an *undefined* operand contributes nothing.
-            JValue::Undefined => Ok(String::new()),
-            JValue::Null
-            | JValue::Number(_)
-            | JValue::Bool(_)
-            | JValue::Array(_)
-            | JValue::Object(_) => match crate::functions::string::string(value, None) {
-                Ok(JValue::String(s)) => Ok(s.to_string()),
-                Ok(JValue::Null) => Ok(String::new()),
-                _ => Err(EvaluatorError::TypeError(
-                    "Cannot concatenate complex types".to_string(),
-                )),
-            },
-            _ => Ok(String::new()),
+        compiled_to_concat_string(value)
+    }
+
+    /// A template string (jsonata-js `evaluateTemplate`): each part evaluated
+    /// in turn and cast to a string as `&` casts its operands, undefined
+    /// giving the empty string. A loop, not a chain of `&`, so a template
+    /// with many parts doesn't nest the evaluation.
+    fn evaluate_template(
+        &mut self,
+        parts: &[AstNode],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
+        let mut result = String::new();
+        for part in parts {
+            if let AstNode::String(text) = part {
+                result.push_str(text);
+                continue;
+            }
+            let value = self.evaluate_internal(part, data)?;
+            result.push_str(&Self::value_to_concat_string(&value)?);
         }
+        Ok(JValue::string(result))
     }
 
     /// String concatenation

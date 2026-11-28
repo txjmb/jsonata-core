@@ -234,7 +234,10 @@ fn push_ast_node_children(node: AstNode, stack: &mut Vec<AstNode>) {
             stack.extend(args);
         }
         AstNode::Lambda { body, .. } => stack.push(*body),
-        AstNode::Array(elements) | AstNode::Block(elements) | AstNode::ArrayGroup(elements) => {
+        AstNode::Array(elements)
+        | AstNode::Block(elements)
+        | AstNode::ArrayGroup(elements)
+        | AstNode::Template(elements) => {
             stack.extend(elements);
         }
         AstNode::Object(pairs) => {
@@ -545,6 +548,12 @@ fn substitute_labels_impl(
         },
         AstNode::Array(elements) => AstNode::Array(
             elements
+                .into_iter()
+                .map(|e| substitute_labels(e, state, depth))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        AstNode::Template(parts) => AstNode::Template(
+            parts
                 .into_iter()
                 .map(|e| substitute_labels(e, state, depth))
                 .collect::<Result<Vec<_>, _>>()?,
@@ -1241,6 +1250,28 @@ fn seek_back(
     Ok(())
 }
 
+/// jsonata-js 2.3.0's `.` after a path with a group-by (#838): a group-by
+/// ends its path, so the steps after it start a new one, as if the grouped
+/// path were in parentheses. `a{k:v}.x` is `(a{k:v}).x`. Unlike in
+/// parentheses, the `%` slots the grouped path can't resolve itself are
+/// the new path's, so the enclosing expression resolves them (and an
+/// unresolvable one is still S0217): jsonata-js's `pushAncestry(result,
+/// block)`.
+fn group_as_block(path: &mut Proc) {
+    let grouped = std::mem::replace(path, Proc::value(Transformed::leaf(AstNode::Undefined)));
+    let Transformed { node, pending } = lower_value(grouped);
+    *path = Proc {
+        steps: vec![PathStep::new(AstNode::Block(vec![node]))],
+        is_path: true,
+        dotted: false,
+        group: None,
+        keep_array: false,
+        pending,
+        step_pending: Vec::new(),
+        checked: 0,
+    };
+}
+
 /// jsonata-js's `.` (`processAST`, binary `.`): the left side as a path,
 /// with the right side's steps, or the right side as one step, after it.
 /// Every step that is a literal is then S0213, and a string step becomes a
@@ -1252,6 +1283,9 @@ fn apply_map(
     state: &mut AncestryState,
     depth: usize,
 ) -> Result<(), AstTransformError> {
+    if path.is_path && path.group.is_some() {
+        group_as_block(path);
+    }
     path.make_path();
     // The left side's last step is last no more.
     path.step_pending.clear();
@@ -1736,6 +1770,21 @@ fn transform_children_impl(
             }
             Ok(Transformed {
                 node: AstNode::Array(transformed),
+                pending,
+            })
+        }
+        // A template string passes up the ancestry (`%`) of each embedded
+        // expression, as jsonata-js's processAST `template` case does.
+        AstNode::Template(parts) => {
+            let mut pending = Vec::new();
+            let mut transformed = Vec::with_capacity(parts.len());
+            for e in parts {
+                let t = transform_node(e, state, depth)?;
+                pending.extend(t.pending);
+                transformed.push(t.node);
+            }
+            Ok(Transformed {
+                node: AstNode::Template(transformed),
                 pending,
             })
         }
