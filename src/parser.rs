@@ -632,45 +632,52 @@ impl Lexer {
         Err(ParserError::UnclosedBacktick)
     }
 
+    /// A regex literal, its opening `/` at the current position (jsonata-js
+    /// `scanRegex`). The closing `/` is the first one outside brackets --
+    /// `(`, `[` and `{` are counted against `)`, `]` and `}`, unless escaped
+    /// -- with an even number of backslashes before it, so `/[/]/` is one
+    /// regex. An empty pattern is S0301, a missing closing `/` S0302. Only
+    /// `i` and `m` are flags; a letter after them is the next token.
     fn read_regex(&mut self) -> Result<Token, ParserError> {
         self.advance(); // skip opening /
-
-        // Read pattern
-        let mut pattern = String::new();
-        let mut escaped = false;
-
-        loop {
-            match self.current() {
-                None => return Err(ParserError::UnclosedString),
-                Some('/') if !escaped => {
-                    self.advance(); // skip closing /
-                    break;
-                }
-                Some('\\') if !escaped => {
-                    escaped = true;
-                    pattern.push('\\');
-                    self.advance();
-                }
-                Some(ch) => {
-                    escaped = false;
-                    pattern.push(ch);
-                    self.advance();
-                }
-            }
-        }
-
-        // Read flags (optional)
-        let mut flags = String::new();
+        let start = self.position;
+        let mut depth: i64 = 0;
         while let Some(ch) = self.current() {
-            if ch.is_alphabetic() {
-                flags.push(ch);
-                self.advance();
-            } else {
-                break;
+            if ch == '/' && depth == 0 {
+                let backslashes = self.input[start..self.position]
+                    .iter()
+                    .rev()
+                    .take_while(|&&c| c == '\\')
+                    .count();
+                if backslashes % 2 == 0 {
+                    let pattern: String = self.input[start..self.position].iter().collect();
+                    if pattern.is_empty() {
+                        return Err(ParserError::Coded {
+                            code: "S0301",
+                            message: "Empty regular expressions are not allowed".to_string(),
+                        });
+                    }
+                    self.advance(); // skip closing /
+                    let mut flags = String::new();
+                    while let Some(flag @ ('i' | 'm')) = self.current() {
+                        flags.push(flag);
+                        self.advance();
+                    }
+                    return Ok(Token::Regex { pattern, flags });
+                }
             }
+            let escaped = self.position > 0 && self.input[self.position - 1] == '\\';
+            match ch {
+                '(' | '[' | '{' if !escaped => depth += 1,
+                ')' | ']' | '}' if !escaped => depth -= 1,
+                _ => {}
+            }
+            self.advance();
         }
-
-        Ok(Token::Regex { pattern, flags })
+        Err(ParserError::Coded {
+            code: "S0302",
+            message: "No terminating / in regular expression".to_string(),
+        })
     }
 
     fn emit_token(&mut self, token: Token) -> Result<Token, ParserError> {
@@ -985,6 +992,9 @@ pub struct Parser {
     /// to a deeper node every iteration without a new recursive call).
     /// Both must be bounded by this one counter; see `MAX_PARSE_DEPTH`.
     depth: usize,
+    /// Set when the input ended where an operand should be; see
+    /// `parse_primary`.
+    missing_operand: bool,
 }
 
 impl Parser {
@@ -995,6 +1005,7 @@ impl Parser {
             lexer,
             current_token,
             depth: 0,
+            missing_operand: false,
         })
     }
 
@@ -1249,6 +1260,15 @@ impl Parser {
     /// Parse a primary expression (literals, identifiers, variables, grouping)
     fn parse_primary(&mut self) -> Result<AstNode, ParserError> {
         match &self.current_token {
+            // The input ended where an operand should be. jsonata-js's parser
+            // takes its end token as the operand and goes on, so whatever
+            // expects a token next reports S0203 ("Expected ) before end of
+            // expression"); only if nothing does is the end token found in
+            // the tree, and that is S0207 (`parse_raw`).
+            Token::Eof => {
+                self.missing_operand = true;
+                Ok(AstNode::Undefined)
+            }
             Token::String(s) => {
                 let value = s.clone();
                 self.advance()?;
@@ -1465,6 +1485,15 @@ impl Parser {
                             Token::Variable(name) => {
                                 params.push(name.clone());
                                 self.advance()?;
+                            }
+                            // jsonata-js reads the parameters as call
+                            // arguments, so at the end of the input it
+                            // expects the `)` (S0203) before it checks them.
+                            Token::Eof => {
+                                return Err(ParserError::Expected {
+                                    expected: ")".to_string(),
+                                    found: "Eof".to_string(),
+                                })
                             }
                             _ => {
                                 return Err(ParserError::Expected {
@@ -1841,6 +1870,9 @@ impl Parser {
                 "S0201: Syntax error: {:?}",
                 self.current_token
             )));
+        }
+        if self.missing_operand {
+            return Err(ParserError::UnexpectedEnd);
         }
 
         Ok(ast)

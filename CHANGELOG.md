@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after `.`, `..` or `|` starts a regex, as it does after other operators.
 - A string literal that ends in a backslash raises S0103 (an illegal
   escape), as in jsonata-js, rather than S0101.
+- A regex literal is scanned as jsonata-js scans it: it ends at the first
+  `/` outside brackets, so `/[/]/` is one regex; an unmatched bracket or a
+  missing closing `/` is S0302 (it was S0101, or accepted), an empty `//` is
+  S0301, and only `i` and `m` are flags.
+- The input ending where an operand should be is S0203 when a token is
+  expected after it (`(`, `[1,`, `$f(`, `«a {`), as in jsonata-js, and
+  S0207 otherwise (`1 +`). It was always S0207.
 - `__jsonata_version__` is `2.3.0`: every case of the jsonata-js 2.3.0
   reference suite passes.
 

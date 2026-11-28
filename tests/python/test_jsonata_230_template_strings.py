@@ -198,3 +198,64 @@ def test_operand_after_star_and_percent(engine, expr, expected):
 
 def test_wildcard_then_division(engine):
     assert evaluate("* / 2", {"a": 4}) == 2
+
+
+def test_many_parts_take_linear_time(engine):
+    # Review finding: the VM joined each part onto a copy of the text so far, so 30,000
+    # parts of 100 characters took seconds on the default path. Now well under one.
+    import time
+
+    template = "«" + "{a}" * 30000 + "»"
+    expr = jsonatapy.compile(template)
+    start = time.perf_counter()
+    result = expr.evaluate({"a": "x" * 100})
+    assert len(result) == 3_000_000
+    assert time.perf_counter() - start < 1.0
+
+
+@pytest.mark.parametrize(
+    "expr, code",
+    [
+        # The input ending where an operand should be: S0203 when a token is expected
+        # after it, S0207 when nothing is, as jsonata-js's parser decides.
+        ("«a {", "S0203"),
+        ("«{1 +", "S0203"),
+        ("(", "S0203"),
+        ("[", "S0203"),
+        ("{", "S0203"),
+        ("$f(", "S0203"),
+        ("a[", "S0203"),
+        ("function(", "S0203"),
+        ("function($x,", "S0203"),
+        ("1 +", "S0207"),
+        ("-", "S0207"),
+        ("a.", "S0207"),
+        ("a ? ", "S0207"),
+        ("$x := ", "S0207"),
+    ],
+)
+def test_end_of_input_where_an_operand_should_be(engine, expr, code):
+    assert error_code(expr) == code
+
+
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        # A regex ends at the first `/` outside brackets, as jsonata-js's scanRegex reads it.
+        ('$match("a/b", /[/]/).match', "/"),
+        ('$match("a/b", /a\\/b/).match', "a/b"),
+        ('$match("A", /a/i).match', "A"),
+        # An unmatched bracket keeps the regex open to the end: S0302.
+        ("$type(/}/)", "S0302"),
+        ("«{/}/ ~> $type}»", "S0302"),
+        ("/abc", "S0302"),
+        ("//", "S0301"),
+        # Only i and m are flags; another letter is the next token.
+        ('$match("A", /a/x)', "S0202"),
+    ],
+)
+def test_regex_literal_scanning(engine, expr, expected):
+    if re.fullmatch(r"S\d{4}", expected):
+        assert error_code(expr) == expected
+    else:
+        assert evaluate(expr) == expected

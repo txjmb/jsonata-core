@@ -3509,7 +3509,7 @@ fn test_builtin_null_handling_matches_reference() {
 fn test_match_no_match_is_undefined() {
     for expr in [
         r#"$match("xyz", /abc/)"#,
-        r#"$match("xyz", /abc/g)"#,
+        r#"$match("xyz", /abc/i)"#,
         r#"$match("xyz", /abc/, 2)"#,
         r#"$match("xyz", function($s, $offset) { null })"#,
     ] {
