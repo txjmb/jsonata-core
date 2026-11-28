@@ -34,31 +34,7 @@
 *Click the chart for the full category-by-category tables, including jsonata-python
 and jsonata-rs, which are left off the chart because at 67 ms–9 s they would
 flatten everything else into a sliver.*
-<!-- END generated performance chart -->
-
-> ### ⚠️ Upgrading to 2.2.8 "Conform-ata"+ — please test before you deploy
->
-> 2.2.8 is primarily a **conformance** release: it corrects a number of places where this
-> library disagreed with the jsonata-js reference. These issues were found during routine quality checks and documentation improvements.  The test harness was inadvertently missing some edge cases.  Many of those corrections **change the
-> result** of expressions that already run today, so an upgrade is not guaranteed to be
-> drop-in.  A lot of work went into this release and a significant amount of test coverage was added to improve future results with the goal of maintaining the highest level of conformance to the jsonata standard.  If you encounter any issues in testing that are not caused by the conformance changes or if you believe a change is in error, please file an issue and we'll work on it as soon as possible.  If you use the library or the CLI, please add a star to the project!
->
-> The areas most likely to affect you:
->
-> - **Boolean coercion of containers.** A one-element array holding a falsy value — `[0]`,
->   `[""]`, `[false]`, `[null]` — is now falsy, as the reference has it. This affects `? :`,
->   `and`, `or`, `$not`, filter predicates and `$filter`.
-> - **`$formatNumber` rounds half-to-even.** `$formatNumber(12.345, "#,##0.00")` was `"12.35"`
->   and is now `"12.34"`.
-> - **Sequence and null handling in paths**, including `*`, `#$i`, `[]` versus `[true]`, and
->   how an explicit `null` behaves in object construction.
-> - **Stricter argument validation** on six builtins that previously validated nothing, and
->   **more accurate error codes** across roughly 112 error shapes.
->
-> Every one of these moves *toward* the reference implementation — but if your expressions were
-> written against the old behaviour, they may need review. **Read the
-> [release notes](CHANGELOG.md) before upgrading**; the 2.2.8 section opens with a summary of
-> what changed and who is affected by each item, ahead of the detailed entries.
+<!-- END generated performance —->
 
 High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python binding and C ABI/library.  If you use this library, please add a github star!
 
