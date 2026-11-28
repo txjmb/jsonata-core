@@ -111,3 +111,49 @@ def test_to_millis_matcher(engine, expr, expected):
 def test_unknown_number_word_is_nan(engine):
     """An unknown word gives NaN, as jsonata-js's wordsToNumber does."""
     assert math.isnan(jsonatapy.compile("$parseInteger('foo', 'w')").evaluate(None))
+
+
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        # A character outside the BMP is never case-folded, as in jsonata-js.
+        ("$toMillis('2020-\U00010428-01', '[Y]-\U00010400-[M]')", None),
+        # A later name that isn't known replaces an earlier value.
+        ("$toMillis('2020-01-01 January Foo', '[Y]-[M]-[D] [MNn] [MNn]')", "ERR D3136"),
+        # A width modifier that isn't a number is NaN: no fixed width.
+        ("$toMillis('202001','[Y,2-x][M01]')", 575283254400000),
+        ("$fromMillis(0, '[Y,2-x]')", "NaN"),
+        ("$fromMillis(1234, '[s].[f,x]')", "01."),
+        # Truncated names that collide resolve to the last one.
+        ("$toMillis('2020-Ju-01','[Y]-[MNn,2-2]-[D]')", 1593561600000),
+        ("$toMillis('2020-J-01','[Y]-[MNn,1-1]-[D]')", 1593561600000),
+        # A negative maximum width makes every name empty.
+        ("$toMillis('2020-January-01','[Y]-[MNn,1--2]-[D]')", "ERR D3136"),
+        ("$fromMillis(0, '[MNn,1--2]')", ""),
+        # Letters are JavaScript numbers, so a long run doesn't overflow.
+        ("$parseInteger('abcdefghijklmnopqrstuvwxyz', 'a')", 2.5609457453661776e35),
+    ],
+)
+def test_to_millis_review_regressions(engine, expr, expected):
+    """Cases found in review, with values from jsonata-js 2.3.0."""
+    check(expr, expected)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "$toMillis('mmxx-01-01','[YI]-[M]-[D]')",
+        "$toMillis('2020-01-01 xii','[Y]-[M]-[D] [HI]')",
+        "$parseInteger('xii','I')",
+    ],
+)
+def test_lower_case_roman_under_upper_picture_is_nan(engine, expr):
+    """jsonata-js's romanToDecimal gives NaN for a character it doesn't know."""
+    assert math.isnan(jsonatapy.compile(expr).evaluate(None))
+
+
+def test_length_guard_counts_utf16_units(engine):
+    """The match-size guard counts UTF-16 code units, as JavaScript's length does."""
+    emoji = "\U0001f600" * 250000
+    expr = f"$toMillis('2020{emoji}', '[Y]{emoji}')"
+    assert jsonatapy.compile(expr).evaluate(None) is None

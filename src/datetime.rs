@@ -548,25 +548,28 @@ fn decimal_to_roman(mut value: i64) -> String {
     result
 }
 
-fn roman_value(c: char) -> i64 {
+fn roman_value(c: char) -> Option<f64> {
     match c {
-        'M' => 1000,
-        'D' => 500,
-        'C' => 100,
-        'L' => 50,
-        'X' => 10,
-        'V' => 5,
-        'I' => 1,
-        _ => 0,
+        'M' => Some(1000.0),
+        'D' => Some(500.0),
+        'C' => Some(100.0),
+        'L' => Some(50.0),
+        'X' => Some(10.0),
+        'V' => Some(5.0),
+        'I' => Some(1.0),
+        _ => None,
     }
 }
 
-fn roman_to_decimal(roman: &str) -> i64 {
-    let chars: Vec<char> = roman.chars().collect();
-    let mut decimal = 0i64;
-    let mut max = 1i64;
-    for i in (0..chars.len()).rev() {
-        let value = roman_value(chars[i]);
+/// NaN for a character that isn't an upper-case numeral, as jsonata-js's
+/// `romanToDecimal` gives (it adds undefined).
+fn roman_to_decimal(roman: &str) -> f64 {
+    let mut decimal = 0.0;
+    let mut max = 1.0;
+    for c in roman.chars().rev() {
+        let Some(value) = roman_value(c) else {
+            return f64::NAN;
+        };
         if value < max {
             decimal -= value;
         } else {
@@ -590,12 +593,12 @@ fn decimal_to_letters(mut value: i64, a_char: char) -> String {
     letters.iter().rev().collect()
 }
 
-fn letters_to_decimal(letters: &str, a_char: char) -> i64 {
-    let a_code = a_char as i64;
-    let chars: Vec<char> = letters.chars().collect();
-    let mut decimal = 0i64;
-    for (i, c) in chars.iter().rev().enumerate() {
-        decimal += (*c as i64 - a_code + 1) * 26i64.pow(i as u32);
+/// In JavaScript numbers, which a long run of letters can't overflow.
+fn letters_to_decimal(letters: &str, a_char: char) -> f64 {
+    let a_code = a_char as u32 as f64;
+    let mut decimal = 0.0;
+    for (i, c) in letters.chars().rev().enumerate() {
+        decimal += (c as u32 as f64 - a_code + 1.0) * 26f64.powi(i as i32);
     }
     decimal
 }
@@ -642,6 +645,9 @@ struct IntegerFormat {
     /// jsonata-js makes its mandatory digits negative, a parse width that
     /// matches nothing.
     negative_width: bool,
+    /// A year whose width modifier's maximum isn't a number (`[Y,2-x]`):
+    /// NaN digits in jsonata-js, so no parse width.
+    nan_width: bool,
     /// Only set for `PrimaryFormat::Sequence` (unsupported "numbering sequence"),
     /// carried for the D3130 error message.
     token: Option<String>,
@@ -660,6 +666,7 @@ impl Default for IntegerFormat {
             grouping_separators: Vec::new(),
             parse_width: None,
             negative_width: false,
+            nan_width: false,
             token: None,
         }
     }
@@ -956,6 +963,10 @@ struct WidthSpec {
     max: Option<usize>,
     /// The maximum was a negative number, which `max` leaves out.
     max_negative: bool,
+    /// The minimum or maximum was text `parseInt` can't read, which
+    /// jsonata-js keeps as NaN (`min`/`max` leave it out).
+    min_nan: bool,
+    max_nan: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1051,7 +1062,7 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
             let (pres_mod, width) = if let Some(comma_idx) = comma {
                 let width_mod = &marker[comma_idx + 1..];
                 let dash = width_mod.find('-');
-                let parse_width = |s: &str| -> Result<Option<i64>, DateTimeError> {
+                let parse_width = |s: &str| -> Result<Option<f64>, DateTimeError> {
                     if s.is_empty() || s == "*" {
                         Ok(None)
                     } else {
@@ -1072,8 +1083,7 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
                         // JavaScript's `parseInt`: `[Y,5x]` is a width of 5
                         // (#302 item 12). NaN, and a negative width, are
                         // taken as no width.
-                        let width = js_parse_int(s);
-                        Ok((!width.is_nan()).then_some(width as i64))
+                        Ok(Some(js_parse_int(s)))
                     }
                 };
                 let (min, max) = match dash {
@@ -1086,9 +1096,11 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
                 (
                     marker[1..comma_idx].to_string(),
                     Some(WidthSpec {
-                        min: min.filter(|w| *w >= 0).map(|w| w as usize),
-                        max: max.filter(|w| *w >= 0).map(|w| w as usize),
-                        max_negative: max.is_some_and(|w| w < 0),
+                        min: min.filter(|w| *w >= 0.0).map(|w| w as usize),
+                        max: max.filter(|w| *w >= 0.0).map(|w| w as usize),
+                        max_negative: max.is_some_and(|w| w < 0.0),
+                        min_nan: min.is_some_and(f64::is_nan),
+                        max_nan: max.is_some_and(f64::is_nan),
                     }),
                 )
             } else {
@@ -1151,6 +1163,11 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
                     if m.width.as_ref().is_some_and(|w| w.max_negative) {
                         integer_format.negative_width = true;
                     }
+                    if m.width.as_ref().is_some_and(|w| w.max_nan) {
+                        // `n` and the mandatory digits are NaN in jsonata-js:
+                        // the year formats as NaN, and parses with no width.
+                        integer_format.nan_width = true;
+                    }
                     if let Some(w) = &m.width {
                         if let Some(max) = w.max {
                             n_val = Some(max as u32);
@@ -1174,11 +1191,14 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
                 if integer_format.primary == PrimaryFormat::Decimal || component == 'f' {
                     if let Some(PictureItem::Marker(prev)) = spec.last_mut() {
                         if let Some(prev_fmt) = &mut prev.integer_format {
-                            prev_fmt.parse_width = Some(if prev_fmt.negative_width {
-                                -1
+                            prev_fmt.parse_width = if prev_fmt.nan_width {
+                                // A NaN width is no width (it is falsy).
+                                None
+                            } else if prev_fmt.negative_width {
+                                Some(-1)
                             } else {
-                                prev_fmt.mandatory_digits as i64
-                            });
+                                Some(prev_fmt.mandatory_digits as i64)
+                            };
                         }
                     }
                 }
@@ -1499,6 +1519,14 @@ fn format_component(
             return format_integer_value(f64::NAN, fmt);
         };
         let mut value = get_date_time_fragment(local_millis, marker.component);
+        if marker.component == 'Y' && marker.width.as_ref().is_some_and(|w| w.max_nan) {
+            // `value % Math.pow(10, NaN)` in jsonata-js.
+            let fmt = marker
+                .integer_format
+                .as_ref()
+                .expect("numeric marker always has an integer_format");
+            return format_integer_value(f64::NAN, fmt);
+        }
         if marker.component == 'Y' {
             if let Some(n) = marker.n {
                 // `10^n` overflows i64 from n = 19, when every i64 year is
@@ -1525,6 +1553,10 @@ fn format_component(
                     if name.chars().count() > max {
                         name = name.chars().take(max).collect();
                     }
+                }
+                if w.max_negative {
+                    // `name.substring(0, -2)` in jsonata-js.
+                    name.clear();
                 }
             }
             Ok(name)
@@ -1562,15 +1594,22 @@ fn format_component(
 /// `fractionalSecondsFormat`, #855): the picture's own digits, widened by a
 /// width modifier, and up to the full millisecond precision for a picture
 /// of one digit with no width modifier.
+///
+/// `None` for the digit range when a width modifier isn't a number: the
+/// range is NaN in jsonata-js, which formats no digits and fixes no width.
+#[allow(clippy::type_complexity)]
 fn fractional_seconds_format(
     marker: &MarkerSpec,
-) -> Result<(Vec<char>, IntegerFormat, usize, usize), DateTimeError> {
+) -> Result<(Vec<char>, IntegerFormat, Option<(usize, usize)>), DateTimeError> {
     let picture: Vec<char> = marker.presentation1.chars().collect();
     // An empty modifier keeps semicolons in the primary token grouping signs.
     let format = analyse_integer_picture(&format!("{};", marker.presentation1))?;
     let mut min_digits = format.mandatory_digits;
     let mut max_digits = min_digits + format.optional_digits;
     if let Some(width) = &marker.width {
+        if width.min_nan || width.max_nan {
+            return Ok((picture, format, None));
+        }
         if let Some(min) = width.min {
             min_digits = min_digits.max(min);
         }
@@ -1581,14 +1620,17 @@ fn fractional_seconds_format(
     } else if picture.len() == 1 {
         max_digits = 3;
     }
-    Ok((picture, format, min_digits, max_digits))
+    Ok((picture, format, Some((min_digits, max_digits))))
 }
 
 /// §9.8.4.5: fractional seconds are the digits of a decimal fraction, so
 /// they are padded and truncated on the right, never rounded into the next
 /// second: 30 ms with `[f01]` is `03` (jsonata-js 2.3.0, #855).
 fn format_fractional_seconds(millis: i64, marker: &MarkerSpec) -> Result<String, DateTimeError> {
-    let (picture, format, min_digits, max_digits) = fractional_seconds_format(marker)?;
+    let (picture, format, range) = fractional_seconds_format(marker)?;
+    let Some((min_digits, max_digits)) = range else {
+        return Ok(String::new());
+    };
     let mut fraction = format!("{:03}", millis.rem_euclid(1000));
     while fraction.ends_with('0') {
         fraction.pop();
@@ -1722,6 +1764,8 @@ enum ParseKind {
     Name {
         component: char,
         width_max: Option<usize>,
+        /// A negative maximum width makes every name '' in jsonata-js.
+        width_negative: bool,
     },
 }
 
@@ -1786,6 +1830,11 @@ struct MatcherPart {
 fn canonical_char(c: char) -> char {
     if c.is_ascii() {
         return c.to_ascii_uppercase();
+    }
+    if c.len_utf16() == 2 {
+        // jsonata-js works on UTF-16 code units, and a surrogate has no
+        // upper case, so a character outside the BMP never changes.
+        return c;
     }
     let mut upper = c.to_uppercase();
     match (upper.next(), upper.next()) {
@@ -1877,7 +1926,7 @@ fn build_matcher_parts(spec: &[PictureItem]) -> Result<Vec<MatcherPart>, DateTim
                 let fmt = m
                     .integer_format
                     .as_ref()
-                    .expect("Z/z marker has an integer_format");
+                    .ok_or_else(|| coded("D3134", m.component.to_string()))?;
                 let separator = fmt.regular.then(|| fmt.grouping_separators[0].clone());
                 let mut width = None;
                 if fmt.parse_width.is_some() {
@@ -1915,9 +1964,12 @@ fn build_matcher_parts(spec: &[PictureItem]) -> Result<Vec<MatcherPart>, DateTim
                 let mut width = None;
                 if let Some(fmt) = &m.integer_format {
                     if fmt.parse_width.is_some() && fmt.primary == PrimaryFormat::Decimal {
-                        let (_, _, min_digits, max_digits) = fractional_seconds_format(m)?;
-                        if min_digits == max_digits {
-                            width = Some(min_digits as i64);
+                        if let (_, _, Some((min_digits, max_digits))) =
+                            fractional_seconds_format(m)?
+                        {
+                            if min_digits == max_digits {
+                                width = Some(min_digits as i64);
+                            }
                         }
                     }
                 }
@@ -1956,6 +2008,7 @@ fn build_matcher_parts(spec: &[PictureItem]) -> Result<Vec<MatcherPart>, DateTim
                         parse: Some(ParseKind::Name {
                             component: m.component,
                             width_max: m.width.as_ref().and_then(|w| w.max),
+                            width_negative: m.width.as_ref().is_some_and(|w| w.max_negative),
                         }),
                     }
                 }
@@ -2028,7 +2081,13 @@ fn parse_component_value(kind: &ParseKind, captured: &str) -> Option<f64> {
         ParseKind::Name {
             component,
             width_max,
-        } => name_lookup(*component, captured, *width_max),
+            width_negative,
+        } => {
+            if *width_negative {
+                return None;
+            }
+            name_lookup(*component, captured, *width_max)
+        }
     }
 }
 
@@ -2455,7 +2514,7 @@ fn js_parse_int(digits: &str) -> f64 {
 fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> f64 {
     match fmt.primary {
         PrimaryFormat::Letters => {
-            letters_to_decimal(captured, if fmt.case == TCase::Upper { 'A' } else { 'a' }) as f64
+            letters_to_decimal(captured, if fmt.case == TCase::Upper { 'A' } else { 'a' })
         }
         PrimaryFormat::Roman => {
             let upper = if fmt.case == TCase::Upper {
@@ -2463,7 +2522,7 @@ fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> f64 {
             } else {
                 captured.to_uppercase()
             };
-            roman_to_decimal(&upper) as f64
+            roman_to_decimal(&upper)
         }
         PrimaryFormat::Words => words_to_number(&captured.to_lowercase()).unwrap_or(f64::NAN),
         PrimaryFormat::Decimal => js_parse_int(&decimal_digits(fmt, captured)),
@@ -2483,14 +2542,17 @@ fn name_lookup(component: char, captured: &str, width_max: Option<usize>) -> Opt
         }
     };
     match component {
+        // jsonata-js builds a lookup object in order, so when truncated names
+        // collide the last one wins: "Ju" is July.
         'M' | 'x' => MONTHS
             .iter()
-            .position(|name| key(name) == captured)
+            .rposition(|name| key(name) == captured)
             .map(|i| (i + 1) as f64),
         'F' => DAYS
             .iter()
             .enumerate()
             .skip(1)
+            .rev()
             .find(|(_, name)| key(name) == captured)
             .map(|(i, _)| i as f64),
         'P' => match captured {
@@ -2519,12 +2581,13 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f6
     // short, or a match that would be too large, cannot match, so the result
     // is undefined. The picture is analysed first, so an invalid one is still
     // an error.
+    // Lengths in UTF-16 code units, as JavaScript's `length` counts them.
+    let max_length = timestamp.encode_utf16().count();
     let timestamp: Vec<char> = timestamp.chars().collect();
-    let max_length = timestamp.len();
     let min_length: usize = spec
         .iter()
         .map(|item| match item {
-            PictureItem::Literal(lit) => lit.chars().count(),
+            PictureItem::Literal(lit) => lit.encode_utf16().count(),
             PictureItem::Marker(_) => 1,
         })
         .sum();
@@ -2546,9 +2609,12 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f6
             continue;
         };
         any_parsed = true;
-        if let Some(value) = parse_component_value(kind, text) {
-            components.insert(m.component, value);
-        }
+        // `components[c] = parse(text)`: a later undefined replaces an
+        // earlier value.
+        match parse_component_value(kind, text) {
+            Some(value) => components.insert(m.component, value),
+            None => components.remove(&m.component),
+        };
     }
     if !any_parsed {
         return Ok(None);
@@ -3138,12 +3204,12 @@ mod tests {
     #[test]
     fn test_roman_numeral_round_trip() {
         assert_eq!(decimal_to_roman(2018), "mmxviii");
-        assert_eq!(roman_to_decimal("MMXVIII"), 2018);
+        assert_eq!(roman_to_decimal("MMXVIII"), 2018.0);
     }
 
     #[test]
     fn test_letters_round_trip() {
         assert_eq!(decimal_to_letters(23, 'a'), "w");
-        assert_eq!(letters_to_decimal("w", 'a'), 23);
+        assert_eq!(letters_to_decimal("w", 'a'), 23.0);
     }
 }

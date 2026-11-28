@@ -73,7 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `january` for `[MNn]`) counts as not given, as in jsonata-js, rather
       than raising D3136 straight away
     - a width modifier is read like JavaScript's `parseInt`, so `[Y,5x]`
-      has a width of 5, and a negative maximum width matches nothing
+      has a width of 5; a negative maximum matches nothing, and one that
+      isn't a number fixes no width
+    - truncated names that collide resolve to the last, as jsonata-js's
+      lookup does: `Ju` with `[MNn,2-2]` is July
+    - roman numerals in the wrong case under `[YI]` give NaN, and letters
+      are read as JavaScript numbers, so a long run doesn't overflow
     - a number directly after another only fixes the earlier one's width
       when it is in digits
 - `$parseInteger` removes every grouping separator of the picture, not only
