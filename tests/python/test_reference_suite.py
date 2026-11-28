@@ -2,7 +2,7 @@
 Test adapter for the JSONata reference test suite.
 
 This module loads and runs all 1972 test cases from the reference JavaScript JSONata
-implementation (jsonata-js v2.3.0). 1868 pass; the rest are listed below, with reasons, in
+implementation (jsonata-js v2.3.0). 1902 pass; the rest are listed below, with reasons, in
 KNOWN_DIVERGENCES (strict xfail) and KNOWN_HANGS (skipped). Both shrink to empty as the
 jsonata-js 2.3.0 changes land. See
 docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md and
@@ -100,13 +100,6 @@ def extract_error_code(error_msg: str) -> str | None:
 # names the jsonata-js pull request and the plan item that removes its entries; see the 2.3.0
 # implementation plan.
 _TEMPLATE_STRINGS = "template strings «...» and <<...>> are not implemented (jsonata-js #860)"
-_OFFSET_MINUTES = (
-    "$toMillis reads a negative timezone offset with minutes, -03:30, as -02:30 (jsonata-js #856)"
-)
-_DATETIME_REWRITE = (
-    "date/time picture rewrite: out-of-range dates, digit families, grouping separators, "
-    "linear-time parsing (jsonata-js #869)"
-)
 
 # Reference cases that are known to diverge, each with the reason. Marked
 # xfail(strict), so one that starts passing fails the suite and has to be
@@ -117,37 +110,6 @@ _DATETIME_REWRITE = (
 # is an unverified case -- counted by UNVERIFIED_ERROR_CEILING below.
 KNOWN_DIVERGENCES: dict[str, str] = {
     "function-eval/case009": _TEMPLATE_STRINGS,
-    "function-tomillis/issue852[0]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[1]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[2]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[3]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[4]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[5]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[6]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[8]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[9]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[12]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[13]": _OFFSET_MINUTES,
-    "function-tomillis/issue852[14]": _OFFSET_MINUTES,
-    "function-parseInteger/digitFamily[1]": _DATETIME_REWRITE,
-    "function-parseInteger/groupingSeparators[1]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[62]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[63]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[64]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[75]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[81]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[82]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[83]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[84]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[85]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[86]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[89]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[90]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[91]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[92]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[93]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[94]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[102]": _DATETIME_REWRITE,
     "template-strings/case000": _TEMPLATE_STRINGS,
     "template-strings/case001": _TEMPLATE_STRINGS,
     "template-strings/case002": _TEMPLATE_STRINGS,
@@ -221,16 +183,10 @@ KNOWN_DIVERGENCES: dict[str, str] = {
 
 # Reference cases that diverge and also run for minutes, so they are skipped
 # rather than xfailed: an xfail still runs the case, and these would hold the
-# suite for longer than CI allows (each passed a 20 s timeout without
-# finishing). Our picture matching is not linear-time on these inputs;
-# jsonata-js 2.3.0's picture-parser rewrite (#869) is. Counted with
-# KNOWN_DIVERGENCES by scripts/check_reference_stats.py, and removed the same
-# way.
-KNOWN_HANGS: dict[str, str] = {
-    "function-parseInteger/groupingSeparators[0]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[79]": _DATETIME_REWRITE,
-    "function-tomillis/parseDateTime[97]": _DATETIME_REWRITE,
-}
+# suite for longer than CI allows. Empty since the linear-time picture matcher
+# of jsonata-js 2.3.0 (#869) was ported. Counted with KNOWN_DIVERGENCES by
+# scripts/check_reference_stats.py, and removed the same way.
+KNOWN_HANGS: dict[str, str] = {}
 
 
 def _build_pytest_params(

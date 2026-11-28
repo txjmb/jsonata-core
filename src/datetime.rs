@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use crate::value::JValue;
-use regex::{Regex, RegexBuilder};
+use regex::Regex;
 use thiserror::Error;
 
 /// Compiled regex for ISO 8601 partial format parsing (compiled once on first use)
@@ -308,23 +308,16 @@ pub fn format_integer(value: f64, picture: &str) -> Result<JValue, DateTimeError
 pub fn parse_integer(value: &str, picture: &str) -> Result<JValue, DateTimeError> {
     let format = analyse_integer_picture(picture)?;
     // A malformed *picture* still raises (D3130), as it does in jsonata-js.
-    // A value that does not match does not: the reference runs the picture
-    // parse without validating the input first -- its own source marks that
-    // path "TODO validate input based on the matcher regex" -- so the answer
-    // is whatever JavaScript's `parseInt` returns. That reads a leading run of
-    // digits and gives NaN when there is none, which is why
+    // A value that does not match does not: like the reference, which parses
+    // without validating the input first, the answer is whatever its matcher's
+    // `parse` gives -- JavaScript's `parseInt` for digits, which reads a
+    // leading run of digits and gives NaN when there is none, so
     // `$parseInteger("12a", "000")` is 12 and `$parseInteger("abc", "000")` is
-    // NaN rather than a D3136 error (#126 group 3).
-    //
-    // Only the decimal format goes this way. The letters/roman/words parsers
-    // are shared with date-time component parsing, where a D3136 on an
-    // unrecognised component is correct and load-bearing.
-    if format.primary == PrimaryFormat::Decimal {
-        return Ok(JValue::Number(js_parse_int(&decimal_digits(
-            &format, value,
-        ))));
+    // NaN rather than a D3136 error (#126 group 3); NaN for unknown words.
+    if format.primary == PrimaryFormat::Sequence {
+        return Err(coded("D3130", format.token.clone().unwrap_or_default()));
     }
-    let parsed = parse_integer_format_value(&format, value)?;
+    let parsed = parse_integer_format_value(&format, value);
     Ok(JValue::Number(parsed))
 }
 
@@ -644,7 +637,11 @@ struct IntegerFormat {
     /// Set when this marker is immediately followed by another integer-formatted
     /// marker with no literal in between -- fixes the parse width so the regex
     /// doesn't greedily consume digits belonging to the next component.
-    parse_width: Option<usize>,
+    parse_width: Option<i64>,
+    /// A year whose width modifier has a negative maximum (`[Y,1--2]`):
+    /// jsonata-js makes its mandatory digits negative, a parse width that
+    /// matches nothing.
+    negative_width: bool,
     /// Only set for `PrimaryFormat::Sequence` (unsupported "numbering sequence"),
     /// carried for the D3130 error message.
     token: Option<String>,
@@ -662,6 +659,7 @@ impl Default for IntegerFormat {
             regular: false,
             grouping_separators: Vec::new(),
             parse_width: None,
+            negative_width: false,
             token: None,
         }
     }
@@ -699,8 +697,10 @@ fn regular_repeat(separators: &[GroupingSeparator]) -> usize {
     if factor == 0 {
         return 0;
     }
+    // A set, as in jsonata-js 2.3.0, so a long picture is linear (#869).
+    let positions: std::collections::HashSet<usize> = indexes.iter().copied().collect();
     for index in 1..=indexes.len() {
-        if !indexes.contains(&(index * factor)) {
+        if !positions.contains(&(index * factor)) {
             return 0;
         }
     }
@@ -954,6 +954,8 @@ fn format_integer_value(value: f64, format: &IntegerFormat) -> Result<String, Da
 struct WidthSpec {
     min: Option<usize>,
     max: Option<usize>,
+    /// The maximum was a negative number, which `max` leaves out.
+    max_negative: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1049,7 +1051,7 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
             let (pres_mod, width) = if let Some(comma_idx) = comma {
                 let width_mod = &marker[comma_idx + 1..];
                 let dash = width_mod.find('-');
-                let parse_width = |s: &str| -> Result<Option<usize>, DateTimeError> {
+                let parse_width = |s: &str| -> Result<Option<i64>, DateTimeError> {
                     if s.is_empty() || s == "*" {
                         Ok(None)
                     } else {
@@ -1067,7 +1069,11 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
                                 ),
                             ));
                         }
-                        Ok(s.parse().ok())
+                        // JavaScript's `parseInt`: `[Y,5x]` is a width of 5
+                        // (#302 item 12). NaN, and a negative width, are
+                        // taken as no width.
+                        let width = js_parse_int(s);
+                        Ok((!width.is_nan()).then_some(width as i64))
                     }
                 };
                 let (min, max) = match dash {
@@ -1079,7 +1085,11 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
                 };
                 (
                     marker[1..comma_idx].to_string(),
-                    Some(WidthSpec { min, max }),
+                    Some(WidthSpec {
+                        min: min.filter(|w| *w >= 0).map(|w| w as usize),
+                        max: max.filter(|w| *w >= 0).map(|w| w as usize),
+                        max_negative: max.is_some_and(|w| w < 0),
+                    }),
                 )
             } else {
                 (marker[1..].to_string(), None)
@@ -1138,6 +1148,9 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
                 if component == 'Y' {
                     // §9.8.4.4 Formatting/parsing the Year Component
                     let mut n_val: Option<u32> = None;
+                    if m.width.as_ref().is_some_and(|w| w.max_negative) {
+                        integer_format.negative_width = true;
+                    }
                     if let Some(w) = &m.width {
                         if let Some(max) = w.max {
                             n_val = Some(max as u32);
@@ -1154,10 +1167,19 @@ fn analyse_date_time_picture(picture: &str) -> Result<Vec<PictureItem>, DateTime
                 }
                 // If the previous part is also an integer with no intervening markup,
                 // its parse width must be precisely defined (so parsing doesn't
-                // greedily consume digits belonging to this marker).
-                if let Some(PictureItem::Marker(prev)) = spec.last_mut() {
-                    if let Some(prev_fmt) = &mut prev.integer_format {
-                        prev_fmt.parse_width = Some(prev_fmt.mandatory_digits);
+                // greedily consume digits belonging to this marker) -- unless this
+                // part can't start with a digit, so there's no doubt where the
+                // previous one ends. Fractional seconds are always parsed as
+                // digits, whatever their presentation (jsonata-js 2.3.0).
+                if integer_format.primary == PrimaryFormat::Decimal || component == 'f' {
+                    if let Some(PictureItem::Marker(prev)) = spec.last_mut() {
+                        if let Some(prev_fmt) = &mut prev.integer_format {
+                            prev_fmt.parse_width = Some(if prev_fmt.negative_width {
+                                -1
+                            } else {
+                                prev_fmt.mandatory_digits as i64
+                            });
+                        }
                     }
                 }
                 m.integer_format = Some(integer_format);
@@ -1687,61 +1709,677 @@ fn format_date_time(
 
 // ── §9.8.4 Parsing ────────────────────────────────────────────────────────────
 
+/// How the text a part matched becomes a component value (the `parse`
+/// functions of jsonata-js's `generateMatcher`).
+#[derive(Debug, Clone)]
 enum ParseKind {
     Timezone {
         has_gmt: bool,
-        separator: Option<char>,
+        separator: Option<String>,
     },
     Fraction,
     Integer(IntegerFormat),
     Name {
+        component: char,
         width_max: Option<usize>,
     },
 }
 
-struct MatcherPart {
-    regex: String,
-    component: Option<char>,
-    parse_kind: Option<ParseKind>,
+/// The character sets a run of characters is matched from, in upper case,
+/// since timestamps are matched case-insensitively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CharSet {
+    Digits,
+    Letters,
+    Roman,
 }
 
-fn integer_format_regex(fmt: &IntegerFormat) -> Result<String, DateTimeError> {
+impl CharSet {
+    const ALL: [CharSet; 3] = [CharSet::Digits, CharSet::Letters, CharSet::Roman];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    fn contains(self, c: char) -> bool {
+        match self {
+            CharSet::Digits => c.is_ascii_digit(),
+            CharSet::Letters => c.is_ascii_uppercase(),
+            CharSet::Roman => "MDCLXVI".contains(c),
+        }
+    }
+}
+
+/// What one part of a picture string matches (jsonata-js `generateMatcher`).
+#[derive(Debug, Clone)]
+enum Matcher {
+    /// The given text, canonicalized.
+    Literal(Vec<char>),
+    /// A number in words.
+    Words,
+    /// A run of `chars`: the longest that lets the rest of the timestamp
+    /// match, or exactly `width` of them, optionally followed by an ordinal
+    /// suffix. A timezone has a prefix before the run, and its run can be
+    /// split by a separator (hours and minutes).
+    Run {
+        chars: CharSet,
+        /// The characters allowed at each position of the prefix.
+        prefix: &'static [&'static str],
+        separator: Option<Vec<char>>,
+        /// `[Z0]` and `[Z01]`: optional minutes, as two digits after a colon.
+        minutes: bool,
+        /// Zero (or none) is no fixed width; a negative width matches nothing.
+        width: Option<i64>,
+        ordinal: bool,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct MatcherPart {
+    matcher: Matcher,
+    parse: Option<ParseKind>,
+}
+
+/// Mirrors `canonicalize`: each character in upper case, as a regex with the
+/// `i` flag compares them, unless that would change its length or make a
+/// non-ASCII character ASCII.
+fn canonical_char(c: char) -> char {
+    if c.is_ascii() {
+        return c.to_ascii_uppercase();
+    }
+    let mut upper = c.to_uppercase();
+    match (upper.next(), upper.next()) {
+        (Some(u), None) if !u.is_ascii() && u.len_utf16() == c.len_utf16() => u,
+        _ => c,
+    }
+}
+
+fn canonicalize(s: &str) -> Vec<char> {
+    s.chars().map(canonical_char).collect()
+}
+
+/// The words a number in words can be made of, in upper case and grouped by
+/// their first letter, in the order jsonata-js tries them: the insertion
+/// order of its `wordValues` object, then "and".
+fn words_by_initial() -> &'static HashMap<char, Vec<Vec<char>>> {
+    static MAP: OnceLock<HashMap<char, Vec<Vec<char>>>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        let mut order: Vec<String> = Vec::new();
+        let mut add = |word: String| {
+            if !order.contains(&word) {
+                order.push(word);
+            }
+        };
+        for w in FEW.iter().chain(ORDINALS.iter()) {
+            add(w.to_lowercase());
+        }
+        for w in DECADES.iter() {
+            let lword = w.to_lowercase();
+            let ieth = format!("{}ieth", &lword[..lword.len() - 1]);
+            add(lword);
+            add(ieth);
+        }
+        add("hundredth".to_string());
+        for w in MAGNITUDES.iter() {
+            let lword = w.to_lowercase();
+            add(lword.clone());
+            add(format!("{lword}th"));
+        }
+        add("and".to_string());
+        let mut map: HashMap<char, Vec<Vec<char>>> = HashMap::new();
+        for word in order {
+            let upper: Vec<char> = word.to_uppercase().chars().collect();
+            map.entry(upper[0]).or_default().push(upper);
+        }
+        map
+    })
+}
+
+const WORD_SEPARATORS: &str = "-, ";
+const ORDINAL_SUFFIXES: [&str; 4] = ["TH", "ST", "ND", "RD"];
+
+fn integer_matcher(fmt: &IntegerFormat) -> Result<Matcher, DateTimeError> {
+    let run = |chars| Matcher::Run {
+        chars,
+        prefix: &[],
+        separator: None,
+        minutes: false,
+        width: None,
+        ordinal: false,
+    };
     Ok(match fmt.primary {
-        PrimaryFormat::Letters => {
-            if fmt.case == TCase::Upper {
-                "[A-Z]+".to_string()
-            } else {
-                "[a-z]+".to_string()
-            }
-        }
-        PrimaryFormat::Roman => {
-            if fmt.case == TCase::Upper {
-                "[MDCLXVI]+".to_string()
-            } else {
-                "[mdclxvi]+".to_string()
-            }
-        }
-        PrimaryFormat::Words => {
-            let mut keys: Vec<&str> = word_values().keys().map(|s| s.as_str()).collect();
-            keys.sort_unstable();
-            format!(r"(?:{}|and|[\-, ])+", keys.join("|"))
-        }
-        PrimaryFormat::Decimal => {
-            let mut r = "[0-9]".to_string();
-            if let Some(pw) = fmt.parse_width {
-                r.push_str(&format!("{{{pw}}}"));
-            } else {
-                r.push('+');
-            }
-            if fmt.ordinal {
-                r.push_str("(?:th|st|nd|rd)");
-            }
-            r
-        }
+        PrimaryFormat::Letters => run(CharSet::Letters),
+        PrimaryFormat::Roman => run(CharSet::Roman),
+        PrimaryFormat::Words => Matcher::Words,
+        PrimaryFormat::Decimal => Matcher::Run {
+            chars: CharSet::Digits,
+            prefix: &[],
+            separator: None,
+            minutes: false,
+            width: fmt.parse_width,
+            ordinal: fmt.ordinal,
+        },
         PrimaryFormat::Sequence => {
             return Err(coded("D3130", fmt.token.clone().unwrap_or_default()));
         }
     })
+}
+
+fn build_matcher_parts(spec: &[PictureItem]) -> Result<Vec<MatcherPart>, DateTimeError> {
+    let mut parts = Vec::with_capacity(spec.len());
+    for item in spec {
+        let part = match item {
+            PictureItem::Literal(lit) => MatcherPart {
+                matcher: Matcher::Literal(canonicalize(lit)),
+                parse: None,
+            },
+            PictureItem::Marker(m) if m.component == 'Z' || m.component == 'z' => {
+                let fmt = m
+                    .integer_format
+                    .as_ref()
+                    .expect("Z/z marker has an integer_format");
+                let separator = fmt.regular.then(|| fmt.grouping_separators[0].clone());
+                let mut width = None;
+                if fmt.parse_width.is_some() {
+                    // Directly followed by another number in digits: the
+                    // number of digits (after any separator) is fixed, if the
+                    // timezone is always formatted with that many.
+                    if let Some(sep) = &separator {
+                        width = Some(sep.position as i64);
+                    } else if fmt.mandatory_digits == 2 || fmt.mandatory_digits == 4 {
+                        width = Some(fmt.mandatory_digits as i64);
+                    }
+                }
+                MatcherPart {
+                    matcher: Matcher::Run {
+                        chars: CharSet::Digits,
+                        prefix: if m.component == 'z' {
+                            &["G", "M", "T", "-+"]
+                        } else {
+                            &["-+"]
+                        },
+                        separator: separator
+                            .as_ref()
+                            .map(|sep| vec![canonical_char(sep.character)]),
+                        minutes: separator.is_none() && fmt.mandatory_digits <= 2,
+                        width,
+                        ordinal: false,
+                    },
+                    parse: Some(ParseKind::Timezone {
+                        has_gmt: m.component == 'z',
+                        separator: separator.map(|sep| sep.character.to_string()),
+                    }),
+                }
+            }
+            PictureItem::Marker(m) if m.component == 'f' => {
+                let mut width = None;
+                if let Some(fmt) = &m.integer_format {
+                    if fmt.parse_width.is_some() && fmt.primary == PrimaryFormat::Decimal {
+                        let (_, _, min_digits, max_digits) = fractional_seconds_format(m)?;
+                        if min_digits == max_digits {
+                            width = Some(min_digits as i64);
+                        }
+                    }
+                }
+                MatcherPart {
+                    matcher: Matcher::Run {
+                        chars: CharSet::Digits,
+                        prefix: &[],
+                        separator: None,
+                        minutes: false,
+                        width,
+                        ordinal: false,
+                    },
+                    parse: Some(ParseKind::Fraction),
+                }
+            }
+            PictureItem::Marker(m) => match &m.integer_format {
+                Some(fmt) => MatcherPart {
+                    matcher: integer_matcher(fmt)?,
+                    parse: Some(ParseKind::Integer(fmt.clone())),
+                },
+                None => {
+                    // A month or day name, or am/pm. Any other component
+                    // can't be a name (D3133).
+                    if !"MxFP".contains(m.component) {
+                        return Err(coded("D3133", m.component.to_string()));
+                    }
+                    MatcherPart {
+                        matcher: Matcher::Run {
+                            chars: CharSet::Letters,
+                            prefix: &[],
+                            separator: None,
+                            minutes: false,
+                            width: None,
+                            ordinal: false,
+                        },
+                        parse: Some(ParseKind::Name {
+                            component: m.component,
+                            width_max: m.width.as_ref().and_then(|w| w.max),
+                        }),
+                    }
+                }
+            },
+        };
+        parts.push(part);
+    }
+    Ok(parts)
+}
+
+/// `Number.parseInt` of a string, NaN when it has no leading digits.
+fn parse_int_or_nan(s: &str) -> f64 {
+    js_parse_int(s)
+}
+
+/// The value of a component from the text that matched it, `None` where
+/// jsonata-js's `parse` gives undefined (an unknown name). Values are
+/// JavaScript numbers, so NaN is possible.
+fn parse_component_value(kind: &ParseKind, captured: &str) -> Option<f64> {
+    match kind {
+        ParseKind::Timezone { has_gmt, separator } => {
+            let chars: Vec<char> = captured.chars().collect();
+            let chars = if *has_gmt { &chars[3..] } else { &chars[..] };
+            // The sign applies to both the hours and the minutes, including
+            // offsets such as -00:30 (jsonata-js #856).
+            let sign = if chars.first() == Some(&'-') {
+                -1.0
+            } else {
+                1.0
+            };
+            let value: String = chars.iter().skip(1).collect();
+            let (hours, minutes) = if let Some(sep) = separator {
+                // The separator could be the same as the sign, and it is
+                // matched case-insensitively.
+                let canon_value = canonicalize(&value);
+                let canon_sep = canonicalize(sep);
+                let position = canon_value
+                    .windows(canon_sep.len())
+                    .position(|w| w == canon_sep.as_slice())
+                    .unwrap_or(0);
+                let value_chars: Vec<char> = value.chars().collect();
+                let head: String = value_chars[..position].iter().collect();
+                let tail: String = value_chars
+                    [(position + canon_sep.len()).min(value_chars.len())..]
+                    .iter()
+                    .collect();
+                (parse_int_or_nan(&head), parse_int_or_nan(&tail))
+            } else if let Some(colon) = value.find(':') {
+                (
+                    parse_int_or_nan(&value[..colon]),
+                    parse_int_or_nan(&value[colon + 1..]),
+                )
+            } else if value.len() <= 2 {
+                (parse_int_or_nan(&value), 0.0)
+            } else {
+                let split = value.len() - 2;
+                (
+                    parse_int_or_nan(&value[..split]),
+                    parse_int_or_nan(&value[split..]),
+                )
+            };
+            Some(sign * (hours * 60.0 + minutes))
+        }
+        ParseKind::Fraction => {
+            let truncated: String = captured.chars().take(3).collect();
+            let fraction: f64 = format!("0.{truncated}").parse().unwrap_or(f64::NAN);
+            Some(fraction * 1000.0)
+        }
+        ParseKind::Integer(fmt) => Some(parse_integer_format_value(fmt, captured)),
+        ParseKind::Name {
+            component,
+            width_max,
+        } => name_lookup(*component, captured, *width_max),
+    }
+}
+
+/// Mirrors `matchParts`: match a timestamp against the parts of a picture
+/// string, finding the same match as the regex made by concatenating a
+/// capturing group for each part. Like a backtracking regex engine, it tries
+/// the possible matches of each part in turn, in the same order, until the
+/// rest of the timestamp matches the rest of the parts. Unlike a regex, it
+/// never tries to match the rest of the parts from the same part and
+/// position twice, so it takes time proportional to the length of the
+/// timestamp times the number of parts, however the picture string is
+/// constructed (jsonata-js #869). Returns the text matching each part.
+fn match_parts(parts: &[MatcherPart], timestamp: &[char]) -> Option<Vec<String>> {
+    const FAILED: u8 = 1;
+    const VISITED: u8 = 2;
+
+    let count = parts.len();
+    let length = timestamp.len();
+    let stride = length + 1;
+    if count == 0 {
+        return (length == 0).then(Vec::new);
+    }
+    let text: Vec<char> = timestamp.iter().map(|&c| canonical_char(c)).collect();
+    let mut memo = vec![0u8; stride * count];
+    // For each part that matches a range of positions, the lowest position
+    // tried, plus one (zero if none tried yet).
+    let mut lowest_tried = vec![0usize; stride * count];
+
+    // Where each literal occurs, found in one pass (Knuth-Morris-Pratt).
+    let literal_starts: Vec<Option<Vec<bool>>> = parts
+        .iter()
+        .map(|part| match &part.matcher {
+            Matcher::Literal(literal) => Some(literal_positions(literal, &text, stride)),
+            _ => None,
+        })
+        .collect();
+
+    // The position after the run of characters from each set that starts at
+    // each position.
+    let run_ends: Vec<Vec<usize>> = CharSet::ALL
+        .iter()
+        .map(|set| {
+            let mut ends = vec![0usize; stride];
+            ends[length] = length;
+            for ii in (0..length).rev() {
+                ends[ii] = if set.contains(text[ii]) {
+                    ends[ii + 1]
+                } else {
+                    ii
+                };
+            }
+            ends
+        })
+        .collect();
+    let run_end = |set: CharSet, pos: usize| run_ends[set.index()][pos];
+    let starts_with = |s: &[char], pos: usize| text.get(pos..pos + s.len()) == Some(s);
+    let words = words_by_initial();
+    let next_words = |pos: usize| -> Vec<Vec<char>> {
+        match text.get(pos) {
+            Some(ch) => match words.get(ch) {
+                Some(list) => list.clone(),
+                None if WORD_SEPARATORS.contains(*ch) => vec![vec![*ch]],
+                None => Vec::new(),
+            },
+            None => Vec::new(),
+        }
+    };
+
+    // One cursor per part, stepping through the positions where it can end
+    // in the order a regex would try them. Only one cursor per part is in
+    // use at a time.
+    enum Cursor {
+        Words {
+            positions: Vec<usize>,
+            options: Vec<Vec<Vec<char>>>,
+            tried: Vec<usize>,
+        },
+        Range {
+            low: usize,
+            high: isize,
+            key: Option<usize>,
+            first: Option<usize>,
+        },
+    }
+    let mut cursors: Vec<Cursor> = parts
+        .iter()
+        .map(|part| match part.matcher {
+            Matcher::Words => Cursor::Words {
+                positions: Vec::new(),
+                options: Vec::new(),
+                tried: Vec::new(),
+            },
+            _ => Cursor::Range {
+                low: 0,
+                high: -1,
+                key: None,
+                first: None,
+            },
+        })
+        .collect();
+
+    let start_cursor = |cursors: &mut [Cursor],
+                        memo: &mut [u8],
+                        lowest_tried: &[usize],
+                        index: usize,
+                        pos: usize| {
+        let base = index * stride;
+        match &mut cursors[index] {
+            Cursor::Words {
+                positions,
+                options,
+                tried,
+            } => {
+                positions.clear();
+                options.clear();
+                tried.clear();
+                if memo[base + pos] & VISITED == 0 {
+                    positions.push(pos);
+                    options.push(next_words(pos));
+                    tried.push(0);
+                }
+            }
+            Cursor::Range {
+                low,
+                high,
+                key,
+                first,
+            } => {
+                *low = 0;
+                *high = -1;
+                *key = None;
+                *first = None;
+                fn only(end: usize, low: &mut usize, high: &mut isize) {
+                    *low = end;
+                    *high = end as isize;
+                }
+                match &parts[index].matcher {
+                    Matcher::Literal(literal) => {
+                        if literal_starts[index].as_ref().is_some_and(|s| s[pos]) {
+                            only(pos + literal.len(), low, high);
+                        }
+                    }
+                    Matcher::Words => unreachable!("a words part has a words cursor"),
+                    Matcher::Run {
+                        chars,
+                        prefix,
+                        separator,
+                        minutes,
+                        width,
+                        ordinal,
+                    } => {
+                        let mut from = pos;
+                        for allowed in prefix.iter() {
+                            if from == length || !allowed.contains(text[from]) {
+                                return;
+                            }
+                            from += 1;
+                        }
+                        if let Some(sep) = separator {
+                            // The separator isn't one of the characters before
+                            // it, so they must all be before it.
+                            let head = run_end(*chars, from);
+                            if head == from || !starts_with(sep, head) {
+                                return;
+                            }
+                            from = head + sep.len();
+                        }
+                        let mut end = run_end(*chars, from);
+                        if end == from {
+                            return;
+                        }
+                        let width = width.filter(|w| *w != 0);
+                        if let Some(w) = width {
+                            // A width that isn't positive (from a width
+                            // modifier such as [Y,1--2]) can't match anything.
+                            if w < 0 || from + w as usize > end {
+                                return;
+                            }
+                            end = from + w as usize;
+                        }
+                        if *minutes
+                            && text.get(end) == Some(&':')
+                            && run_end(CharSet::Digits, (end + 1).min(length)) >= end + 3
+                        {
+                            // The optional minutes of a timezone are tried
+                            // before the hours on their own, as the regex
+                            // (?::[0-9]{2})? would.
+                            *first = Some(end + 3);
+                        }
+                        if width.is_none() && !ordinal {
+                            let k = base + end;
+                            *key = Some(k);
+                            *low = from + 1;
+                            *high = if lowest_tried[k] == 0 {
+                                end as isize
+                            } else {
+                                (end as isize).min(lowest_tried[k] as isize - 2)
+                            };
+                            return;
+                        }
+                        // A fixed number of characters, or all of them if
+                        // followed by an ordinal suffix (which isn't one of them).
+                        if !ordinal {
+                            only(end, low, high);
+                        } else {
+                            let suffix: String = text
+                                .get(end..(end + 2).min(length))
+                                .map(|s| s.iter().collect())
+                                .unwrap_or_default();
+                            if ORDINAL_SUFFIXES.contains(&suffix.as_str()) {
+                                only(end + 2, low, high);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    let next_end = |cursors: &mut [Cursor],
+                    memo: &mut [u8],
+                    lowest_tried: &mut [usize],
+                    index: usize|
+     -> Option<usize> {
+        let base = index * stride;
+        match &mut cursors[index] {
+            Cursor::Words {
+                positions,
+                options,
+                tried,
+            } => {
+                // A number in words matches like the regex
+                // (?:word1|word2|...|[-, ])+, which tries to continue with
+                // each word in turn before ending at the current position: a
+                // depth-first search through the words, searching from each
+                // position only once.
+                while let Some(top) = positions.len().checked_sub(1) {
+                    if tried[top] < options[top].len() {
+                        let word = options[top][tried[top]].clone();
+                        tried[top] += 1;
+                        let pos = positions[top] + word.len();
+                        if starts_with(&word, positions[top]) && memo[base + pos] & VISITED == 0 {
+                            memo[base + pos] |= VISITED;
+                            positions.push(pos);
+                            options.push(next_words(pos));
+                            tried.push(0);
+                        }
+                    } else {
+                        let end = positions.pop().expect("non-empty");
+                        options.pop();
+                        tried.pop();
+                        if top > 0 {
+                            // The number has to have at least one word.
+                            return Some(end);
+                        }
+                    }
+                }
+                None
+            }
+            Cursor::Range {
+                low,
+                high,
+                key,
+                first,
+            } => {
+                if let Some(end) = first.take() {
+                    return Some(end);
+                }
+                if *high < *low as isize {
+                    return None;
+                }
+                if let Some(k) = key {
+                    lowest_tried[*k] = (*high + 1) as usize;
+                }
+                let end = *high as usize;
+                *high -= 1;
+                Some(end)
+            }
+        }
+    };
+
+    // Search for the end of each part in turn, backtracking to the previous
+    // part when the current one can't be matched.
+    let mut starts = vec![0usize; count];
+    let mut ends = vec![0usize; count];
+    start_cursor(&mut cursors, &mut memo, &lowest_tried, 0, 0);
+    let mut depth = 1;
+    while depth > 0 {
+        let index = depth - 1;
+        match next_end(&mut cursors, &mut memo, &mut lowest_tried, index) {
+            None => {
+                memo[index * stride + starts[index]] |= FAILED;
+                depth -= 1;
+            }
+            Some(end) if index == count - 1 => {
+                if end == length {
+                    ends[index] = end;
+                    return Some(
+                        starts
+                            .iter()
+                            .zip(&ends)
+                            .map(|(&s, &e)| timestamp[s..e].iter().collect())
+                            .collect(),
+                    );
+                }
+            }
+            Some(end) => {
+                if memo[(index + 1) * stride + end] & FAILED == 0 {
+                    ends[index] = end;
+                    starts[index + 1] = end;
+                    start_cursor(&mut cursors, &mut memo, &lowest_tried, index + 1, end);
+                    depth = index + 2;
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The positions where `literal` occurs in `text` (Knuth-Morris-Pratt), as
+/// a flag for each of the `stride` positions.
+fn literal_positions(literal: &[char], text: &[char], stride: usize) -> Vec<bool> {
+    let mut starts = vec![false; stride];
+    if literal.is_empty() {
+        return starts;
+    }
+    let mut overlap = vec![0usize; literal.len()];
+    let mut kk = 0;
+    for ii in 1..literal.len() {
+        while kk > 0 && literal[ii] != literal[kk] {
+            kk = overlap[kk - 1];
+        }
+        if literal[ii] == literal[kk] {
+            kk += 1;
+        }
+        overlap[ii] = kk;
+    }
+    kk = 0;
+    for (ii, &c) in text.iter().enumerate() {
+        while kk > 0 && c != literal[kk] {
+            kk = overlap[kk - 1];
+        }
+        if c == literal[kk] {
+            kk += 1;
+        }
+        if kk == literal.len() {
+            starts[ii + 1 - kk] = true;
+            kk = overlap[kk - 1];
+        }
+    }
+    starts
 }
 
 /// Returns `f64` (matching JS Number) since the `words` format can parse magnitudes far
@@ -1753,14 +2391,16 @@ fn decimal_digits(fmt: &IntegerFormat, captured: &str) -> String {
     if fmt.ordinal && digits.len() >= 2 {
         digits.truncate(digits.len() - 2);
     }
-    if fmt.regular {
-        // Faithful port of the JS reference, which strips a literal ','
-        // regardless of the actual grouping-separator character.
-        digits = digits.replace(',', "");
-    } else {
-        for sep in &fmt.grouping_separators {
-            digits = digits.replace(sep.character, "");
-        }
+    // Every grouping separator of the picture, regular or not, in one pass
+    // (jsonata-js 2.3.0 `removeGroupingSeparators`; 2.2 stripped only ','
+    // from a regular picture).
+    if !fmt.grouping_separators.is_empty() {
+        let separators: std::collections::HashSet<char> = fmt
+            .grouping_separators
+            .iter()
+            .map(|sep| sep.character)
+            .collect();
+        digits.retain(|c| !separators.contains(&c));
     }
     if fmt.zero_code != 0x30 {
         digits = digits
@@ -1810,179 +2450,55 @@ fn js_parse_int(digits: &str) -> f64 {
     s[..end].parse::<f64>().unwrap_or(f64::NAN)
 }
 
-fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> Result<f64, DateTimeError> {
+/// A JavaScript number, as jsonata-js's integer matcher `parse` gives it:
+/// NaN for digits `parseInt` can't read or for words it doesn't know.
+fn parse_integer_format_value(fmt: &IntegerFormat, captured: &str) -> f64 {
     match fmt.primary {
-        PrimaryFormat::Letters => Ok(letters_to_decimal(
-            captured,
-            if fmt.case == TCase::Upper { 'A' } else { 'a' },
-        ) as f64),
+        PrimaryFormat::Letters => {
+            letters_to_decimal(captured, if fmt.case == TCase::Upper { 'A' } else { 'a' }) as f64
+        }
         PrimaryFormat::Roman => {
             let upper = if fmt.case == TCase::Upper {
                 captured.to_string()
             } else {
                 captured.to_uppercase()
             };
-            Ok(roman_to_decimal(&upper) as f64)
+            roman_to_decimal(&upper) as f64
         }
-        PrimaryFormat::Words => words_to_number(&captured.to_lowercase())
-            .ok_or_else(|| coded("D3136", "unrecognized number word")),
-        PrimaryFormat::Decimal => decimal_digits(fmt, captured)
-            .parse::<f64>()
-            .map_err(|_| coded("D3136", "invalid number")),
-        PrimaryFormat::Sequence => Err(coded("D3130", fmt.token.clone().unwrap_or_default())),
+        PrimaryFormat::Words => words_to_number(&captured.to_lowercase()).unwrap_or(f64::NAN),
+        PrimaryFormat::Decimal => js_parse_int(&decimal_digits(fmt, captured)),
+        // generateMatcher raises D3130 for a sequence before anything is parsed.
+        PrimaryFormat::Sequence => f64::NAN,
     }
 }
 
-fn name_lookup(
-    component: char,
-    captured: &str,
-    width_max: Option<usize>,
-) -> Result<i64, DateTimeError> {
+/// The value of a month or day name, or am/pm, or `None` (undefined in
+/// jsonata-js) for text that isn't one. The lookup is case-sensitive, though
+/// the timestamp is matched case-insensitively, as in jsonata-js.
+fn name_lookup(component: char, captured: &str, width_max: Option<usize>) -> Option<f64> {
+    let key = |name: &str| -> String {
+        match width_max {
+            Some(w) if w > 0 => name.chars().take(w).collect(),
+            _ => name.to_string(),
+        }
+    };
     match component {
-        'M' | 'x' => {
-            for (i, name) in MONTHS.iter().enumerate() {
-                let key: String = match width_max {
-                    Some(w) => name.chars().take(w).collect(),
-                    None => name.to_string(),
-                };
-                if key == captured {
-                    return Ok((i + 1) as i64);
-                }
-            }
-            Err(coded(
-                "D3136",
-                format!("unrecognized month name: {captured}"),
-            ))
-        }
-        'F' => {
-            for (i, name) in DAYS.iter().enumerate().skip(1) {
-                let key: String = match width_max {
-                    Some(w) => name.chars().take(w).collect(),
-                    None => name.to_string(),
-                };
-                if key == captured {
-                    return Ok(i as i64);
-                }
-            }
-            Err(coded("D3136", format!("unrecognized day name: {captured}")))
-        }
+        'M' | 'x' => MONTHS
+            .iter()
+            .position(|name| key(name) == captured)
+            .map(|i| (i + 1) as f64),
+        'F' => DAYS
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, name)| key(name) == captured)
+            .map(|(i, _)| i as f64),
         'P' => match captured {
-            "am" | "AM" => Ok(0),
-            "pm" | "PM" => Ok(1),
-            _ => Err(coded("D3136", "unrecognized am/pm marker")),
+            "am" | "AM" => Some(0.0),
+            "pm" | "PM" => Some(1.0),
+            _ => None,
         },
-        other => Err(coded("D3133", other.to_string())),
-    }
-}
-
-fn build_matcher_parts(spec: &[PictureItem]) -> Result<Vec<MatcherPart>, DateTimeError> {
-    let mut parts = Vec::with_capacity(spec.len());
-    for item in spec {
-        match item {
-            PictureItem::Literal(lit) => parts.push(MatcherPart {
-                regex: regex::escape(lit),
-                component: None,
-                parse_kind: None,
-            }),
-            PictureItem::Marker(m) => {
-                if m.component == 'Z' || m.component == 'z' {
-                    let fmt = m.integer_format.as_ref().unwrap();
-                    let separator = if fmt.regular {
-                        Some(fmt.grouping_separators[0].character)
-                    } else {
-                        None
-                    };
-                    let mut regex = String::new();
-                    if m.component == 'z' {
-                        regex.push_str("GMT");
-                    }
-                    regex.push_str("[-+][0-9]+");
-                    if let Some(sep) = separator {
-                        regex.push_str(&format!("{}[0-9]+", regex::escape(&sep.to_string())));
-                    }
-                    parts.push(MatcherPart {
-                        regex,
-                        component: Some(m.component),
-                        parse_kind: Some(ParseKind::Timezone {
-                            has_gmt: m.component == 'z',
-                            separator,
-                        }),
-                    });
-                } else if m.component == 'f' {
-                    parts.push(MatcherPart {
-                        regex: "[0-9]+".to_string(),
-                        component: Some('f'),
-                        parse_kind: Some(ParseKind::Fraction),
-                    });
-                } else if let Some(fmt) = &m.integer_format {
-                    let regex = integer_format_regex(fmt)?;
-                    parts.push(MatcherPart {
-                        regex,
-                        component: Some(m.component),
-                        parse_kind: Some(ParseKind::Integer(fmt.clone())),
-                    });
-                } else {
-                    // A names-based component (month/day/am-pm). Anything else here
-                    // means the presentation modifier requested names for a component
-                    // that doesn't support them (e.g. `[YN]`).
-                    if !"MxFP".contains(m.component) {
-                        return Err(coded("D3133", m.component.to_string()));
-                    }
-                    parts.push(MatcherPart {
-                        regex: "[a-zA-Z]+".to_string(),
-                        component: Some(m.component),
-                        parse_kind: Some(ParseKind::Name {
-                            width_max: m.width.as_ref().and_then(|w| w.max),
-                        }),
-                    });
-                }
-            }
-        }
-    }
-    Ok(parts)
-}
-
-fn parse_component_value(
-    kind: &ParseKind,
-    component: char,
-    captured: &str,
-) -> Result<i64, DateTimeError> {
-    match kind {
-        ParseKind::Timezone { has_gmt, separator } => {
-            let v = if *has_gmt { &captured[3..] } else { captured };
-            if let Some(sep) = separator {
-                let idx = v
-                    .find(*sep)
-                    .ok_or_else(|| coded("D3136", "invalid timezone"))?;
-                let hours: i64 = v[..idx]
-                    .parse()
-                    .map_err(|_| coded("D3136", "invalid timezone"))?;
-                let minutes: i64 = v[idx + sep.len_utf8()..]
-                    .parse()
-                    .map_err(|_| coded("D3136", "invalid timezone"))?;
-                timezone_minutes(hours, minutes)
-            } else {
-                let numdigits = v.len() - 1;
-                if numdigits <= 2 {
-                    let hours: i64 = v.parse().map_err(|_| coded("D3136", "invalid timezone"))?;
-                    timezone_minutes(hours, 0)
-                } else {
-                    let hours: i64 = v[..3]
-                        .parse()
-                        .map_err(|_| coded("D3136", "invalid timezone"))?;
-                    let minutes: i64 = v[3..].parse().unwrap_or(0);
-                    timezone_minutes(hours, minutes)
-                }
-            }
-        }
-        ParseKind::Fraction => {
-            let truncated = &captured[..captured.len().min(3)];
-            let padded = format!("0.{truncated}");
-            let f: f64 = padded.parse().unwrap_or(0.0);
-            Ok((f * 1000.0).round() as i64)
-        }
-        ParseKind::Integer(fmt) => Ok(parse_integer_format_value(fmt, captured)? as i64),
-        ParseKind::Name { width_max } => name_lookup(component, captured, *width_max),
+        _ => None,
     }
 }
 
@@ -1996,14 +2512,15 @@ const MAX_MATCH_SIZE: usize = 1_000_000;
 fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f64>, DateTimeError> {
     let spec = analyse_date_time_picture(picture)?;
 
-    // Guard from jsonata-js 2.3.0 (`analyseDateTimePicture`'s `cannotMatch`):
-    // a timestamp needs every character of each literal and at least one per
+    // jsonata-js 2.3.0 (`analyseDateTimePicture`'s `cannotMatch`): a
+    // timestamp needs every character of each literal and at least one per
     // marker, and matching costs time and memory proportional to the number
     // of picture parts times the timestamp length. A timestamp that is too
-    // short, or a match that would be too large, cannot match -- return
-    // undefined instead of compiling a regex that can exhaust memory. The
-    // picture is analysed first, so an invalid one is still an error.
-    let max_length = timestamp.chars().count();
+    // short, or a match that would be too large, cannot match, so the result
+    // is undefined. The picture is analysed first, so an invalid one is still
+    // an error.
+    let timestamp: Vec<char> = timestamp.chars().collect();
+    let max_length = timestamp.len();
     let min_length: usize = spec
         .iter()
         .map(|item| match item {
@@ -2016,45 +2533,36 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f6
     }
 
     let parts = build_matcher_parts(&spec)?;
-
-    let pattern = format!(
-        "^{}$",
-        parts
-            .iter()
-            .map(|p| format!("({})", p.regex))
-            .collect::<Vec<_>>()
-            .join("")
-    );
-    let re = RegexBuilder::new(&pattern)
-        .case_insensitive(true)
-        .build()
-        .map_err(|e| DateTimeError::ParseError(format!("invalid picture-derived regex: {e}")))?;
-
-    let caps = match re.captures(timestamp) {
-        Some(c) => c,
-        None => return Ok(None),
+    let Some(info) = match_parts(&parts, &timestamp) else {
+        return Ok(None);
     };
 
-    let mut components: HashMap<char, i64> = HashMap::new();
-    for (i, part) in parts.iter().enumerate() {
-        if let Some(kind) = &part.parse_kind {
-            let captured = caps.get(i + 1).map(|m| m.as_str()).unwrap_or("");
-            let value = parse_component_value(kind, part.component.unwrap(), captured)?;
-            components.insert(part.component.unwrap(), value);
+    // The component values, as JavaScript numbers. A component whose text
+    // gave undefined (an unknown name) is left out, as if it wasn't given.
+    let mut components: HashMap<char, f64> = HashMap::new();
+    let mut any_parsed = false;
+    for ((part, item), text) in parts.iter().zip(&spec).zip(&info) {
+        let (Some(kind), PictureItem::Marker(m)) = (&part.parse, item) else {
+            continue;
+        };
+        any_parsed = true;
+        if let Some(value) = parse_component_value(kind, text) {
+            components.insert(m.component, value);
         }
     }
-
-    if components.is_empty() {
+    if !any_parsed {
         return Ok(None);
     }
 
     // jsonata-js builds the masks with `shift(components[part])`, which is
-    // truthy-tested: a component that parsed as 0 (hour 0, "am", day 0)
-    // counts as not given when choosing the date and time types.
+    // truthy-tested: a component that parsed as 0 or NaN (hour 0, "am", day
+    // 0) counts as not given when choosing the date and time types.
     let mask_of = |order: &str| -> u8 {
         let mut mask = 0u8;
         for ch in order.chars() {
-            let given = components.get(&ch).is_some_and(|value| *value != 0);
+            let given = components
+                .get(&ch)
+                .is_some_and(|value| *value != 0.0 && !value.is_nan());
             mask = (mask << 1) | given as u8;
         }
         mask
@@ -2062,37 +2570,32 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f6
     let is_type = |type_: u8, mask: u8| (mask & !type_) == 0 && (mask & type_) != 0;
 
     let dmask = mask_of("YXMxWwdD");
-    let dm_a = 0b1010_0001u8;
-    let dm_b = 0b1000_0010u8;
-    let dm_c = 0b0101_0100u8;
-    let dm_d = 0b0100_1000u8;
-    let date_a = is_type(dm_a, dmask);
-    let date_b = !date_a && is_type(dm_b, dmask);
-    let date_c = is_type(dm_c, dmask);
-    let date_d = !date_c && is_type(dm_d, dmask);
-
-    // dateC ({Y, x, w, F}, ISO week-numbering year/month) and dateD ({X, W, F}, ISO week
-    // date) are recognised but not supported for parsing (matches the JS reference's
-    // explicit "not currently supported" TODOs) -- fail fast rather than running the
-    // defaulting walk below, since both ultimately raise the same D3136 regardless.
-    if date_c || date_d {
-        return Err(coded(
-            "D3136",
-            "ISO week-numbering year/month parsing is not supported",
-        ));
-    }
+    let date_a = is_type(0b1010_0001, dmask);
+    let date_b = !date_a && is_type(0b1000_0010, dmask);
+    let date_c = is_type(0b0101_0100, dmask);
+    let date_d = !date_c && is_type(0b0100_1000, dmask);
 
     let tmask = mask_of("PHhmsf");
     let time_a = is_type(0b010111, tmask);
     let time_b = !time_a && is_type(0b101111, tmask);
 
-    let date_comps = if date_b { "YD" } else { "YMD" };
+    let date_comps = if date_b {
+        "YD"
+    } else if date_c {
+        "XxwF"
+    } else if date_d {
+        "XWF"
+    } else {
+        "YMD"
+    };
     let time_comps = if time_b { "Phmsf" } else { "Hmsf" };
-    let comps: String = format!("{date_comps}{time_comps}");
 
+    // From the most significant part to the least: an unspecified part before
+    // the specified block defaults to now, one after it to zero (or 1 for a
+    // month or day), and a gap inside it is an error.
     let mut start_specified = false;
     let mut end_specified = false;
-    for part in comps.chars() {
+    for part in date_comps.chars().chain(time_comps.chars()) {
         match components.entry(part) {
             std::collections::hash_map::Entry::Occupied(_) => {
                 start_specified = true;
@@ -2105,94 +2608,91 @@ fn parse_date_time(timestamp: &str, picture: &str, now: i64) -> Result<Option<f6
             }
             std::collections::hash_map::Entry::Vacant(e) => {
                 if start_specified {
-                    e.insert(if "MDd".contains(part) { 1 } else { 0 });
+                    e.insert(if "MDd".contains(part) { 1.0 } else { 0.0 });
                     end_specified = true;
                 } else {
-                    e.insert(get_date_time_fragment(now, part));
+                    e.insert(get_date_time_fragment(now, part) as f64);
                 }
             }
         }
     }
 
-    let year = components[&'Y'];
+    // dateC ({Y, x, w, F}) and dateD ({X, W, F}) are not supported for
+    // parsing, as in jsonata-js.
+    if date_c || date_d {
+        return Err(coded(
+            "D3136",
+            "ISO week-numbering year/month parsing is not supported",
+        ));
+    }
 
-    let hour_val = if time_b {
-        let h = components[&'h'];
-        let hh = if h == 12 { 0 } else { h };
-        if components.get(&'P').copied() == Some(1) {
-            match hh.checked_add(12) {
-                Some(hour) => hour,
-                // An hour this large is NaN from `Date.UTC` in jsonata-js.
-                None => return Ok(Some(f64::NAN)),
-            }
-        } else {
-            hh
-        }
-    } else {
-        components[&'H']
-    };
-
-    // jsonata-js builds the timestamp with `Date.UTC`, which carries a field
-    // past its range into the next one: month 13 is January of the next year,
-    // 30 February is 1 or 2 March, hour 24 is midnight of the next day. A
-    // month of 0 is January.
+    let get = |c: char| components.get(&c).copied().unwrap_or(f64::NAN);
     let mut month0 = match components.get(&'M') {
-        Some(&m) if m > 0 => m - 1,
-        _ => 0,
+        Some(&m) if m > 0.0 => m - 1.0,
+        _ => 0.0,
     };
-    let mut day = components.get(&'D').copied().unwrap_or(1);
+    let mut day = get('D');
+    let year = get('Y');
     if date_b {
-        // As jsonata-js: the month and day `d - 1` days on from 1 January,
-        // kept with the parsed year, so a day past the year's end lands in
-        // the same year, not the next. If 1 January or the derived date is
-        // past JavaScript's range, the date is invalid and the result NaN.
-        let derived = match date_utc(year, 0, 1, 0, 0, 0, 0)
+        // The month and day `d - 1` days on from 1 January, kept with the
+        // parsed year, so a day past the year's end lands in the same year.
+        // If 1 January or the derived date is past JavaScript's range, the
+        // date is invalid and the result NaN.
+        let derived = js_integer(year)
+            .and_then(|y| date_utc(y, 0, 1, 0, 0, 0, 0))
             .and_then(|first_jan| {
-                let offset_millis = components[&'d']
+                let offset_millis = js_integer(get('d'))?
                     .checked_sub(1)?
                     .checked_mul(MILLIS_PER_DAY)?;
                 first_jan.checked_add(offset_millis)
             })
-            .filter(|derived| (-MAX_DATE_MILLIS..=MAX_DATE_MILLIS).contains(derived))
-        {
-            Some(derived) => derived,
-            None => return Ok(Some(f64::NAN)),
+            .filter(|derived| (-MAX_DATE_MILLIS..=MAX_DATE_MILLIS).contains(derived));
+        let Some(derived) = derived else {
+            return Ok(Some(f64::NAN));
         };
         let (_, m, d) = CivilDate::from_millis(derived).ymd();
-        month0 = m - 1;
-        day = d;
+        month0 = (m - 1) as f64;
+        day = d as f64;
     }
-    // A date past JavaScript's range is NaN from `Date.UTC`, and jsonata-js
-    // returns that NaN.
-    let Some(millis) = date_utc(
-        year,
-        month0,
-        day,
-        hour_val,
-        components[&'m'],
-        components[&'s'],
-        components.get(&'f').copied().unwrap_or(0),
-    ) else {
+    let hour = if time_b {
+        // 12-hour to 24-hour.
+        let h = get('h');
+        let hour = if h == 12.0 { 0.0 } else { h };
+        if components.get(&'P') == Some(&1.0) {
+            hour + 12.0
+        } else {
+            hour
+        }
+    } else {
+        get('H')
+    };
+
+    // `Date.UTC`, which gives NaN for a NaN field or a date past JavaScript's
+    // range, and which jsonata-js returns as it is.
+    let fields = [year, month0, day, hour, get('m'), get('s'), get('f')];
+    let integers: Option<Vec<i64>> = fields.iter().map(|v| js_integer(*v)).collect();
+    let Some(millis) = integers.and_then(|f| date_utc(f[0], f[1], f[2], f[3], f[4], f[5], f[6]))
+    else {
         return Ok(Some(f64::NAN));
     };
-    // `millis -= (components.Z || components.z) * 60 * 1000`, in JavaScript
-    // numbers: a zero Z falls through to z, and nothing clips the result, so
-    // an offset can move it past JavaScript's range.
+    // `if (components.Z || components.z) millis -= (components.Z ||
+    // components.z) * 60 * 1000`, in JavaScript numbers: a zero or NaN Z falls
+    // through to z, and nothing clips the result.
+    let truthy = |v: &&f64| **v != 0.0 && !v.is_nan();
     let offset = components
         .get(&'Z')
-        .filter(|offset| **offset != 0)
-        .or_else(|| components.get(&'z'))
+        .filter(truthy)
+        .or_else(|| components.get(&'z').filter(truthy))
         .copied()
-        .unwrap_or(0);
-    Ok(Some(millis as f64 - offset as f64 * 60.0 * 1000.0))
+        .unwrap_or(0.0);
+    Ok(Some(millis as f64 - offset * 60.0 * 1000.0))
 }
 
-/// A timezone offset in minutes, if it adds up without overflowing.
-fn timezone_minutes(hours: i64, minutes: i64) -> Result<i64, DateTimeError> {
-    hours
-        .checked_mul(60)
-        .and_then(|h| h.checked_add(minutes))
-        .ok_or_else(|| coded("D3136", "invalid timezone"))
+/// A JavaScript number as `Date.UTC` reads it (ToIntegerOrInfinity): the
+/// integer part, or `None` for NaN, infinity or a magnitude too large for any
+/// date.
+fn js_integer(value: f64) -> Option<i64> {
+    (value.is_finite() && value.abs() < 9e15).then(|| value.trunc() as i64)
 }
 
 /// JavaScript's `Date.UTC(year, month0, day, hour, minute, second, millis)`:
@@ -2448,7 +2948,9 @@ mod tests {
             (
                 "2018-01-01T00:00:00+0099999999999999999",
                 "[Y]-[M]-[D]T[H]:[m]:[s][Z0000]",
-                -5.999999998485235e21,
+                // jsonata-js 2.3.0 takes the last two digits as the minutes
+                // (2.2 split after the third character).
+                -3.599999998485237e21,
             ),
             (
                 "2018-01-01T00:00:00+9999999999999999:00",

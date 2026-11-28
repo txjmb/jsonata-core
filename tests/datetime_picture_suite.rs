@@ -149,9 +149,7 @@ fn from_millis_iso_week_date() {
 #[test]
 fn to_millis_parse_date_time() {
     // Cases new in jsonata-js 2.3.0 that wait on its picture-parser rewrite (#869).
-    const DIVERGENT: &[usize] = &[
-        62, 63, 64, 75, 79, 81, 82, 83, 84, 85, 86, 89, 90, 91, 92, 93, 94, 97, 102,
-    ];
+    const DIVERGENT: &[usize] = &[];
     let (total, failures) = run_group_file_except(
         &suite_root().join("function-tomillis/parseDateTime.json"),
         DIVERGENT,
