@@ -2070,8 +2070,8 @@
 <h3 id="reference-test-suite">Reference Test Suite<a class="headerlink" href="#reference-test-suite" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Total Tests</strong>: 1972</li>
-<li><strong>Passing</strong>: 1824 (92%)</li>
-<li><strong>Known divergences</strong>: 148, all from changes new in jsonata-js 2.3.0 that are still being ported (template strings, the date/time picture rewrite, and a few smaller fixes). Each is listed with its reason, and the upstream change it waits on, in <code>KNOWN_DIVERGENCES</code> (strict <code>xfail</code>) or, for three that run for minutes, <code>KNOWN_HANGS</code> (skipped), both in <code>tests/python/test_reference_suite.py</code>. A strict <code>xfail</code> that starts passing fails the suite until it is removed. See <a href="#known-differences-outside-the-reference-suite">Known differences outside the reference suite</a> for closure shapes the suite does not cover</li>
+<li><strong>Passing</strong>: 1830 (93%)</li>
+<li><strong>Known divergences</strong>: 142, all from changes new in jsonata-js 2.3.0 that are still being ported (template strings, the date/time picture rewrite, and a few smaller fixes). Each is listed with its reason, and the upstream change it waits on, in <code>KNOWN_DIVERGENCES</code> (strict <code>xfail</code>) or, for three that run for minutes, <code>KNOWN_HANGS</code> (skipped), both in <code>tests/python/test_reference_suite.py</code>. A strict <code>xfail</code> that starts passing fails the suite until it is removed. See <a href="#known-differences-outside-the-reference-suite">Known differences outside the reference suite</a> for closure shapes the suite does not cover</li>
 <li><strong>Source</strong>: Official jsonata-js repository (v2.3.0) at <code>tests/jsonata-js/</code></li>
 </ul>
 <h3 id="checks-written-in-javascript">Checks written in JavaScript<a class="headerlink" href="#checks-written-in-javascript" title="Permanent link">&para;</a></h3>
@@ -2168,7 +2168,7 @@ leak in a long-lived Python process. See
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run full test suite</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/python/test_reference_suite.py
 </span></code></pre></div>
-<p>Results show 1824/1972 (92%) of the suite passing against the reference JSONata implementation.</p>
+<p>Results show 1830/1972 (93%) of the suite passing against the reference JSONata implementation.</p>
 <p>Two of those 1686 pass only because <em>something</em> was raised, not because the error code was
 compared — our message for them carries no code for the suite to check. <code>UNVERIFIED_ERROR_CEILING</code>
 in <code>tests/python/test_reference_suite.py</code> pins that count at 2 so it cannot quietly grow.</p>
