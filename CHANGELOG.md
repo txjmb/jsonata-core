@@ -9,7 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Template strings, from jsonata-js 2.3.0 (#860): `«Hello, {name}!»` or
+  `<<Hello, {name}!>>` joins its text and the value of each embedded
+  `{expression}`, cast to a string as `&` casts its operands. Templates
+  nest inside `{}`; `\{`, `\}`, `\<`, `\>`, `\«` and `\»` escape the
+  delimiters in the text, and an unescaped `}` there is S0108. A template
+  with no `{}` in a path step stays a string (`Account.Order.«OrderID»` is
+  `"OrderID"` per order) rather than naming a field. A template that isn't
+  closed is S0107. `<<` opens a template only where an operand starts, so
+  `"a"<<<b>>` is `"a" < <<b>>`. The default path compiles templates as well
+  as the tree-walker.
+
 ### Changed
+
+- Names follow jsonata-js's tokenizer: a name runs up to whitespace or an
+  operator character, so `a€` and `bar»` are names (they were S0204). A `/`
+  after `.`, `..` or `|` starts a regex, as it does after other operators.
+- A string literal that ends in a backslash raises S0103 (an illegal
+  escape), as in jsonata-js, rather than S0101.
+- A regex literal is scanned as jsonata-js scans it: it ends at the first
+  `/` outside brackets, so `/[/]/` is one regex; an unmatched bracket or a
+  missing closing `/` is S0302 (it was S0101, or accepted), an empty `//` is
+  S0301, and only `i` and `m` are flags.
+- The input ending where an operand should be is S0203 when a token is
+  expected after it (`(`, `[1,`, `$f(`, `«a {`), as in jsonata-js, and
+  S0207 otherwise (`1 +`). It was always S0207.
+- `__jsonata_version__` is `2.3.0`: every case of the jsonata-js 2.3.0
+  reference suite passes.
 
 - Behavior follows jsonata-js 2.3.0 in these cases:
   - `$split` and `$replace` return undefined when the pattern is undefined
@@ -62,6 +88,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     empty. `$fromMillis(1e20, "[Y0001]")` is `0NaN`; it used to raise
     "Invalid timestamp". A timezone too large for a 64-bit integer is also
     treated as not a number, where jsonata-js still formats its digits.
+  - `$toMillis` matches a timestamp against its picture with jsonata-js
+    2.3.0's linear-time matcher (#869) instead of a generated regex. Long or
+    adversarial pictures no longer take minutes, and every case of the
+    reference suite's `parseDateTime` group now matches jsonata-js. Along
+    with it:
+    - a negative offset with minutes, such as `-03:30`, gives its sign to
+      both parts (#856); it was read as `-02:30`
+    - a month or day name that isn't written as the picture asks (say
+      `january` for `[MNn]`) counts as not given, as in jsonata-js, rather
+      than raising D3136 straight away
+    - a width modifier is read like JavaScript's `parseInt`, so `[Y,5x]`
+      has a width of 5; a negative maximum matches nothing, and one that
+      isn't a number fixes no width
+    - truncated names that collide resolve to the last, as jsonata-js's
+      lookup does: `Ju` with `[MNn,2-2]` is July
+    - roman numerals in the wrong case under `[YI]` give NaN, and letters
+      are read as JavaScript numbers, so a long run doesn't overflow
+    - a number directly after another only fixes the earlier one's width
+      when it is in digits
+- `$parseInteger` removes every grouping separator of the picture, not only
+  commas (`$parseInteger('1.234.567', '#.##0')` is `1234567`), and gives NaN
+  for a word it doesn't know instead of raising D3136, as jsonata-js does.
 
 ### Deprecated
 
@@ -69,6 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `&` raises D3001 for a number that isn't finite (`"" & 1/0`), from
+  `$string`, as jsonata-js does. It was an uncoded type error.
 - `$formatNumber` scales a negative number by the percent or per-mille sign
   of the sub-picture it uses: `$formatNumber(-0.5, "0;0%")` is `50%`, not
   `0%`. Both sub-pictures are checked for errors whatever the number's sign,

@@ -9,8 +9,8 @@ jsonatapy includes a comprehensive test adapter that runs the complete reference
 ### Reference Test Suite
 
 - **Total Tests**: 1972
-- **Passing**: 1868 (95%)
-- **Known divergences**: 104, all from changes new in jsonata-js 2.3.0 that are still being ported (template strings and the rewrite of `$toMillis` picture parsing). Each is listed with its reason, and the upstream change it waits on, in `KNOWN_DIVERGENCES` (strict `xfail`) or, for three that run for minutes, `KNOWN_HANGS` (skipped), both in `tests/python/test_reference_suite.py`. A strict `xfail` that starts passing fails the suite until it is removed. See [Known differences outside the reference suite](#known-differences-outside-the-reference-suite) for closure shapes the suite does not cover
+- **Passing**: 1972 (100%)
+- **Known divergences**: 0, none in the suite (see [Known differences outside the reference suite](#known-differences-outside-the-reference-suite) for closure shapes it does not cover). `KNOWN_DIVERGENCES` in `tests/python/test_reference_suite.py` is the registry; entries there are strict `xfail`, so one that starts passing fails the suite until it is removed
 - **Source**: Official jsonata-js repository (v2.3.0) at `tests/jsonata-js/`
 
 ### Checks written in JavaScript
@@ -54,6 +54,11 @@ Some path and evaluation-order shapes differ too:
 
 (Data for these rows: `{"x":[1,2],"acct":{"o":[{"id":1}]}}`.)
 
+A `\u` escape that is half of a surrogate pair, with no other half after it (`"\ud83d"`, or
+`«\ud83d»` in a template string), is S0104 here. jsonata-js keeps the lone half in its string,
+which a Rust string cannot hold. A pair written as two escapes (`"\ud83d\ude00"`) is one
+character in both.
+
 ## Current Compatibility Status
 
 ```bash
@@ -61,7 +66,7 @@ Some path and evaluation-order shapes differ too:
 uv run pytest tests/python/test_reference_suite.py
 ```
 
-Results show 1868/1972 (95%) of the suite passing against the reference JSONata implementation.
+Results show 1972/1972 (100%) of the suite passing against the reference JSONata implementation.
 
 Two of those 1686 pass only because *something* was raised, not because the error code was
 compared — our message for them carries no code for the suite to check. `UNVERIFIED_ERROR_CEILING`

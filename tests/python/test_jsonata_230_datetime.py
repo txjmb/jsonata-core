@@ -4,6 +4,8 @@ Expected values are from jsonata-js 2.3.0 from npm. Every case runs on the defau
 the forced tree-walker.
 """
 
+import math
+
 import jsonatapy
 import pytest
 
@@ -77,3 +79,81 @@ def test_fractional_seconds(engine, expr, expected):
 def test_out_of_range_dates(engine, expr, expected):
     """An out-of-range date formats as NaN digits and empty names (jsonata-js #869)."""
     check(expr, expected)
+
+
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        ("$toMillis('2020-01-01 00:00 -03:30', '[Y]-[M]-[D] [H]:[m] [Z]')", 1577849400000),
+        ("$toMillis('2020-01-01 00:00 -0030', '[Y]-[M]-[D] [H]:[m] [Z0001]')", 1577838600000),
+        ("$toMillis('2020-01-01 00:00 GMT-09:30', '[Y]-[M]-[D] [H]:[m] [z]')", 1577871000000),
+        # A width modifier is read with parseInt (PR #302 item 12).
+        ("$toMillis('20200101', '[Y,5x][M01][D01]')", 575306841600000),
+        ("$toMillis('2020x0101', '[Y]x[M,2x][D01]')", 1577836800000),
+        # Names are matched case-insensitively but looked up as written.
+        ("$toMillis('January 5 2020', '[MNn] [D] [Y]')", 1578182400000),
+        ("$toMillis('january 5 2020', '[MNn] [D] [Y]')", "ERR D3136"),
+        ("$toMillis('2020 twelfth', '[Y] [Mwo]')", 1606780800000),
+        ("$toMillis('2018-01-01T12:00:00.57', '[Y]-[M]-[D]T[H]:[m]:[s].[f]')", 1514808000570),
+        ("$toMillis('2020-1-1 12pm', '[Y]-[M]-[D] [h][P]')", 1577880000000),
+        # Every grouping separator is removed, not only a comma.
+        ("$parseInteger('1.234.567', '#.##0')", 1234567),
+        ("$parseInteger('1 234 567', '# ##0')", 1234567),
+        # Long pictures parse in linear time.
+        ("$type($toMillis('1', '[Y' & $pad('', 600000, '0.') & ']'))", "number"),
+    ],
+)
+def test_to_millis_matcher(engine, expr, expected):
+    """$toMillis's linear-time picture matcher (jsonata-js #869, and #856 for offsets)."""
+    check(expr, expected)
+
+
+def test_unknown_number_word_is_nan(engine):
+    """An unknown word gives NaN, as jsonata-js's wordsToNumber does."""
+    assert math.isnan(jsonatapy.compile("$parseInteger('foo', 'w')").evaluate(None))
+
+
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        # A character outside the BMP is never case-folded, as in jsonata-js.
+        ("$toMillis('2020-\U00010428-01', '[Y]-\U00010400-[M]')", None),
+        # A later name that isn't known replaces an earlier value.
+        ("$toMillis('2020-01-01 January Foo', '[Y]-[M]-[D] [MNn] [MNn]')", "ERR D3136"),
+        # A width modifier that isn't a number is NaN: no fixed width.
+        ("$toMillis('202001','[Y,2-x][M01]')", 575283254400000),
+        ("$fromMillis(0, '[Y,2-x]')", "NaN"),
+        ("$fromMillis(1234, '[s].[f,x]')", "01."),
+        # Truncated names that collide resolve to the last one.
+        ("$toMillis('2020-Ju-01','[Y]-[MNn,2-2]-[D]')", 1593561600000),
+        ("$toMillis('2020-J-01','[Y]-[MNn,1-1]-[D]')", 1593561600000),
+        # A negative maximum width makes every name empty.
+        ("$toMillis('2020-January-01','[Y]-[MNn,1--2]-[D]')", "ERR D3136"),
+        ("$fromMillis(0, '[MNn,1--2]')", ""),
+        # Letters are JavaScript numbers, so a long run doesn't overflow.
+        ("$parseInteger('abcdefghijklmnopqrstuvwxyz', 'a')", 2.5609457453661776e35),
+    ],
+)
+def test_to_millis_review_regressions(engine, expr, expected):
+    """Cases found in review, with values from jsonata-js 2.3.0."""
+    check(expr, expected)
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "$toMillis('mmxx-01-01','[YI]-[M]-[D]')",
+        "$toMillis('2020-01-01 xii','[Y]-[M]-[D] [HI]')",
+        "$parseInteger('xii','I')",
+    ],
+)
+def test_lower_case_roman_under_upper_picture_is_nan(engine, expr):
+    """jsonata-js's romanToDecimal gives NaN for a character it doesn't know."""
+    assert math.isnan(jsonatapy.compile(expr).evaluate(None))
+
+
+def test_length_guard_counts_utf16_units(engine):
+    """The match-size guard counts UTF-16 code units, as JavaScript's length does."""
+    emoji = "\U0001f600" * 250000
+    expr = f"$toMillis('2020{emoji}', '[Y]{emoji}')"
+    assert jsonatapy.compile(expr).evaluate(None) is None

@@ -68,12 +68,12 @@ JSONata is a lightweight query and transformation language for JSON data. Think 
 - Works with native Python types
 
 ### Complete
-- Full JSONata 2.2.2 support
+- Full JSONata 2.3.0 support
 - All built-in functions
 - Lambda functions and higher-order functions
 
 ### Production Ready
-- 1868/1972 test suite compatibility
+- 1972/1972 test suite compatibility
 - Detailed error messages
 - Cross-platform support (Linux, macOS, Windows)
 

@@ -149,8 +149,8 @@ CLAIMS: list[Claim] = [
     ),
     Claim(
         "docs/credits.md",
-        r"passes (?P<passing>\d+) of the (?P<total>\d+) tests from the jsonata-js",
-        {"passing": "passing", "total": "total"},
+        r"passes all (?P<passing>\d+) tests from the jsonata-js",
+        {"passing": "passing"},
     ),
     Claim(
         "docs/migration-from-jsonata-python.md",
@@ -179,13 +179,13 @@ CLAIMS: list[Claim] = [
     ),
     Claim(
         "docs/development/testing.md",
-        r"(?P<passing>\d+)/(?P<total>\d+) passing \(the rest are known divergences",
+        r"(?P<passing>\d+)/(?P<total>\d+) passing \(a known divergence would be listed",
         {"passing": "passing", "total": "total"},
     ),
     Claim(
         "docs/development/testing.md",
         r"contains (?P<total>\d+) tests from the official jsonata-js repository \(v(?P<version>[\d.]+)\)\. "
-        r"(?P<passing>\d+) pass",
+        r"All (?P<passing>\d+) pass",
         {"total": "total", "version": "version", "passing": "passing"},
     ),
     Claim(
@@ -239,7 +239,7 @@ CLAIMS: list[Claim] = [
     Claim(
         "tests/python/test_reference_suite.py",
         r"runs all (?P<total>\d+) test cases from the reference JavaScript JSONata\n"
-        r"implementation \(jsonata-js v(?P<version>[\d.]+)\)\. (?P<passing>\d+) pass",
+        r"implementation \(jsonata-js v(?P<version>[\d.]+)\)\. All (?P<passing>\d+) pass",
         {"total": "total", "version": "version", "passing": "passing"},
         re.MULTILINE | re.DOTALL,
     ),
@@ -270,11 +270,13 @@ CLAIMS: list[Claim] = [
         {"version": "version", "passing": "passing", "total": "total"},
     ),
     Claim(".serena/memories/core.md", r"source of the (?P<total>\d+) cases", {"total": "total"}),
-    Claim(
-        "docs/performance.md",
-        r"\*\*jsonata-js\*\* \| JavaScript \| (?P<version>[\d.]+) \|",
-        {"version": "implemented"},
-    ),
+    # docs/performance.md names the jsonata-js the published numbers were measured
+    # against (2.2.2), so it is not checked against the implemented version until the
+    # 2.3.0 release reruns the benchmarks, which regenerates it from
+    # benchmarks/python/generate_performance_doc.py (checked below). Restore then:
+    #   Claim("docs/performance.md",
+    #         r"\*\*jsonata-js\*\* \| JavaScript \| (?P<version>[\d.]+) \|",
+    #         {"version": "implemented"}),
     Claim(
         "benchmarks/python/generate_performance_doc.py",
         r"\*\*jsonata-js\*\* \| JavaScript \| (?P<version>[\d.]+) \|",

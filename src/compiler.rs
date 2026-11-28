@@ -266,6 +266,14 @@ impl BytecodeCompiler {
                 self.compile_expr(rhs);
                 self.emit(Instr::Concat);
             }
+            // A template appends each part to one buffer, cast before the next
+            // part runs, as jsonata-js casts them (`eval_compiled_inner`). A
+            // `Concat` per part would copy the text so far each time, which
+            // is quadratic in the number of parts.
+            CompiledExpr::Template(_) => {
+                let idx = self.add_fallback(expr.clone());
+                self.emit(Instr::EvalFallback(idx));
+            }
 
             // ── Conditional ──────────────────────────────────────────
             CompiledExpr::Conditional {
