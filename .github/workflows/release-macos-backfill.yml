@@ -38,6 +38,16 @@ on:
         required: true
         type: string
         default: 'Linux-x86_64 Linux-aarch64 Windows macOS'
+      test_fixes_ref:
+        description: 'Optional: a ref (e.g. main) to take the files in test_fixes_files from, for test fixes made after the release'
+        required: false
+        type: string
+        default: ''
+      test_fixes_files:
+        description: 'Optional: space-separated test files to take from test_fixes_ref (e.g. tests/python/test_deep_recursion.py)'
+        required: false
+        type: string
+        default: ''
       dry_run:
         description: 'Dry run (build and test, skip publishing)'
         required: false
@@ -224,6 +234,30 @@ jobs:
         with:
           ref: refs/tags/v${{ inputs.version }}
           submodules: true
+
+      # A test fixed after the release (for example one whose assumption a
+      # newer CPython breaks) can be taken from a later ref. Only test files
+      # can be replaced, never the code that goes into the wheel, which is
+      # built from the tag in build-wheels.
+      - name: Take test fixes from a later ref
+        if: inputs.test_fixes_ref != '' && inputs.test_fixes_files != ''
+        shell: bash
+        env:
+          FIXES_REF: ${{ inputs.test_fixes_ref }}
+          FIXES_FILES: ${{ inputs.test_fixes_files }}
+        run: |
+          set -euo pipefail
+          for f in $FIXES_FILES; do
+            case "$f" in
+              *..*) echo "::error::test_fixes_files may not contain '..', got '$f'"; exit 1 ;;
+              tests/*) ;;
+              *) echo "::error::test_fixes_files may only name files under tests/, got '$f'"; exit 1 ;;
+            esac
+          done
+          git fetch --no-tags --depth=1 origin "$FIXES_REF"
+          git checkout FETCH_HEAD -- $FIXES_FILES
+          echo "Replaced from $FIXES_REF ($(git rev-parse --short FETCH_HEAD)):"
+          git diff --cached --stat HEAD
 
       - name: Set up Python
         if: matrix.platform.os != 'macOS'
