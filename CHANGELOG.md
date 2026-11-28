@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Python 3.10, which reached end of life in October 2026. `requires-python` is
+  now `>=3.11`, and releases build and test wheels for 3.11 through 3.15.
+  jsonatapy 2.2.x stays installable on 3.10. The `mcp` extra and the charts
+  in the `bench` extra lose their 3.11-only markers, since every supported
+  Python now meets them.
+
 ### Fixed
 
 - `&` raises D3001 for a number that isn't finite (`"" & 1/0`), from
