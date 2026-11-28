@@ -130,7 +130,7 @@ Thanks to the broader JSONata community:
 
 ### Reference Test Suite
 
-jsonatapy passes 1868 of the 1972 tests from the jsonata-js reference test suite. This comprehensive test coverage is thanks to the JSONata maintainers' commitment to quality.
+jsonatapy passes 1902 of the 1972 tests from the jsonata-js reference test suite. This comprehensive test coverage is thanks to the JSONata maintainers' commitment to quality.
 
 **Location:** [jsonata-js/test/test-suite](https://github.com/jsonata-js/jsonata/tree/master/test/test-suite)
 

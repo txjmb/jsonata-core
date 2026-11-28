@@ -37,7 +37,7 @@ tests/
 3. **Reference Test Suite** (1972 tests)
    - Official JSONata compatibility tests
    - Comprehensive language feature coverage
-   - 1868/1972 passing (the rest are known divergences, listed with reasons)
+   - 1902/1972 passing (the rest are known divergences, listed with reasons)
    - Imported from jsonata-js repository
 
 ## Running Tests
@@ -292,7 +292,7 @@ def test_with_fixture(sample_data):
 
 ### Overview
 
-The reference test suite contains 1972 tests from the official jsonata-js repository (v2.3.0). 1868 pass. The rest, all from jsonata-js 2.3.0 changes not yet ported, are listed in `KNOWN_DIVERGENCES` in `tests/python/test_reference_suite.py` as strict xfails (or in `KNOWN_HANGS`, skipped, for three that run for minutes), so the list cannot silently grow or go stale.
+The reference test suite contains 1972 tests from the official jsonata-js repository (v2.3.0). 1902 pass. The rest, all from jsonata-js 2.3.0 changes not yet ported, are listed in `KNOWN_DIVERGENCES` in `tests/python/test_reference_suite.py` as strict xfails, so the list cannot silently grow or go stale.
 
 ### Location
 

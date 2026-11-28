@@ -62,6 +62,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     empty. `$fromMillis(1e20, "[Y0001]")` is `0NaN`; it used to raise
     "Invalid timestamp". A timezone too large for a 64-bit integer is also
     treated as not a number, where jsonata-js still formats its digits.
+  - `$toMillis` matches a timestamp against its picture with jsonata-js
+    2.3.0's linear-time matcher (#869) instead of a generated regex. Long or
+    adversarial pictures no longer take minutes, and every case of the
+    reference suite's `parseDateTime` group now matches jsonata-js. Along
+    with it:
+    - a negative offset with minutes, such as `-03:30`, gives its sign to
+      both parts (#856); it was read as `-02:30`
+    - a month or day name that isn't written as the picture asks (say
+      `january` for `[MNn]`) counts as not given, as in jsonata-js, rather
+      than raising D3136 straight away
+    - a width modifier is read like JavaScript's `parseInt`, so `[Y,5x]`
+      has a width of 5; a negative maximum matches nothing, and one that
+      isn't a number fixes no width
+    - truncated names that collide resolve to the last, as jsonata-js's
+      lookup does: `Ju` with `[MNn,2-2]` is July
+    - roman numerals in the wrong case under `[YI]` give NaN, and letters
+      are read as JavaScript numbers, so a long run doesn't overflow
+    - a number directly after another only fixes the earlier one's width
+      when it is in digits
+- `$parseInteger` removes every grouping separator of the picture, not only
+  commas (`$parseInteger('1.234.567', '#.##0')` is `1234567`), and gives NaN
+  for a word it doesn't know instead of raising D3136, as jsonata-js does.
 
 ### Deprecated
 
