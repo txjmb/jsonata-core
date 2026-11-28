@@ -4727,20 +4727,39 @@ pub(crate) fn check_loop_timeout(
 /// Result type returned by a host-registered function.
 pub type HostFnResult = Result<JValue, EvaluatorError>;
 
-/// Per-call context handed to a host function.
-///
-/// In v1 this is intentionally opaque: a host function takes data and returns
-/// data. It exists so a later phase can add re-entrancy (invoking a JSONata
-/// lambda passed as an argument) by widening this type, without changing the
-/// [`HostFn`] signature or breaking existing callers.
+/// Per-call context handed to a host function: a handle on the running
+/// evaluation, so the host function can call a JSONata function it was
+/// passed, or hand back a function of its own.
 #[non_exhaustive]
-pub struct HostCtx {
-    _private: (),
+pub struct HostCtx<'a> {
+    evaluator: &'a mut Evaluator,
 }
 
-impl HostCtx {
-    fn new() -> Self {
-        HostCtx { _private: () }
+impl<'a> HostCtx<'a> {
+    fn new(evaluator: &'a mut Evaluator) -> Self {
+        HostCtx { evaluator }
+    }
+
+    /// Call a function value the host function was given (a lambda, a
+    /// builtin, a regex, a partial application or another host function),
+    /// as jsonata-js calls a function argument from a native function: with
+    /// no input.
+    pub fn call_function(&mut self, function: &JValue, args: &[JValue]) -> HostFnResult {
+        self.evaluator.call_function_from_host(function, args)
+    }
+
+    /// A function value that calls `f`, for the host function to return or
+    /// to pass to another function.
+    pub fn function_value(&mut self, f: Rc<dyn HostFn>) -> JValue {
+        self.evaluator.host_function_value(f)
+    }
+
+    /// The running evaluator. A host that reaches the evaluation from code
+    /// this borrow can't follow (the Python bindings, from Python code) moves
+    /// it out with `std::mem::replace` for the length of the call, and puts it
+    /// back before returning.
+    pub fn evaluator(&mut self) -> &mut Evaluator {
+        self.evaluator
     }
 }
 
@@ -4753,7 +4772,7 @@ impl HostCtx {
 /// can hand the function a re-entrancy handle through [`HostCtx`] without an
 /// API break.
 pub trait HostFn {
-    fn call(&self, args: &[JValue], ctx: &mut HostCtx) -> HostFnResult;
+    fn call(&self, args: &[JValue], ctx: &mut HostCtx<'_>) -> HostFnResult;
 
     /// How many arguments the function declares, as jsonata-js reads a
     /// JavaScript function's `length`: a higher-order function such as `$map`
@@ -4769,7 +4788,7 @@ impl<F> HostFn for F
 where
     F: Fn(&[JValue]) -> HostFnResult,
 {
-    fn call(&self, args: &[JValue], _ctx: &mut HostCtx) -> HostFnResult {
+    fn call(&self, args: &[JValue], _ctx: &mut HostCtx<'_>) -> HostFnResult {
         self(args)
     }
 }
@@ -4870,6 +4889,11 @@ pub struct Evaluator {
     /// evaluator has run, by `PathStep::id` (`None`: does not compile), so a
     /// step compiles once per evaluator rather than each time it runs (#197).
     step_bodies: StepBodies,
+    /// A `clone` the host bound for the evaluation, which the transform
+    /// operator copies its input with, as jsonata-js's looks up `clone` in the
+    /// expression's base environment (for Node-RED). A binding the
+    /// expression makes itself doesn't count (jsonata-js #859).
+    host_clone: Option<JValue>,
 }
 
 /// The compiled-step cache: the step looked up last, which is the one asked
@@ -4951,6 +4975,7 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
+            host_clone: None,
         }
     }
 
@@ -4969,6 +4994,7 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
+            host_clone: None,
         }
     }
 
@@ -4989,6 +5015,7 @@ impl Evaluator {
             start_time: None,
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
+            host_clone: None,
         }
     }
 
@@ -5021,6 +5048,58 @@ impl Evaluator {
     /// let data = JValue::from_json_str(r#"{"greeting": "hi"}"#).unwrap();
     /// assert_eq!(ev.evaluate(&ast, &data).unwrap(), JValue::from("HI"));
     /// ```
+    /// Bind a variable in the outermost scope, as a binding passed to an
+    /// evaluation is.
+    pub fn bind(&mut self, name: String, value: JValue) {
+        if name == "clone" {
+            self.host_clone = Some(value.clone());
+        }
+        self.context.bind(name, value);
+    }
+
+    /// The function a transform copies its input with, if the host gave one:
+    /// a `clone` binding (T2013 when it isn't a function) or a host override
+    /// of `$clone`. `None` for the builtin copy.
+    fn transform_clone_function(&self) -> Result<Option<JValue>, EvaluatorError> {
+        if let Some(clone) = &self.host_clone {
+            if !clone.is_function() {
+                return Err(EvaluatorError::TypeError(
+                    "T2013: The transform expression clones the input object using the $clone() \
+                     function.  This has been overridden in the current scope by a non-function."
+                        .to_string(),
+                ));
+            }
+            return Ok(Some(clone.clone()));
+        }
+        Ok(self
+            .host_fns
+            .contains_key("clone")
+            .then(|| JValue::builtin("clone")))
+    }
+
+    /// This evaluator's identity: the same for the whole evaluation, and
+    /// different for every evaluator.
+    pub fn id(&self) -> u64 {
+        self.context.ctx_id
+    }
+
+    /// See [`HostCtx::call_function`].
+    pub fn call_function_from_host(&mut self, function: &JValue, args: &[JValue]) -> HostFnResult {
+        if !function.is_function() {
+            return Err(not_a_function());
+        }
+        self.as_callback(|ev| ev.call_function_value(function, args, &JValue::Null))
+    }
+
+    /// See [`HostCtx::function_value`]. The function is registered under a
+    /// name no expression can write (it starts with U+0001), and the value
+    /// is a reference to it, like `$sum` is to the builtin.
+    pub fn host_function_value(&mut self, f: Rc<dyn HostFn>) -> JValue {
+        let name = format!("\u{1}host{}", self.host_fns.len());
+        self.host_fns.insert(name.clone(), f);
+        JValue::builtin(name)
+    }
+
     pub fn register_fn(
         &mut self,
         name: impl Into<String>,
@@ -8834,7 +8913,7 @@ impl Evaluator {
                 for arg in args {
                     evaluated_args.push(self.evaluate_internal(arg, data)?);
                 }
-                let mut ctx = HostCtx::new();
+                let mut ctx = HostCtx::new(self);
                 return f.call(&evaluated_args, &mut ctx);
             }
         }
@@ -8939,6 +9018,11 @@ impl Evaluator {
         // per-function logic. Only the builtins that call back into evaluation
         // are still handled below.
         if crate::builtins::is_pure_builtin(name) {
+            if let Some(result) =
+                self.split_or_contains_with_matcher(name, &evaluated_args, Some(data), data)?
+            {
+                return Ok(result);
+            }
             return crate::builtins::dispatch_pure(
                 name,
                 &evaluated_args,
@@ -10009,6 +10093,21 @@ impl Evaluator {
         // of its own: an object reached some other way (a variable, `$$`)
         // is then never part of it, and an input that holds one object at
         // two places gets an object for each place, as in jsonata-js.
+        // A host's `clone` makes the value to change, as in jsonata-js. It is
+        // still copied below, so an identity `clone` can't reach the input.
+        let cloned;
+        let input = match self.transform_clone_function()? {
+            Some(clone) => {
+                let arg = input.clone();
+                cloned =
+                    self.as_callback(|ev| ev.call_function_value(&clone, &[arg], &JValue::Null))?;
+                if !matches!(cloned, JValue::Object(_) | JValue::Array(_)) {
+                    return Ok(cloned);
+                }
+                &cloned
+            }
+            None => input,
+        };
         let copy = transform_unshare(input)?;
         let mut tree = TransformTree::build(&copy).ok_or_else(|| {
             // A fresh copy holds each object at one place only.
@@ -10941,12 +11040,10 @@ impl Evaluator {
             }
             results.push(JValue::object(result_obj));
 
-            // Only a lambda `next` is called (see `check_matcher_result`).
-            let Some(JValue::Lambda(next)) = match_obj.get("next") else {
+            let Some(next) = self.matcher_next(match_obj, data)? else {
                 break;
             };
-            let next = Rc::clone(next);
-            current = normalize_lazy(&self.invoke_stored_lambda(&next, &[], data)?)?;
+            current = next;
             if limit.is_some_and(|limit| results.len() >= limit) {
                 check_matcher_result(&current, "match")?;
                 break;
@@ -11123,18 +11220,132 @@ impl Evaluator {
             };
             count += 1;
 
-            // Only a lambda `next` is called (see `check_matcher_result`).
-            current = match found.get("next") {
-                Some(JValue::Lambda(next)) => {
-                    let next = Rc::clone(next);
-                    normalize_lazy(&self.invoke_stored_lambda(&next, &[], data)?)?
-                }
-                _ => JValue::Undefined,
-            };
+            current = self
+                .matcher_next(&found, data)?
+                .unwrap_or(JValue::Undefined);
             check_matcher_result(&current, "replace")?;
         }
         result.extend_from_slice(js_substring(&units, position, None));
         Ok(JValue::string(String::from_utf16_lossy(&result)))
+    }
+
+    /// The match after `found`, from its `next` function, or `None` when it
+    /// has no `next` that can be called. A lambda or a host function is
+    /// called; jsonata-js crashes calling a missing `next` or a builtin, which
+    /// ends the matches here instead.
+    fn matcher_next(
+        &mut self,
+        found: &IndexMap<String, JValue>,
+        data: &JValue,
+    ) -> Result<Option<JValue>, EvaluatorError> {
+        let next = match found.get("next") {
+            Some(next @ JValue::Lambda(_)) => next.clone(),
+            Some(next @ JValue::Builtin { name }) if self.host_fns.contains_key(&**name) => {
+                next.clone()
+            }
+            _ => return Ok(None),
+        };
+        let result = self.as_callback(|ev| ev.call_function_value(&next, &[], data))?;
+        Ok(Some(normalize_lazy(&result)?))
+    }
+
+    /// `$split` and `$contains` with a custom matcher function (a lambda, a
+    /// host function or a builtin) as the separator or token, following jsonata-js
+    /// `split` and `contains`, which drive it with `evaluateMatcher`.
+    /// `None` when the call has no such matcher, for the shared dispatcher.
+    /// `start` and `end` count UTF-16 code units, as in jsonata-js.
+    fn split_or_contains_with_matcher(
+        &mut self,
+        name: &str,
+        args: &[JValue],
+        context: Option<&JValue>,
+        data: &JValue,
+    ) -> Result<Option<JValue>, EvaluatorError> {
+        if !matches!(name, "split" | "contains") {
+            return Ok(None);
+        }
+        // The context is the string when it is left out (`<s-...>`).
+        let with_context: Vec<JValue>;
+        let args = match context {
+            Some(context @ JValue::String(_)) if args.len() == 1 => {
+                with_context = std::iter::once(context.clone())
+                    .chain(args.iter().cloned())
+                    .collect();
+                &with_context[..]
+            }
+            _ => args,
+        };
+        // A regex is the shared dispatcher's; any other function is called
+        // as jsonata-js calls it, a builtin included (`$split(s, $sum)` is
+        // its T0412).
+        if !matches!(
+            args.get(1),
+            Some(JValue::Lambda(_) | JValue::Builtin { .. })
+        ) {
+            return Ok(None);
+        }
+        let coerced = validate_builtin_args(name, args, context)?;
+        let args = coerced.as_deref().unwrap_or(args);
+        let JValue::String(s) = &args[0] else {
+            // Validation leaves only an undefined string, which gives undefined.
+            return Ok(Some(JValue::Undefined));
+        };
+        let s = s.clone();
+        let matcher = args[1].clone();
+        let limit = match args.get(2) {
+            Some(JValue::Number(n)) if *n < 0.0 => {
+                return Err(EvaluatorError::EvaluationError(
+                    "D3020: Third argument of split function must be a positive number".to_string(),
+                ))
+            }
+            Some(JValue::Number(n)) => Some(*n),
+            _ => None,
+        };
+        let below_limit = |count: f64| limit.map_or(true, |limit| count < limit);
+        if name == "split" && !below_limit(0.0) {
+            return Ok(Some(JValue::array(vec![])));
+        }
+        let call = JValue::String(s.clone());
+        let first = self.as_callback(|ev| ev.call_function_value(&matcher, &[call], data))?;
+        let mut current = normalize_lazy(&first)?;
+        check_matcher_result(&current, name)?;
+        if name == "contains" {
+            // jsonata-js tests `typeof matches !== 'undefined'`. A Python
+            // host function can only return None for no match, which arrives
+            // as null, so null is no match too.
+            return Ok(Some(JValue::Bool(!matches!(
+                current,
+                JValue::Undefined | JValue::Null
+            ))));
+        }
+        let units: Vec<u16> = s.encode_utf16().collect();
+        let piece = |start: f64, end: Option<f64>| {
+            JValue::string(String::from_utf16_lossy(js_substring(&units, start, end)))
+        };
+        let mut result = Vec::new();
+        if !matches!(current, JValue::Object(_)) {
+            result.push(JValue::String(s));
+            return Ok(Some(JValue::array(result)));
+        }
+        let mut start = 0.0;
+        let mut count = 0.0;
+        while let JValue::Object(found) = current.clone() {
+            if !below_limit(count) {
+                break;
+            }
+            let end = found.get("start").map(js_to_number);
+            result.push(piece(start, end));
+            start = found.get("end").map_or(f64::NAN, js_to_number);
+            current = self
+                .matcher_next(&found, data)?
+                .unwrap_or(JValue::Undefined);
+            check_matcher_result(&current, name)?;
+            count += 1.0;
+        }
+        if below_limit(count) {
+            result.push(piece(start, None));
+        }
+        Ok(Some(JValue::array(result)))
     }
 
     /// THE builtin-shadowing rule for compiled code (#191). A compiled
@@ -11491,7 +11702,7 @@ impl Evaluator {
         // exactly as it does at the other two dispatch sites.
         if !self.host_fns.is_empty() {
             if let Some(f) = self.host_fns.get(name).cloned() {
-                let mut ctx = HostCtx::new();
+                let mut ctx = HostCtx::new(self);
                 return f.call(values, &mut ctx);
             }
         }
@@ -11523,6 +11734,14 @@ impl Evaluator {
         // "at least 1 argument" first would wrongly reject `$zip`/`$millis`
         // (arity 0) reached by reference.
         if pure {
+            if matches!(name, "split" | "contains") {
+                let data = context.cloned().unwrap_or(JValue::Null);
+                if let Some(result) =
+                    self.split_or_contains_with_matcher(name, values, context, &data)?
+                {
+                    return Ok(result);
+                }
+            }
             return crate::builtins::dispatch_pure_with(
                 name,
                 values,
@@ -12516,7 +12735,7 @@ impl Evaluator {
             }
             PartialTarget::Host(HostTarget(f)) => {
                 let f = Rc::clone(f);
-                let mut ctx = HostCtx::new();
+                let mut ctx = HostCtx::new(self);
                 f.call(&full_args, &mut ctx)
             }
         }

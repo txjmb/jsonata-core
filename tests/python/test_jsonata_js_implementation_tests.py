@@ -214,6 +214,42 @@ def test_transform_ignores_a_clone_bound_in_the_expression(engine):
     assert result["Account"]["Order"][0]["Product"][0]["blah"] == "foo"
 
 
+def test_transform_uses_a_host_clone(engine):
+    import copy
+
+    calls = []
+    expr = compile_with(
+        'Account ~> |Order|{"Product":"blah"},nomatch|',
+        override={"clone": lambda obj: calls.append(obj) or copy.deepcopy(obj)},
+    )
+    assert expr.evaluate(TESTDATA2) == {
+        "Account Name": "Firefly",
+        "Order": [
+            {"OrderID": "order103", "Product": "blah"},
+            {"OrderID": "order104", "Product": "blah"},
+        ],
+    }
+    assert len(calls) == 1
+
+
+def test_transform_with_a_host_clone_that_is_not_a_function(engine):
+    # A transform uses the clone the host provides, so if that is not a function, it can't
+    # make a copy to work on.
+    expr = '( $ ~> |Account.Order.Product|{"blah":"foo"}| )'
+    assert error_code(lambda: evaluate(expr, TESTDATA2, {"clone": 5})) == "T2013"
+
+
+def test_transform_with_an_identity_host_clone_still_copies(engine):
+    # Deviation: jsonata-js then changes the input itself, and `$$.a` is part of the copy.
+    # Here the clone's result is copied again, so the input never changes, and `$$.a` is
+    # not in that copy (D1014).
+    data = {"a": {"b": 1}}
+    bindings = {"clone": lambda obj: obj}
+    assert evaluate('$ ~> | a | {"b": 2} |', data, bindings) == {"a": {"b": 2}}
+    assert data == {"a": {"b": 1}}
+    assert error_code(lambda: evaluate('$ ~> | $$.a | {"b": 2} |', data, bindings)) == "D1014"
+
+
 # --- Tests that bind Javascript functions ---
 
 
@@ -289,6 +325,115 @@ def test_partially_apply_host_function(engine):
         {"substr": lambda s, start, length: s[start : start + length]},
     )
     assert expr.evaluate(TESTDATA2) == "Hello"
+
+
+def repeating_letters(char, repeat):
+    """A custom matcher for `repeat` contiguous occurrences of `char`."""
+    chars = char * repeat
+
+    def match(string, offset=0):
+        pos = string.find(chars, offset or 0)
+        if pos == -1:
+            return None
+        return {
+            "match": chars,
+            "start": pos,
+            "end": pos + len(chars),
+            "groups": [],
+            "next": lambda: match(string, pos + len(chars)),
+        }
+
+    return match
+
+
+WELSH = "LLANFAIRPWLLGWYNGYLLGOGERYCHWYRNDROBWLLLLANTYSILIOGOGOGOCH"
+
+
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        (
+            f"$match('{WELSH}', $repeatingLetters('L', 2))",
+            [
+                {"match": "LL", "index": 0, "groups": []},
+                {"match": "LL", "index": 10, "groups": []},
+                {"match": "LL", "index": 18, "groups": []},
+                {"match": "LL", "index": 37, "groups": []},
+                {"match": "LL", "index": 39, "groups": []},
+            ],
+        ),
+        (
+            f"$split('{WELSH}', $repeatingLetters('L', 2))",
+            ["", "ANFAIRPW", "GWYNGY", "GOGERYCHWYRNDROBW", "", "ANTYSILIOGOGOGOCH"],
+        ),
+        (
+            f"$replace('{WELSH}', $repeatingLetters('L', 2), 'Ỻ')",
+            "ỺANFAIRPWỺGWYNGYỺGOGERYCHWYRNDROBWỺỺANTYSILIOGOGOGOCH",
+        ),
+        (f"$contains('{WELSH}', $repeatingLetters('L', 4))", True),
+        # A Python matcher can only return None for no match.
+        (f"$contains('{WELSH}', $repeatingLetters('Q', 4))", False),
+    ],
+)
+def test_custom_matcher(engine, expr, expected):
+    expr = compile_with(expr, {"repeatingLetters": repeating_letters})
+    assert expr.evaluate(None) == expected
+
+
+def my_func(arr, fn):
+    return 2 * fn(arr)
+
+
+@pytest.mark.parametrize(
+    "expr, extra, expected",
+    [
+        ("$myfunc([1,2,3], $sum)", {}, 12),
+        ("$myfunc([1,2,3], λ($arr) { $arr[1] + $arr[2] })", {}, 10),
+        ("$myfunc([1,2,3], $myfunc2)", {"myfunc2": lambda arr: 2 * arr[1]}, 8),
+    ],
+)
+def test_host_function_calls_a_function_argument(engine, expr, extra, expected):
+    expr = compile_with(expr, {"myfunc": my_func, **extra})
+    assert expr.evaluate(None) == expected
+
+
+def test_host_function_returns_a_function(engine):
+    expr = compile_with(
+        """(
+          $startsWithHello := $startsWith("Hello");
+          [$startsWithHello("Hello, Bob"), $startsWithHello("Goodbye, Bill")]
+        )""",
+        {"startsWith": lambda prefix: lambda arg: arg.startswith(prefix)},
+    )
+    assert expr.evaluate(None) == [True, False]
+
+
+def counter(count):
+    return {"value": count, "inc": lambda: counter(count + 1)}
+
+
+@pytest.mark.parametrize(
+    "expr, expected",
+    [
+        ("$counter(5).value", 5),
+        ("$counter(0).inc().value", 1),
+        ("$counter(0).inc().inc().inc().inc().value", 4),
+        ("$counter(3).value + 5", 8),
+        ("$counter(0).inc().inc().inc().inc().value + 3", 7),
+        ("$counter($counter(3).inc().inc().value).inc().value", 6),
+        ("$counter(3).inc().value.$string()", "4"),
+        ("«count: {$counter(1).inc().value}, then {$counter(5).value}»", "count: 2, then 5"),
+    ],
+)
+def test_functions_in_bindings_and_results(engine, expr, expected):
+    # async-function.js binds `counter`, whose result holds a method, and awaits each
+    # Promise it returns; here the same functions are synchronous.
+    assert evaluate(expr, {}, {"counter": counter}) == expected
+
+
+def test_calling_a_missing_method_of_a_host_result(engine):
+    expr = "$counter(2).inc().foo().value"
+    assert error_code(lambda: evaluate(expr, {}, {"counter": counter})) == "T1006"
 
 
 # --- Tests that are specific to a Javascript runtime ---

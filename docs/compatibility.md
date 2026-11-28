@@ -21,7 +21,17 @@ jsonata-js also tests behavior in JavaScript files that no adapter can run:
 lists every one of them and records whether it is ported to a test here or does not apply (with
 the reason, such as a JavaScript runtime detail, the Promise API, or parser recovery mode, which
 jsonatapy does not have). Its test fails if the pinned submodule adds or renames a check that the
-registry does not name. Triage is in progress for 2.3.0.
+registry does not name. For 2.3.0, 151 are ported (most to
+`tests/python/test_jsonata_js_implementation_tests.py`) and 46 do not apply.
+
+Two ported checks behave differently here on purpose:
+
+- A Python host function can only return `None` for "no match", so a custom matcher that
+  returns null is no match for `$contains`. jsonata-js tests for undefined, so a JSONata
+  matcher that returns `null` makes its `$contains` true.
+- A host `clone` that returns its argument unchanged makes jsonata-js's transform change
+  the input itself. Here the clone's result is copied again, so the input never changes, and
+  a location that reaches the input another way (`$$.a`) is D1014.
 
 ### Known differences outside the reference suite
 

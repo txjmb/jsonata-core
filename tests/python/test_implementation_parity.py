@@ -70,21 +70,9 @@ Entry = Ported | NotApplicable | Untriaged
 # Reasons shared by several entries.
 RECOVERY = NotApplicable("parser recovery mode (`recover: true`, `errors()`) is not implemented")
 PROMISE = NotApplicable("a Promise in the input: this implementation has no async API")
-PROMISE_FUNCTIONS = NotApplicable(
-    "a binding whose functions return objects holding more functions, behind Promises: "
-    "this implementation has no async API, and a host function returns only JSON values"
-)
-HOST_FUNCTION_VALUES = NotApplicable(
-    "a host function that takes or returns a JSONata function (a custom matcher, a callback, "
-    "a closure): the Python host API passes only JSON values across the boundary"
-)
 GENERATOR = NotApplicable(
     "a JavaScript generator function as a host function, which jsonata-js runs to its first "
     "yield; a Python host function returns its value directly"
-)
-HOST_CLONE = NotApplicable(
-    "a host-registered `clone`, which jsonata-js's transform calls to copy its input (for "
-    "Node-RED): a transform here copies the input itself, and `$clone` is only the builtin"
 )
 INHERITED = NotApplicable(
     "the `inherited` option, which reads what a JavaScript object inherits (class getters and "
@@ -128,9 +116,9 @@ REGISTRY: dict[str, Entry] = {
     "implementation-tests.js > Tests that use the $clone() function > clone undefined > should return undefined": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_clone"),
     "implementation-tests.js > Tests that use the $clone() function > clone empty object > should return empty object": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_clone"),
     "implementation-tests.js > Tests that use the $clone() function > clone object > should return same object": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_clone"),
-    "implementation-tests.js > Tests that use the $clone() function > transform expression with overridden $clone function > should return result object": HOST_CLONE,
+    "implementation-tests.js > Tests that use the $clone() function > transform expression with overridden $clone function > should return result object": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_transform_uses_a_host_clone"),
     "implementation-tests.js > Tests that use the $clone() function > transform expression with overridden $clone value > should use the built-in $clone and succeed (expression-level override is ignored for security)": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_transform_ignores_a_clone_bound_in_the_expression"),
-    "implementation-tests.js > Tests that use the $clone() function > transform expression with overridden $clone value > should throw T2013 if the host overrides $clone with a non-function": HOST_CLONE,
+    "implementation-tests.js > Tests that use the $clone() function > transform expression with overridden $clone value > should throw T2013 if the host overrides $clone with a non-function": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_transform_with_a_host_clone_that_is_not_a_function"),
     "implementation-tests.js > Tests that bind Javascript functions > Override implementation of $now() > should return result object": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_override_now"),
     "implementation-tests.js > Tests that bind Javascript functions > function throws a `DOMException` with a read-only `message` property > rethrows correctly": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_host_function_exception_message_is_kept"),
     "implementation-tests.js > Tests that bind Javascript functions > map a user-defined Javascript function with signature > should return result object": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_host_function_as_a_callback"),
@@ -140,14 +128,14 @@ REGISTRY: dict[str, Entry] = {
     "implementation-tests.js > Tests that bind Javascript functions > $sift with a user-defined Javascript function > should return result object": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_host_function_as_a_callback"),
     "implementation-tests.js > Tests that bind Javascript functions > $each with a user-defined Javascript function > should return result object": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_host_function_as_a_callback"),
     "implementation-tests.js > Tests that bind Javascript functions > Partially apply user-defined Javascript function > should return result object": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_partially_apply_host_function"),
-    "implementation-tests.js > Tests that bind Javascript functions > User defined matchers > should match using a custom matcher": HOST_FUNCTION_VALUES,
-    "implementation-tests.js > Tests that bind Javascript functions > User defined matchers > should split using a custom matcher": HOST_FUNCTION_VALUES,
-    "implementation-tests.js > Tests that bind Javascript functions > User defined matchers > should replace using a custom matcher": HOST_FUNCTION_VALUES,
-    "implementation-tests.js > Tests that bind Javascript functions > User defined matchers > should test inclusion using a custom matcher": HOST_FUNCTION_VALUES,
-    "implementation-tests.js > Tests that bind Javascript functions > User defined higher-order functions > should be able to invoke a built-in function passed as an argument": HOST_FUNCTION_VALUES,
-    "implementation-tests.js > Tests that bind Javascript functions > User defined higher-order functions > should be able to invoke a lambda function passed as an argument": HOST_FUNCTION_VALUES,
-    "implementation-tests.js > Tests that bind Javascript functions > User defined higher-order functions > should be able to invoke a user-defined function passed as an argument": HOST_FUNCTION_VALUES,
-    "implementation-tests.js > Tests that bind Javascript functions > User defined higher-order functions > should be able to return a function from a user-defined function": HOST_FUNCTION_VALUES,
+    "implementation-tests.js > Tests that bind Javascript functions > User defined matchers > should match using a custom matcher": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_custom_matcher"),
+    "implementation-tests.js > Tests that bind Javascript functions > User defined matchers > should split using a custom matcher": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_custom_matcher"),
+    "implementation-tests.js > Tests that bind Javascript functions > User defined matchers > should replace using a custom matcher": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_custom_matcher"),
+    "implementation-tests.js > Tests that bind Javascript functions > User defined matchers > should test inclusion using a custom matcher": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_custom_matcher"),
+    "implementation-tests.js > Tests that bind Javascript functions > User defined higher-order functions > should be able to invoke a built-in function passed as an argument": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_host_function_calls_a_function_argument"),
+    "implementation-tests.js > Tests that bind Javascript functions > User defined higher-order functions > should be able to invoke a lambda function passed as an argument": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_host_function_calls_a_function_argument"),
+    "implementation-tests.js > Tests that bind Javascript functions > User defined higher-order functions > should be able to invoke a user-defined function passed as an argument": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_host_function_calls_a_function_argument"),
+    "implementation-tests.js > Tests that bind Javascript functions > User defined higher-order functions > should be able to return a function from a user-defined function": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_host_function_returns_a_function"),
     "implementation-tests.js > Tests that bind Javascript functions > User defined generator function > should be able to invoke a generator function returning a simple value": GENERATOR,
     "implementation-tests.js > Tests that bind Javascript functions > User defined generator function > should be able to invoke a generator function and map over its return array value": GENERATOR,
     "implementation-tests.js > Tests that bind Javascript functions > User defined generator function > should be able to invoke a generator function and map over its return object value": GENERATOR,
@@ -295,16 +283,16 @@ REGISTRY: dict[str, Entry] = {
     "async-function.js > Invoke JSONata with callback - return values > should handle a value": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_return_values"),
     "async-function.js > Invoke JSONata with callback - return values > should handle a promise": PROMISE,
     "async-function.js > Evaluate concurrent expressions with callbacks > should process two expressions concurrently": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_one_expression_evaluated_twice"),
-    "async-function.js > Handle chained functions that end in promises > basic async function": PROMISE_FUNCTIONS,
-    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function": PROMISE_FUNCTIONS,
-    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function several times": PROMISE_FUNCTIONS,
-    "async-function.js > Handle chained functions that end in promises > basic async function and part of a numeric expression": PROMISE_FUNCTIONS,
-    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function several times and part of a numeric expression": PROMISE_FUNCTIONS,
-    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function - nested": PROMISE_FUNCTIONS,
-    "async-function.js > Handle chained functions that end in promises > basic async function, then invokes a built-in function": PROMISE_FUNCTIONS,
-    "async-function.js > Handle chained functions that end in promises > basic async function inside a template string": NotApplicable("a binding whose functions return Promises: this implementation has no async API"),
+    "async-function.js > Handle chained functions that end in promises > basic async function": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_functions_in_bindings_and_results"),
+    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_functions_in_bindings_and_results"),
+    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function several times": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_functions_in_bindings_and_results"),
+    "async-function.js > Handle chained functions that end in promises > basic async function and part of a numeric expression": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_functions_in_bindings_and_results"),
+    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function several times and part of a numeric expression": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_functions_in_bindings_and_results"),
+    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function - nested": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_functions_in_bindings_and_results"),
+    "async-function.js > Handle chained functions that end in promises > basic async function, then invokes a built-in function": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_functions_in_bindings_and_results"),
+    "async-function.js > Handle chained functions that end in promises > basic async function inside a template string": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_functions_in_bindings_and_results"),
     "async-function.js > Handle chained functions that end in promises > registered async function inside a template string": Ported("tests/python/test_jsonata_230_template_strings.py::test_registered_function_inside_a_template"),
-    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes a non-existent function": PROMISE_FUNCTIONS,
+    "async-function.js > Handle chained functions that end in promises > basic async function, but invokes a non-existent function": Ported("tests/python/test_jsonata_js_implementation_tests.py::test_calling_a_missing_method_of_a_host_result"),
     "async-function.js > Array with Promise items > should await each item": PROMISE,
     # --- parser-pluggable-regex.js ---
     "parser-pluggable-regex.js > Invoke parser with custom RegexEngine param > should call RegexEngine param constructure during evaluation": REGEX_ENGINE,

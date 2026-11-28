@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed is S0107. `<<` opens a template only where an operand starts, so
   `"a"<<<b>>` is `"a" < <<b>>`. The default path compiles templates as well
   as the tree-walker.
+- Functions cross the Python host boundary both ways, as between jsonata-js
+  and JavaScript. A JSONata function in a host function's arguments arrives
+  as a callable that applies it, and a Python callable in a host function's
+  result or in the bindings is a JSONata function: a custom matcher for
+  `$match`, `$split`, `$replace` and `$contains`, a closure, or the methods
+  of an object (`$counter(0).inc().value`). They used to arrive as `None`,
+  and a callable in a result or a binding was an error. In Rust, `HostCtx`
+  gives a host function `call_function` and `function_value`.
+- `$split` and `$contains` take a custom matcher function, as `$match` and
+  `$replace` do. A matcher's `next` can be a host function.
+- A transform copies its input with a host override of `clone`, or a `clone`
+  in the bindings, as jsonata-js does; a `clone` binding that isn't a
+  function is T2013.
 - `$clone`, the jsonata-js builtin that deep-copies an object or array
   through JSON (`JSON.parse($string(arg))`), so a function inside it becomes
   `""`. It was T1006.

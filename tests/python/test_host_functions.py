@@ -218,3 +218,75 @@ class TestCalleeEvaluatedOnce:
         expr.register("tick", tick)
         assert expr.evaluate(None) == "1"
         assert len(calls) == 1
+
+
+class TestFunctionValues:
+    """Functions cross the boundary both ways, as between jsonata-js and JavaScript."""
+
+    def test_function_argument_is_callable(self):
+        expr = jsonatapy.compile("$apply(function($x, $y){ $x * $y }, 6, 7)")
+        expr.register("apply", lambda fn, a, b: fn(a, b))
+        assert expr.evaluate(None) == 42
+
+    def test_functions_nested_in_arguments(self):
+        expr = jsonatapy.compile('$call({"f": $uppercase, "fs": [$lowercase]}, "Ab")')
+        expr.register("call", lambda obj, s: [obj["f"](s), obj["fs"][0](s)])
+        assert expr.evaluate(None) == ["AB", "ab"]
+
+    def test_function_argument_comes_back_as_itself(self):
+        expr = jsonatapy.compile("$identity($sum)([1, 2])")
+        expr.register("identity", lambda fn: fn)
+        assert expr.evaluate(None) == 3
+
+    def test_function_argument_repr(self):
+        expr = jsonatapy.compile("[$show($sum), $show(function(){1})]")
+        expr.register("show", repr)
+        assert expr.evaluate(None) == ["<jsonata function $sum>", "<jsonata function>"]
+
+    def test_function_kept_past_its_evaluation_raises(self):
+        kept = []
+        expr = jsonatapy.compile("$keep($sum)")
+        expr.register("keep", lambda fn: kept.append(fn) or 1)
+        assert expr.evaluate(None) == 1
+        with pytest.raises(ValueError, match="can only be called while"):
+            kept[0]([1])
+
+    def test_function_kept_for_another_evaluation_raises(self):
+        kept = []
+        expr = jsonatapy.compile("$keep($sum)")
+        expr.register("keep", lambda fn: kept.append(fn) or 1)
+        expr.evaluate(None)
+        other = jsonatapy.compile("$call()")
+        other.register("call", lambda: kept[0]([1]))
+        with pytest.raises(ValueError, match="can only be called while"):
+            other.evaluate(None)
+
+    def test_error_in_a_function_argument_keeps_its_code(self):
+        expr = jsonatapy.compile("$apply(function(){ $error('boom') })")
+        expr.register("apply", lambda fn: fn())
+        with pytest.raises(ValueError, match=r"^D3137: boom"):
+            expr.evaluate(None)
+
+    def test_host_can_catch_an_error_in_a_function_argument(self):
+        def attempt(fn):
+            try:
+                return fn()
+            except ValueError as e:
+                return str(e)[:5]
+
+        expr = jsonatapy.compile("$attempt(function(){ $error('boom') })")
+        expr.register("attempt", attempt)
+        assert expr.evaluate(None) == "D3137"
+
+    def test_returned_callable_reports_its_arity(self):
+        expr = jsonatapy.compile("$map([1, 2], $make())")
+        expr.register("make", lambda: lambda value, index: [value, index])
+        assert expr.evaluate(None) == [[1, 0], [2, 1]]
+
+    def test_callable_bindings(self):
+        assert jsonatapy.evaluate("$f(2)", None, {"f": lambda x: x * 10}) == 20
+        assert jsonatapy.evaluate("$type($f)", None, {"f": len}) == "function"
+        assert jsonatapy.evaluate("$o.m(3)", None, {"o": {"m": lambda x: -x}}) == -3
+
+    def test_function_result_is_none_in_python(self):
+        assert jsonatapy.evaluate("$f", None, {"f": len}) is None
