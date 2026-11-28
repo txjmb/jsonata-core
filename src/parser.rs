@@ -242,7 +242,72 @@ pub enum Token {
     // Special
     Hash, // # index binding operator
     At,   // @ focus binding operator
+
+    // Template strings (jsonata-js #860): `«` or `<<` opens one, carrying
+    // the opener; then come text and `{` ... `}` embedded expressions, and
+    // the closer that matches the opener ends it.
+    TemplateStart(String),
+    TemplateText(String),
+    TemplateEnd,
     Eof,
+}
+
+/// The delimiters of a template string: each opener and the closer it needs.
+/// A template ends at its own closer only, so the other form's delimiters
+/// are ordinary text inside it (`<<a » b>>`, `«a >> b»`).
+const TEMPLATE_DELIMITERS: [(&str, &str); 2] = [("\u{AB}", "\u{BB}"), ("<<", ">>")];
+
+/// The characters that template text may escape as themselves, besides the
+/// JSON escapes a string literal takes (jsonata-js `TEMPLATE_ESCAPES`).
+const TEMPLATE_ESCAPES: &str = "{}<>\u{AB}\u{BB}";
+
+/// One open template string. `depth` counts the unmatched `{` of the
+/// embedded expression being lexed: zero means the lexer is in the template's
+/// text, otherwise it is lexing ordinary tokens (jsonata-js keeps the same
+/// stack in its tokenizer, so templates can nest inside `{}`).
+struct TemplateFrame {
+    close: &'static str,
+    depth: usize,
+}
+
+/// The characters that end a name (or a `$` variable name) in jsonata-js's
+/// tokenizer: the whitespace ` \t\n\r\v` and every character that starts
+/// an operator, `!` and `~` included. Anything else, `«`, `»` and
+/// non-letters among them, is part of the name.
+fn ends_name(ch: char) -> bool {
+    matches!(
+        ch,
+        ' ' | '\t'
+            | '\n'
+            | '\r'
+            | '\u{B}'
+            | '.'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '('
+            | ')'
+            | ','
+            | '@'
+            | '#'
+            | ';'
+            | ':'
+            | '?'
+            | '+'
+            | '-'
+            | '*'
+            | '/'
+            | '%'
+            | '|'
+            | '='
+            | '<'
+            | '>'
+            | '^'
+            | '&'
+            | '!'
+            | '~'
+    )
 }
 
 /// Lexer for tokenizing JSONata expressions
@@ -250,6 +315,13 @@ pub struct Lexer {
     input: Vec<char>,
     position: usize,
     last_token: Option<Token>,
+    /// The open template strings, innermost last.
+    templates: Vec<TemplateFrame>,
+    /// Set by the parser when the token just passed is a binary operator,
+    /// so that the next token is lexed where an operand starts. Only the
+    /// parser can tell `2 * /a/` (multiplication) from `* / 2` (the
+    /// wildcard, divided); see `operand_expected`.
+    after_binary_operator: bool,
 }
 
 impl Lexer {
@@ -258,6 +330,8 @@ impl Lexer {
             input: input.chars().collect(),
             position: 0,
             last_token: None,
+            templates: Vec::new(),
+            after_binary_operator: false,
         }
     }
 
@@ -316,98 +390,160 @@ impl Lexer {
                 }
                 Some('\\') => {
                     self.advance();
-                    match self.current() {
-                        None => return Err(ParserError::UnclosedString),
-                        Some('"') => result.push('"'),
-                        Some('\\') => result.push('\\'),
-                        Some('/') => result.push('/'),
-                        Some('b') => result.push('\u{0008}'),
-                        Some('f') => result.push('\u{000C}'),
-                        Some('n') => result.push('\n'),
-                        Some('r') => result.push('\r'),
-                        Some('t') => result.push('\t'),
-                        Some('u') => {
-                            // Unicode escape sequence \uXXXX
-                            self.advance();
-                            let mut hex = String::new();
-                            for _ in 0..4 {
-                                match self.current() {
-                                    Some(h) if h.is_ascii_hexdigit() => {
-                                        hex.push(h);
-                                        self.advance();
-                                    }
-                                    _ => {
-                                        return Err(ParserError::InvalidEscape(format!(
-                                            "\\u{}",
-                                            hex
-                                        )))
-                                    }
-                                }
-                            }
-                            let code = u32::from_str_radix(&hex, 16).unwrap();
-                            if (0xD800..=0xDBFF).contains(&code) {
-                                // High surrogate - expect \uXXXX low surrogate to follow
-                                if self.current() == Some('\\') {
-                                    self.advance();
-                                    if self.current() == Some('u') {
-                                        self.advance();
-                                        let mut low_hex = String::new();
-                                        for _ in 0..4 {
-                                            match self.current() {
-                                                Some(h) if h.is_ascii_hexdigit() => {
-                                                    low_hex.push(h);
-                                                    self.advance();
-                                                }
-                                                _ => {
-                                                    return Err(ParserError::InvalidEscape(
-                                                        format!("\\u{}", low_hex),
-                                                    ))
-                                                }
-                                            }
-                                        }
-                                        let low = u32::from_str_radix(&low_hex, 16).unwrap();
-                                        if (0xDC00..=0xDFFF).contains(&low) {
-                                            let cp =
-                                                0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00);
-                                            if let Some(ch) = char::from_u32(cp) {
-                                                result.push(ch);
-                                            } else {
-                                                return Err(ParserError::InvalidEscape(format!(
-                                                    "\\u{}\\u{}",
-                                                    hex, low_hex
-                                                )));
-                                            }
-                                        } else {
-                                            return Err(ParserError::InvalidEscape(format!(
-                                                "\\u{}\\u{}",
-                                                hex, low_hex
-                                            )));
-                                        }
-                                    } else {
-                                        return Err(ParserError::InvalidEscape(format!(
-                                            "\\u{}",
-                                            hex
-                                        )));
-                                    }
-                                } else {
-                                    return Err(ParserError::InvalidEscape(format!("\\u{}", hex)));
-                                }
-                            } else if let Some(ch) = char::from_u32(code) {
-                                result.push(ch);
-                            } else {
-                                return Err(ParserError::InvalidEscape(format!("\\u{}", hex)));
-                            }
-                            continue; // Don't advance again
-                        }
-                        Some(ch) => return Err(ParserError::InvalidEscape(format!("\\{}", ch))),
-                    }
-                    self.advance();
+                    self.scan_escape("", &mut result)?;
                 }
                 Some(ch) => {
                     result.push(ch);
                     self.advance();
                 }
             }
+        }
+    }
+
+    /// Read four hex digits at the current position, as `\u` takes them.
+    fn read_hex4(&mut self) -> Option<u32> {
+        let hex: String = self
+            .input
+            .get(self.position..self.position + 4)?
+            .iter()
+            .collect();
+        if !hex.chars().all(|h| h.is_ascii_hexdigit()) {
+            return None;
+        }
+        self.position += 4;
+        u32::from_str_radix(&hex, 16).ok()
+    }
+
+    /// Decode the escape sequence whose `\` has just been passed, appending
+    /// it to `out` and moving past it (jsonata-js `scanEscape`, which string
+    /// literals and template text share). `extra` lists the characters that
+    /// may also be escaped as themselves. `\u` needs exactly four hex digits
+    /// (S0104); anything else, the end of the input included, is S0103.
+    ///
+    /// jsonata-js decodes each `\u` to one UTF-16 unit, so a surrogate pair
+    /// written as two escapes makes one character. A lone surrogate can't be
+    /// held in a Rust string, so it is reported as S0104 here, where
+    /// jsonata-js keeps it.
+    fn scan_escape(&mut self, extra: &str, out: &mut String) -> Result<(), ParserError> {
+        let Some(ch) = self.current() else {
+            return Err(ParserError::InvalidEscape("\\".to_string()));
+        };
+        let simple = match ch {
+            '"' => Some('"'),
+            '\\' => Some('\\'),
+            '/' => Some('/'),
+            'b' => Some('\u{0008}'),
+            'f' => Some('\u{000C}'),
+            'n' => Some('\n'),
+            'r' => Some('\r'),
+            't' => Some('\t'),
+            c if extra.contains(c) => Some(c),
+            _ => None,
+        };
+        if let Some(c) = simple {
+            out.push(c);
+            self.advance();
+            return Ok(());
+        }
+        if ch != 'u' {
+            return Err(ParserError::InvalidEscape(format!("\\{}", ch)));
+        }
+        self.advance(); // skip 'u'
+        let bad_unicode = || ParserError::InvalidEscape("\\u".to_string());
+        let code = self.read_hex4().ok_or_else(bad_unicode)?;
+        let cp = if (0xD800..=0xDBFF).contains(&code) {
+            // A high surrogate: the low one must follow as another `\u`.
+            if self.current() != Some('\\') || self.peek(1) != Some('u') {
+                return Err(bad_unicode());
+            }
+            self.position += 2;
+            let low = self.read_hex4().ok_or_else(bad_unicode)?;
+            if !(0xDC00..=0xDFFF).contains(&low) {
+                return Err(bad_unicode());
+            }
+            0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00)
+        } else {
+            code
+        };
+        out.push(char::from_u32(cp).ok_or_else(bad_unicode)?);
+        Ok(())
+    }
+
+    /// Whether the input at the current position starts with `text`.
+    fn at(&self, text: &str) -> bool {
+        let rest = self.input.get(self.position..).unwrap_or_default();
+        text.chars().count() <= rest.len() && text.chars().zip(rest).all(|(c, r)| c == *r)
+    }
+
+    /// The next token of the innermost template's text: its closer, or the
+    /// literal text up to the next unescaped `{` or the closer (jsonata-js
+    /// `nextTemplateToken`). The end of the input is `Eof`, which the parser
+    /// reports as an unterminated template (S0107). An unescaped `}` is
+    /// S0108, so a stray brace is reported rather than kept as text.
+    fn next_template_token(&mut self, close: &'static str) -> Result<Token, ParserError> {
+        if self.position >= self.input.len() {
+            return self.emit_token(Token::Eof);
+        }
+        if self.at(close) {
+            self.position += close.chars().count();
+            self.templates.pop();
+            return self.emit_token(Token::TemplateEnd);
+        }
+        let mut text = String::new();
+        while let Some(ch) = self.current() {
+            if ch == '{' || self.at(close) {
+                break;
+            }
+            match ch {
+                '\\' => {
+                    self.advance();
+                    self.scan_escape(TEMPLATE_ESCAPES, &mut text)?;
+                }
+                '}' => {
+                    return Err(ParserError::Coded {
+                        code: "S0108",
+                        message: "A } in template string text must be escaped as \\}".to_string(),
+                    })
+                }
+                _ => {
+                    text.push(ch);
+                    self.advance();
+                }
+            }
+        }
+        self.emit_token(Token::TemplateText(text))
+    }
+
+    /// Whether the last token leaves the lexer where an operand starts, so
+    /// that a `/` opens a regex and `<<` a template rather than being the
+    /// division and less-than operators. jsonata-js asks its parser, which
+    /// lexes in infix position only after an operand; this lexer judges
+    /// from the token before, except after `*` and `%`. On their own those
+    /// are operands (the wildcard and the parent operator), so the parser
+    /// says when it has just read one as a binary operator.
+    fn operand_expected(&self) -> bool {
+        if self.after_binary_operator {
+            return true;
+        }
+        match &self.last_token {
+            None => true, // Start of expression
+            Some(Token::LeftParen) | Some(Token::LeftBracket) | Some(Token::LeftBrace) => true,
+            Some(Token::Comma) | Some(Token::Semicolon) | Some(Token::Colon) => true,
+            Some(Token::Equal) | Some(Token::NotEqual) => true,
+            Some(Token::LessThan) | Some(Token::LessThanOrEqual) => true,
+            Some(Token::GreaterThan) | Some(Token::GreaterThanOrEqual) => true,
+            Some(Token::Plus) | Some(Token::Minus) => true,
+            Some(Token::Ampersand) | Some(Token::Question) | Some(Token::TildeArrow) => true,
+            Some(Token::ColonEqual)
+            | Some(Token::QuestionQuestion)
+            | Some(Token::QuestionColon) => true,
+            Some(Token::Dot) | Some(Token::DotDot) | Some(Token::Pipe) => true,
+            Some(Token::And) | Some(Token::Or) | Some(Token::In) => true,
+            // Deliberately NOT Token::Function: a lambda's next token is
+            // always `(`, so a `/` can only follow `function`/`λ` when they
+            // are a bare name -- a value, after which `/` divides.
+            Some(Token::Identifier(s)) if s == "and" || s == "or" || s == "in" => true,
+            _ => false, // After values, an operator
         }
     }
 
@@ -468,14 +604,13 @@ impl Lexer {
     fn read_identifier(&mut self) -> String {
         let start = self.position;
 
+        // Up to whitespace or an operator character, as jsonata-js reads a
+        // name (`$` is neither, so `a$b` and `$a$b` are single names).
         while let Some(ch) = self.current() {
-            // Continue if alphanumeric, underscore or `$` (not an operator
-            // in jsonata-js, so `a$b` and `$a$b` are single names)
-            if ch.is_alphanumeric() || ch == '_' || ch == '$' {
-                self.advance();
-            } else {
+            if ends_name(ch) {
                 break;
             }
+            self.advance();
         }
 
         self.input[start..self.position].iter().collect()
@@ -497,55 +632,84 @@ impl Lexer {
         Err(ParserError::UnclosedBacktick)
     }
 
+    /// A regex literal, its opening `/` at the current position (jsonata-js
+    /// `scanRegex`). The closing `/` is the first one outside brackets --
+    /// `(`, `[` and `{` are counted against `)`, `]` and `}`, unless escaped
+    /// -- with an even number of backslashes before it, so `/[/]/` is one
+    /// regex. An empty pattern is S0301, a missing closing `/` S0302. Only
+    /// `i` and `m` are flags; a letter after them is the next token.
     fn read_regex(&mut self) -> Result<Token, ParserError> {
         self.advance(); // skip opening /
-
-        // Read pattern
-        let mut pattern = String::new();
-        let mut escaped = false;
-
-        loop {
-            match self.current() {
-                None => return Err(ParserError::UnclosedString),
-                Some('/') if !escaped => {
-                    self.advance(); // skip closing /
-                    break;
-                }
-                Some('\\') if !escaped => {
-                    escaped = true;
-                    pattern.push('\\');
-                    self.advance();
-                }
-                Some(ch) => {
-                    escaped = false;
-                    pattern.push(ch);
-                    self.advance();
-                }
-            }
-        }
-
-        // Read flags (optional)
-        let mut flags = String::new();
+        let start = self.position;
+        let mut depth: i64 = 0;
         while let Some(ch) = self.current() {
-            if ch.is_alphabetic() {
-                flags.push(ch);
-                self.advance();
-            } else {
-                break;
+            if ch == '/' && depth == 0 {
+                let backslashes = self.input[start..self.position]
+                    .iter()
+                    .rev()
+                    .take_while(|&&c| c == '\\')
+                    .count();
+                if backslashes % 2 == 0 {
+                    let pattern: String = self.input[start..self.position].iter().collect();
+                    if pattern.is_empty() {
+                        return Err(ParserError::Coded {
+                            code: "S0301",
+                            message: "Empty regular expressions are not allowed".to_string(),
+                        });
+                    }
+                    self.advance(); // skip closing /
+                    let mut flags = String::new();
+                    while let Some(flag @ ('i' | 'm')) = self.current() {
+                        flags.push(flag);
+                        self.advance();
+                    }
+                    return Ok(Token::Regex { pattern, flags });
+                }
             }
+            let escaped = self.position > 0 && self.input[self.position - 1] == '\\';
+            match ch {
+                '(' | '[' | '{' if !escaped => depth += 1,
+                ')' | ']' | '}' if !escaped => depth -= 1,
+                _ => {}
+            }
+            self.advance();
         }
-
-        Ok(Token::Regex { pattern, flags })
+        Err(ParserError::Coded {
+            code: "S0302",
+            message: "No terminating / in regular expression".to_string(),
+        })
     }
 
     fn emit_token(&mut self, token: Token) -> Result<Token, ParserError> {
+        self.after_binary_operator = false;
         self.last_token = Some(token.clone());
         Ok(token)
     }
 
     pub fn next_token(&mut self) -> Result<Token, ParserError> {
+        // Inside a template's text, a `{` is lexed below as an operator,
+        // starting an embedded expression; anything else is text.
+        if let Some(frame) = self.templates.last() {
+            if frame.depth == 0 && self.current() != Some('{') {
+                let close = frame.close;
+                return self.next_template_token(close);
+            }
+        }
         loop {
             self.skip_whitespace();
+
+            // The start of a template string: `«`, or `<<` where an operand
+            // starts (elsewhere `<` is less-than, so `"a"<<<b>>` is
+            // `"a" < <<b>>`). Before the two-character operators, so that
+            // `<<=` opens a template.
+            if let Some(&(open, close)) = TEMPLATE_DELIMITERS
+                .iter()
+                .find(|(open, _)| (*open != "<<" || self.operand_expected()) && self.at(open))
+            {
+                self.position += open.chars().count();
+                self.templates.push(TemplateFrame { close, depth: 0 });
+                return self.emit_token(Token::TemplateStart(open.to_string()));
+            }
 
             match self.current() {
                 None => return Ok(Token::Eof),
@@ -641,12 +805,21 @@ impl Lexer {
                     self.advance();
                     return self.emit_token(Token::RightBracket);
                 }
+                // Inside a template, braces are counted: the `}` that brings
+                // the count back to zero ends the embedded expression and
+                // resumes the template's text.
                 Some('{') => {
                     self.advance();
+                    if let Some(frame) = self.templates.last_mut() {
+                        frame.depth += 1;
+                    }
                     return self.emit_token(Token::LeftBrace);
                 }
                 Some('}') => {
                     self.advance();
+                    if let Some(frame) = self.templates.last_mut() {
+                        frame.depth = frame.depth.saturating_sub(1);
+                    }
                     return self.emit_token(Token::RightBrace);
                 }
                 Some(',') => {
@@ -705,44 +878,10 @@ impl Lexer {
                     return self.emit_token(Token::Star);
                 }
                 Some('/') => {
-                    // Determine if this is a regex literal or division operator
-                    // Regex literals can appear after:
-                    // - Start of expression (last_token is None)
-                    // - Operators: (, [, {, ,, ;, :, =, !=, <, >, <=, >=, +, -, &, ?, ~>,
-                    //   :=, ??, ?:
-                    // - Keywords: and, or, in
-                    // Every token goes through `emit_token`, so `last_token`
-                    // is the one just before this `/` (#205: `$f := /a/` and
-                    // `$string(/a/)` were read as division).
-                    // Division operator appears after:
-                    // - Values: ), ], }, identifiers, variables, numbers, strings, etc.
-
-                    let is_regex = match &self.last_token {
-                        None => true, // Start of expression
-                        Some(Token::LeftParen)
-                        | Some(Token::LeftBracket)
-                        | Some(Token::LeftBrace) => true,
-                        Some(Token::Comma) | Some(Token::Semicolon) | Some(Token::Colon) => true,
-                        Some(Token::Equal) | Some(Token::NotEqual) => true,
-                        Some(Token::LessThan) | Some(Token::LessThanOrEqual) => true,
-                        Some(Token::GreaterThan) | Some(Token::GreaterThanOrEqual) => true,
-                        // Not `*` or `%`: on their own they are the wildcard
-                        // and the parent operator, values a `/` divides.
-                        Some(Token::Plus) | Some(Token::Minus) => true,
-                        Some(Token::Ampersand)
-                        | Some(Token::Question)
-                        | Some(Token::TildeArrow) => true,
-                        Some(Token::ColonEqual)
-                        | Some(Token::QuestionQuestion)
-                        | Some(Token::QuestionColon) => true,
-                        Some(Token::And) | Some(Token::Or) | Some(Token::In) => true,
-                        // Deliberately NOT Token::Function: a lambda's next
-                        // token is always `(`, so a `/` can only follow
-                        // `function`/`λ` when they are a bare name -- a value,
-                        // after which `/` divides.
-                        Some(Token::Identifier(s)) if s == "and" || s == "or" || s == "in" => true,
-                        _ => false, // After values, treat as division
-                    };
+                    // A regex literal where an operand starts, otherwise the
+                    // division operator (#205: `$f := /a/` and `$string(/a/)`
+                    // were read as division).
+                    let is_regex = self.operand_expected();
 
                     if is_regex {
                         let tok = self.read_regex()?;
@@ -789,8 +928,16 @@ impl Lexer {
                     return self.emit_token(Token::Pipe);
                 }
 
-                // Identifiers and keywords
-                Some(ch) if ch.is_alphabetic() || ch == '_' => {
+                // `!` and `~` on their own are not operators (jsonata-js
+                // lexes them only to end a name).
+                Some(ch @ ('!' | '~')) => {
+                    return Err(ParserError::UnexpectedToken(ch.to_string()));
+                }
+
+                // Identifiers and keywords: as in jsonata-js, a name is any
+                // run of characters up to whitespace or an operator
+                // character, so `»` or `€` is a name too.
+                Some(_) => {
                     let ident = self.read_identifier();
                     let tok = match ident.as_str() {
                         "true" => Token::True,
@@ -802,10 +949,6 @@ impl Lexer {
                         _ => Token::Identifier(ident),
                     };
                     return self.emit_token(tok);
-                }
-
-                Some(ch) => {
-                    return Err(ParserError::UnexpectedToken(ch.to_string()));
                 }
             }
         }
@@ -849,6 +992,9 @@ pub struct Parser {
     /// to a deeper node every iteration without a new recursive call).
     /// Both must be bounded by this one counter; see `MAX_PARSE_DEPTH`.
     depth: usize,
+    /// Set when the input ended where an operand should be; see
+    /// `parse_primary`.
+    missing_operand: bool,
 }
 
 impl Parser {
@@ -859,6 +1005,7 @@ impl Parser {
             lexer,
             current_token,
             depth: 0,
+            missing_operand: false,
         })
     }
 
@@ -916,6 +1063,41 @@ impl Parser {
                 expected: format!("{:?}", expected),
                 found: format!("{:?}", self.current_token),
             })
+        }
+    }
+
+    /// The rest of a template string, its opener just passed (jsonata-js's
+    /// `(template)` nud): literal text and `{expr}` embedded expressions, up
+    /// to the closer. An empty `{}` contributes nothing. The input ending
+    /// inside the template's text is S0107.
+    fn parse_template(&mut self, close: &str) -> Result<AstNode, ParserError> {
+        let mut parts = Vec::new();
+        loop {
+            match &self.current_token {
+                Token::TemplateText(text) => {
+                    parts.push(AstNode::String(text.clone()));
+                    self.advance()?;
+                }
+                Token::LeftBrace => {
+                    self.advance()?;
+                    if self.current_token != Token::RightBrace {
+                        parts.push(self.parse_expression(0)?);
+                    }
+                    self.expect(Token::RightBrace)?;
+                }
+                Token::TemplateEnd => {
+                    self.advance()?;
+                    return Ok(AstNode::Template(parts));
+                }
+                Token::Eof => {
+                    return Err(ParserError::Coded {
+                        code: "S0107",
+                        message: format!("Template string must be terminated with {close}"),
+                    })
+                }
+                // The lexer gives nothing else inside a template's text.
+                other => return Err(ParserError::UnexpectedToken(format!("{other:?}"))),
+            }
         }
     }
 
@@ -1078,6 +1260,15 @@ impl Parser {
     /// Parse a primary expression (literals, identifiers, variables, grouping)
     fn parse_primary(&mut self) -> Result<AstNode, ParserError> {
         match &self.current_token {
+            // The input ended where an operand should be. jsonata-js's parser
+            // takes its end token as the operand and goes on, so whatever
+            // expects a token next reports S0203 ("Expected ) before end of
+            // expression"); only if nothing does is the end token found in
+            // the tree, and that is S0207 (`parse_raw`).
+            Token::Eof => {
+                self.missing_operand = true;
+                Ok(AstNode::Undefined)
+            }
             Token::String(s) => {
                 let value = s.clone();
                 self.advance()?;
@@ -1124,6 +1315,14 @@ impl Parser {
                 let name = name.clone();
                 self.advance()?;
                 Ok(AstNode::Variable(name))
+            }
+            Token::TemplateStart(open) => {
+                let close = TEMPLATE_DELIMITERS
+                    .iter()
+                    .find(|(o, _)| o == open)
+                    .map_or(">>", |(_, c)| *c);
+                self.advance()?;
+                self.parse_template(close)
             }
             Token::ParentVariable(name) => {
                 let name = name.clone();
@@ -1286,6 +1485,15 @@ impl Parser {
                             Token::Variable(name) => {
                                 params.push(name.clone());
                                 self.advance()?;
+                            }
+                            // jsonata-js reads the parameters as call
+                            // arguments, so at the end of the input it
+                            // expects the `)` (S0203) before it checks them.
+                            Token::Eof => {
+                                return Err(ParserError::Expected {
+                                    expected: ")".to_string(),
+                                    found: "Eof".to_string(),
+                                })
                             }
                             _ => {
                                 return Err(ParserError::Expected {
@@ -1619,6 +1827,10 @@ impl Parser {
                         }
                     };
 
+                    // What follows a binary operator is an operand: a `/`
+                    // there is a regex and a `<<` a template, even after
+                    // `*` and `%` (`2 * /a/`).
+                    self.lexer.after_binary_operator = true;
                     self.advance()?;
                     let rhs = self.parse_expression(right_bp)?;
 
@@ -1658,6 +1870,9 @@ impl Parser {
                 "S0201: Syntax error: {:?}",
                 self.current_token
             )));
+        }
+        if self.missing_operand {
+            return Err(ParserError::UnexpectedEnd);
         }
 
         Ok(ast)
@@ -1979,6 +2194,130 @@ mod tests {
             Token::Identifier("with-dash".to_string())
         );
         assert_eq!(lexer.next_token().unwrap(), Token::Eof);
+    }
+
+    fn lex_all(input: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(input.to_string());
+        let mut tokens = Vec::new();
+        loop {
+            let token = lexer.next_token().unwrap();
+            if token == Token::Eof {
+                return tokens;
+            }
+            tokens.push(token);
+        }
+    }
+
+    #[test]
+    fn test_lexer_template_strings() {
+        use Token::*;
+        let text = |s: &str| TemplateText(s.to_string());
+        let name = |s: &str| Identifier(s.to_string());
+        assert_eq!(
+            lex_all("«a {b} c»"),
+            vec![
+                TemplateStart("«".to_string()),
+                text("a "),
+                LeftBrace,
+                name("b"),
+                RightBrace,
+                text(" c"),
+                TemplateEnd
+            ]
+        );
+        // Braces inside the embedded expression are counted; whitespace in
+        // the text is kept.
+        assert_eq!(
+            lex_all("« { {} } »"),
+            vec![
+                TemplateStart("«".to_string()),
+                text(" "),
+                LeftBrace,
+                LeftBrace,
+                RightBrace,
+                RightBrace,
+                text(" "),
+                TemplateEnd
+            ]
+        );
+        // A `<<` template ends at the first `>>`; the other form's
+        // delimiters are text.
+        assert_eq!(
+            lex_all("<<a»>>>"),
+            vec![
+                TemplateStart("<<".to_string()),
+                text("a»"),
+                TemplateEnd,
+                GreaterThan
+            ]
+        );
+        // `<<` opens a template only where an operand starts.
+        assert_eq!(
+            lex_all("\"a\"<<<b>>"),
+            vec![
+                String("a".to_string()),
+                LessThan,
+                TemplateStart("<<".to_string()),
+                text("b"),
+                TemplateEnd
+            ]
+        );
+        // Escapes in the text, and an unterminated template is Eof.
+        assert_eq!(
+            lex_all("«\\{\\}\\«\\u00e9"),
+            vec![TemplateStart("«".to_string()), text("{}«é")]
+        );
+    }
+
+    #[test]
+    fn test_lexer_template_errors() {
+        let error = |input: &str| {
+            let mut lexer = Lexer::new(input.to_string());
+            loop {
+                match lexer.next_token() {
+                    Ok(Token::Eof) => panic!("no error for {input}"),
+                    Ok(_) => continue,
+                    Err(e) => return e.to_string(),
+                }
+            }
+        };
+        assert!(error("«a}b»").starts_with("S0108"));
+        assert!(error("«a\\qb»").starts_with("S0103"));
+        assert!(error("«a\\").starts_with("S0103"));
+        assert!(error("«\\u12»").starts_with("S0104"));
+        assert!(error("\"a\\").starts_with("S0103"));
+    }
+
+    #[test]
+    fn test_lexer_names_end_at_whitespace_or_operators() {
+        assert_eq!(
+            lex_all("a€ bar»+c"),
+            vec![
+                Token::Identifier("a€".to_string()),
+                Token::Identifier("bar»".to_string()),
+                Token::Plus,
+                Token::Identifier("c".to_string())
+            ]
+        );
+        assert_eq!(lex_all("$x»"), vec![Token::Variable("x»".to_string())]);
+    }
+
+    #[test]
+    fn test_parse_template() {
+        assert_eq!(
+            parse("«a{}{b}»").unwrap(),
+            AstNode::Template(vec![
+                AstNode::String("a".to_string()),
+                AstNode::Path {
+                    steps: vec![PathStep::new(AstNode::Name("b".to_string()))]
+                },
+            ])
+        );
+        let unterminated = parse("«a {b}").unwrap_err().to_string();
+        assert_eq!(
+            unterminated,
+            "S0107: Template string must be terminated with »"
+        );
     }
 
     // Parser tests

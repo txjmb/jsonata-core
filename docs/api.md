@@ -358,7 +358,7 @@ print(jsonatapy.__version__)  # "2.2.8"
 JSONata specification version supported.
 
 ```python
-print(jsonatapy.__jsonata_version__)  # "2.2.2"
+print(jsonatapy.__jsonata_version__)  # "2.3.0"
 ```
 
 ## Guardrails

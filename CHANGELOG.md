@@ -9,7 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Template strings, from jsonata-js 2.3.0 (#860): `«Hello, {name}!»` or
+  `<<Hello, {name}!>>` joins its text and the value of each embedded
+  `{expression}`, cast to a string as `&` casts its operands. Templates
+  nest inside `{}`; `\{`, `\}`, `\<`, `\>`, `\«` and `\»` escape the
+  delimiters in the text, and an unescaped `}` there is S0108. A template
+  with no `{}` in a path step stays a string (`Account.Order.«OrderID»` is
+  `"OrderID"` per order) rather than naming a field. A template that isn't
+  closed is S0107. `<<` opens a template only where an operand starts, so
+  `"a"<<<b>>` is `"a" < <<b>>`. The default path compiles templates as well
+  as the tree-walker.
+
 ### Changed
+
+- Names follow jsonata-js's tokenizer: a name runs up to whitespace or an
+  operator character, so `a€` and `bar»` are names (they were S0204). A `/`
+  after `.`, `..` or `|` starts a regex, as it does after other operators.
+- A string literal that ends in a backslash raises S0103 (an illegal
+  escape), as in jsonata-js, rather than S0101.
+- A regex literal is scanned as jsonata-js scans it: it ends at the first
+  `/` outside brackets, so `/[/]/` is one regex; an unmatched bracket or a
+  missing closing `/` is S0302 (it was S0101, or accepted), an empty `//` is
+  S0301, and only `i` and `m` are flags.
+- The input ending where an operand should be is S0203 when a token is
+  expected after it (`(`, `[1,`, `$f(`, `«a {`), as in jsonata-js, and
+  S0207 otherwise (`1 +`). It was always S0207.
+- `__jsonata_version__` is `2.3.0`: every case of the jsonata-js 2.3.0
+  reference suite passes.
 
 - Behavior follows jsonata-js 2.3.0 in these cases:
   - `$split` and `$replace` return undefined when the pattern is undefined
@@ -91,6 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `&` raises D3001 for a number that isn't finite (`"" & 1/0`), from
+  `$string`, as jsonata-js does. It was an uncoded type error.
 - `$formatNumber` scales a negative number by the percent or per-mille sign
   of the sub-picture it uses: `$formatNumber(-0.5, "0;0%")` is `50%`, not
   `0%`. Both sub-pictures are checked for errors whatever the number's sign,

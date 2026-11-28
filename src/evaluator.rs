@@ -238,6 +238,9 @@ pub(crate) enum CompiledExpr {
 
     // ── String ──────────────────────────────────────────────────────────
     Concat(Box<CompiledExpr>, Box<CompiledExpr>),
+    /// A template string's parts (`AstNode::Template`), each evaluated and
+    /// cast to a string before the next is evaluated, as jsonata-js does.
+    Template(Vec<CompiledExpr>),
 
     // ── Logical ─────────────────────────────────────────────────────────
     And(Box<CompiledExpr>, Box<CompiledExpr>),
@@ -394,6 +397,11 @@ fn compiled_builtin_names(expr: &CompiledExpr, out: &mut Vec<&'static str>) {
         }
         CompiledExpr::ArrayConstruct(elems) => {
             for (e, _) in elems {
+                compiled_builtin_names(e, out);
+            }
+        }
+        CompiledExpr::Template(parts) => {
+            for e in parts {
                 compiled_builtin_names(e, out);
             }
         }
@@ -586,6 +594,7 @@ fn compiled_expr_node_count_exceeds(expr: &CompiledExpr, limit: usize) -> bool {
             // ── Compound ──────────────────────────────────────────────
             CompiledExpr::ObjectConstruct(pairs) => pairs.iter().any(|(_, v)| walk(v, budget)),
             CompiledExpr::ArrayConstruct(elems) => elems.iter().any(|(e, _)| walk(e, budget)),
+            CompiledExpr::Template(parts) => parts.iter().any(|e| walk(e, budget)),
             CompiledExpr::FieldPath { steps, .. } => {
                 for step in steps.iter() {
                     // Each step interns its field name into `string_pool` in
@@ -876,6 +885,15 @@ fn try_compile_node(node: &AstNode, allowed_vars: Option<&[&str]>) -> Option<Com
                 compiled.push((try_compile_expr_inner(elem, allowed_vars)?, is_nested));
             }
             Some(CompiledExpr::ArrayConstruct(compiled))
+        }
+
+        // ── Template string ─────────────────────────────────────────────
+        AstNode::Template(parts) => {
+            let compiled: Option<Vec<CompiledExpr>> = parts
+                .iter()
+                .map(|e| try_compile_expr_inner(e, allowed_vars))
+                .collect();
+            compiled.map(CompiledExpr::Template)
         }
 
         // ── Block (sequential evaluation) ───────────────────────────────
@@ -1291,6 +1309,14 @@ fn eval_compiled_node(
             let ls = compiled_to_concat_string(&left)?;
             let rs = compiled_to_concat_string(&right)?;
             Ok(JValue::string(format!("{}{}", ls, rs)))
+        }
+        CompiledExpr::Template(parts) => {
+            let mut result = String::new();
+            for part in parts {
+                let value = eval_compiled_inner(part, data, vars, ctx, shape, options, start_time)?;
+                result.push_str(&compiled_to_concat_string(&value)?);
+            }
+            Ok(JValue::string(result))
         }
 
         // ── Logical ─────────────────────────────────────────────────────
@@ -1854,7 +1880,10 @@ pub(crate) fn compiled_to_concat_string(value: &JValue) -> Result<String, Evalua
         | JValue::Object(_) => match crate::functions::string::string(value, None) {
             Ok(JValue::String(s)) => Ok(s.to_string()),
             Ok(JValue::Null) => Ok(String::new()),
-            _ => Err(EvaluatorError::TypeError(
+            // `$string`'s own error, as jsonata-js's `fn.string` throws it:
+            // D3001 for a non-finite number (`"" & 1/0`).
+            Err(e) => Err(e.into()),
+            Ok(_) => Err(EvaluatorError::TypeError(
                 "Cannot concatenate complex types".to_string(),
             )),
         },
@@ -4475,6 +4504,14 @@ fn analyze_on_nothing(node: &AstNode, from_nothing: bool) -> (KindOnNothing, boo
         AstNode::Array(items) | AstNode::ArrayGroup(items) => {
             (K::Other, any(items.iter(), from_nothing))
         }
+        // A template casts each part as `&` casts its operands.
+        AstNode::Template(parts) => (
+            K::String,
+            parts.iter().any(|part| {
+                let (kind, raises) = analyze_on_nothing(part, from_nothing);
+                raises || kind == K::Unknown
+            }),
+        ),
         AstNode::Block(items) => match items.split_last() {
             None => (K::Undefined, false),
             Some((last, rest)) => {
@@ -5986,6 +6023,8 @@ impl Evaluator {
 
             AstNode::Block(expressions) => self.evaluate_block(expressions, data),
 
+            AstNode::Template(parts) => self.evaluate_template(parts, data),
+
             // Lambda: capture current environment for closure support
             AstNode::Lambda {
                 params,
@@ -7180,9 +7219,10 @@ impl Evaluator {
             AstNode::Function { args, .. } => {
                 args.is_empty() || args.iter().any(Self::may_read_dollar)
             }
-            AstNode::Array(items) | AstNode::ArrayGroup(items) | AstNode::Block(items) => {
-                items.iter().any(Self::may_read_dollar)
-            }
+            AstNode::Array(items)
+            | AstNode::ArrayGroup(items)
+            | AstNode::Block(items)
+            | AstNode::Template(items) => items.iter().any(Self::may_read_dollar),
             AstNode::Object(pairs) => pairs
                 .iter()
                 .any(|(key, value)| Self::may_read_dollar(key) || Self::may_read_dollar(value)),
@@ -11275,7 +11315,9 @@ impl Evaluator {
                     }
                 }
             }
-            AstNode::Array(exprs) | AstNode::ArrayGroup(exprs) => {
+            // A template's parts are evaluated in the template's scope, as
+            // an array's members are.
+            AstNode::Array(exprs) | AstNode::ArrayGroup(exprs) | AstNode::Template(exprs) => {
                 for expr in exprs {
                     Self::collect_free_vars_walk(expr, bound, free);
                 }
@@ -12037,37 +12079,31 @@ impl Evaluator {
         }
     }
 
-    /// Convert a value to a string for concatenation
+    /// Convert a value to a string for concatenation, as `&` and template
+    /// strings cast their operands (jsonata-js `castString`).
     fn value_to_concat_string(value: &JValue) -> Result<String, EvaluatorError> {
-        // Normalize a lazy operand up front: `functions::string::string`'s lazy arm maps a
-        // conversion failure to `JValue::Null` (silently stringifying to `""`), which would
-        // swallow the TypeError this must raise instead. Guarded by `is_lazy` so the
-        // common (non-lazy) path pays no clone.
-        let normalized;
-        let value = if value.is_lazy() {
-            normalized = normalize_lazy(value)?;
-            &normalized
-        } else {
-            value
-        };
-        match value {
-            JValue::String(s) => Ok(s.to_string()),
-            // An explicit null stringifies as "null" (same as `$string(null)`);
-            // only an *undefined* operand contributes nothing.
-            JValue::Undefined => Ok(String::new()),
-            JValue::Null
-            | JValue::Number(_)
-            | JValue::Bool(_)
-            | JValue::Array(_)
-            | JValue::Object(_) => match crate::functions::string::string(value, None) {
-                Ok(JValue::String(s)) => Ok(s.to_string()),
-                Ok(JValue::Null) => Ok(String::new()),
-                _ => Err(EvaluatorError::TypeError(
-                    "Cannot concatenate complex types".to_string(),
-                )),
-            },
-            _ => Ok(String::new()),
+        compiled_to_concat_string(value)
+    }
+
+    /// A template string (jsonata-js `evaluateTemplate`): each part evaluated
+    /// in turn and cast to a string as `&` casts its operands, undefined
+    /// giving the empty string. A loop, not a chain of `&`, so a template
+    /// with many parts doesn't nest the evaluation.
+    fn evaluate_template(
+        &mut self,
+        parts: &[AstNode],
+        data: &JValue,
+    ) -> Result<JValue, EvaluatorError> {
+        let mut result = String::new();
+        for part in parts {
+            if let AstNode::String(text) = part {
+                result.push_str(text);
+                continue;
+            }
+            let value = self.evaluate_internal(part, data)?;
+            result.push_str(&Self::value_to_concat_string(&value)?);
         }
+        Ok(JValue::string(result))
     }
 
     /// String concatenation
