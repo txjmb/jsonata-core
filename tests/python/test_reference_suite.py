@@ -2,7 +2,7 @@
 Test adapter for the JSONata reference test suite.
 
 This module loads and runs all 1972 test cases from the reference JavaScript JSONata
-implementation (jsonata-js v2.3.0). 1824 pass; the rest are listed below, with reasons, in
+implementation (jsonata-js v2.3.0). 1830 pass; the rest are listed below, with reasons, in
 KNOWN_DIVERGENCES (strict xfail) and KNOWN_HANGS (skipped). Both shrink to empty as the
 jsonata-js 2.3.0 changes land. See
 docs/superpowers/specs/2026-07-05-reference-suite-coverage-gap-design.md and
@@ -106,7 +106,6 @@ _DATETIME_REWRITE = (
     "date/time picture rewrite: out-of-range dates, digit families, grouping separators, "
     "linear-time parsing (jsonata-js #869)"
 )
-_GROUPED_PATH_STEPS = "a step after a group-by, a{k:v}.x, is (a{k:v}).x (jsonata-js #838)"
 _FORMAT_NUMBER_DIGITS = "$formatNumber exponent mantissa scaling (jsonata-js #865, #868)"
 
 # Reference cases that are known to diverge, each with the reason. Marked
@@ -187,12 +186,6 @@ KNOWN_DIVERGENCES: dict[str, str] = {
     "function-tomillis/parseDateTime[93]": _DATETIME_REWRITE,
     "function-tomillis/parseDateTime[94]": _DATETIME_REWRITE,
     "function-tomillis/parseDateTime[102]": _DATETIME_REWRITE,
-    "object-constructor/case027": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[0]": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[2]": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[3]": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[4]": _GROUPED_PATH_STEPS,
-    "object-constructor/grouped-path-steps[5]": _GROUPED_PATH_STEPS,
     "template-strings/case000": _TEMPLATE_STRINGS,
     "template-strings/case001": _TEMPLATE_STRINGS,
     "template-strings/case002": _TEMPLATE_STRINGS,

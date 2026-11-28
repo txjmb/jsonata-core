@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     their types, for every match, including scalars and arrays, so
     `|a.b|"s"|` raises T2011 and `|a.b|{}, 5|` raises T2012. A `null` update
     raises T2011 instead of being ignored.
+  - A path step after a group-by reads the grouped object as one value
+    (jsonata-js #838): `n.m{k: v}.a` is the group's `a` entry, and
+    `o{c: b}.$keys()` lists the group's keys. `o.b{"k":$}[].k` used to be
+    `{}`.
 
 ### Deprecated
 

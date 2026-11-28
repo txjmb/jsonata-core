@@ -7696,12 +7696,17 @@ impl Evaluator {
     /// True when `node` starts with a `consarray` first step: an array
     /// constructor that begins a dotted path (`dotted`), or a consarray
     /// block. A sort is a step of the path it ends in jsonata-js, so
-    /// `[3,1].$^($)` and `[3,1]^($).$` start with one too.
+    /// `[3,1].$^($)` and `[3,1]^($).$` start with one too, and so does a
+    /// path with a group-by.
     fn starts_cons(node: &AstNode, dotted: bool) -> bool {
         match node {
             AstNode::Array(_) => dotted,
             AstNode::Block(_) => Self::is_cons_block(node),
             AstNode::Sort { input, .. } => Self::starts_cons(input, dotted),
+            // A grouped path keeps its first step's mark: parser.js
+            // `blockExpression` tests `steps[0].consarray` whatever the
+            // path's group-by, so `([1,2].${"k":$})` is a consarray block.
+            AstNode::ObjectTransform { input, .. } => Self::starts_cons(input, dotted),
             AstNode::Path { steps } if !Self::is_non_path(steps) => {
                 Self::starts_cons(&steps[0].node, dotted || steps.len() > 1)
             }

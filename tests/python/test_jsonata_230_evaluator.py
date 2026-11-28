@@ -165,3 +165,36 @@ def test_tuple_arrays(engine, expr, data, expected):
 def test_transform(engine, expr, data, expected):
     """The transform's update and delete clauses run, and are type-checked, for every match, and a null update is T2011."""
     check(expr, data, expected)
+
+
+GROUPED = {
+    "o": [{"b": 1, "c": "x"}, {"b": 2, "c": "y"}],
+    "n": {"m": [{"k": "a", "v": 1}, {"k": "b", "v": 2}, {"k": "a", "v": 3}]},
+}
+
+
+@pytest.mark.parametrize(
+    "expr, data, expected",
+    [
+        ("o{c: b}.x", GROUPED, 1),
+        ("o{c: b}.$keys()", GROUPED, ["x", "y"]),
+        ("o{c: b}.($.x + $.y)", GROUPED, 3),
+        ("n.m{k: v}.a", GROUPED, [1, 3]),
+        ("n.m{k: $sum(v)}.$each(function($v,$k){$k & $v})", GROUPED, ["a4", "b2"]),
+        ('o.b{"k":$}[].k', GROUPED, [1, 2]),
+        ("n.m{k: v}.nope", GROUPED, UNDEFINED),
+        ("o{c: b}.x.$string()", GROUPED, "1"),
+        ("(o{c: b}).x", GROUPED, 1),
+        # A grouped path that starts with an array constructor is evaluated
+        # once, so the next step reads the grouped object as no items.
+        ('[1,2].${"k":$}.k', GROUPED, UNDEFINED),
+        ('[1,2][0].${"k":$}.k', GROUPED, UNDEFINED),
+        ('[o.b].${"k":$}.k', GROUPED, UNDEFINED),
+        ("[o].${c:b}.$keys()", GROUPED, UNDEFINED),
+        ('[1,2].${"k":$}', GROUPED, {"k": [1, 2]}),
+        ('o.([1,2].${"k":$})', GROUPED, [{"k": [1, 2]}, {"k": [1, 2]}]),
+    ],
+)
+def test_grouped_path_steps(engine, expr, data, expected):
+    """A step after a group-by reads the grouped object as one value (jsonata-js #838)."""
+    check(expr, data, expected)
