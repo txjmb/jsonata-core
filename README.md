@@ -34,7 +34,7 @@
 *Click the chart for the full category-by-category tables, including jsonata-python
 and jsonata-rs, which are left off the chart because at 67 ms–9 s they would
 flatten everything else into a sliver.*
-<!-- END generated performance —->
+<!-- END generated performance chart -->
 
 High-performance [JSONata](https://jsonata.org/) implementation in Rust, with Python binding and C ABI/library.  If you use this library, please add a github star!
 
