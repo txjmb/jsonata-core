@@ -2725,7 +2725,7 @@
 <p>jsonatapy has three layers of testing:</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>tests/
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── python/                      # Python integration tests
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   ├── test_reference_suite.py  # Reference suite runner (1686 tests)
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   ├── test_reference_suite.py  # Reference suite runner (1972 tests)
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   ├── test_basic.py            # Basic functionality
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   ├── test_functions.py        # Built-in functions
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   ├── test_lambda.py           # Lambda functions
@@ -2754,11 +2754,11 @@
 <p>Located in <code>tests/python/</code></p>
 </li>
 <li>
-<p><strong>Reference Test Suite</strong> (1686 tests)</p>
+<p><strong>Reference Test Suite</strong> (1972 tests)</p>
 </li>
 <li>Official JSONata compatibility tests</li>
 <li>Comprehensive language feature coverage</li>
-<li>1686/1686 passing (no known divergences)</li>
+<li>1803/1972 passing (the rest are known divergences, listed with reasons)</li>
 <li>Imported from jsonata-js repository</li>
 </ol>
 <h2 id="running-tests">Running Tests<a class="headerlink" href="#running-tests" title="Permanent link">&para;</a></h2>
@@ -2966,7 +2966,7 @@
 </span></code></pre></div></p>
 <h2 id="reference-test-suite">Reference Test Suite<a class="headerlink" href="#reference-test-suite" title="Permanent link">&para;</a></h2>
 <h3 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h3>
-<p>The reference test suite contains 1686 tests from the official jsonata-js repository (v2.2.2). 1686 pass. Any future divergence goes in <code>KNOWN_DIVERGENCES</code> in <code>tests/python/test_reference_suite.py</code> as a strict xfail, so it cannot silently grow.</p>
+<p>The reference test suite contains 1972 tests from the official jsonata-js repository (v2.3.0). 1803 pass. The rest, all from jsonata-js 2.3.0 changes not yet ported, are listed in <code>KNOWN_DIVERGENCES</code> in <code>tests/python/test_reference_suite.py</code> as strict xfails (or in <code>KNOWN_HANGS</code>, skipped, for three that run for minutes), so the list cannot silently grow or go stale.</p>
 <h3 id="location_2">Location<a class="headerlink" href="#location_2" title="Permanent link">&para;</a></h3>
 <p>Tests are in the <code>tests/jsonata-js</code> git submodule:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Initialize submodule</span>
@@ -2976,7 +2976,7 @@
 </span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>git<span class="w"> </span>submodule<span class="w"> </span>update<span class="w"> </span>--remote<span class="w"> </span>tests/jsonata-js
 </span></code></pre></div>
 <h3 id="running-reference-tests">Running Reference Tests<a class="headerlink" href="#running-reference-tests" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># All reference tests (1686 tests)</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># All reference tests (1972 tests)</span>
 </span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/python/test_reference_suite.py
 </span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
 </span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># Verbose output</span>

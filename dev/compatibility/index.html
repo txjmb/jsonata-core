@@ -1141,6 +1141,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#checks-written-in-javascript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checks written in JavaScript
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#known-differences-outside-the-reference-suite" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1829,6 +1840,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#checks-written-in-javascript" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checks written in JavaScript
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#known-differences-outside-the-reference-suite" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2047,11 +2069,19 @@
 <p>jsonatapy includes a comprehensive test adapter that runs the complete reference JSONata test suite from the official JavaScript implementation.</p>
 <h3 id="reference-test-suite">Reference Test Suite<a class="headerlink" href="#reference-test-suite" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Total Tests</strong>: 1686</li>
-<li><strong>Passing</strong>: 1686 (100%)</li>
-<li><strong>Known divergences</strong>: none in the suite (see <a href="#known-differences-outside-the-reference-suite">Known differences outside the reference suite</a> for closure shapes it does not cover). <code>KNOWN_DIVERGENCES</code> in <code>tests/python/test_reference_suite.py</code> is the registry; entries there are strict <code>xfail</code>, so one that starts passing fails the suite until it is removed</li>
-<li><strong>Source</strong>: Official jsonata-js repository (v2.2.2) at <code>tests/jsonata-js/</code></li>
+<li><strong>Total Tests</strong>: 1972</li>
+<li><strong>Passing</strong>: 1803 (91%)</li>
+<li><strong>Known divergences</strong>: 169, all from changes new in jsonata-js 2.3.0 that are still being ported (template strings, the date/time picture rewrite, and a few smaller fixes). Each is listed with its reason, and the upstream change it waits on, in <code>KNOWN_DIVERGENCES</code> (strict <code>xfail</code>) or, for three that run for minutes, <code>KNOWN_HANGS</code> (skipped), both in <code>tests/python/test_reference_suite.py</code>. A strict <code>xfail</code> that starts passing fails the suite until it is removed. See <a href="#known-differences-outside-the-reference-suite">Known differences outside the reference suite</a> for closure shapes the suite does not cover</li>
+<li><strong>Source</strong>: Official jsonata-js repository (v2.3.0) at <code>tests/jsonata-js/</code></li>
 </ul>
+<h3 id="checks-written-in-javascript">Checks written in JavaScript<a class="headerlink" href="#checks-written-in-javascript" title="Permanent link">&para;</a></h3>
+<p>jsonata-js also tests behavior in JavaScript files that no adapter can run:
+<code>implementation-tests.js</code>, <code>parser-recovery.js</code>, <code>async-function.js</code> and
+<code>parser-pluggable-regex.js</code>, 197 checks in 2.3.0. <code>tests/python/test_implementation_parity.py</code>
+lists every one of them and records whether it is ported to a test here or does not apply (with
+the reason, such as a JavaScript runtime detail, the Promise API, or parser recovery mode, which
+jsonatapy does not have). Its test fails if the pinned submodule adds or renames a check that the
+registry does not name. Triage is in progress for 2.3.0.</p>
 <h3 id="known-differences-outside-the-reference-suite">Known differences outside the reference suite<a class="headerlink" href="#known-differences-outside-the-reference-suite" title="Permanent link">&para;</a></h3>
 <p>These shapes appear in neither the reference suite nor the differential corpora, and are kept
 on purpose. Each is pinned in <code>tests/lambda_closure_suite.rs::divergent_from_reference</code>.</p>
@@ -2138,7 +2168,7 @@ leak in a long-lived Python process. See
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run full test suite</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/python/test_reference_suite.py
 </span></code></pre></div>
-<p>Results show 1686/1686 (100%) of the suite passing against the reference JSONata implementation.</p>
+<p>Results show 1803/1972 (91%) of the suite passing against the reference JSONata implementation.</p>
 <p>Two of those 1686 pass only because <em>something</em> was raised, not because the error code was
 compared — our message for them carries no code for the suite to check. <code>UNVERIFIED_ERROR_CEILING</code>
 in <code>tests/python/test_reference_suite.py</code> pins that count at 2 so it cannot quietly grow.</p>
@@ -2227,7 +2257,6 @@ in <code>tests/python/test_reference_suite.py</code> pins that count at 2 so it 
 <li><code>errors</code> - Error conditions and messages</li>
 <li><code>missing-paths</code> - Handling undefined paths</li>
 <li><code>null</code> - Null value handling</li>
-<li><code>parser-recovery</code> - Parser error recovery</li>
 </ul>
 <h2 id="running-compatibility-tests">Running Compatibility Tests<a class="headerlink" href="#running-compatibility-tests" title="Permanent link">&para;</a></h2>
 <h3 id="run-all-tests">Run All Tests<a class="headerlink" href="#run-all-tests" title="Permanent link">&para;</a></h3>
