@@ -503,7 +503,9 @@ jobs:
           # file instead of trusting its cache, which is keyed by filename
           # only for --find-links sources -- see the macOS comment below,
           # which is where this actually bit us (issue #45).
-          uv pip install --system --reinstall --find-links dist jsonatapy
+          # --no-index: dist holds only this release's wheels, so a wheel missing
+          # for this interpreter fails here instead of quietly testing PyPI's copy.
+          uv pip install --system --reinstall --no-index --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install wheel (macOS)
@@ -523,7 +525,7 @@ jobs:
           # this is exactly what caused issue #45 (verified: the built wheel
           # was correct, `uv pip install` resolved and "installed" it in
           # ~1ms, but the parser behaved like the pre-%/@-operator code).
-          uv pip install --reinstall --find-links dist jsonatapy
+          uv pip install --reinstall --no-index --find-links dist jsonatapy
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install test dependencies (Linux/Windows)
