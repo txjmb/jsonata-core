@@ -123,18 +123,18 @@ REGISTRY: dict[str, Entry] = {
     "implementation-tests.js > Tests that are specific to a Javascript runtime > empty regex > should throw error #2": TODO,
     "implementation-tests.js > Tests that are specific to a Javascript runtime > empty regex: Escaped termination > should throw error": TODO,
     "implementation-tests.js > Tests that are specific to a Javascript runtime > empty regex: Escaped termination > should throw error #2": TODO,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: syntax error inside braces > should throw error": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: unclosed function call inside braces > should throw error": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: syntax error inside nested template > should throw error": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: syntax error in second interpolation > should throw error": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: unterminated, starting mid-expression > should throw error": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: illegal escape > should throw error": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: number formatting matches & > should return result object": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string with 1000 interpolations > should return the same as the & chain": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string with 20000 interpolations > should not grow the stack with the number of parts": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: evaluation error reports the embedded expression, not an & operator > should throw error": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: evaluation error reports the embedded expression that failed > should throw error": TODO_NEW,
-    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: unescaped } in the text > should throw error": TODO_NEW,
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: syntax error inside braces > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_syntax_errors"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: unclosed function call inside braces > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_syntax_errors"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: syntax error inside nested template > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_syntax_errors"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: syntax error in second interpolation > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_syntax_errors"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: unterminated, starting mid-expression > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_syntax_errors"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: illegal escape > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_syntax_errors"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: number formatting matches & > should return result object": Ported("tests/python/test_jsonata_230_template_strings.py::test_number_formatting_matches_concat"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string with 1000 interpolations > should return the same as the & chain": Ported("tests/python/test_jsonata_230_template_strings.py::test_1000_interpolations_match_the_concat_chain"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string with 20000 interpolations > should not grow the stack with the number of parts": Ported("tests/python/test_jsonata_230_template_strings.py::test_20000_interpolations_do_not_nest"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: evaluation error reports the embedded expression, not an & operator > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_evaluation_errors"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: evaluation error reports the embedded expression that failed > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_evaluation_errors"),
+    "implementation-tests.js > Tests that are specific to a Javascript runtime > template string: unescaped } in the text > should throw error": Ported("tests/python/test_jsonata_230_template_strings.py::test_syntax_errors"),
     "implementation-tests.js > Tests that are specific to a Javascript runtime > Functions - $match > $match(\"test escape \\\\\", /\\\\/) > should find \\": TODO,
     "implementation-tests.js > Tests that are specific to a Javascript runtime > Functions - $match > $match(\"ababbabbcc\",/ab/) > should return result object": TODO,
     "implementation-tests.js > Tests that are specific to a Javascript runtime > Functions - $match > $match(\"ababbabbcc\",/a(b+)/) > should return result object": TODO,
@@ -237,13 +237,13 @@ REGISTRY: dict[str, Entry] = {
     "parser-recovery.js > Invoke parser with incomplete expression > Account.Order[0;].Product > should return ast": TODO,
     "parser-recovery.js > Invoke parser with incomplete expression > Account.Order[0].Product; > should return ast": TODO,
     "parser-recovery.js > Invoke parser with incomplete expression > $inputSource[0].UnstructuredAnswers^()[0].Text > should return ast": TODO,
-    "parser-recovery.js > Invoke parser with incomplete expression > «a {x;} b» > should return ast": TODO_NEW,
-    "parser-recovery.js > Invoke parser with incomplete expression > «abc > should return ast": TODO_NEW,
-    "parser-recovery.js > Invoke parser with incomplete expression > «Hello {name} > should return ast": TODO_NEW,
-    "parser-recovery.js > Invoke parser with incomplete expression > «a {x;} b > should record the error inside the braces without throwing": TODO_NEW,
-    "parser-recovery.js > Invoke parser with incomplete expression > <<a {«b > should report the unterminated inner template and the missing }": TODO_NEW,
-    "parser-recovery.js > Invoke parser with incomplete expression > «a {+} b» > should recover from an invalid expression inside a closed template": TODO_NEW,
-    "parser-recovery.js > Invoke parser with incomplete expression > «s3://{bucket;}/x» > should tokenize the rest of the template as text, not as a regex": TODO_NEW,
+    "parser-recovery.js > Invoke parser with incomplete expression > «a {x;} b» > should return ast": NotApplicable("parser recovery mode (`recover: true`, `errors()`) is not implemented"),
+    "parser-recovery.js > Invoke parser with incomplete expression > «abc > should return ast": NotApplicable("parser recovery mode (`recover: true`, `errors()`) is not implemented"),
+    "parser-recovery.js > Invoke parser with incomplete expression > «Hello {name} > should return ast": NotApplicable("parser recovery mode (`recover: true`, `errors()`) is not implemented"),
+    "parser-recovery.js > Invoke parser with incomplete expression > «a {x;} b > should record the error inside the braces without throwing": NotApplicable("parser recovery mode (`recover: true`, `errors()`) is not implemented"),
+    "parser-recovery.js > Invoke parser with incomplete expression > <<a {«b > should report the unterminated inner template and the missing }": NotApplicable("parser recovery mode (`recover: true`, `errors()`) is not implemented"),
+    "parser-recovery.js > Invoke parser with incomplete expression > «a {+} b» > should recover from an invalid expression inside a closed template": NotApplicable("parser recovery mode (`recover: true`, `errors()`) is not implemented"),
+    "parser-recovery.js > Invoke parser with incomplete expression > «s3://{bucket;}/x» > should tokenize the rest of the template as text, not as a regex": NotApplicable("parser recovery mode (`recover: true`, `errors()`) is not implemented"),
     "parser-recovery.js > Invoke parser with incomplete expression > An expression with syntax error should not be executable > Account. > should return ast": TODO,
     # --- async-function.js ---
     "async-function.js > Invoke JSONata with callback > Make HTTP request > should return promise to results": TODO,
@@ -261,8 +261,8 @@ REGISTRY: dict[str, Entry] = {
     "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function several times and part of a numeric expression": TODO,
     "async-function.js > Handle chained functions that end in promises > basic async function, but invokes another function - nested": TODO,
     "async-function.js > Handle chained functions that end in promises > basic async function, then invokes a built-in function": TODO,
-    "async-function.js > Handle chained functions that end in promises > basic async function inside a template string": TODO_NEW,
-    "async-function.js > Handle chained functions that end in promises > registered async function inside a template string": TODO_NEW,
+    "async-function.js > Handle chained functions that end in promises > basic async function inside a template string": NotApplicable("a binding whose functions return Promises: this implementation has no async API"),
+    "async-function.js > Handle chained functions that end in promises > registered async function inside a template string": Ported("tests/python/test_jsonata_230_template_strings.py::test_registered_function_inside_a_template"),
     "async-function.js > Handle chained functions that end in promises > basic async function, but invokes a non-existent function": TODO,
     "async-function.js > Array with Promise items > should await each item": TODO,
     # --- parser-pluggable-regex.js ---
@@ -273,7 +273,7 @@ REGISTRY: dict[str, Entry] = {
 }
 # fmt: on
 
-UNTRIAGED_CEILING = 172
+UNTRIAGED_CEILING = 151
 
 
 # A mocha `describe("title", ...)` or `it("title", ...)` call, at the start of a token.

@@ -266,6 +266,17 @@ impl BytecodeCompiler {
                 self.compile_expr(rhs);
                 self.emit(Instr::Concat);
             }
+            // A template folds its parts into a string from the left: each
+            // part is evaluated, then joined (and so cast) onto the text so
+            // far before the next part runs, as jsonata-js casts them.
+            CompiledExpr::Template(parts) => {
+                let empty = self.intern_const(JValue::string(""));
+                self.emit(Instr::PushConst(empty));
+                for part in parts {
+                    self.compile_expr(part);
+                    self.emit(Instr::Concat);
+                }
+            }
 
             // ── Conditional ──────────────────────────────────────────
             CompiledExpr::Conditional {

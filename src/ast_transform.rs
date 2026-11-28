@@ -234,7 +234,10 @@ fn push_ast_node_children(node: AstNode, stack: &mut Vec<AstNode>) {
             stack.extend(args);
         }
         AstNode::Lambda { body, .. } => stack.push(*body),
-        AstNode::Array(elements) | AstNode::Block(elements) | AstNode::ArrayGroup(elements) => {
+        AstNode::Array(elements)
+        | AstNode::Block(elements)
+        | AstNode::ArrayGroup(elements)
+        | AstNode::Template(elements) => {
             stack.extend(elements);
         }
         AstNode::Object(pairs) => {
@@ -545,6 +548,12 @@ fn substitute_labels_impl(
         },
         AstNode::Array(elements) => AstNode::Array(
             elements
+                .into_iter()
+                .map(|e| substitute_labels(e, state, depth))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        AstNode::Template(parts) => AstNode::Template(
+            parts
                 .into_iter()
                 .map(|e| substitute_labels(e, state, depth))
                 .collect::<Result<Vec<_>, _>>()?,
@@ -1761,6 +1770,21 @@ fn transform_children_impl(
             }
             Ok(Transformed {
                 node: AstNode::Array(transformed),
+                pending,
+            })
+        }
+        // A template string passes up the ancestry (`%`) of each embedded
+        // expression, as jsonata-js's processAST `template` case does.
+        AstNode::Template(parts) => {
+            let mut pending = Vec::new();
+            let mut transformed = Vec::with_capacity(parts.len());
+            for e in parts {
+                let t = transform_node(e, state, depth)?;
+                pending.extend(t.pending);
+                transformed.push(t.node);
+            }
+            Ok(Transformed {
+                node: AstNode::Template(transformed),
                 pending,
             })
         }

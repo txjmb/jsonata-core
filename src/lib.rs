@@ -200,7 +200,7 @@ pub mod _bench {
 
 /// The JSONata reference implementation version this library targets.
 #[cfg(feature = "python")]
-const JSONATA_REFERENCE_VERSION: &str = "2.2.2";
+const JSONATA_REFERENCE_VERSION: &str = "2.3.0";
 
 #[cfg(feature = "python")]
 use crate::value::JValue;

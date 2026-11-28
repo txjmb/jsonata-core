@@ -41,9 +41,37 @@ users[age >= 18 and status = 'active']
 
 **Arithmetic**: `+`, `-`, `*`, `/`, `%`
 
-**String concatenation**: `&`
+**String concatenation**: `&` (see also [template strings](#template-strings))
 
 **Range**: `[1..5]` - generates `[1, 2, 3, 4, 5]`
+
+### Template Strings
+
+New in JSONata 2.3.0. A template string builds a string from literal text and
+embedded expressions in curly braces. It is enclosed in guillemets (`«` and `»`)
+or, the same thing, in double angle brackets (`<<` and `>>`):
+
+```jsonata
+«Hello {firstName} {lastName}, you have {$count(orders)} orders»
+```
+
+Each embedded value is cast to a string as the `&` operator casts it, so a
+missing value adds nothing and `{}` adds nothing. Any expression can go inside
+the braces, including function calls, object constructors and other template
+strings; a sequence separated by `;` needs its own parentheses, as in
+`«{($x := 1; $x + 1)}»`.
+
+A template is closed by the delimiter that matches its opener, so `<<` and `>>`
+are ordinary text inside `«...»`, and the guillemets inside `<<...>>`. A
+`<<...>>` template ends at the first `>>`, so text that ends in `>` needs an
+escape: `<<<li>{name}</li\>>>`. The text takes the escapes of a string
+literal, plus `\{`, `\}`, `\«`, `\»`, `\<` and `\>`; an unescaped `}` in the
+text is an error (S0108).
+
+- `«{1 + 2} apples»` gives `"3 apples"`
+- `«{missing}»` gives `""`
+- `«\{literal\}»` gives `"{literal}"`
+- `<<a \>> b>>` gives `"a >> b"`
 
 ### Object Construction
 
@@ -200,7 +228,7 @@ JSONata has the following types:
 
 jsonatapy aims for 100% compatibility with the reference JavaScript implementation. Currently:
 
-- **1902/1972 tests passing** (the rest are jsonata-js 2.3.0 changes still being ported)
+- **1972/1972 tests passing**
 - All language features supported
 - All built-in functions implemented
 - Full lambda and higher-order function support
