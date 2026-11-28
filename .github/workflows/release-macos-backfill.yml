@@ -250,18 +250,27 @@ jobs:
 
       # --reinstall: uv's --find-links cache is keyed by filename only, and the
       # self-hosted Mac's cache persists across jobs (issue #45, see release.yml).
+      # --no-index and the exact pin keep uv on the wheel just built: with PyPI
+      # in play it would take a newer jsonatapy release (or the copy already on
+      # PyPI) instead.
       - name: Install wheel (Linux/Windows)
         if: matrix.platform.os != 'macOS'
         shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          uv pip install --system --reinstall --find-links dist jsonatapy pytest pytest-xdist
+          uv pip install --system --reinstall --no-index --find-links dist "jsonatapy==$VERSION"
+          uv pip install --system pytest pytest-xdist
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Install wheel (macOS)
         if: matrix.platform.os == 'macOS'
         shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          uv pip install --reinstall --find-links dist jsonatapy pytest pytest-xdist
+          uv pip install --reinstall --no-index --find-links dist "jsonatapy==$VERSION"
+          uv pip install pytest pytest-xdist
           python -c "import jsonatapy; print(f'jsonatapy {jsonatapy.__version__} installed successfully')"
 
       - name: Check the installed version
