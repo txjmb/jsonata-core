@@ -143,7 +143,7 @@ data = jsonatapy.JsonataData(large_dataset)
 result = expr.evaluate_with_data(data)   # 3–15x faster than evaluate(dict)
 ```
 
-Supports Python 3.10, 3.11, 3.12, 3.13, 3.14 on Linux, macOS (Intel & ARM), and Windows.
+Supports Python 3.10, 3.11, 3.12, 3.13, 3.14, 3.15 on Linux, macOS (Intel & ARM), and Windows.
 
 ---
 
@@ -225,7 +225,7 @@ benchmark methodology.
 - **1803/1972 JSONata reference tests passing**
 - **Pure Rust core** — no JavaScript runtime, no Node.js dependency
 - **Optional Python bindings** — PyO3/maturin, zero-copy where possible
-- **Cross-platform** — Linux, macOS (Intel & ARM), Windows; Python 3.10–3.14
+- **Cross-platform** — Linux, macOS (Intel & ARM), Windows; Python 3.10–3.15
 - **SIMD-accelerated JSON parsing** — via `simd-json`, enabled by default (disable with `--no-default-features`)
 
 ---
