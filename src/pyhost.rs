@@ -308,6 +308,8 @@ fn convert_with_functions(
     if let Ok(function) = obj.cast::<JsonataFunction>() {
         // A host function value names an entry in its own evaluator's
         // registry, so in another evaluation it would be a different function.
+        // A lambda can hold one too (a captured `$f := $make()`), so every
+        // function is held to its evaluation, not only host function values.
         let function = function.borrow();
         if function.evaluator_id != evaluator.id() {
             return Err(PyValueError::new_err(
