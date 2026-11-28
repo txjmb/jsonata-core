@@ -34,7 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function is T2013.
 - `$clone`, the jsonata-js builtin that deep-copies an object or array
   through JSON (`JSON.parse($string(arg))`), so a function inside it becomes
-  `""`. It was T1006.
+  `""`. It was T1006. `register("clone", f)` still works and is the host `clone`
+  a transform copies with.
 
 ### Changed
 

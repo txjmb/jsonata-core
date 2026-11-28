@@ -373,6 +373,9 @@ WELSH = "LLANFAIRPWLLGWYNGYLLGOGERYCHWYRNDROBWLLLLANTYSILIOGOGOGOCH"
         (f"$contains('{WELSH}', $repeatingLetters('L', 4))", True),
         # A Python matcher can only return None for no match.
         (f"$contains('{WELSH}', $repeatingLetters('Q', 4))", False),
+        # A JSONata matcher's null is a match, as jsonata-js tests for undefined only.
+        ("$contains('abc', function($s){ null })", True),
+        ("$contains('abc', function($s){ undefined })", False),
     ],
 )
 def test_custom_matcher(engine, expr, expected):

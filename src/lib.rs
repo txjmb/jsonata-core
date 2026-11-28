@@ -326,7 +326,7 @@ impl JsonataExpression {
             expression::run_compiled(&self.ast, &self.bytecode, data, options)
                 .map_err(evaluator_error_to_py)
         } else {
-            let mut ev = create_evaluator(py, bindings, options)?;
+            let mut ev = create_evaluator(py, bindings, options, pystack::StackEntry::here())?;
             self.register_host_fns(py, &mut ev)?;
             ev.evaluate(&self.ast, data).map_err(evaluator_error_to_py)
         }
@@ -824,13 +824,14 @@ fn create_evaluator(
     py: Python,
     bindings: Option<Py<PyAny>>,
     options: evaluator::EvaluatorOptions,
+    entry: Option<pystack::StackEntry>,
 ) -> PyResult<evaluator::Evaluator> {
     let mut ev = evaluator::Evaluator::with_options(evaluator::Context::new(), options);
     if let Some(bindings_obj) = bindings {
         // A callable in the bindings is a function, as one `assign`ed in
         // jsonata-js is: it is registered on this evaluator, so the values
         // are converted after the evaluator exists.
-        let bindings_json = pyhost::to_jvalue(bindings_obj.bind(py), &mut ev, None)?;
+        let bindings_json = pyhost::to_jvalue(bindings_obj.bind(py), &mut ev, entry)?;
         let JValue::Object(map) = bindings_json else {
             return Err(PyTypeError::new_err("bindings must be a dictionary"));
         };

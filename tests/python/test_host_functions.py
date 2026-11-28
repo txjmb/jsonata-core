@@ -290,3 +290,40 @@ class TestFunctionValues:
 
     def test_function_result_is_none_in_python(self):
         assert jsonatapy.evaluate("$f", None, {"f": len}) is None
+
+    def test_function_value_from_another_evaluation_is_rejected(self):
+        # Review finding: a host function value names an entry in its own
+        # evaluator's registry, so handed to a later evaluation it called
+        # whichever callable had that entry there.
+        kept = []
+        first = jsonatapy.compile("$keep($make())")
+        first.register("make", lambda: lambda: "first")
+        first.register("keep", lambda fn: kept.append(fn) or 1)
+        first.evaluate(None)
+        second = jsonatapy.compile("$get()()")
+        second.register("get", lambda: kept[0])
+        with pytest.raises(ValueError, match="only be used in the evaluation it came from"):
+            second.evaluate(None, {"x": lambda: "wrong", "y": lambda: "wrong"})
+        with pytest.raises(ValueError, match="only be used in the evaluation it came from"):
+            jsonatapy.evaluate("$f()", None, {"f": kept[0]})
+
+    def test_same_callable_is_registered_once(self):
+        fn = lambda x: x  # noqa: E731
+        expr = jsonatapy.compile("$map([1, 2, 3], function($i){ $same() }) ~> $count()")
+        expr.register("same", lambda: fn)
+        assert expr.evaluate(None) == 3
+
+    def test_register_clone_still_works(self):
+        # Review finding: `$clone` became a builtin in 2.3.0, and `register`
+        # rejects builtins; a host `clone` registered before keeps working.
+        calls = []
+        expr = jsonatapy.compile('$ ~> |a|{"b": 2}|')
+        expr.register("clone", lambda obj: calls.append(obj) or obj)
+        assert expr.evaluate({"a": {"b": 1}}) == {"a": {"b": 2}}
+        assert calls == [{"a": {"b": 1}}]
+
+    def test_binding_callable_called_deep_in_a_recursion(self):
+        # Review finding: callables in the bindings were not given the
+        # evaluation's stack entry, so deep calls skipped the stack guard.
+        expr = "($r := function($n){ $n = 0 ? $f() : $r($n - 1) }; $r(2000))"
+        assert jsonatapy.evaluate(expr, None, {"f": lambda: "bottom"}) == "bottom"

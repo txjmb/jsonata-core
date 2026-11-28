@@ -4894,6 +4894,8 @@ pub struct Evaluator {
     /// expression's base environment (for Node-RED). A binding the
     /// expression makes itself doesn't count (jsonata-js #859).
     host_clone: Option<JValue>,
+    /// The names `host_function_value_keyed` registered, by key.
+    host_fn_keys: HashMap<usize, Rc<str>>,
 }
 
 /// The compiled-step cache: the step looked up last, which is the one asked
@@ -4976,6 +4978,7 @@ impl Evaluator {
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
             host_clone: None,
+            host_fn_keys: HashMap::new(),
         }
     }
 
@@ -4995,6 +4998,7 @@ impl Evaluator {
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
             host_clone: None,
+            host_fn_keys: HashMap::new(),
         }
     }
 
@@ -5016,38 +5020,10 @@ impl Evaluator {
             host_fns: HashMap::new(),
             step_bodies: StepBodies::default(),
             host_clone: None,
+            host_fn_keys: HashMap::new(),
         }
     }
 
-    /// Register a host function callable from an expression as `$name(...)`.
-    ///
-    /// `f` may be any plain closure `Fn(&[JValue]) -> Result<JValue,
-    /// EvaluatorError>` (via the blanket [`HostFn`] impl) or any [`HostFn`]
-    /// implementor. Host functions resolve *after* the expression's own `:=`
-    /// bindings and language-defined functions, and *before* built-ins.
-    ///
-    /// Returns an error if `name` collides with a built-in function; to replace
-    /// a built-in deliberately (e.g. a frozen `$now`), use
-    /// [`register_fn_override`](Self::register_fn_override).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use jsonata_core::evaluator::Evaluator;
-    /// use jsonata_core::parser::parse;
-    /// use jsonata_core::value::JValue;
-    ///
-    /// let mut ev = Evaluator::new();
-    /// ev.register_fn("shout", |args: &[JValue]| {
-    ///     let s = args.first().and_then(|v| v.as_str()).unwrap_or("");
-    ///     Ok(JValue::from(s.to_uppercase()))
-    /// })
-    /// .expect("`shout` does not collide with a built-in");
-    ///
-    /// let ast = parse("$shout(greeting)").unwrap();
-    /// let data = JValue::from_json_str(r#"{"greeting": "hi"}"#).unwrap();
-    /// assert_eq!(ev.evaluate(&ast, &data).unwrap(), JValue::from("HI"));
-    /// ```
     /// Bind a variable in the outermost scope, as a binding passed to an
     /// evaluation is.
     pub fn bind(&mut self, name: String, value: JValue) {
@@ -5100,13 +5076,65 @@ impl Evaluator {
         JValue::builtin(name)
     }
 
+    /// [`host_function_value`](Self::host_function_value) for a host
+    /// function the host identifies by `key` (the Python bindings use the
+    /// callable's address, which stays unique while the registry holds it):
+    /// the same key gives the same value, so a callable handed over again
+    /// and again is registered once.
+    pub fn host_function_value_keyed(
+        &mut self,
+        key: usize,
+        make: impl FnOnce() -> Rc<dyn HostFn>,
+    ) -> JValue {
+        if let Some(name) = self.host_fn_keys.get(&key) {
+            return JValue::Builtin { name: name.clone() };
+        }
+        let value = self.host_function_value(make());
+        if let JValue::Builtin { name } = &value {
+            self.host_fn_keys.insert(key, name.clone());
+        }
+        value
+    }
+
+    /// Register a host function callable from an expression as `$name(...)`.
+    ///
+    /// `f` may be any plain closure `Fn(&[JValue]) -> Result<JValue,
+    /// EvaluatorError>` (via the blanket [`HostFn`] impl) or any [`HostFn`]
+    /// implementor. Host functions resolve *after* the expression's own `:=`
+    /// bindings and language-defined functions, and *before* built-ins.
+    ///
+    /// Returns an error if `name` collides with a built-in function; to replace
+    /// a built-in deliberately (e.g. a frozen `$now`), use
+    /// [`register_fn_override`](Self::register_fn_override).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use jsonata_core::evaluator::Evaluator;
+    /// use jsonata_core::parser::parse;
+    /// use jsonata_core::value::JValue;
+    ///
+    /// let mut ev = Evaluator::new();
+    /// ev.register_fn("shout", |args: &[JValue]| {
+    ///     let s = args.first().and_then(|v| v.as_str()).unwrap_or("");
+    ///     Ok(JValue::from(s.to_uppercase()))
+    /// })
+    /// .expect("`shout` does not collide with a built-in");
+    ///
+    /// let ast = parse("$shout(greeting)").unwrap();
+    /// let data = JValue::from_json_str(r#"{"greeting": "hi"}"#).unwrap();
+    /// assert_eq!(ev.evaluate(&ast, &data).unwrap(), JValue::from("HI"));
+    /// ```
     pub fn register_fn(
         &mut self,
         name: impl Into<String>,
         f: impl HostFn + 'static,
     ) -> Result<(), EvaluatorError> {
         let name = name.into();
-        if self.is_builtin_function(&name) {
+        // `$clone` became a builtin in 2.3.0; a host `clone` registered before
+        // then keeps working, as the override jsonata-js's `registerFunction`
+        // makes it.
+        if self.is_builtin_function(&name) && name != "clone" {
             return Err(EvaluatorError::EvaluationError(format!(
                 "cannot register host function '{name}': it shadows a built-in; \
                  use register_fn_override to replace a built-in deliberately"
@@ -11310,13 +11338,13 @@ impl Evaluator {
         let mut current = normalize_lazy(&first)?;
         check_matcher_result(&current, name)?;
         if name == "contains" {
-            // jsonata-js tests `typeof matches !== 'undefined'`. A Python
-            // host function can only return None for no match, which arrives
-            // as null, so null is no match too.
-            return Ok(Some(JValue::Bool(!matches!(
-                current,
-                JValue::Undefined | JValue::Null
-            ))));
+            // jsonata-js tests `typeof matches !== 'undefined'`. A Python host
+            // function can only return None for no match, which arrives as
+            // null, so a host matcher's null is no match too.
+            let host_matcher =
+                matches!(&matcher, JValue::Builtin { name } if self.host_fns.contains_key(&**name));
+            let no_match = current.is_undefined() || (host_matcher && current.is_null());
+            return Ok(Some(JValue::Bool(!no_match)));
         }
         let units: Vec<u16> = s.encode_utf16().collect();
         let piece = |start: f64, end: Option<f64>| {

@@ -139,7 +139,7 @@ impl PyHostFn {
         let evaluator_id = ctx.evaluator().id();
         let py_args: Vec<Py<PyAny>> = args
             .iter()
-            .map(|a| to_python(py, a, evaluator_id))
+            .map(|a| to_python(py, a, evaluator_id, self.entry))
             .collect::<PyResult<_>>()
             .map_err(|e| pyerr_to_evaluator_error(py, e))?;
         let args_tuple = PyTuple::new(py, &py_args).map_err(|e| pyerr_to_evaluator_error(py, e))?;
@@ -182,6 +182,9 @@ pub(crate) struct JsonataFunction {
     /// The function's parameter count, for `python_arity` when Python passes
     /// it on to another function: a lambda's parameters, `None` otherwise.
     arity: Option<usize>,
+    /// The stack entry of the evaluation (see `pystack`), for the callables
+    /// Python passes to the function.
+    entry: Option<pystack::StackEntry>,
 }
 
 #[pymethods]
@@ -204,13 +207,13 @@ impl JsonataFunction {
         let result = (|| {
             let mut values = Vec::with_capacity(args.len());
             for arg in args.iter() {
-                values.push(to_jvalue(&arg, &mut evaluator, None)?);
+                values.push(to_jvalue(&arg, &mut evaluator, self.entry)?);
             }
             Ok::<_, PyErr>(evaluator.call_function_from_host(&self.function, &values))
         })();
         HOST_EVALUATORS.with(|s| s.borrow_mut().push(evaluator));
         match result? {
-            Ok(value) => to_python(py, &value, self.evaluator_id),
+            Ok(value) => to_python(py, &value, self.evaluator_id, self.entry),
             Err(error) => {
                 let exception = PyValueError::new_err(error.message().to_string());
                 let value = exception.value(py).clone().into_any().unbind();
@@ -242,7 +245,12 @@ fn contains_function(value: &JValue) -> bool {
 
 /// A value for a host function's arguments, with each function in it as a
 /// `JsonataFunction` of evaluation `evaluator_id`.
-fn to_python(py: Python<'_>, value: &JValue, evaluator_id: u64) -> PyResult<Py<PyAny>> {
+fn to_python(
+    py: Python<'_>,
+    value: &JValue,
+    evaluator_id: u64,
+    entry: Option<pystack::StackEntry>,
+) -> PyResult<Py<PyAny>> {
     if !contains_function(value) {
         return json_to_python(py, value);
     }
@@ -250,14 +258,14 @@ fn to_python(py: Python<'_>, value: &JValue, evaluator_id: u64) -> PyResult<Py<P
         JValue::Array(items) => {
             let items = items
                 .iter()
-                .map(|item| to_python(py, item, evaluator_id))
+                .map(|item| to_python(py, item, evaluator_id, entry))
                 .collect::<PyResult<Vec<_>>>()?;
             Ok(PyList::new(py, &items)?.into_any().unbind())
         }
         JValue::Object(map) => {
             let dict = PyDict::new(py);
             for (key, item) in map.iter() {
-                dict.set_item(key, to_python(py, item, evaluator_id)?)?;
+                dict.set_item(key, to_python(py, item, evaluator_id, entry)?)?;
             }
             Ok(dict.into_any().unbind())
         }
@@ -270,6 +278,7 @@ fn to_python(py: Python<'_>, value: &JValue, evaluator_id: u64) -> PyResult<Py<P
                 function: function.clone(),
                 evaluator_id,
                 arity,
+                entry,
             };
             Ok(Py::new(py, function)?.into_any())
         }
@@ -297,14 +306,22 @@ fn convert_with_functions(
     entry: Option<pystack::StackEntry>,
 ) -> PyResult<JValue> {
     if let Ok(function) = obj.cast::<JsonataFunction>() {
-        return Ok(function.borrow().function.clone());
+        // A host function value names an entry in its own evaluator's
+        // registry, so in another evaluation it would be a different function.
+        let function = function.borrow();
+        if function.evaluator_id != evaluator.id() {
+            return Err(PyValueError::new_err(
+                "a JSONata function can only be used in the evaluation it came from",
+            ));
+        }
+        return Ok(function.function.clone());
     }
     if let Ok(dict) = obj.cast::<PyDict>() {
         let mut map = IndexMap::with_capacity(dict.len());
         for (key, value) in dict.iter() {
             map.insert(
                 key.extract::<String>()?,
-                to_jvalue(&value, evaluator, entry)?,
+                convert_with_functions(&value, evaluator, entry)?,
             );
         }
         return Ok(JValue::object(map));
@@ -312,20 +329,24 @@ fn convert_with_functions(
     if let Ok(list) = obj.cast::<PyList>() {
         let mut items = Vec::with_capacity(list.len());
         for item in list.iter() {
-            items.push(to_jvalue(&item, evaluator, entry)?);
+            items.push(convert_with_functions(&item, evaluator, entry)?);
         }
         return Ok(JValue::array(items));
     }
     if let Ok(tuple) = obj.cast::<PyTuple>() {
         let mut items = Vec::with_capacity(tuple.len());
         for item in tuple.iter() {
-            items.push(to_jvalue(&item, evaluator, entry)?);
+            items.push(convert_with_functions(&item, evaluator, entry)?);
         }
         return Ok(JValue::array(items));
     }
     if obj.is_callable() {
-        let arity = python_arity(obj);
-        return Ok(evaluator.host_function_value(Rc::new(PyHostFn::new(obj, arity, entry))));
+        // Keyed by address: the registry holds the callable, so the address
+        // is not reused while the evaluation can see it.
+        let key = obj.as_ptr() as usize;
+        return Ok(evaluator.host_function_value_keyed(key, || {
+            Rc::new(PyHostFn::new(obj, python_arity(obj), entry))
+        }));
     }
     lazy::convert(obj, false)
 }

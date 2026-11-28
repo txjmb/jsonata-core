@@ -1147,7 +1147,9 @@ pub(crate) fn dispatch_pure_with(
             None | Some(JValue::Undefined) => Ok(JValue::Undefined),
             Some(arg) => {
                 let JValue::String(json) = functions::string::string(arg, None)? else {
-                    unreachable!("$string always returns a string for a defined value")
+                    return Err(EvaluatorError::EvaluationError(
+                        "clone() could not serialize its argument".to_string(),
+                    ));
                 };
                 JValue::from_json_str(&json)
                     .map_err(|e| EvaluatorError::EvaluationError(format!("clone() failed: {e}")))
